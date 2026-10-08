@@ -1,8 +1,8 @@
 """The workflow engine: build each ticket through a harness adapter.
 
 For each ticket the engine makes a worktree from the base branch, spawns the
-stack's specialist through the adapter, and records each event in the journal.
-Later steps (report validation, the gates) are added in this module.
+stack's specialist through the adapter, checks the specialist's report, runs
+the stack's gates itself, and records each event in the journal.
 
 Standard library and git through subprocess only.
 """
