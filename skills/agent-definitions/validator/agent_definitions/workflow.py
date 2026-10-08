@@ -241,7 +241,14 @@ def load_workflow(path: Path, tiers: Tiers) -> Workflow:
 
     `text-file` paths are relative to the directory of the workflow file.
     """
-    data = tomllib.loads(Path(path).read_text())
+    try:
+        data = tomllib.loads(Path(path).read_text())
+    except FileNotFoundError:
+        raise WorkflowError(["workflow file not found"]) from None
+    except OSError as error:
+        raise WorkflowError([f"workflow file cannot be read: {error}"]) from None
+    except tomllib.TOMLDecodeError as error:
+        raise WorkflowError([f"not valid TOML: {error}"]) from None
     reader = _Reader()
     reader.refuse_unknown(data, TOP_LEVEL_FIELDS, "")
     base_branch = reader.string(data, "base-branch", "base-branch")

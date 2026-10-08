@@ -295,3 +295,46 @@ def test_a_malformed_field_exits_1_and_names_the_field(tmp_path, capsys, edit, e
     assert "Traceback" not in err
     for part in expected:
         assert part in err
+
+
+def test_a_workflow_file_that_does_not_exist_exits_1_and_names_the_path(tmp_path, capsys):
+    try:
+        code = delegate.main(["run", str(tmp_path / "absent.toml"), "--dry-run"])
+    except SystemExit as stop:
+        code = stop.code
+    _out, err = capsys.readouterr()
+
+    assert code == 1
+    assert "absent.toml" in err
+    assert "Traceback" not in err
+
+
+def test_a_workflow_that_is_not_valid_toml_exits_1_and_names_the_path(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, 'base-branch = "main\n')
+
+    assert code == 1
+    assert out == ""
+    assert "workflow.toml" in err
+    assert "not valid TOML" in err
+
+
+def test_a_tier_file_that_does_not_exist_exits_1_and_names_the_path(tmp_path, capsys):
+    repo = make_repo(tmp_path, VALID)
+
+    code, _out, err = run(repo, capsys, "--dry-run", "--tiers", str(tmp_path / "no-tiers.toml"))
+
+    assert code == 1
+    assert "no-tiers.toml" in err
+    assert "Traceback" not in err
+
+
+def test_a_run_without_dry_run_exits_2_and_creates_nothing(tmp_path, capsys):
+    repo = make_repo(tmp_path, VALID)
+    before = state(repo)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 2
+    assert out == ""
+    assert "--dry-run" in err
+    assert state(repo) == before

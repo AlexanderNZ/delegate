@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
-from .tiers import load_tiers
+from .tiers import Tiers, load_tiers
 from .workflow import WorkflowError, load_workflow, plan_order
 
 
@@ -22,10 +23,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+class TierFileError(Exception):
+    """The tier file cannot be used. The message names the file."""
+
+
+def _load_tiers(path: Path | None) -> Tiers:
+    """The tier table. Raise TierFileError, which names the file, when it cannot be used."""
     try:
-        workflow = load_workflow(args.workflow, load_tiers(args.tiers))
+        return load_tiers(path)
+    except FileNotFoundError:
+        raise TierFileError(f"tier file {path} not found") from None
+    except (OSError, tomllib.TOMLDecodeError, KeyError) as error:
+        raise TierFileError(f"tier file {path} is not usable: {error!r}") from None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.dry_run:
+        parser.error("only --dry-run is available: pass --dry-run to check the workflow and print its plan")
+    try:
+        workflow = load_workflow(args.workflow, _load_tiers(args.tiers))
+    except TierFileError as error:
+        print(f"delegate run: {error}", file=sys.stderr)
+        return 1
     except WorkflowError as error:
         for problem in error.problems:
             print(f"delegate run: {args.workflow}: {problem}", file=sys.stderr)
