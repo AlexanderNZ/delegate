@@ -120,3 +120,21 @@ def test_the_command_writes_the_exit_code_table_of_watch_with_the_reason_and_the
     assert "| 0 | run succeeded | The journal holds `run-end` with the result `built`. |" in text
     assert "wrong reason" not in text
     assert "Code 2 is also the code that `argparse` gives for a usage error." in text  # the prose after the table stays
+
+
+@outside_the_package
+def test_the_command_writes_the_options_of_render_validate_bootstrap_and_brief_into_the_commands_page(pages, capsys):
+    page = pages / "docs" / "reference" / "commands.md"
+    page.write_text(page.read_text().replace("| `--gate-command <cmd>` |", "| `--old-flag` |"))
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = page.read_text()
+    assert (code, err) == (0, "")
+    assert "| `--gate-command <cmd>` | A gate the verifier may run, alone or with arguments; repeat it. |" in text
+    assert "| `-o, --out <out>` | " in text  # render
+    assert "| `--skills-dir <skills-dir>` | Check that every preloaded skill exists here. |" in text  # validate
+    assert "| `--rejected <rejected>` | The commit the first verifier rejected. Required. |" in text  # brief fixup
+    assert "| `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |" in text  # before the subcommand
+    assert "--old-flag" not in text
+    assert "## `delegate bootstrap`" in text  # the prose of the page stays

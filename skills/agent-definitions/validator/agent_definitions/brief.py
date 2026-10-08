@@ -452,7 +452,7 @@ def verifier_run_brief(
     return full_brief(copy, branch, base, task, gate_commands=gates) + verifier_run_sections(copy, report_path, "full")
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="verifier-brief",
         description="Print a verifier's brief. The mode of the brief sets the mode of the verifier.",
@@ -481,8 +481,11 @@ def main(argv: list[str] | None = None) -> int:
             help="select the gate block under this sub-heading of \"Verification gates\"; "
             "it overrides the path match; give it again for a second block",
         )
+    return p
 
-    args = p.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     try:
         if args.mode == "full":
             out = full_brief(args.repo, args.branch, args.base, read_task(args.task), args.stack)

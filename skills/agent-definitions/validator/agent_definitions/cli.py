@@ -96,19 +96,19 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agent-definitions")
     p.add_argument("--tiers", help="path to a tiers.toml; default is the bundled table")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("render", help="render a declaration into <out>/claude-code and <out>/opencode")
-    r.add_argument("declaration")
-    r.add_argument("-o", "--out", required=True)
+    r.add_argument("declaration", help="the declaration file (TOML) to render")
+    r.add_argument("-o", "--out", required=True, help="the output directory; it receives the subdirectories claude-code and opencode")
     add_opencode_override_flags(r)
     r.set_defaults(fn=cmd_render)
     v = sub.add_parser("validate", help="validate rendered agent directories")
     v.add_argument("rendered", nargs="?", help="a root with claude-code/ and opencode/ subdirectories")
-    v.add_argument("--claude-code")
-    v.add_argument("--opencode")
+    v.add_argument("--claude-code", help="a directory of rendered Claude Code agents to validate")
+    v.add_argument("--opencode", help="a directory of rendered OpenCode agents to validate")
     v.add_argument("--skills-dir", help="check that every preloaded skill exists here")
     v.add_argument(
         "--user-skills-dir",
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--repo", required=True, help="the repository root")
     b.add_argument("--name", required=True, help="the agent name; the skill is <name>-context")
     b.add_argument("--domain", required=True, help="the domain in one sentence; it is also the skill description")
-    b.add_argument("--tier", required=True, help="strong | standard | cheap")
+    b.add_argument("--tier", required=True, help="the tier of the agent: strong, standard or cheap")
     b.add_argument(
         "--skill",
         action="append",
@@ -169,7 +169,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     b.add_argument("--dry-run", action="store_true", help="print every file with its content and write nothing")
     b.set_defaults(fn=run_from_args)
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return args.fn(args)
 
 
