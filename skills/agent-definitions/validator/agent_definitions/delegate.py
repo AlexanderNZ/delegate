@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli
+from . import brief, cli, run
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -27,6 +27,10 @@ AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
 # The subcommand that the `verifier-brief` command owns.
 BRIEF_COMMAND: str = "brief"
 BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
+
+# The subcommand that `agent_definitions.run` owns.
+RUN_COMMAND: str = "run"
+RUN_HELP: str = "check a workflow file and print its plan: `run <workflow> --dry-run`"
 
 TIERS_OPTION: str = "--tiers"
 
@@ -45,6 +49,7 @@ def _help_parser() -> argparse.ArgumentParser:
     for name, text in AGENT_DEFINITIONS_COMMANDS.items():
         sub.add_parser(name, help=f"{text} (as agent-definitions {name})", add_help=False)
     sub.add_parser(BRIEF_COMMAND, help=f"{BRIEF_HELP} (as verifier-brief)", add_help=False)
+    sub.add_parser(RUN_COMMAND, help=f"{RUN_HELP} (as delegate run)", add_help=False)
     return parser
 
 
@@ -82,7 +87,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return brief.main(args[at + 1 :])
-    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND])
+    if command == RUN_COMMAND:
+        if at:
+            print(
+                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {RUN_COMMAND}",
+                file=sys.stderr,
+            )
+            return 2
+        return run.main(args[at + 1 :])
+    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
     return 2
 
