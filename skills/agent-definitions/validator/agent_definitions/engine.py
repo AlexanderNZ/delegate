@@ -2,7 +2,10 @@
 
 For each ticket the engine makes a worktree from the base branch, installs the
 push guard in it (see `guards.py`), spawns the stack's specialist through the adapter, checks the specialist's report, runs
-the stack's gates itself, and records each event in the journal.
+the stack's gates itself, and records each event in the journal. After the
+specialist reports `committed`, and before any gate runs, the engine compares
+the changed paths with the hotspot patterns of the stack. A match fails the
+step, and no verifier runs (see `guards.py`). A fix-up gets the same check.
 
 In `assure` mode the engine then verifies the built branch. It makes a
 temporary copy of the branch, builds a full verifier brief with the brief
@@ -50,7 +53,7 @@ from pathlib import Path
 from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
-from .guards import GuardError, install_push_guard
+from .guards import GuardError, changed_paths, hotspot_matches, install_push_guard
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
@@ -483,6 +486,9 @@ def _build_with_continuations(
                 return f"the specialist reported status {report.status!r}{detail}"
             if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
                 return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
+            stop = _hotspot_stop(journal, ticket.id, stack, worktree, workflow.base_branch, True, PHASE_BUILD, 0)
+            if stop:
+                return stop
             outcomes = [(gate, *_run_gate_with_output(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
             red = [(gate, output) for gate, green, output in outcomes if not green]
             if not red:
@@ -505,6 +511,25 @@ def _build_with_continuations(
             ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
             resumed=resume_session is not None, gate_output=gate_output,
         )
+
+
+def _hotspot_stop(
+    journal: Journal, ticket: str, stack: Stack, worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
+) -> str | None:
+    """Compare the paths that the specialist changed since `since` with the hotspot patterns of the stack.
+
+    Return None when none matches, or the reason the step fails. A match is
+    recorded as `hotspot-finding`. The caller stops the step before any gate
+    and any verifier runs.
+    """
+    matches = hotspot_matches(changed_paths(worktree, since, merge_base=merge_base), stack.hotspots)
+    if not matches:
+        return None
+    journal.append(
+        "hotspot-finding", ticket=ticket, phase=phase, round=round_number,
+        matches=[{"path": m.path, "pattern": m.pattern} for m in matches],
+    )
+    return "hotspot finding: " + "; ".join(f"{m.path} matches the hotspot {m.pattern!r}" for m in matches)
 
 
 def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
@@ -663,6 +688,11 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     if report.status != "committed":
         detail = f": {report.blocked_reason}" if report.blocked_reason else ""
         raise _StepFailed(f"the fix-up specialist reported status {report.status!r}{detail}")
+    stop = _hotspot_stop(
+        step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
+    )
+    if stop:
+        raise _StepFailed(stop)
     try:
         brief = fixup_brief(step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
     except BriefError as error:

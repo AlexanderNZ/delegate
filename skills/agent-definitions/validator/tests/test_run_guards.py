@@ -90,3 +90,75 @@ def test_the_repository_hooks_still_run_for_a_commit_in_an_engine_worktree(tmp_p
     (worktree,) = marker.read_text().split()
     assert worktree.endswith("/worktrees/" + next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"] + "/a")
 
+
+def hotspot_workflow(*, mode="assure", hotspots='["LICENSE", ".github/workflows/*"]'):
+    from .support import WORKFLOW
+
+    return WORKFLOW.replace('mode = "assure"', f'mode = "{mode}"').replace(
+        'hotspots = ["LICENSE", ".github/workflows/*"]', f"hotspots = {hotspots}"
+    )
+
+
+def make_parents(request):
+    for name in ("LICENSE", ".github/workflows/ci.yml", "docs/agents/delegation.md"):
+        (request.cwd / name).parent.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.mark.parametrize(
+    "path, hotspots",
+    [
+        pytest.param("LICENSE", '["LICENSE"]', id="exact-file"),
+        pytest.param(".github/workflows/ci.yml", '[".github/workflows/*"]', id="glob"),
+        pytest.param("docs/agents/delegation.md", '["docs/agents/"]', id="directory-with-slash"),
+        pytest.param("docs/agents/delegation.md", '["docs/agents"]', id="directory-without-slash"),
+    ],
+)
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+def test_a_specialist_that_changes_a_hotspot_path_fails_the_step_naming_the_path_and_no_verifier_runs(
+    tmp_path, capsys, registered, path, hotspots, mode
+):
+    repo = make_repo(tmp_path, hotspot_workflow(mode=mode, hotspots=hotspots))
+    adapter = registered(ScriptedAdapter(files={"feature.txt": "feature\n", path: "changed\n"}, on_specialist=make_parents))
+    base_tip = git(repo, "rev-parse", "main").strip()
+
+    code, out, err = run(repo, capsys)
+
+    events = read_journal(out)
+    assert code == 1
+    assert f"delegate run: ticket a: hotspot finding: {path} matches the hotspot" in err
+    (finding,) = [e for e in events if e["event"] == "hotspot-finding"]
+    assert (finding["ticket"], finding["phase"], finding["round"]) == ("a", "build", 0)
+    assert [m["path"] for m in finding["matches"]] == [path]
+    assert adapter.verifier_calls == []
+    assert "verify-start" not in event_names(events)
+    assert next(e for e in events if e["event"] == "step-end")["state"] == "failed"
+    assert git(repo, "rev-parse", "run/demo").strip() == base_tip
+
+
+def test_a_change_outside_the_hotspots_continues_to_the_verifier_even_beside_a_path_that_only_looks_like_a_hotspot(
+    tmp_path, capsys, registered
+):
+    repo = make_repo(tmp_path, hotspot_workflow())
+    adapter = registered(ScriptedAdapter(files={"feature.txt": "feature\n", "LICENSE.md": "notes\n", "NOTICE": "n\n"}))
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert len(adapter.verifier_calls) == 1
+    assert "hotspot-finding" not in event_names(read_journal(out))
+
+
+def test_a_fixup_that_changes_a_hotspot_path_fails_the_step_and_no_second_verifier_runs(tmp_path, capsys, registered):
+    repo = make_repo(tmp_path, hotspot_workflow())
+    adapter = registered(
+        ScriptedAdapter(verdict="REJECT", fixup_files={"LICENSE": "changed\n"}, on_specialist=make_parents)
+    )
+
+    code, out, err = run(repo, capsys)
+
+    events = read_journal(out)
+    assert code == 1
+    assert "delegate run: ticket a: hotspot finding: LICENSE matches the hotspot" in err
+    (finding,) = [e for e in events if e["event"] == "hotspot-finding"]
+    assert (finding["phase"], finding["round"]) == ("fixup", 1)
+    assert len(adapter.verifier_calls) == 1

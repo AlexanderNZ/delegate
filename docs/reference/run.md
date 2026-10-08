@@ -35,9 +35,10 @@ A step has these parts:
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the report from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond `base-branch`.
-5. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a continuation. See [the continuation](#the-continuation).
-6. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
-7. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
+5. Compare the changed paths with the hotspot patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
+6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a continuation. See [the continuation](#the-continuation).
+7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
+8. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
 
 The engine does not trust the report for the gates. A gate that is red is recorded red when the report says `gates_green` is true.
 
@@ -128,6 +129,16 @@ The engine installs the push guard in each worktree that it makes, also in a wor
 - The directory also holds a wrapper for each other hook of the repository (or of the host, when the host sets `core.hooksPath`). The wrapper runs the original hook with the same arguments and the same input, so those hooks still run for the commits of the specialist.
 - The guard does not stop a push with the `--no-verify` option, because git skips every `pre-push` hook then. It also does not stop a push from a clone or from another directory. It holds against the plain push command of a specialist in the worktree.
 
+### The hotspot guard
+
+After the specialist reports `committed` and the branch holds a commit, and before the gates run, the engine compares the paths that the branch changed since the merge base with `base-branch` with the `hotspots` of the stack. After a fix-up specialist, the engine compares the paths that changed since the rejected commit. The engine does this in every mode.
+
+- A changed path is a path that is added, changed, or deleted. A rename counts as its old path and its new path.
+- A pattern that ends with `/` names a directory. It matches every path below the directory.
+- Any other pattern is matched against the whole path with `fnmatch` rules: `*` matches any characters, also `/`. A pattern that names a directory also matches every path below it. `LICENSE` matches `LICENSE` and does not match `LICENSE.md` or `docs/LICENSE`.
+- A match fails the step at once. The engine writes `hotspot-finding` and the step ends with a reason that names each path: `hotspot finding: <path> matches the hotspot '<pattern>'`. No gate runs, no continuation starts, and no verifier starts. The branch and the worktree stay as they are, and the run branch does not move.
+- A change outside the hotspots goes on to the gates and the verification.
+
 ## The rebase onto the run branch
 
 In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
@@ -204,6 +215,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `report ... is not valid JSON`, `must be a JSON object`, `invalid: <field>: ...` | The report does not match the schema. The message names the field. |
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
+| `hotspot finding: <path> matches the hotspot '<pattern>'` | A changed path matches a hotspot pattern. See [the hotspot guard](#the-hotspot-guard). |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
 | `crashed: <exception type>: <message>` | An exception from the adapter or from git ended the step. See [a crash in a step](#a-crash-in-a-step). |
 | `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, or its gates were still red. `<reason>` is the reason of the last run. |
@@ -291,6 +303,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
+| `hotspot-finding` | `ticket`, `phase` (`build` or `fixup`), `round` (0 for the first build, else the fix-up round), `matches` (a list of objects, each with the changed `path` and the `pattern` it matches) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |

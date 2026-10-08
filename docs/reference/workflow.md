@@ -112,7 +112,7 @@ Each `[stacks.<name>]` table describes one stack. All four fields are required.
 | `specialist` | string | The name of the specialist agent for this stack. |
 | `verifier` | string | The name of the verifier agent for this stack. |
 | `gates` | list of strings | The gate commands. The engine runs them. At least one is required. |
-| `hotspots` | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. |
+| `hotspots` | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a step that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
 
 ## Tickets
 
