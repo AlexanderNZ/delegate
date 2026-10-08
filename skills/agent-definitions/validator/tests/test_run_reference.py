@@ -32,10 +32,9 @@ outside_the_package = pytest.mark.skipif(
         "agent", "model", "prompt", "cwd", "report_path",  # the request of an adapter
         "exit_status", "end_state", "session_id", "event_stream",  # its result
         "finished", "failed", "capped", "tier_column",
-        "--dry-run", "--repo <dir>", "--tiers <file>", "--resume <run-id>", "--break-lock",
     ],
 )
-def test_the_reference_names_each_report_field_adapter_field_and_option(name):
+def test_the_reference_names_each_report_field_and_adapter_field(name):
     assert f"`{name}`" in REFERENCE.read_text()
 
 

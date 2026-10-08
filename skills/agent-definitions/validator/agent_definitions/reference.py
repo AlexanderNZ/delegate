@@ -31,6 +31,7 @@ RUN_PAGE: str = "docs/reference/run.md"
 STATUS_PAGE: str = "docs/reference/status-and-watch.md"
 COMMANDS_PAGE: str = "docs/reference/commands.md"
 SKILL_PAGE: str = "skills/agent-definitions/SKILL.md"
+DOCS_PAGE: str = "docs/reference/docs.md"
 
 
 class DocsError(Exception):
@@ -39,10 +40,11 @@ class DocsError(Exception):
 
 @dataclass(frozen=True)
 class Section:
-    """One generated section: the page that holds it (relative to the root), its id, and the function that builds its text."""
+    """One generated section: the page that holds it (relative to the root), its id, what it is built from, and the function that builds its text."""
 
     page: str
     id: str
+    source: str
     build: Callable[[], str]
 
     @property
@@ -132,21 +134,53 @@ def finding_code_table() -> str:
     return "\n".join(rows)
 
 
+def generated_sections_table() -> str:
+    """The table of every generated section: its page, its id, and what the code builds it from."""
+    rows = ["| Page | Section | Built from |", "|---|---|---|"]
+    rows += [f"| `{section.page}` | `{section.id}` | {section.source} |" for section in SECTIONS]
+    return "\n".join(rows)
+
+
 SECTIONS: tuple[Section, ...] = (
-    Section(RUN_PAGE, "run-options", lambda: options_table(run.build_parser())),
-    Section(COMMANDS_PAGE, "agent-definitions-options", lambda: options_table(cli.build_parser())),
-    Section(COMMANDS_PAGE, "render-options", lambda: options_table(_subparser(cli.build_parser(), "render"))),
-    Section(COMMANDS_PAGE, "validate-options", lambda: options_table(_subparser(cli.build_parser(), "validate"))),
-    Section(COMMANDS_PAGE, "bootstrap-options", lambda: options_table(_subparser(cli.build_parser(), "bootstrap"))),
-    Section(COMMANDS_PAGE, "brief-full-options", lambda: options_table(_subparser(brief.build_parser(), "full"))),
-    Section(COMMANDS_PAGE, "brief-fixup-options", lambda: options_table(_subparser(brief.build_parser(), "fixup"))),
-    Section(COMMANDS_PAGE, "verifier-guard-commands", guard_table),
-    Section(SKILL_PAGE, "verifier-guard-commands", guard_table),
-    Section(COMMANDS_PAGE, "finding-codes", finding_code_table),
-    Section(SKILL_PAGE, "finding-codes", finding_code_table),
-    Section(STATUS_PAGE, "status-options", lambda: options_table(status.build_parser())),
-    Section(STATUS_PAGE, "watch-options", lambda: options_table(watch.build_parser())),
-    Section(STATUS_PAGE, "watch-exit-codes", lambda: exit_code_table(watch.EXIT_CODES, watch.EXIT_CODE_CONDITIONS)),
+    Section(RUN_PAGE, "run-options", "The argument parser of `delegate run`.", lambda: options_table(run.build_parser())),
+    Section(
+        STATUS_PAGE, "status-options", "The argument parser of `delegate status`.", lambda: options_table(status.build_parser())
+    ),
+    Section(STATUS_PAGE, "watch-options", "The argument parser of `delegate watch`.", lambda: options_table(watch.build_parser())),
+    Section(
+        STATUS_PAGE, "watch-exit-codes", "The exit codes of `delegate watch`.",
+        lambda: exit_code_table(watch.EXIT_CODES, watch.EXIT_CODE_CONDITIONS),
+    ),
+    Section(
+        COMMANDS_PAGE, "agent-definitions-options", "The options of `agent-definitions` before its subcommand.",
+        lambda: options_table(cli.build_parser()),
+    ),
+    Section(
+        COMMANDS_PAGE, "render-options", "The `render` parser of `agent-definitions`.",
+        lambda: options_table(_subparser(cli.build_parser(), "render")),
+    ),
+    Section(
+        COMMANDS_PAGE, "validate-options", "The `validate` parser of `agent-definitions`.",
+        lambda: options_table(_subparser(cli.build_parser(), "validate")),
+    ),
+    Section(
+        COMMANDS_PAGE, "bootstrap-options", "The `bootstrap` parser of `agent-definitions`.",
+        lambda: options_table(_subparser(cli.build_parser(), "bootstrap")),
+    ),
+    Section(
+        COMMANDS_PAGE, "brief-full-options", "The `full` parser of `verifier-brief`.",
+        lambda: options_table(_subparser(brief.build_parser(), "full")),
+    ),
+    Section(
+        COMMANDS_PAGE, "brief-fixup-options", "The `fixup` parser of `verifier-brief`.",
+        lambda: options_table(_subparser(brief.build_parser(), "fixup")),
+    ),
+    Section(COMMANDS_PAGE, "verifier-guard-commands", "The command constants of the renderer.", guard_table),
+    Section(SKILL_PAGE, "verifier-guard-commands", "The command constants of the renderer.", guard_table),
+    Section(COMMANDS_PAGE, "finding-codes", "The finding codes of the validator.", finding_code_table),
+    Section(SKILL_PAGE, "finding-codes", "The finding codes of the validator.", finding_code_table),
+    Section(DOCS_PAGE, "docs-options", "The argument parser of `delegate docs`.", lambda: options_table(build_parser())),
+    Section(DOCS_PAGE, "generated-sections", "The list of sections in this module.", generated_sections_table),
 )
 
 

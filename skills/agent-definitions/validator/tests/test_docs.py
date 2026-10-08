@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import delegate, validate
+from agent_definitions import delegate, reference, validate
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -192,3 +192,32 @@ def test_the_command_writes_a_row_for_each_finding_code_of_the_validator_into_th
 def test_the_validator_emits_exactly_the_finding_codes_that_it_documents():
     assert "BAD_MODEL" in emitted_finding_codes()  # the scan finds codes
     assert emitted_finding_codes() == set(validate.FINDING_CODES)
+
+
+@outside_the_package
+@pytest.mark.parametrize("section", reference.SECTIONS, ids=lambda section: section.name)
+def test_each_committed_generated_section_matches_the_code(section):
+    """The one drift test of a section. A changed flag, exit code, guard command or finding code with no `delegate docs` fails it."""
+    assert section.name not in [stale.name for stale in reference.stale_sections(ROOT)], "run `delegate docs` and commit the result"
+
+
+@outside_the_package
+def test_the_reference_lists_each_generated_section_with_its_page_and_its_source(pages, capsys):
+    page = pages / "docs" / "reference" / "docs.md"
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = page.read_text()
+    assert (code, err) == (0, "")
+    assert "| `docs/reference/run.md` | `run-options` | The argument parser of `delegate run`. |" in text
+    assert "| `skills/agent-definitions/SKILL.md` | `verifier-guard-commands` | The command constants of the renderer. |" in text
+    assert "| `docs/reference/status-and-watch.md` | `watch-exit-codes` | The exit codes of `delegate watch`. |" in text
+    assert "| `--check` | " in text
+
+
+@outside_the_package
+def test_the_readme_links_the_generated_pages_and_names_the_command_that_writes_them():
+    readme = (ROOT / "README.md").read_text()
+    assert "docs/reference/commands.md" in readme
+    assert "docs/reference/docs.md" in readme
+    assert "delegate docs" in readme

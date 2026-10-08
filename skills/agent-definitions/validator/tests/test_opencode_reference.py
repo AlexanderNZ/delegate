@@ -13,7 +13,6 @@ from .opencode_fake import FIXTURES
 
 ROOT = Path(__file__).resolve().parents[4]
 REFERENCE = ROOT / "docs" / "reference" / "opencode-adapter.md"
-RUN_REFERENCE = ROOT / "docs" / "reference" / "run.md"
 
 outside_the_package = pytest.mark.skipif(
     not (ROOT / "README.md").is_file(), reason="the docs are outside the package source, as in a Nix build"
@@ -41,12 +40,6 @@ def test_the_reference_lists_each_recorded_stream(fixture):
 @pytest.mark.parametrize("part", ["--format json", "--model <model>", "--agent <agent>", "--dir <directory>", "--session <session id>", "PWD"])
 def test_the_reference_names_each_part_of_the_command(part):
     assert part in REFERENCE.read_text()
-
-
-@outside_the_package
-@pytest.mark.parametrize("option", ["--opencode-model <tier=model>", "--opencode-allow <model>"])
-def test_the_run_reference_names_the_override_options(option):
-    assert f"`{option}`" in RUN_REFERENCE.read_text()
 
 
 @outside_the_package

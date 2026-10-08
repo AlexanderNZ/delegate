@@ -19,6 +19,8 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
 - [Reference: the `opencode` adapter](docs/reference/opencode-adapter.md): the command, how the adapter selects the agent, the working directory, the end states, the recorded streams, and the live smoke run.
 - [Reference: `delegate status` and `delegate watch`](docs/reference/status-and-watch.md): the state of each ticket of a run, the follow of its journal, the problem events, and the exit code of each reason.
+- [Reference: `render`, `validate`, `bootstrap` and `brief`](docs/reference/commands.md): the options of each command, the commands that the verifier guard permits, and the finding codes of the validator.
+- [Reference: `delegate docs`](docs/reference/docs.md): the command that writes the generated sections of these pages from the code. After a change to a flag, an exit code, a guard command or a finding code, run `delegate docs`; a test fails when a committed page differs from the code.
 
 ## Generated files
 
