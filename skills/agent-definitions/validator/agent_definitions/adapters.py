@@ -23,6 +23,15 @@ CAPPED: str = "capped"
 END_STATES: tuple[str, ...] = (FINISHED, FAILED, CAPPED)
 
 
+class AdapterError(RuntimeError):
+    """The harness could not run the agent at all, so no end state can describe the run.
+
+    An unknown agent, an unknown flag, or a missing login does this. The same
+    cause stops every later agent, so the engine records the error as a crash and
+    ends the run.
+    """
+
+
 @dataclass(frozen=True)
 class AdapterRequest:
     """What the engine gives an adapter for one agent run.
@@ -88,8 +97,18 @@ def unregister(name: str) -> None:
 
 
 def get(name: str) -> Adapter:
-    """The adapter registered under the name. Raise KeyError when there is none."""
-    return _REGISTRY[name]
+    """The adapter under the name. Raise KeyError when there is none.
+
+    A registered adapter comes first. The built-in adapters follow; each one is
+    imported when it is first asked for, because its module imports this one.
+    """
+    if name in _REGISTRY:
+        return _REGISTRY[name]
+    if name == "claude-code":
+        from .claude_code import ClaudeCodeAdapter
+
+        return ClaudeCodeAdapter()
+    raise KeyError(name)
 
 
 def registered_names() -> list[str]:

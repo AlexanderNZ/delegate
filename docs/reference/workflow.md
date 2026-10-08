@@ -86,7 +86,7 @@ All fields except `tier-overrides` are required. A field that this reference doe
 
 | Adapter | Harness |
 |---|---|
-| `claude-code` | Claude Code |
+| `claude-code` | Claude Code. See [the adapter reference](claude-code-adapter.md). |
 | `opencode` | OpenCode |
 | `cursor` | Cursor `agent` CLI |
 

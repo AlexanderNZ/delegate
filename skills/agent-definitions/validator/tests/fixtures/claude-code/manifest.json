@@ -1,0 +1,13 @@
+{
+  "harness": "Claude Code",
+  "harness_version": "2.1.287",
+  "recorded": "2026-10-08",
+  "recorded_note": "UTC date of the timestamps in the streams; the local date was 2026-10-09 (NZDT).",
+  "command": "claude --print --output-format stream-json --verbose --model <model> [--agent <name>] [--max-turns <n>]",
+  "redaction": "The init event lists of tools, slash commands, skills, plugins, agents, MCP servers and memory paths are emptied. The working directory is /work. Thinking signatures and the rate-limit windows are removed. Nothing else is changed.",
+  "fixtures": {
+    "finished.jsonl": {"end_state": "finished", "how": "model haiku, agent smoke-agent, a prompt that asks for one sentence", "exit_status": 0},
+    "capped.jsonl": {"end_state": "capped", "how": "model haiku, --max-turns 1, a prompt that needs two tool calls", "exit_status": 1},
+    "failed.jsonl": {"end_state": "failed", "how": "model no-such-model-xyz, which the API refuses with a 404", "exit_status": 1}
+  }
+}

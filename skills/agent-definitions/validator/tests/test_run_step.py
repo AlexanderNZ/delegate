@@ -66,14 +66,14 @@ def test_the_journal_records_the_run_the_step_and_the_adapter_result(tmp_path, c
 
 
 def test_an_adapter_with_no_implementation_exits_1_names_it_and_creates_nothing(tmp_path, capsys):
-    # `claude-code` is a valid adapter name, but nothing registers an implementation yet.
-    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"'))
+    # `cursor` is a valid adapter name, but nothing registers an implementation yet.
+    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "cursor"'))
     before = (git(repo, "branch", "--all"), git(repo, "worktree", "list"), git(repo, "status", "--short"))
 
     code, out, err = run(repo, capsys)
 
     assert (code, out) == (1, "")
-    assert "claude-code" in err
+    assert "cursor" in err
     assert "Traceback" not in err
     assert (git(repo, "branch", "--all"), git(repo, "worktree", "list"), git(repo, "status", "--short")) == before
 
