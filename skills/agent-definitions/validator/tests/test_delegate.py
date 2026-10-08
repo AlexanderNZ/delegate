@@ -159,3 +159,102 @@ def test_bootstrap_writes_the_files_the_standalone_command_writes(repo, tmp_path
     assert umbrella[0] == 0
     assert snapshot(repo) == standalone_files
     assert any(name.endswith("acme-api-context/SKILL.md") for name in standalone_files)
+
+
+@pytest.fixture
+def scratch(tmp_path):
+    """A repository with a base commit, a rejected commit and a fix-up commit."""
+    r = tmp_path / "scratch"
+    (r / "docs" / "agents").mkdir(parents=True)
+    git(r, "init", "-q", "-b", "main")
+    (r / "docs" / "agents" / "delegation.md").write_text(
+        "# Rules\n\n## Verification gates\n\n```\nmake check\n```\n\n## Hotspots\n"
+    )
+    (r / "README.md").write_text("base\n")
+    git(r, "add", ".")
+    git(r, "commit", "-q", "-m", "base")
+    git(r, "checkout", "-q", "-b", "feat")
+    (r / "feature.py").write_text("def answer():\n    return 41\n")
+    git(r, "add", "feature.py")
+    git(r, "commit", "-q", "-m", "add the answer")
+    rejected = git(r, "rev-parse", "HEAD")
+    (r / "feature.py").write_text("def answer():\n    return 42\n")
+    git(r, "add", "feature.py")
+    git(r, "commit", "-q", "-m", "correct the answer")
+    return r, rejected
+
+
+def test_brief_full_prints_what_verifier_brief_full_prints(scratch, capsys):
+    repo, _rejected = scratch
+    argv = ["full", "--repo", str(repo), "--branch", "feat", "--task", "Return the answer."]
+    standalone = invoke(brief.main, argv, capsys)
+    umbrella = invoke(delegate.main, ["brief", *argv], capsys)
+    assert umbrella == standalone
+    code, out, _err = umbrella
+    assert code == 0
+    assert "Return the answer." in out
+    assert "make check" in out
+    assert "+    return 42" in out
+
+
+def test_brief_fixup_prints_what_verifier_brief_fixup_prints(scratch, tmp_path, capsys):
+    repo, rejected = scratch
+    findings = tmp_path / "findings.md"
+    findings.write_text("# Findings\n\n1. The answer is wrong.\n")
+    argv = ["fixup", "--repo", str(repo), "--branch", "feat", "--rejected", rejected, "--findings", str(findings)]
+    standalone = invoke(brief.main, argv, capsys)
+    umbrella = invoke(delegate.main, ["brief", *argv], capsys)
+    assert umbrella == standalone
+    code, out, _err = umbrella
+    assert code == 0
+    assert "1. The answer is wrong." in out
+    assert "-    return 41" in out
+
+
+def test_brief_failure_exits_one_and_prints_the_error_to_stderr_like_the_standalone_command(scratch, capsys):
+    repo, _rejected = scratch
+    argv = ["full", "--repo", str(repo), "--branch", "no-such-branch", "--task", "Return the answer."]
+    standalone = invoke(brief.main, argv, capsys)
+    umbrella = invoke(delegate.main, ["brief", *argv], capsys)
+    assert umbrella == standalone
+    code, out, err = umbrella
+    assert code == 1
+    assert out == ""
+    assert "no-such-branch" in err
+
+
+def test_brief_without_a_mode_is_a_usage_error_like_the_standalone_command(capsys):
+    umbrella = invoke(delegate.main, ["brief"], capsys)
+    assert umbrella == invoke(brief.main, [], capsys)
+    assert umbrella[0] == 2
+
+
+def test_help_lists_every_subcommand(capsys):
+    code, out, _err = invoke(delegate.main, ["--help"], capsys)
+    assert code == 0
+    for name in ("render", "validate", "bootstrap", "brief"):
+        assert name in out.split(), f"--help must list {name}"
+
+
+def test_no_subcommand_is_a_usage_error_that_lists_the_subcommands(capsys):
+    code, out, err = invoke(delegate.main, [], capsys)
+    assert code == 2
+    assert out == ""
+    for name in ("render", "validate", "bootstrap", "brief"):
+        assert name in err.split()
+
+
+def test_an_unknown_subcommand_is_a_usage_error_that_names_it(capsys):
+    code, out, err = invoke(delegate.main, ["frobnicate"], capsys)
+    assert code == 2
+    assert out == ""
+    assert "frobnicate" in err
+
+
+def test_a_tiers_option_before_brief_is_a_usage_error(capsys):
+    # verifier-brief has no --tiers option, so the umbrella must not drop it
+    # and run the brief as if it were absent.
+    code, out, err = invoke(delegate.main, ["--tiers", "x.toml", "brief", "full"], capsys)
+    assert code == 2
+    assert out == ""
+    assert "--tiers" in err
