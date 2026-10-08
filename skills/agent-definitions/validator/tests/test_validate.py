@@ -4,6 +4,7 @@ import pytest
 import yaml
 
 from agent_definitions.validate import (
+    Finding,
     opencode_bash_action,
     opencode_pattern_matches,
     split_frontmatter,
@@ -454,3 +455,9 @@ def test_opencode_guard_needs_the_widened_pattern_for_another_repository_path(re
     f = validate_opencode_dir(rendered / "opencode", tiers)
     assert "SPECIALIST_CAN_PUSH" in _codes(f)
     assert opencode_bash_action({"bash": {"*": "allow", "git push*": "deny"}}, "git -C /tmp/x push") == "allow"
+
+
+def test_a_finding_with_a_code_that_the_reference_does_not_list_is_an_error_that_names_the_code():
+    """A code outside the documented set would be missing from the reference, so the validator refuses to write it."""
+    with pytest.raises(ValueError, match="NOT_A_CODE"):
+        Finding("NOT_A_CODE", "agent.md", "x")

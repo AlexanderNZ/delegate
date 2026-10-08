@@ -4,12 +4,13 @@ The pages are outside the package source, as the README is, so a Nix build
 that copies only the package skips the cases that read them, with a reason.
 """
 
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 
-from agent_definitions import delegate
+from agent_definitions import delegate, validate
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -161,3 +162,33 @@ def test_the_command_writes_the_guard_table_of_the_verifier_from_the_renderer_co
     for row in GUARD_ROWS:
         assert row in text
     assert "(old)" not in text
+
+
+def emitted_finding_codes() -> set[str]:
+    """The codes that the source of the validator writes, found in the text of the source: an oracle that does not run the validator."""
+    source = (Path(validate.__file__)).read_text()
+    return set(re.findall(r'Finding\(\s*"([A-Z_]+)"', source))
+
+
+def codes_in_table(text: str) -> set[str]:
+    return set(re.findall(r"^\| `([A-Z_]+)` \|", text, flags=re.MULTILINE))
+
+
+@outside_the_package
+@pytest.mark.parametrize("page", ["skills/agent-definitions/SKILL.md", "docs/reference/commands.md"])
+def test_the_command_writes_a_row_for_each_finding_code_of_the_validator_into_the_skill_and_the_reference(pages, capsys, page):
+    path = pages / page
+    path.write_text(path.read_text().replace("| `BAD_TYPE` |", "| `OLD_CODE` |"))
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = path.read_text()
+    assert (code, err) == (0, "")
+    assert "| `BAD_TYPE` | OpenCode `tools` as a string; that aborts config load for the whole session |" in text
+    assert "OLD_CODE" not in text
+    assert emitted_finding_codes() <= codes_in_table(text)
+
+
+def test_the_validator_emits_exactly_the_finding_codes_that_it_documents():
+    assert "BAD_MODEL" in emitted_finding_codes()  # the scan finds codes
+    assert emitted_finding_codes() == set(validate.FINDING_CODES)

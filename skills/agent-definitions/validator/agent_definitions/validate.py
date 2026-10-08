@@ -98,11 +98,51 @@ def opencode_bash_action(permission: dict, command: str) -> str | None:
     return action
 
 
+#: Every code that the validator writes, with its meaning. The finding-code
+#: tables of the skill and of the commands reference are generated from this
+#: table (`delegate docs`), and `Finding` accepts no code outside it, so a
+#: code cannot be missing from the reference.
+FINDING_CODES: dict[str, str] = {
+    "UNKNOWN_KEY": "a frontmatter key the harness does not recognise; inert on Claude Code, swept into provider options on OpenCode",
+    "BAD_MODEL": "model not in the tier table's allowed set for that harness",
+    "BAD_EFFORT": "Claude Code `effort` outside the levels, or OpenCode `variant` outside the variants",
+    "MISSING_TWIN": "a `-specialist` without its `-verifier`, or the reverse",
+    "DUPLICATE_NAME": "two files declare one name; the harness picks one by filesystem read order",
+    "VERIFIER_WRITE_TOOL": (
+        "a verifier lists Edit, Write, MultiEdit, NotebookEdit, or an unguarded Bash; on OpenCode it permits a write tool "
+        "with `allow` or `ask`, or its `bash` map does not open with `\"*\": deny`, or that map resolves a write command to allow"
+    ),
+    "VERIFIER_BASH_UNGUARDED": (
+        "a Claude Code verifier lists `Bash` with no `PreToolUse` hook on Bash whose command carries `# agent-definitions:verifier-guard`"
+    ),
+    "RULE_SHADOWED": "an OpenCode permission rule placed before `\"*\"` in the same map; the last matching rule wins, so it does nothing",
+    "VERIFIER_NOT_READONLY": (
+        "a Claude Code verifier with no `tools` allowlist; an OpenCode verifier whose first rule is not `\"*\": deny`"
+    ),
+    "SPECIALIST_CAN_PUSH": (
+        "a `-specialist` with no push guard: on Claude Code no `PreToolUse` hook that selects Bash and names `push`; on OpenCode "
+        "no `permission.bash` deny that covers `git push`. A deny that the catch-all shadows does not count"
+    ),
+    "BAD_FRONTMATTER": "frontmatter absent on line 1, unclosed, or not YAML",
+    "NAME_INVALID": "a name that starts with a hyphen or holds a character outside letters, digits, hyphen and underscore, so the harness would skip the file",
+    "MISSING_NAME": "a Claude Code file with no name; the harness treats it as documentation",
+    "MISSING_DESCRIPTION": "a name with no description; the harness skips the file, and OpenCode needs a description for routing",
+    "BAD_TYPE": "OpenCode `tools` as a string; that aborts config load for the whole session",
+    "CROSS_HARNESS_MISMATCH": "an agent present for one harness and absent for the other",
+    "MISSING_SKILL": "a preloaded skill absent from `--skills-dir`",
+    "DESCRIPTION_BUDGET": "combined Claude Code descriptions exceed the budget in `tiers.toml`",
+}
+
+
 @dataclass(frozen=True)
 class Finding:
     code: str
     file: str
     message: str
+
+    def __post_init__(self) -> None:
+        if self.code not in FINDING_CODES:
+            raise ValueError(f"finding code {self.code!r} is not in FINDING_CODES, so the reference would not list it")
 
     def __str__(self) -> str:
         return f"{self.code} {self.file}: {self.message}"
