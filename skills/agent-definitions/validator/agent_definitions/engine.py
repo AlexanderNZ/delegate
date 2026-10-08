@@ -51,7 +51,7 @@ from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
 from .journal import Journal, JournalError, read_events
-from .lock import LockError, LockHolder, run_lock
+from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -252,6 +252,10 @@ def run_workflow(
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
     run_id = resume if resume is not None else _new_run_id()
     try:
+        # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
+        check_free(state_dir, workflow.run_branch, break_stale=break_lock)
+        if resume is None:
+            _check_branches(workflow, repo)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
             return _execute(workflow, workflow_path, adapter, roles, repo, state_dir, run_id, resume is not None, broken)
     except LockError as error:
@@ -264,7 +268,6 @@ def _execute(
 ) -> RunResult:
     order = plan_order(workflow)
     if not resuming:
-        _check_branches(workflow, repo)
         _git(repo, "branch", workflow.run_branch, workflow.base_branch)
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
         journal.append(

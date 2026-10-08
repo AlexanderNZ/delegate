@@ -22,11 +22,12 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 ## What a run does
 
 1. The engine validates the workflow. A problem exits 1 and creates nothing.
-2. The engine checks that `base-branch` is a branch of the repository and that no ticket branch exists. A problem exits 1 and creates nothing.
-3. The engine creates the run branch at `base-branch`.
-4. The engine writes `run-start` to a new journal.
-5. For each ticket in dependency order, the engine does the step below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
-6. The engine writes `run-end`.
+2. The engine checks that no other run holds the lock of the run branch. See [the run lock](#the-run-lock). A held lock exits 1 and creates nothing.
+3. The engine checks that `base-branch` is a branch of the repository and that no ticket branch exists. A problem exits 1 and creates nothing.
+4. The engine takes the lock.
+5. The engine creates the run branch at `base-branch`, and writes `run-start` to a new journal.
+6. For each ticket in dependency order, the engine does the step below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
+7. The engine writes `run-end`, and releases the lock.
 
 A step has these parts:
 

@@ -53,6 +53,31 @@ def _read_holder(path: Path) -> LockHolder:
         raise LockError(f"lock file {path} cannot be read ({error!r}); remove it by hand when no run uses it") from None
 
 
+def _refuse(path: Path, run_branch: str, holder: LockHolder, break_stale: bool) -> None:
+    """Raise LockError for a lock that the caller may not take. Return when the lock is stale and `break_stale` is set."""
+    if _alive(holder.pid):
+        raise LockError(
+            f"run branch {run_branch} is in use by run {holder.run_id} (process {holder.pid}); lock file {path}"
+        )
+    if not break_stale:
+        raise LockError(
+            f"run branch {run_branch} is locked by run {holder.run_id}, process {holder.pid}, which no longer exists; "
+            f"pass --break-lock to remove the lock (lock file {path})"
+        )
+
+
+def check_free(state_dir: Path, run_branch: str, *, break_stale: bool = False) -> None:
+    """Raise LockError, as `run_lock` does, when the lock of the run branch is held. Create nothing.
+
+    A caller uses it to report a run branch in use before any other check, and
+    before `run_lock` makes the state directory. `run_lock` still decides: it
+    holds the lock with an atomic link.
+    """
+    path = _lock_path(state_dir, run_branch)
+    if path.exists():
+        _refuse(path, run_branch, _read_holder(path), break_stale)
+
+
 @contextmanager
 def run_lock(
     state_dir: Path, run_branch: str, run_id: str, *, break_stale: bool = False
@@ -76,15 +101,7 @@ def run_lock(
                 os.link(private, path)
             except FileExistsError:
                 holder = _read_holder(path)
-                if _alive(holder.pid):
-                    raise LockError(
-                        f"run branch {run_branch} is in use by run {holder.run_id} (process {holder.pid}); lock file {path}"
-                    ) from None
-                if not break_stale:
-                    raise LockError(
-                        f"run branch {run_branch} is locked by run {holder.run_id}, process {holder.pid}, which no longer exists; "
-                        f"pass --break-lock to remove the lock (lock file {path})"
-                    ) from None
+                _refuse(path, run_branch, holder, break_stale)
                 path.unlink()
                 broken = holder
                 continue
