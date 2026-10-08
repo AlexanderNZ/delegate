@@ -138,3 +138,82 @@ def test_the_minute_options_refuse_a_value_that_is_not_greater_than_0(tmp_path, 
 
     assert stop.value.code == 2
     assert option in capsys.readouterr().err
+
+
+def positions(out: str) -> list[int]:
+    """The `seq` of each event line that the output holds."""
+    return [int(line.split()[0]) for line in out.splitlines() if line.split()[0].isdigit()]
+
+
+def test_max_minutes_exits_6_before_the_run_ends_and_prints_the_position_to_go_on_from(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"))
+
+    code, out, err = watch(repo, capsys, "--max-minutes", "0.01")
+
+    assert (code, err) == (6, "")
+    assert positions(out) == [1, 2]
+    assert out.splitlines()[-1] == "position 2"
+    assert "watch: time limit" in out
+
+
+def test_watch_from_a_position_reports_the_events_after_it_once_and_none_twice(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"))
+    code, first, _ = watch(repo, capsys, "--max-minutes", "0.01")
+    assert code == 6
+    position = first.splitlines()[-1].removeprefix("position ")
+    from .support import append_events
+
+    append_events(path, step_end("a"), run_end("built", ["a"]))
+
+    code, second, err = watch(repo, capsys, "--from", position)
+
+    assert (code, err) == (0, "")
+    assert positions(first) + positions(second) == [1, 2, 3, 4]
+    assert second.splitlines()[-1] == "position 4"
+
+
+def test_the_events_before_the_position_still_count_for_the_problem_that_follows_it(tmp_path, capsys):
+    # The red gate is event 3, before the position. The step-end after it is a gate problem.
+    repo = bare_repo(tmp_path)
+    red = ("gate-result", {"ticket": "a", "round": 0, "phase": "build", "command": "make test", "exit_status": 1, "green": False, "output_tail": ""})
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), red, step_end("a", "failed", "gates red: make test"))
+
+    code, out, _ = watch(repo, capsys, "--from", "3")
+
+    assert code == 3
+    assert positions(out) == [4]
+    assert "watch: problem: ticket a: the gates are not green: make test" in out.splitlines()
+
+
+def test_a_run_that_failed_exits_3_at_its_problem_and_1_when_watch_goes_on_from_there(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), step_end("a", "failed", "no commit"), run_end("failed", [], ["a"]))
+
+    code, first, _ = watch(repo, capsys)
+    assert (code, first.splitlines()[-1]) == (3, "position 3")
+    code, second, _ = watch(repo, capsys, "--from", "3")
+
+    assert code == 1
+    assert positions(second) == [4]
+
+
+def test_watch_from_a_position_beyond_the_journal_exits_2_and_names_the_position(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", run_start("r1", "a"), run_end("built", ["a"]))
+
+    code, out, err = watch(repo, capsys, "--from", "9")
+
+    assert (code, out) == (2, "")
+    assert "9" in err and "2" in err
+
+
+def test_watch_from_the_end_of_a_run_that_ended_exits_with_its_result_and_reports_no_event(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", run_start("r1", "a"), run_end("built", ["a"]))
+
+    code, out, _ = watch(repo, capsys, "--from", "2")
+
+    assert code == 0
+    assert out == "position 2\n"

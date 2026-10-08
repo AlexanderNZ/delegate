@@ -48,6 +48,17 @@ def _positive(text: str) -> float:
     return value
 
 
+def _position(text: str) -> int:
+    """An option value that is a journal position: a whole number, 0 or more."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {text}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
     parser.add_argument("run_id", nargs="?", help="the run to follow; default is the newest run of the repository")
@@ -63,6 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-minutes", type=_positive, metavar="N",
         help="exit after N minutes, before a harness time limit, and print the position to go on from",
+    )
+    parser.add_argument(
+        "--from", type=_position, default=0, metavar="POSITION", dest="from_position",
+        help="go on after the event with this position, which an earlier watch printed; no event is reported twice",
     )
     parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
     return parser
@@ -140,20 +155,29 @@ def main(argv: list[str] | None = None) -> int:
 def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
     """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
     started = time.monotonic()
-    offset, next_seq, position = 0, 1, 0
+    offset, next_seq, position = 0, 1, args.from_position
     tracker = _Tracker()
     streams: set[Path] = set()
     last_event: dict[str, object] | None = None
+    first_read = True
     while True:
         events, offset = read_new_events(journal, offset, next_seq)
         next_seq += len(events)
+        if first_read and next_seq - 1 < args.from_position:
+            raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {args.from_position} is beyond its end")
+        first_read = False
         for event in events:
             last_event = event
-            position = int(event["seq"])  # type: ignore[call-overload]
-            print(format_event(event), flush=True)
+            seq = int(event["seq"])  # type: ignore[call-overload]
             if "event_stream" in event:
                 streams.add(Path(str(event["event_stream"])))
-            problem = tracker.problem(event)
+            problem = tracker.problem(event)  # an event before the position still counts for the events after it
+            if seq <= args.from_position:
+                if event["event"] == "run-end":
+                    return (EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED), position
+                continue
+            position = seq
+            print(format_event(event), flush=True)
             if problem is not None:
                 print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
                 return EXIT_PROBLEM, position
