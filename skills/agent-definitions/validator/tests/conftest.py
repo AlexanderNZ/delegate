@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,19 @@ from agent_definitions.render import render
 from agent_definitions.tiers import load_tiers
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
+
+
+@pytest.fixture(autouse=True)
+def isolated_git_config(monkeypatch):
+    """Keep the git configuration of the host out of every test.
+
+    A global `core.hooksPath` can name a `post-rewrite` hook that does not read
+    its stdin. Git then dies of SIGPIPE (exit 141) after a finished rebase, and a
+    test of the run fails for a cause outside the code. Setting the environment
+    of the process is the boundary; the test repositories hold all they need.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture(scope="session")
