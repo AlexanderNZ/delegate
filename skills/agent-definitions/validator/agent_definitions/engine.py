@@ -70,6 +70,26 @@ def _specialist_model(workflow: Workflow, tiers: Tiers, column: str) -> tuple[st
         raise EngineError(f"the tier table has no {column!r} column for tier {tier!r}") from None
 
 
+def _branch_exists(repo: Path, name: str) -> bool:
+    return subprocess.run(
+        ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{name}"], capture_output=True
+    ).returncode == 0
+
+
+def _check_branches(workflow: Workflow, repo: Path) -> None:
+    """Refuse a run whose base branch is missing or whose ticket branch is taken. Create nothing."""
+    if not _branch_exists(repo, workflow.base_branch):
+        raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
+    for ticket in workflow.tickets:
+        branch = _ticket_branch(workflow, ticket)
+        if _branch_exists(repo, branch):
+            raise EngineError(f"branch {branch!r} for ticket {ticket.id!r} exists already; delete it or choose another run-branch")
+
+
+def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
+    return f"{workflow.run_branch}-{ticket.id}"
+
+
 def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers) -> RunResult:
     """Build the tickets of a workflow in dependency order. Return the result of the run."""
     try:
@@ -80,7 +100,7 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
         ) from None
     repo = Path(_git(repo, "rev-parse", "--show-toplevel"))
     state_dir = (repo / _git(repo, "rev-parse", "--git-common-dir")).resolve() / "delegate"
-    _git(repo, "rev-parse", "--verify", f"refs/heads/{workflow.base_branch}^{{commit}}")
+    _check_branches(workflow, repo)
     tier, model = _specialist_model(workflow, tiers, adapter.tier_column)
 
     run_id = _new_run_id()
@@ -111,7 +131,7 @@ def _build_ticket(
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed."""
     stack = workflow.stacks[ticket.stack]
-    branch = f"{workflow.run_branch}-{ticket.id}"
+    branch = _ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
     base_commit = _git(repo, "rev-parse", workflow.base_branch)
@@ -129,6 +149,8 @@ def _build_ticket(
         "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),
     )
+    if result.end_state != adapters.FINISHED or result.exit_status != 0:
+        return f"the specialist ended {result.end_state} with exit status {result.exit_status}"
     try:
         report = read_specialist_report(report_path, ticket.id)
     except ReportError as error:

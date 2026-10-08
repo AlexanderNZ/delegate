@@ -8,6 +8,7 @@ no model.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -104,12 +105,13 @@ class ScriptedAdapter:
             head = git(request.cwd, "rev-parse", "HEAD").strip()
         if self.write_report:
             branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+            ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
             if callable(self.report_text):
                 text = self.report_text(request, head)
             elif self.report_text is not None:
                 text = self.report_text
             else:
-                text = json.dumps(valid_report("a", branch, head))
+                text = json.dumps(valid_report(ticket, branch, head))
             request.report_path.parent.mkdir(parents=True, exist_ok=True)
             request.report_path.write_text(text)
         request.report_path.parent.mkdir(parents=True, exist_ok=True)

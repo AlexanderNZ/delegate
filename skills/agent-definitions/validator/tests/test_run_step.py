@@ -314,3 +314,90 @@ def test_the_brief_gives_the_text_of_a_ticket_file_and_states_when_no_path_is_re
     sections = brief_sections(call.prompt)
     assert "The export command reads from a pipe." in sections["Task"]
     assert "no path is reserved" in sections["File boundary"].lower()
+
+
+@pytest.mark.parametrize(("end_state", "exit_status"), [("failed", 1), ("capped", 0), ("finished", 2)])
+def test_a_specialist_that_ends_failed_capped_or_with_a_bad_exit_status_fails_the_step_and_the_report_is_not_trusted(
+    tmp_path, capsys, scripted, end_state, exit_status
+):
+    scripted.end_state = end_state
+    scripted.exit_status = exit_status  # the report on disk is valid, but the run did not finish
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err
+    events = read_journal(out)
+    result = next(e for e in events if e["event"] == "adapter-result")
+    assert (result["end_state"], result["exit_status"]) == (end_state, exit_status)
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "failed"
+    assert end_state in step_end["reason"] and str(exit_status) in step_end["reason"]
+    assert "gate-result" not in event_names(events)
+
+
+TWO_TICKETS = WORKFLOW + '''
+[[tickets]]
+id = "b"
+text = "The export command writes a header row."
+stack = "python"
+blocked-by = ["a"]
+'''
+
+
+def test_tickets_are_built_in_dependency_order_each_from_the_base_branch(tmp_path, capsys, scripted):
+    # The file lists the dependent ticket b first. The plan must still build a first.
+    head, a_ticket, b_ticket = WORKFLOW.split("[[tickets]]")[0], WORKFLOW.split("[[tickets]]")[1], TWO_TICKETS.split("[[tickets]]")[2]
+    repo = make_repo(tmp_path, head + "[[tickets]]" + b_ticket + "[[tickets]]" + a_ticket)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    events = read_journal(out)
+    started = [e["ticket"] for e in events if e["event"] == "step-start"]
+    assert started == ["a", "b"]
+    run_end = next(e for e in events if e["event"] == "run-end")
+    assert (run_end["result"], run_end["built"]) == ("built", ["a", "b"])
+    bases = {e["base_commit"] for e in events if e["event"] == "step-start"}
+    assert bases == {git(repo, "rev-parse", "main").strip()}
+
+
+def test_a_failed_step_ends_the_run_and_no_later_ticket_starts(tmp_path, capsys, scripted):
+    scripted.end_state = "failed"
+    scripted.exit_status = 1
+    repo = make_repo(tmp_path, TWO_TICKETS)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    events = read_journal(out)
+    assert [e["ticket"] for e in events if e["event"] == "step-start"] == ["a"]
+    run_end = next(e for e in events if e["event"] == "run-end")
+    assert (run_end["result"], run_end["built"], run_end["failed"]) == ("failed", [], ["a"])
+    assert len(scripted.calls) == 1
+
+
+def test_a_base_branch_that_does_not_exist_exits_1_names_it_and_creates_nothing(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, WORKFLOW.replace('base-branch = "main"', 'base-branch = "trunk"'))
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, out) == (1, "")
+    assert "'trunk'" in err and "Traceback" not in err
+    assert not (repo / ".git" / "delegate").exists()
+    assert scripted.calls == []
+
+
+def test_a_ticket_branch_that_exists_stops_the_run_before_it_starts(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    assert run(repo, capsys)[0] == 0
+    calls_before = len(scripted.calls)
+    runs_before = sorted(path.name for path in (repo / ".git" / "delegate" / "runs").iterdir())
+
+    code, out, err = run(repo, capsys)  # the same workflow again: the branch of ticket a is taken
+
+    assert (code, out) == (1, "")
+    assert "run/demo-a" in err and "Traceback" not in err
+    assert len(scripted.calls) == calls_before
+    assert sorted(path.name for path in (repo / ".git" / "delegate" / "runs").iterdir()) == runs_before
