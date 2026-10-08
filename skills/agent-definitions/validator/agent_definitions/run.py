@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to the workflow TOML file; with --resume the default is the file that the run started from",
     )
     parser.add_argument("--dry-run", action="store_true", help="validate the workflow and print the plan; create nothing")
-    parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete")
+    parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run")
     parser.add_argument(
         "--break-lock", action="store_true",
         help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
