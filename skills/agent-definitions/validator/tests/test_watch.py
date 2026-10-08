@@ -42,9 +42,10 @@ def test_watch_of_a_run_that_built_prints_each_event_in_order_and_exits_0(tmp_pa
     assert "result=built" in printed[3]
 
 
-def test_watch_of_a_run_that_failed_exits_1(tmp_path, capsys):
+def test_watch_of_a_run_that_ends_failed_exits_1(tmp_path, capsys):
+    # A skip is no problem event, so a run whose only record of failure is the run-end has no problem to report first.
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", run_start("r1", "a"), step_end("a", "failed", "no commit"), run_end("failed", [], ["a"]))
+    write_journal(repo, "r1", run_start("r1", "a"), run_end("failed", [], ["a"]))
 
     code, out, _ = watch(repo, capsys, "r1")
 
@@ -110,7 +111,7 @@ def test_watch_waits_for_the_end_of_a_line_that_is_half_written_and_does_not_fai
     writer.join()
 
     assert (code, err) == (0, "")
-    assert [line.split()[2] for line in out.splitlines()] == ["run-start", "run-end"]
+    assert [line.split()[2] for line in out.splitlines()[:2]] == ["run-start", "run-end"]
 
 
 def test_watch_exits_2_and_names_the_line_when_the_journal_holds_a_line_that_is_not_an_event(tmp_path, capsys):

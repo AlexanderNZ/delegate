@@ -23,6 +23,8 @@ EXIT_FAILED: int = 1
 EXIT_ERROR: int = 2
 EXIT_PROBLEM: int = 3
 EXIT_VERDICT: int = 4
+EXIT_STALL: int = 5
+EXIT_TIME_LIMIT: int = 6
 
 # The role that each adapter-result event and each report event belongs to.
 AGENT_RESULT_ROLES: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up specialist", "verify-result": "verifier"}
@@ -35,6 +37,17 @@ UNTIL_VERDICT: str = "verdict"
 LONG_FIELDS: frozenset[str] = frozenset({"output_tail"})
 
 
+def _positive(text: str) -> float:
+    """An option value that is a number greater than 0."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"must be greater than 0, not {text}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
     parser.add_argument("run_id", nargs="?", help="the run to follow; default is the newest run of the repository")
@@ -43,7 +56,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--until", choices=[UNTIL_VERDICT],
         help="also exit when a verifier verdict is written to the journal; default is to follow the run to its end",
     )
-    parser.add_argument("--poll-seconds", type=float, default=1.0, help="how often to read the journal; default 1")
+    parser.add_argument(
+        "--stall-minutes", type=_positive, metavar="N",
+        help="exit when the journal and the captured event streams have not changed for N minutes",
+    )
+    parser.add_argument(
+        "--max-minutes", type=_positive, metavar="N",
+        help="exit after N minutes, before a harness time limit, and print the position to go on from",
+    )
+    parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
     return parser
 
 
@@ -93,33 +114,65 @@ class _Tracker:
         return None
 
 
+def _last_change(journal: Path, streams: set[Path]) -> float:
+    """The newest modification time of the journal and of the event streams that exist."""
+    times = [journal.stat().st_mtime]
+    for stream in streams:
+        try:
+            times.append(stream.stat().st_mtime)
+        except FileNotFoundError:
+            continue  # a stream that the journal names and the disk lacks cannot show a change
+    return max(times)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.poll_seconds <= 0:
-        print(f"delegate watch: --poll-seconds must be greater than 0, not {args.poll_seconds}", file=sys.stderr)
-        return EXIT_ERROR
     try:
         journal = journal_of(args.repo, args.run_id)
-        offset, next_seq, tracker = 0, 1, _Tracker()
-        while True:
-            events, offset = read_new_events(journal, offset, next_seq)
-            next_seq += len(events)
-            for event in events:
-                print(format_event(event), flush=True)
-                problem = tracker.problem(event)
-                if problem is not None:
-                    print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
-                    return EXIT_PROBLEM
-                if args.until == UNTIL_VERDICT and event["event"] == "verdict":
-                    findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
-                    print(
-                        f"watch: verdict: ticket {event['ticket']} round {event['round']}: {event['verdict']}"
-                        + (f": {findings}" if findings else "")
-                    )
-                    return EXIT_VERDICT
-                if event["event"] == "run-end":
-                    return EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED
-            time.sleep(args.poll_seconds)
+        code, position = _follow(args, journal)
     except (RunsError, JournalError) as error:
         print(f"delegate watch: {error}", file=sys.stderr)
         return EXIT_ERROR
+    print(f"position {position}")
+    return code
+
+
+def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
+    """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
+    started = time.monotonic()
+    offset, next_seq, position = 0, 1, 0
+    tracker = _Tracker()
+    streams: set[Path] = set()
+    last_event: dict[str, object] | None = None
+    while True:
+        events, offset = read_new_events(journal, offset, next_seq)
+        next_seq += len(events)
+        for event in events:
+            last_event = event
+            position = int(event["seq"])  # type: ignore[call-overload]
+            print(format_event(event), flush=True)
+            if "event_stream" in event:
+                streams.add(Path(str(event["event_stream"])))
+            problem = tracker.problem(event)
+            if problem is not None:
+                print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
+                return EXIT_PROBLEM, position
+            if args.until == UNTIL_VERDICT and event["event"] == "verdict":
+                findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
+                print(
+                    f"watch: verdict: ticket {event['ticket']} round {event['round']}: {event['verdict']}"
+                    + (f": {findings}" if findings else "")
+                )
+                return EXIT_VERDICT, position
+            if event["event"] == "run-end":
+                return (EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED), position
+        if args.stall_minutes is not None and time.time() - _last_change(journal, streams) >= args.stall_minutes * 60:
+            print(
+                f"watch: stall: the journal and the event streams have not changed for {args.stall_minutes:g} minutes; "
+                f"last event: {format_event(last_event) if last_event else 'none'}"
+            )
+            return EXIT_STALL, position
+        if args.max_minutes is not None and time.monotonic() - started >= args.max_minutes * 60:
+            print(f"watch: time limit: {args.max_minutes:g} minutes are used; the run is not at its end")
+            return EXIT_TIME_LIMIT, position
+        time.sleep(args.poll_seconds)
