@@ -142,6 +142,22 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CMD",
         help="a gate the verifier may run, alone or with arguments; repeat it",
     )
+    b.add_argument(
+        "--get-only-command",
+        action="append",
+        metavar="CMD",
+        help="a command the verifier may run only without -X, alone or with arguments; repeat it",
+    )
+    b.add_argument(
+        "--output-language",
+        metavar="LANGUAGE",
+        help="the language of agent text: none | ste (ASD-STE100); default: write no field",
+    )
+    b.add_argument(
+        "--tracked-file-build",
+        action="store_true",
+        help="the build reads tracked files only, as a flake does; the specialist then stages every new file",
+    )
     b.add_argument("--skills-root", default=DEFAULT_SKILLS_ROOT, help=f"default {DEFAULT_SKILLS_ROOT}")
     b.add_argument(
         "--user-skills-dir",

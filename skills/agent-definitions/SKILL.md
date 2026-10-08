@@ -93,7 +93,8 @@ none of them.
 ```bash
 agent-definitions bootstrap --repo PATH --name NAME --domain TEXT --tier TIER \
   --skill NAME [--skill NAME ...] --reference PATH [--reference PATH ...] \
-  [--prompt-file FILE] [--max-turns N] [--gate-command CMD ...] [--skills-root DIR] [--dry-run]
+  [--prompt-file FILE] [--max-turns N] [--gate-command CMD ...] [--get-only-command CMD ...] \
+  [--output-language none|ste] [--tracked-file-build] [--skills-root DIR] [--dry-run]
 ```
 
 It writes six files.
@@ -110,9 +111,11 @@ It writes six files.
 - **The skills list opens with `<name>-context`**, and each `--skill` follows in the order given.
 - **The command renders into a temporary directory and validates it**, never the harness directory. On a finding it prints each finding, exits 1, and writes no agent file. The skill and the declaration are on disk before that pass, because the validator reports `MISSING_SKILL` for a context skill it cannot find.
 - **`--dry-run` prints every file with its content and writes nothing.** It does not validate: the context skill is not on disk, so the pass would report a skill that the real run creates.
+- **`--output-language` and `--tracked-file-build` write the two neutral declaration options.** `--output-language ste` writes `outputLanguage = "ste"`, and the rendered pair then carries the ASD-STE100 rule. `--output-language none` writes `outputLanguage = "none"`. Any other value exits 1 and names the permitted values, `none` and `ste`. `--tracked-file-build` writes `trackedFileBuild = true`, and the rendered Claude Code specialist then carries the flake reason (see "Rendering rules"). Without a flag the declaration holds no such key, and the declaration, the context skill, and the rendered pair are the same bytes as before the flags existed.
+- **`--get-only-command` writes `getOnlyCommands`**, as `--gate-command` writes `gateCommands`. Repeat it for each command. The entry rules are the rules of "Gate commands". Without the flag the declaration holds no `getOnlyCommands` key.
 - **A second run with the same arguments writes the same bytes.** A run with different arguments replaces all six files. The command never changes `docs/agents/delegation.md`.
 
-Each generated file opens with a comment that names the command to re-run, with `--repo .` in place of the path of one machine. In the skill that comment is below the frontmatter, because Claude Code reads frontmatter from line 1 and from nowhere else.
+Each generated file opens with a comment that names the command to re-run, with `--repo .` in place of the path of one machine. The command names each option flag that the run used, so a re-run from the comment writes the same bytes. In the skill that comment is below the frontmatter, because Claude Code reads frontmatter from line 1 and from nowhere else.
 
 A live-read block is one plain `git grep` command. Claude Code runs a load-time block only when it can analyse the command. The earlier compound block (`R=$(...); if ...; fi`) stopped a subagent from starting in the manual, acceptEdits and auto permission modes (measured on Claude Code 2.1.283, 2026-09-26). bootstrap counts the lines of each reference when it writes the skill: a document of at most 200 lines gets `git grep --untracked --no-exclude-standard -h -E -m 200 -e '^' -- :/<path>`, and a longer one gets its heading index, `git grep --untracked --no-exclude-standard -h -n -E -e '^#{1,6} ' -- :/<path>`, with a note that gives the `sed -n` command for one section. A reference must be a file; a directory exits 1.
 
