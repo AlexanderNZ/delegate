@@ -18,6 +18,7 @@ from pathlib import Path
 from . import adapters
 from .adapters import AdapterRequest
 from .journal import Journal
+from .reports import ReportError, read_specialist_report
 from .tiers import Tiers
 from .workflow import Ticket, Workflow, plan_order
 
@@ -38,6 +39,7 @@ class RunResult:
     journal: Path
     built: list[str]
     failed: list[str]
+    failures: dict[str, str]
 
     @property
     def ok(self) -> bool:
@@ -86,6 +88,7 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     )
     built: list[str] = []
     failed: list[str] = []
+    failures: dict[str, str] = {}
     for ticket in order:
         stack = workflow.stacks[ticket.stack]
         branch = f"{workflow.run_branch}-{ticket.id}"
@@ -102,7 +105,17 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
             "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
             session_id=result.session_id, event_stream=str(result.event_stream),
         )
-        journal.append("step-end", ticket=ticket.id, state=BUILT, reason=None)
+        reason: str | None = None
+        try:
+            read_specialist_report(report_path, ticket.id)
+        except ReportError as error:
+            reason = str(error)
+        journal.append("report-validation", ticket=ticket.id, valid=reason is None, path=str(report_path), reason=reason)
+        journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
+        if reason:
+            failed.append(ticket.id)
+            failures[ticket.id] = reason
+            break
         built.append(ticket.id)
     journal.append("run-end", result=BUILT if not failed else FAILED, built=built, failed=failed)
-    return RunResult(run_id, journal.path, built, failed)
+    return RunResult(run_id, journal.path, built, failed, failures)

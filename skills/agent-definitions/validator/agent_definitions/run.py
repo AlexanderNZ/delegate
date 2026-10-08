@@ -61,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"run {result.run_id}")
         print(f"journal {result.journal}")
+        for ticket, reason in result.failures.items():
+            print(f"delegate run: ticket {ticket}: {reason}", file=sys.stderr)
         return 0 if result.ok else 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")

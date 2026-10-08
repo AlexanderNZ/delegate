@@ -112,6 +112,7 @@ class ScriptedAdapter:
                 text = json.dumps(valid_report("a", branch, head))
             request.report_path.parent.mkdir(parents=True, exist_ok=True)
             request.report_path.write_text(text)
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
         stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
         stream.write_text('{"type":"result"}\n')
         return AdapterResult(self.exit_status, self.end_state, self.session_id, stream)

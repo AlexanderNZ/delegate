@@ -1,0 +1,95 @@
+"""The agent report: a JSON file that an agent writes to the path its brief names.
+
+`read_specialist_report` reads a specialist's report and checks it against the
+schema below. A missing file, text that is not JSON, a missing field, a field of
+the wrong type, and a value outside the permitted set each raise ReportError.
+The message names the field. A field that the schema does not list is ignored.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+# The values of the `status` field of a specialist report.
+SPECIALIST_STATUSES: tuple[str, ...] = ("committed", "blocked", "partial")
+
+# The required fields of a specialist report, with the type of each.
+SPECIALIST_REQUIRED: dict[str, str] = {
+    "ticket": "string",
+    "status": "string",
+    "branch": "string",
+    "head_sha": "string",
+    "commits": "list of strings",
+    "gates_green": "boolean",
+    "summary": "string",
+}
+
+# The optional fields of a specialist report, with the type of each.
+SPECIALIST_OPTIONAL: dict[str, str] = {
+    "worktree": "string",
+    "blocked_reason": "string",
+    "judgement_calls": "string",
+}
+
+
+class ReportError(Exception):
+    """A report is missing or invalid. The message names the path or the field."""
+
+
+@dataclass(frozen=True)
+class SpecialistReport:
+    ticket: str
+    status: str
+    branch: str
+    head_sha: str
+    commits: list[str]
+    gates_green: bool
+    summary: str
+    blocked_reason: str | None
+    judgement_calls: str | None
+
+
+def _has_type(value: object, kind: str) -> bool:
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "boolean":
+        return isinstance(value, bool)
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def read_specialist_report(path: Path, ticket: str) -> SpecialistReport:
+    """Read and check the report of a specialist for `ticket`. Raise ReportError."""
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        raise ReportError(f"report missing: the specialist wrote no file at {path}") from None
+    except OSError as error:
+        raise ReportError(f"report cannot be read at {path}: {error}") from None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ReportError(f"report at {path} is not valid JSON: {error}") from None
+    if not isinstance(data, dict):
+        raise ReportError(f"report at {path} must be a JSON object, not {type(data).__name__}")
+    problems: list[str] = []
+    for name, kind in SPECIALIST_REQUIRED.items():
+        if name not in data:
+            problems.append(f"{name}: field is missing")
+        elif not _has_type(data[name], kind):
+            problems.append(f"{name}: must be a {kind}, not {data[name]!r}")
+    for name, kind in SPECIALIST_OPTIONAL.items():
+        if name in data and not _has_type(data[name], kind):
+            problems.append(f"{name}: must be a {kind}, not {data[name]!r}")
+    if not problems:
+        if data["status"] not in SPECIALIST_STATUSES:
+            problems.append(f"status: {data['status']!r} is not a status; known statuses: {', '.join(SPECIALIST_STATUSES)}")
+        if data["ticket"] != ticket:
+            problems.append(f"ticket: the report is for ticket {data['ticket']!r}, but this step builds ticket {ticket!r}")
+    if problems:
+        raise ReportError(f"report at {path} is invalid: " + "; ".join(problems))
+    return SpecialistReport(
+        data["ticket"], data["status"], data["branch"], data["head_sha"], data["commits"], data["gates_green"],
+        data["summary"], data.get("blocked_reason"), data.get("judgement_calls"),
+    )
