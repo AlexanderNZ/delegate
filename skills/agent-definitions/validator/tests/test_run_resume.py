@@ -2,7 +2,8 @@
 
 A killed run is a real one: a child process runs `delegate run` with a scripted
 adapter and SIGKILLs itself at a chosen adapter call. It leaves what a kill
-leaves, an open journal, a lock, and a worktree. A case that needs another
+leaves, an open journal, a lock, and a worktree. A resume of such a run needs
+`--break-lock`, because the lock belongs to a process that no longer exists. A case that needs another
 journal state cuts a finished journal, which is the file a kill at that point
 would leave. Each case calls `delegate.main` against a real temporary git
 repository.
@@ -44,7 +45,7 @@ def test_a_stopped_run_builds_the_remaining_tickets_on_resume_and_an_accepted_ti
     run_id, _ = kill_a_run(repo, 3)  # killed as the specialist of ticket b starts
     assert tree(repo, "run/demo").count("a.txt") == 1 and "b.txt" not in tree(repo, "run/demo")
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert (code, err) == (0, "")
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
@@ -61,7 +62,7 @@ def test_a_resume_appends_to_the_journal_and_never_rewrites_a_line(tmp_path, cap
     run_id, _ = kill_a_run(repo, 3)
     before = journal_path(repo, run_id).read_bytes()
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert (code, err) == (0, "")
     after = journal_path(repo, run_id).read_bytes()
@@ -79,7 +80,7 @@ def test_a_step_whose_specialist_finished_does_not_spawn_the_specialist_again_an
     run_id, _ = kill_a_run(repo, 2)  # killed as the verifier of ticket a starts, after the specialist reported
     committed = git(repo, "rev-parse", "run/demo-a").strip()
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert (code, err) == (0, "")
     assert [ticket_of(c) for c in scripted.calls] == ["b"]
@@ -96,7 +97,7 @@ def test_a_step_that_was_stopped_before_any_commit_runs_its_specialist_in_the_sa
     run_id, _ = kill_a_run(repo, 1)  # killed as the first specialist starts
     started = next(e for e in read_journal_file(repo, run_id) if e["event"] == "step-start")
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert (code, err) == (0, "")
     (call,) = scripted.calls
@@ -111,7 +112,7 @@ def test_a_step_whose_worktree_is_gone_gets_it_back_on_the_same_branch(tmp_path,
     started = next(e for e in read_journal_file(repo, run_id) if e["event"] == "step-start")
     git(repo, "worktree", "remove", "--force", started["worktree"])
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert (code, err) == (0, "")
     assert str(scripted.calls[0].cwd) == started["worktree"] and scripted.calls[0].cwd.is_dir()
@@ -177,7 +178,7 @@ def test_a_workflow_that_differs_from_the_run_is_refused_and_the_message_names_t
     (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b", ("a",)))
     before = journal_path(repo, run_id).read_bytes()
 
-    code, out, err = resume_main(repo, capsys, run_id)
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
     assert code == 1 and "tickets" in err and run_id in err
     assert journal_path(repo, run_id).read_bytes() == before
@@ -191,7 +192,7 @@ def test_a_resume_can_name_the_workflow_file_on_the_command_line(tmp_path, capsy
     moved.write_text((repo / "workflow.toml").read_text())
     (repo / "workflow.toml").unlink()
 
-    code, out, err = run_main(capsys, str(moved), "--resume", run_id, "--repo", str(repo))
+    code, out, err = run_main(capsys, str(moved), "--resume", run_id, "--repo", str(repo), "--break-lock")
 
     assert (code, err) == (0, "")
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]

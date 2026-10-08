@@ -26,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="validate the workflow and print the plan; create nothing")
     parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete")
+    parser.add_argument(
+        "--break-lock", action="store_true",
+        help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
+    )
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository to build in; default is the current directory")
     parser.add_argument("--tiers", type=Path, help="path to a tiers.toml; default is the bundled table")
     return parser
@@ -70,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not args.dry_run:
         try:
-            result = run_workflow(workflow, args.workflow, args.repo, tiers, resume=args.resume)
+            result = run_workflow(workflow, args.workflow, args.repo, tiers, resume=args.resume, break_lock=args.break_lock)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

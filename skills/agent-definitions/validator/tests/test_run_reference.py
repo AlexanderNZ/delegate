@@ -32,7 +32,7 @@ outside_the_package = pytest.mark.skipif(
         "agent", "model", "prompt", "cwd", "report_path",  # the request of an adapter
         "exit_status", "end_state", "session_id", "event_stream",  # its result
         "finished", "failed", "capped", "tier_column",
-        "--dry-run", "--repo <dir>", "--tiers <file>", "--resume <run-id>",
+        "--dry-run", "--repo <dir>", "--tiers <file>", "--resume <run-id>", "--break-lock",
     ],
 )
 def test_the_reference_names_each_report_field_adapter_field_and_option(name):
@@ -122,7 +122,7 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
 
         repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
         run_id, _ = kill_a_run(repo, 3)
-        code, _, _ = resume_main(repo, capsys, run_id)
+        code, _, _ = resume_main(repo, capsys, run_id, "--break-lock")
     finally:
         adapters.unregister("scripted")
     assert code == 0
@@ -133,3 +133,26 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
         for name in event:
             if name not in ("seq", "time", "event"):
                 assert f"`{name}`" in rows[f"`{event['event']}`"], (event["event"], name)
+
+
+@outside_the_package
+def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
+    from .support import kill_a_run, read_journal_file, resume_main
+
+    adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}}))
+    try:
+        from .test_run_multi import HEAD, ticket
+
+        repo = make_repo(tmp_path, HEAD + ticket("a"))
+        run_id, _ = kill_a_run(repo, 1)
+        code, _, _ = resume_main(repo, capsys, run_id, "--break-lock")
+    finally:
+        adapters.unregister("scripted")
+    assert code == 0
+    events = read_journal_file(repo, run_id)
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    broken = [e for e in events if e["event"] == "lock-broken"]
+    assert len(broken) == 1
+    for name in broken[0]:
+        if name not in ("seq", "time", "event"):
+            assert f"`{name}`" in rows["`lock-broken`"], name

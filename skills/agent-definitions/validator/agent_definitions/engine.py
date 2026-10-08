@@ -22,6 +22,9 @@ skipped, and the journal records which blocker. A ticket with no failed blocker
 still runs. A rebase conflict fails that step only: the engine aborts the
 rebase, so the branch and its worktree keep the state from before the rebase.
 
+A run holds the lock of its run branch from before it changes anything until it
+ends, so a second run on the same run branch is refused (see `lock.py`).
+
 A run can be resumed. `run_workflow` with `resume` opens the journal of an
 earlier run, rebuilds the state from it, and goes on at the first step that is
 not complete. It appends to the journal and never rewrites a line. A step with
@@ -48,6 +51,7 @@ from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
 from .journal import Journal, JournalError, read_events
+from .lock import LockError, LockHolder, run_lock
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -224,12 +228,18 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
 
 
 def run_workflow(
-    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, *, resume: str | None = None
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, *, resume: str | None = None,
+    break_lock: bool = False,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order. Return the result of the run.
 
     With `resume`, the run id of an earlier run, go on with that run: build the
     tickets that are not complete, and append to its journal.
+
+    The run holds the lock of its run branch until it ends. Raise EngineError,
+    which names the holder, when another run holds the lock. `break_lock`
+    removes a lock whose process no longer exists, and never one whose process
+    is alive.
     """
     try:
         adapter = adapters.get(workflow.adapter)
@@ -240,18 +250,22 @@ def run_workflow(
     repo, state_dir = _state_dir(repo)
     needed = ("specialist", "verifier") if workflow.mode == "assure" else ("specialist",)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
-    return _execute(workflow, workflow_path, adapter, roles, repo, state_dir, resume)
+    run_id = resume if resume is not None else _new_run_id()
+    try:
+        with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
+            return _execute(workflow, workflow_path, adapter, roles, repo, state_dir, run_id, resume is not None, broken)
+    except LockError as error:
+        raise EngineError(str(error)) from None
 
 
 def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, roles: dict[str, tuple[str, str]], repo: Path,
-    state_dir: Path, resume: str | None,
+    state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
 ) -> RunResult:
     order = plan_order(workflow)
-    if resume is None:
+    if not resuming:
         _check_branches(workflow, repo)
         _git(repo, "branch", workflow.run_branch, workflow.base_branch)
-        run_id = _new_run_id()
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
         journal.append(
             "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
@@ -259,7 +273,6 @@ def _execute(
         )
         progress = _Progress()
     else:
-        run_id = resume
         journal, events = _journal_events(state_dir, run_id)
         progress = _restore(events, run_id)
         _check_same_run(workflow, workflow_path, events[0], run_id)
@@ -269,6 +282,8 @@ def _execute(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket,
         )
+    if broken is not None:
+        journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
     complete = {*built, *failed, *skipped}
     for position, ticket in enumerate(order):
