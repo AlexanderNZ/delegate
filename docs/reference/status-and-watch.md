@@ -1,0 +1,101 @@
+# Reference: `delegate status` and `delegate watch`
+
+`delegate status` and `delegate watch` show the state of a run. They read only the journal of the run and the event-stream files that the journal names. They need no adapter, no workflow file, and no tool beyond git, which finds the state directory. They do not need `jq`.
+
+Both commands find the journal in the state directory of the repository, in `runs/<run-id>/journal.jsonl`. See [the journal](run.md#the-journal).
+
+## `delegate status`
+
+```
+delegate status [run-id] [--repo <dir>]
+```
+
+| Option | Meaning |
+|---|---|
+| `[run-id]` | The run to show. The default is the newest run of the repository. The newest run is the run whose `run-start` event has the latest time. |
+| `--repo <dir>` | The git repository that holds the run. The default is the current directory. |
+
+The first line gives the run id, the result, the mode, and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. The second line gives the path of the journal. Then each ticket of the run has one line, in plan order:
+
+```
+ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time>
+```
+
+| Part | Meaning |
+|---|---|
+| `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`), `built`, `failed`, or `skipped`. |
+| `verdict` | The verdict of the newest `verdict` event of the ticket, or `-` when there is none. |
+| `branch` | The branch of the ticket, from `step-start`, or `-` when the ticket has no step. |
+| `last event` | The time of the newest event of the ticket, or `-` when there is none. |
+
+A ticket that failed or was skipped has a second line, `  reason: <reason>`.
+
+`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. The message on stderr names the repository, the run id, or the journal.
+
+## `delegate watch`
+
+```
+delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--max-minutes N] [--from <position>] [--poll-seconds N]
+```
+
+`watch` reads the journal, prints each event as one line, and exits when it has a reason. A coordinator can run `watch` as a background task, and act on the exit code. A line has the position (`seq`), the time, the event name, and then each field of the event that is not a list or an object, as `name=value`. The field `output_tail` is not printed. Before it exits, `watch` prints the reason on a line that starts with `watch:`, and then the line `position <seq>`. The position is the `seq` of the last event that `watch` reported.
+
+| Option | Meaning |
+|---|---|
+| `[run-id]` | The run to follow. The default is the newest run of the repository. |
+| `--repo <dir>` | The git repository that holds the run. The default is the current directory. |
+| `--until verdict` | Also exit when a verifier verdict is in the journal. The default is to follow the run to its end. |
+| `--stall-minutes N` | Exit when the journal and the event streams have not changed for N minutes. N is a number greater than 0. |
+| `--max-minutes N` | Exit when N minutes are used, before the time limit of a harness. N is a number greater than 0. |
+| `--from <position>` | Go on after the event with this position. See [the position](#the-position). |
+| `--poll-seconds N` | How often `watch` reads the journal. The default is 1. |
+
+### Exit codes
+
+| Code | Reason | When |
+|---|---|---|
+| 0 | run succeeded | The journal holds `run-end` with the result `built`. |
+| 1 | run failed | The journal holds `run-end` with the result `failed`. |
+| 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, or a `--from` position beyond the end of the journal. |
+| 3 | problem | An event is a problem. See [the problem events](#the-problem-events). |
+| 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
+| 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
+| 6 | time limit | `--max-minutes` is set and the time is used. |
+
+Code 2 is also the code that `argparse` gives for a usage error.
+
+`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem.
+
+### The problem events
+
+A problem is one of these events. The line `watch: problem: ticket <id>: <reason>` names the ticket and the reason.
+
+| Problem | The event | Reason in the line |
+|---|---|---|
+| A step ends blocked or partial | `report-validation` or `fixup-report` with a `status` other than `committed` | `the step ended <status>: <blocked_reason>` |
+| A step ends with gates that are not green | `step-end` with the state `failed`, when the newest result of a gate command of the ticket is red | `the gates are not green: <commands>` |
+| An agent fails | `adapter-result`, `fixup-result` or `verify-result` with the end state `failed`, an exit status other than 0, or (for a fix-up specialist and a verifier) the end state `capped` | `the <role> ended <end state> with exit status <n>` |
+| An agent returns no result | `report-validation`, `fixup-report` or `verify-report` with `valid` false | `the <role> returned no valid result: <reason>` |
+| A second continuation of a step | `continuation` with a `count` of 2 or more | `the step continued <n> times (limit <n>, trigger <trigger>)` |
+| A step fails for any other reason | `step-end` with the state `failed`, and no red gate | `the step failed: <reason>` |
+
+A specialist that ends `capped` continues, so it is not a problem. The first continuation of a step is also not a problem. A gate that is red and turns green after a continuation is not a problem.
+
+### The verdict
+
+With `--until verdict`, `watch` exits at the first `verdict` event. The line is `watch: verdict: ticket <id> round <n>: <verdict>: <findings>`. The findings are separated by `; `. Without the option, `watch` goes past each verdict.
+
+### The stall
+
+`--stall-minutes N` compares the time now with the newest modification time of the journal and of the event-stream files that the events name (`event_stream`). If the difference is N minutes or more, `watch` exits. The line is `watch: stall: the journal and the event streams have not changed for N minutes; last event: <the line of the last event>`. A run that has ended is not a stall.
+
+The journal names the event stream of an agent when the agent has ended. While an agent runs, only the journal and the streams of earlier agents show a change. Set N to more than the longest time of one agent run.
+
+### The position
+
+`--max-minutes N` ends the watch before a harness kills the background task. The line is `watch: time limit: N minutes are used; the run is not at its end`. Each exit prints `position <seq>`. `watch --from <seq>` goes on after that event:
+
+- It prints no event with a position of `<seq>` or less, so no event is reported twice.
+- It reads the earlier events for the problem rules. A step-end after the position still finds the red gate before the position.
+- If the journal ended at or before the position, it exits with the result of the run.
+- If the journal holds fewer events than `<seq>`, it exits 2.

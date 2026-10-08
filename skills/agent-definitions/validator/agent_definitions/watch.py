@@ -26,6 +26,17 @@ EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
 
+# The meaning of each exit code. The reference page of `watch` lists the same table.
+EXIT_CODES: dict[int, str] = {
+    EXIT_SUCCEEDED: "run succeeded",
+    EXIT_FAILED: "run failed",
+    EXIT_ERROR: "error",
+    EXIT_PROBLEM: "problem",
+    EXIT_VERDICT: "verdict",
+    EXIT_STALL: "stall",
+    EXIT_TIME_LIMIT: "time limit",
+}
+
 # The role that each adapter-result event and each report event belongs to.
 AGENT_RESULT_ROLES: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up specialist", "verify-result": "verifier"}
 AGENT_REPORT_ROLES: dict[str, str] = {"report-validation": "specialist", "fixup-report": "fix-up specialist", "verify-report": "verifier"}
