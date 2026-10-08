@@ -17,6 +17,7 @@ EXPLANATION = ROOT / "docs" / "explanation"
 
 PAGES = [
     "why-the-verifier-is-blind.md",
+    "why-each-specialist-has-a-twin.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -27,6 +28,14 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("the claim that the tests pass is not evidence", r"claim"),
         ("the engine runs the gates outside the specialist", r"engine runs (the|your) gates"),
         ("the verifier runs the gates in a copy it may break", r"temporary copy"),
+    ],
+    "why-each-specialist-has-a-twin.md": [
+        ("the twin holds the same skills as the specialist", r"same skills"),
+        ("a verifier without the skills reads the code and misses the discipline", r"misses the discipline"),
+        ("the twin has a read-only tool set", r"read-only"),
+        ("one declaration renders both agents, so the pair cannot drift", r"one declaration"),
+        ("a generic verifier is right only for docs and configuration", r"generic verifier"),
+        ("a monorepo has one pair for each stack", r"each stack"),
     ],
 }
 
