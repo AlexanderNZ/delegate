@@ -17,7 +17,7 @@ import os
 import re
 import shlex
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,8 +92,14 @@ def new_repo(path: Path) -> Path:
     return path
 
 
-def follow(page: Path, cwd: Path, monkeypatch, *, replace: Mapping[str, str] = {}, skip: tuple[str, ...] = ()) -> list[Step]:
+def follow(
+    page: Path, cwd: Path, monkeypatch, *, replace: Mapping[str, str] = {}, skip: tuple[str, ...] = (),
+    only: Callable[[Block], bool] = lambda block: True,
+) -> list[Step]:
     """Run every command of every bash block of the page, in order, and return the steps.
+
+    `only` selects the bash blocks to run, for a page whose blocks belong to
+    different moments (a run, then an interruption, then a resume).
 
     `replace` maps a placeholder of the page (for example `<run-id>`) to the text
     that a real run gives. A command that starts with one of `skip` is not run.
@@ -101,7 +107,7 @@ def follow(page: Path, cwd: Path, monkeypatch, *, replace: Mapping[str, str] = {
     """
     steps: list[Step] = []
     for block in blocks(page):
-        if block.lang != "bash":
+        if block.lang != "bash" or not only(block):
             continue
         for command in commands(block):
             for placeholder, value in replace.items():
