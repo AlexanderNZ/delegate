@@ -20,6 +20,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES
+
 DELEGATION_DOC = Path("docs") / "agents" / "delegation.md"
 FINDINGS_HEADING = "## Findings under verification"
 GATES_HEADING = re.compile(r"^#+[ \t]+.*verification gates[ \t]*$", re.IGNORECASE | re.MULTILINE)
@@ -247,6 +249,40 @@ def fixup_brief(
     pairs.append(("## Delta", f"`{command}`\n\n" + _fenced_diff(delta)))
     pairs.append(("## Gates", read_gates(repo, _changed_files(repo, f"{rejected}..{branch}"), stacks)))
     return _sections(*pairs)
+
+
+def specialist_brief(
+    ticket: str, text: str, worktree: str | Path, hotspots: Sequence[str], gates: Sequence[str], report_path: str | Path
+) -> str:
+    """The brief the engine sends a specialist: the ticket, the file boundary, the gates, the report path.
+
+    The ticket text is behavioural and holds no path. The file boundary is the
+    worktree, and the hotspot patterns that only the coordinator may change.
+    """
+    if hotspots:
+        reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
+            f"- `{pattern}`" for pattern in hotspots
+        )
+    else:
+        reserved = "No path is reserved for the coordinator in this stack."
+    boundary = (
+        f"Work only in the worktree `{worktree}`. Change no file outside it.\n\n"
+        f"{reserved}\n\n"
+        "Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit."
+    )
+    fields = ", ".join(f"`{name}`" for name in SPECIALIST_REQUIRED)
+    report = (
+        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
+        "`status` is one of " + ", ".join(f"`{s}`" for s in SPECIALIST_STATUSES) + ". "
+        "`gates_green` states whether the gates passed in your run. "
+        "Optional fields: " + ", ".join(f"`{name}`" for name in SPECIALIST_OPTIONAL) + "."
+    )
+    return _sections(
+        ("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}"),
+        ("## File boundary", boundary),
+        ("## Gates", "The engine runs these gates itself after you finish.\n\n" + _bash("\n".join(gates))),
+        ("## Report", report),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

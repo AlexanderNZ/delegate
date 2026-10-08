@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import adapters
 from .adapters import Adapter, AdapterRequest
+from .brief import specialist_brief
 from .journal import Journal
 from .reports import ReportError, read_specialist_report
 from .tiers import Tiers
@@ -119,7 +120,11 @@ def _build_ticket(
         "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
         base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
     )
-    result = adapter.run(AdapterRequest(stack.specialist, model, ticket.text, worktree, report_path))
+    result = adapter.run(AdapterRequest(
+            stack.specialist, model,
+            specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path),
+            worktree, report_path,
+        ))
     journal.append(
         "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),

@@ -274,3 +274,43 @@ def test_a_tier_table_without_the_column_of_the_adapter_exits_1_and_names_the_co
     assert "'cursor'" in err and "strong" in err
     assert "Traceback" not in err
     assert scripted.calls == []
+
+
+def brief_sections(prompt):
+    """The prompt as a map from section heading to section body."""
+    parts = prompt.split("\n## ")
+    return {part.split("\n", 1)[0].removeprefix("## "): part.split("\n", 1)[1] for part in parts if "\n" in part}
+
+
+def test_the_brief_holds_the_ticket_the_file_boundary_the_gates_and_the_report_path(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    (call,) = scripted.calls
+    sections = brief_sections(call.prompt)
+    assert "ticket a" in sections["Task"].lower() and "The export command writes a CSV file." in sections["Task"]
+    boundary = sections["File boundary"]
+    assert str(call.cwd) in boundary
+    assert "LICENSE" in boundary and ".github/workflows/*" in boundary
+    assert "push" in boundary
+    assert "test -f feature.txt" in sections["Gates"]
+    report = sections["Report"]
+    assert str(call.report_path) in report
+    for name in ("ticket", "status", "branch", "head_sha", "commits", "gates_green", "summary"):
+        assert f"`{name}`" in report
+
+
+def test_the_brief_gives_the_text_of_a_ticket_file_and_states_when_no_path_is_reserved(tmp_path, capsys, scripted):
+    workflow = WORKFLOW.replace('text = "The export command writes a CSV file."', 'text-file = "ticket-a.md"').replace(
+        'hotspots = ["LICENSE", ".github/workflows/*"]', "hotspots = []"
+    )
+    repo = make_repo(tmp_path, workflow)
+    (repo / "ticket-a.md").write_text("The export command reads from a pipe.\n")
+
+    code, out, err = run(repo, capsys)
+
+    (call,) = scripted.calls
+    sections = brief_sections(call.prompt)
+    assert "The export command reads from a pipe." in sections["Task"]
+    assert "no path is reserved" in sections["File boundary"].lower()
