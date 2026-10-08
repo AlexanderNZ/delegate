@@ -15,29 +15,27 @@ import shutil
 from agent_definitions import delegate
 
 from .support import (
-    event_names, finished_run, git, journal_path, kill_a_run, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree,
+    event_names, finished_run, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
 from .test_run_multi import HEAD, ticket
 
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
 
 
-def cut_journal_after(repo, run_id, event, ticket_id=None):
-    """Keep the journal up to the first matching event. This is the file that a kill right after the event leaves."""
+def cut_journal_after(repo, run_id, event, ticket_id=None, nth=1):
+    """Keep the journal up to the nth matching event. This is the file that a kill right after the event leaves."""
     path = journal_path(repo, run_id)
-    kept = []
+    kept, seen = [], 0
     for line in path.read_text().splitlines(keepends=True):
         kept.append(line)
         parsed = json.loads(line)
         if parsed["event"] == event and (ticket_id is None or parsed.get("ticket") == ticket_id):
-            break
+            seen += 1
+            if seen == nth:
+                break
     else:
-        raise AssertionError(f"no {event} event")
+        raise AssertionError(f"fewer than {nth} {event} events")
     path.write_text("".join(kept))
-
-
-
-
 
 
 def test_a_stopped_run_builds_the_remaining_tickets_on_resume_and_an_accepted_ticket_gets_no_new_adapter_invocation(tmp_path, capsys, scripted):
@@ -84,6 +82,7 @@ def test_a_step_whose_specialist_finished_does_not_spawn_the_specialist_again_an
 
     assert (code, err) == (0, "")
     assert [ticket_of(c) for c in scripted.calls] == ["b"]
+    assert scripted.continuation_calls == [] and scripted.fixup_calls == []
     assert [ticket_of(c) for c in scripted.verifier_calls] == ["a", "b"]
     assert git(repo, "rev-parse", "run/demo-a").strip() == committed
     assert git(repo, "rev-list", "--count", f"main..{committed}").strip() == "1"
@@ -224,3 +223,56 @@ def test_resume_and_dry_run_together_are_a_usage_error(tmp_path, capsys, scripte
 
     assert code == 2 and "--dry-run" in capsys.readouterr().err
     assert journal_path(repo, run_id).read_bytes() == before
+
+
+def test_the_continuations_in_the_journal_count_against_the_limit_after_a_stop(tmp_path, capsys, scripted):
+    # A specialist that always ends capped: the first run makes 2 continuations (the limit of assure) and fails.
+    scripted.outcomes = [("capped", 0)]
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert code == 1
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    cut_journal_after(repo, run_id, "continuation")  # stopped after the first continuation began
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert code == 1 and "continuation limit of 2" in err
+    events = read_journal_file(repo, run_id)
+    assert [e["count"] for e in events if e["event"] == "continuation"] == [1, 2]
+    assert [e["count"] for e in events if e["event"] == "continuation-limit"] == [2]
+
+
+def test_a_verifier_round_that_a_stop_left_open_goes_on_with_the_next_round_number(tmp_path, capsys, scripted):
+    scripted.verdict_sequence = ["REJECT", "ACCEPT"]
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    run_id = finished_run(repo, capsys)
+    cut_journal_after(repo, run_id, "verify-start", nth=2)  # stopped as the verifier of the fix-up round began
+    git(repo, "update-ref", "refs/heads/run/demo", "main")
+    scripted.verifier_calls.clear(), scripted.calls.clear(), scripted.fixup_calls.clear()
+    scripted.verdict_sequence = ["ACCEPT"]
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert scripted.calls == [] and scripted.fixup_calls == [] and len(scripted.verifier_calls) == 1
+    starts = [e for e in read_journal_file(repo, run_id) if e["event"] == "verify-start"]
+    assert [e["round"] for e in starts] == [0, 1, 2]
+    assert "a.txt" in tree(repo, "run/demo")
+
+
+def test_the_verifier_runs_in_the_journal_count_against_the_fix_up_limit_after_a_stop(tmp_path, capsys, scripted):
+    scripted.verdict_sequence = ["REJECT"]
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert code == 1
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    cut_journal_after(repo, run_id, "verify-start", nth=3)  # stopped in the last round the limit allows
+    scripted.verifier_calls.clear(), scripted.fixup_calls.clear()
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert code == 1 and "ticket a:" in err and "fix-up rounds" in err
+    assert scripted.verifier_calls == [] and scripted.fixup_calls == []
+    events = read_journal_file(repo, run_id)
+    assert [e["state"] for e in events if e["event"] == "step-end"] == ["failed"]
+    assert event_names(events)[-1] == "run-end"
