@@ -151,7 +151,7 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
     return f"{workflow.run_branch}-{ticket.id}"
 
 
-def _state_dir(repo: Path) -> tuple[Path, Path]:
+def state_directory(repo: Path) -> tuple[Path, Path]:
     """The top level of the repository and the directory where the engine keeps its state."""
     top = Path(_git(repo, "rev-parse", "--show-toplevel"))
     return top, (top / _git(top, "rev-parse", "--git-common-dir")).resolve() / "delegate"
@@ -170,7 +170,7 @@ def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[st
 
 def workflow_of_run(repo: Path, run_id: str) -> Path:
     """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown."""
-    _, state_dir = _state_dir(repo)
+    _, state_dir = state_directory(repo)
     try:
         events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
     except JournalError as error:
@@ -247,7 +247,7 @@ def run_workflow(
         raise EngineError(
             f"adapter {workflow.adapter!r} has no implementation yet; registered: {', '.join(adapters.registered_names()) or 'none'}"
         ) from None
-    repo, state_dir = _state_dir(repo)
+    repo, state_dir = state_directory(repo)
     needed = ("specialist", "verifier") if workflow.mode == "assure" else ("specialist",)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
     run_id = resume if resume is not None else _new_run_id()

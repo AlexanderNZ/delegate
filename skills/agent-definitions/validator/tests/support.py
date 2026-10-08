@@ -342,3 +342,57 @@ def finished_run(repo: Path, capsys) -> str:
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
     assert (code, err) == (0, "")
     return next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+
+
+def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]]) -> Path:
+    """Write a journal of `(event name, fields)` pairs for the run `run_id` in the state directory of `repo`.
+
+    It uses the journal class of the engine, so each line has `seq` and `time`
+    as the engine writes them. Return the path of the journal file.
+    """
+    from agent_definitions.journal import Journal
+
+    path = journal_path(repo, run_id)
+    journal = Journal(path)
+    for name, fields in events:
+        journal.append(name, **fields)
+    return path
+
+
+def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
+    """Append `(event name, fields)` pairs to an existing journal file, as a run in progress does."""
+    from agent_definitions.journal import Journal
+
+    journal, _ = Journal.reopen(path)
+    for name, fields in events:
+        journal.append(name, **fields)
+
+
+def bare_repo(tmp_path: Path) -> Path:
+    """A git repository with no commit and no run. `delegate status` and `delegate watch` need only the state directory."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    return repo
+
+
+def run_start(run_id: str, *tickets: str, mode: str = "assure") -> tuple[str, dict[str, object]]:
+    return "run-start", {
+        "run_id": run_id, "workflow": "/w/workflow.toml", "mode": mode, "adapter": "scripted",
+        "base_branch": "main", "run_branch": "run/demo", "tickets": list(tickets),
+    }
+
+
+def step_start(ticket: str) -> tuple[str, dict[str, object]]:
+    return "step-start", {
+        "ticket": ticket, "stack": "python", "branch": f"run/demo-{ticket}", "worktree": f"/w/{ticket}",
+        "base_commit": "0" * 40, "agent": "python-specialist", "tier": "strong", "model": "m",
+    }
+
+
+def step_end(ticket: str, state: str = "built", reason: str | None = None) -> tuple[str, dict[str, object]]:
+    return "step-end", {"ticket": ticket, "state": state, "reason": reason}
+
+
+def run_end(result: str = "built", built: list[str] | None = None, failed: list[str] | None = None) -> tuple[str, dict[str, object]]:
+    return "run-end", {"result": result, "built": built or [], "failed": failed or [], "skipped": []}

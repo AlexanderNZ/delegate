@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli, run
+from . import brief, cli, run, status
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -31,6 +31,10 @@ BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 # The subcommand that `agent_definitions.run` owns.
 RUN_COMMAND: str = "run"
 RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
+
+# The subcommand that `agent_definitions.status` owns.
+STATUS_COMMAND: str = "status"
+STATUS_HELP: str = "print the state of each ticket of a run, from its journal"
 
 TIERS_OPTION: str = "--tiers"
 
@@ -50,6 +54,7 @@ def _help_parser() -> argparse.ArgumentParser:
         sub.add_parser(name, help=f"{text} (as agent-definitions {name})", add_help=False)
     sub.add_parser(BRIEF_COMMAND, help=f"{BRIEF_HELP} (as verifier-brief)", add_help=False)
     sub.add_parser(RUN_COMMAND, help=f"{RUN_HELP} (as delegate run)", add_help=False)
+    sub.add_parser(STATUS_COMMAND, help=f"{STATUS_HELP} (as delegate status)", add_help=False)
     return parser
 
 
@@ -95,7 +100,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return run.main(args[at + 1 :])
-    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND])
+    if command == STATUS_COMMAND:
+        if at:
+            print(
+                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {STATUS_COMMAND}",
+                file=sys.stderr,
+            )
+            return 2
+        return status.main(args[at + 1 :])
+    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
     return 2
 
