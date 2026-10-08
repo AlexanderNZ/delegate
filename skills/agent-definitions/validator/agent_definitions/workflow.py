@@ -23,6 +23,13 @@ ADAPTERS: tuple[str, ...] = ("claude-code", "cursor", "opencode")
 # The roles whose tier a workflow can override.
 ROLES: tuple[str, ...] = ("specialist", "verifier")
 
+# The strength order of the tiers that the bundled table names. A higher number is a stronger tier.
+# `strong` and `verifier` have the same rank: both name the strongest model.
+TIER_RANK: dict[str, int] = {"cheap": 0, "standard": 1, "strong": 2, "verifier": 2}
+
+# The verifier tier never goes down, in any mode. A verifier override must rank at least this high.
+VERIFIER_TIER_FLOOR: str = "verifier"
+
 
 @dataclass(frozen=True)
 class Stack:
@@ -118,7 +125,25 @@ def _tier_override_problems(overrides: dict[str, str], tiers: Tiers) -> list[str
         elif value not in tiers.tiers:
             kind = "a model identifier, not a tier name" if value in models or "/" in value else "not a tier name"
             problems.append(f"{field}: {value!r} is {kind}; known tiers: {', '.join(sorted(tiers.tiers))}")
+        elif role == "verifier":
+            problems.extend(_verifier_floor_problems(field, value))
     return problems
+
+
+def _verifier_floor_problems(field: str, tier: str) -> list[str]:
+    """One message when the verifier override `tier` ranks below the verifier tier, or has no rank.
+
+    The verifier tier never goes down, in any mode. A tier that is not in
+    `TIER_RANK` has no place in the strength order, so the floor cannot be
+    checked and the override is refused.
+    """
+    floor = TIER_RANK[VERIFIER_TIER_FLOOR]
+    allowed = ", ".join(sorted(name for name, rank in TIER_RANK.items() if rank >= floor))
+    if tier not in TIER_RANK:
+        return [f"{field}: {tier!r} has no place in the tier order, so the verifier tier floor cannot be checked; allowed: {allowed}"]
+    if TIER_RANK[tier] < floor:
+        return [f"{field}: {tier!r} is below the verifier tier, and the verifier tier never goes down; allowed: {allowed}"]
+    return []
 
 
 class _Reader:

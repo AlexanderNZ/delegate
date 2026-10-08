@@ -103,6 +103,8 @@ The valid tier names are the tier names of the tier table. The bundled table hol
 
 A model identifier in place of a tier name is an error. The message names the field, for example `tier-overrides.specialist`. A role other than `specialist` and `verifier` is also an error.
 
+The verifier tier never goes down, in any mode. The `verifier` entry must name a tier that is as strong as the tier `verifier`: `strong` or `verifier`. A weaker tier (`standard` or `cheap`) is an error, and so is a tier that is not in the strength order of the bundled table. The message names the field, `tier-overrides.verifier`. The engine finds this error when it loads the file, so `--dry-run` reports it too.
+
 ## Stacks
 
 Each `[stacks.<name>]` table describes one stack. All four fields are required.

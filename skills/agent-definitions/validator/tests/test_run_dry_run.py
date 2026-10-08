@@ -183,6 +183,40 @@ def test_a_provider_model_identifier_in_the_verifier_role_is_refused_by_field(tm
     assert "'anthropic/claude-opus-5'" in err
 
 
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+@pytest.mark.parametrize("tier", ["cheap", "standard"])
+def test_a_verifier_override_below_the_verifier_tier_is_refused_by_field_in_every_mode(tmp_path, capsys, mode, tier):
+    workflow = with_overrides(verifier=tier).replace('mode = "assure"', f'mode = "{mode}"')
+
+    code, out, err = invalid(tmp_path, capsys, workflow)
+
+    assert code == 1
+    assert out == ""
+    assert f"tier-overrides.verifier: {tier!r} is below the verifier tier" in err
+    assert "Traceback" not in err
+
+
+def test_a_run_without_dry_run_refuses_a_verifier_override_below_the_verifier_tier_before_it_creates_anything(tmp_path, capsys):
+    repo = make_repo(tmp_path, with_overrides(verifier="cheap"))
+    before = state(repo)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, out) == (1, "")
+    assert "tier-overrides.verifier" in err and "'cheap'" in err
+    assert state(repo) == before
+
+
+@pytest.mark.parametrize("tier", ["strong", "verifier"])
+def test_a_verifier_override_at_or_above_the_verifier_tier_is_accepted(tmp_path, capsys, tier):
+    repo = make_repo(tmp_path, with_overrides(verifier=tier))
+
+    code, out, err = run(repo, capsys, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert f"tier override verifier: {tier}" in out
+
+
 def test_a_tier_name_that_does_not_exist_is_refused_by_field(tmp_path, capsys):
     code, _out, err = invalid(tmp_path, capsys, with_overrides(specialist="turbo"))
 
