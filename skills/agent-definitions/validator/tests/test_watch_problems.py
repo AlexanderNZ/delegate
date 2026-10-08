@@ -113,6 +113,10 @@ def test_a_verifier_that_returns_no_result_is_a_problem_that_names_the_ticket(tm
             "the verifier ended failed with exit status 1", id="verifier-failed",
         ),
         pytest.param(
+            "verify-result", {"round": 0, "exit_status": 0, "end_state": "capped", "session_id": None, "event_stream": "/s"},
+            "the verifier ended capped with exit status 0", id="verifier-capped",
+        ),
+        pytest.param(
             "fixup-result", {"round": 1, "exit_status": 0, "end_state": "failed", "session_id": None, "event_stream": "/s"},
             "the fix-up specialist ended failed with exit status 0", id="fixup-failed",
         ),
