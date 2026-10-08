@@ -44,6 +44,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 ## Docs
 
 - [Tutorial: from install to one verified ticket](docs/tutorial.md): bootstrap a sample repository, run one ticket in `assure` mode on Claude Code, and read the verdict and the journal. Its sample files are in [`examples/tutorial`](examples/tutorial).
+- [How to bootstrap a single-stack repository](docs/how-to/bootstrap-a-single-stack-repository.md): write the delegation document and a skill, run `delegate bootstrap`, check the pair, and name it in a workflow.
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
 - [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, the journal, the resume of a stopped run, and the run lock.
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
