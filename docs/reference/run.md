@@ -54,10 +54,11 @@ A REJECT in `assure` mode starts a fix-up round. The limit is 2 rounds for each 
 
 1. The engine writes the findings of the rejected verdict to `runs/<run id>/findings/<ticket id>.fixup-<round>.md`, one finding on each line, with the prefix `- `.
 2. The engine sends the specialist a fix-up brief in the same worktree. The brief holds the ticket, the findings verbatim (`## Findings to fix`), the rejected commit (`## Rejected commit`), the file boundary, the gates, and the report path. The tier and the model are those of the first specialist run.
-3. The fix must be a new commit on top of the rejected commit. The engine asks the brief generator (`fixup_brief`) for the fix-up verifier brief. The generator refuses when the rejected commit is not an ancestor of the branch (the specialist amended or rewrote history), and when the branch tip is the rejected commit (the specialist added no commit). A refusal fails the step, and the journal records the reason in `fixup-refused`.
-4. The engine runs the gates of the stack itself. A red gate fails the step.
-5. The engine spawns a fresh verifier in a new temporary copy. The brief starts with `## Findings under verification`, so the verifier works in the mode `fix-up`. The brief holds the findings verbatim, the delta `git diff <rejected commit>..<ticket branch>` (not the full diff), the gates, the path of the copy, and the report path. It never holds a line of a specialist report. The verdict report must name the mode `fix-up`.
-6. On ACCEPT, the engine moves the run branch to the tip that the verifier saw, by fast-forward only. On REJECT, the next round starts. Its rejected commit is the tip that the last verifier saw, so its delta holds only the newest fix-up.
+3. The engine reads the report of the fix-up specialist and checks it, as for the first run. A specialist that ends `failed` or `capped`, a missing or invalid report, and a status other than `committed` fail the step.
+4. The fix must be a new commit on top of the rejected commit. The engine asks the brief generator (`fixup_brief`) for the fix-up verifier brief. The generator refuses when the rejected commit is not an ancestor of the branch (the specialist amended or rewrote history), and when the branch tip is the rejected commit (the specialist added no commit). A refusal fails the step, and the journal records the reason in `fixup-refused`.
+5. The engine runs the gates of the stack itself. A red gate fails the step.
+6. The engine spawns a fresh verifier in a new temporary copy. The brief starts with `## Findings under verification`, so the verifier works in the mode `fix-up`. The brief holds the findings verbatim, the delta `git diff <rejected commit>..<ticket branch>` (not the full diff), the gates, the path of the copy, and the report path. It never holds a line of a specialist report. The verdict report must name the mode `fix-up`.
+7. On ACCEPT, the engine moves the run branch to the tip that the verifier saw, by fast-forward only. On REJECT, the next round starts. Its rejected commit is the tip that the last verifier saw, so its delta holds only the newest fix-up.
 
 Each round spawns a new verifier with a new session. The engine never resumes a verifier session. After the second round, a REJECT fails the step with the reason `the verifier rejected the branch after 2 fix-up rounds: <findings>`, and the run ends.
 
@@ -101,6 +102,8 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, or the exit status is not 0. The engine does not read the verdict report. |
 | `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names another mode than the mode of the run (`full`, or `fix-up` in a fix-up round) is invalid. |
 | `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. |
+| `the fix-up specialist ended <state> with exit status <n>` | The adapter result of the fix-up specialist is `failed` or `capped`, or the exit status is not 0. |
+| `the fix-up specialist reported status 'blocked': ...`, and the report errors above | The report of the fix-up specialist is missing, is invalid, or has a status other than `committed`. |
 | `the fix-up of round <n> is refused: ...` | The branch does not hold the rejected commit, or holds no commit beyond it. The message holds the cause from the brief generator. |
 | `run branch <name> cannot fast-forward to <branch>: ...` | The verdict is ACCEPT, but the run branch holds a commit that the ticket branch does not hold. |
 
@@ -180,6 +183,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
 | `fixup-start` | `ticket`, `round` (1 or 2), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
 | `fixup-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` (the adapter result of the fix-up specialist) |
+| `fixup-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid) |
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built) |

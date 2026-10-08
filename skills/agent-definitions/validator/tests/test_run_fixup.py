@@ -158,3 +158,86 @@ def test_after_two_rejected_fixup_rounds_the_step_fails_the_run_ends_and_the_run
     assert [e["ticket"] for e in events if e["event"] == "step-start"] == ["a"]  # ticket b never starts
     run_end = next(e for e in events if e["event"] == "run-end")
     assert (run_end["result"], run_end["failed"]) == ("failed", ["a"])
+
+
+@pytest.mark.parametrize(
+    ("changes", "cause"),
+    [
+        pytest.param({"fixup_amend": True}, "amended or rewrote", id="the-specialist-amended-the-rejected-commit"),
+        pytest.param({"fixup_commit": False}, "no fix-up to verify", id="the-specialist-added-no-commit"),
+    ],
+)
+def test_a_fixup_that_does_not_sit_on_top_of_the_rejected_commit_makes_the_brief_generator_refuse_and_the_step_fails(
+    tmp_path, capsys, scripted, changes, cause
+):
+    scripted.verdict = "REJECT"
+    scripted.verdict_findings = [FINDING]
+    for name, value in changes.items():
+        setattr(scripted, name, value)
+    repo = make_repo(tmp_path, WITH_SECOND_TICKET)
+    base_tip = tip(repo, "main")
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err and cause in err
+    assert len(scripted.verifier_calls) == 1  # no verifier reads a branch that has no delta
+    assert tip(repo, "run/demo") == base_tip
+    events = read_journal(out)
+    (refused,) = [e for e in events if e["event"] == "fixup-refused"]
+    assert (refused["ticket"], refused["round"]) == ("a", 1) and cause in refused["reason"]
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "failed" and cause in step_end["reason"]
+    assert [e["ticket"] for e in events if e["event"] == "step-start"] == ["a"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "cause"),
+    [
+        pytest.param({"fixup_end_state": "failed", "fixup_exit_status": 1}, "failed with exit status 1", id="the-specialist-failed"),
+        pytest.param({"fixup_end_state": "capped"}, "capped with exit status 0", id="the-specialist-hit-its-cap"),
+        pytest.param({"fixup_exit_status": 2}, "finished with exit status 2", id="the-exit-status-is-not-zero"),
+        pytest.param({"fixup_write_report": False}, "report missing", id="no-report"),
+        pytest.param({"fixup_report_text": "not json"}, "not valid JSON", id="a-report-that-is-not-json"),
+        pytest.param(
+            {"fixup_report_text": json.dumps(valid_report("a", "run/demo-a", "0" * 40, status="blocked", blocked_reason="no access"))},
+            "'blocked': no access",
+            id="the-specialist-reports-blocked",
+        ),
+    ],
+)
+def test_a_fixup_specialist_that_fails_caps_or_reports_badly_fails_the_step_and_no_second_verifier_starts(
+    tmp_path, capsys, scripted, changes, cause
+):
+    scripted.verdict = "REJECT"
+    scripted.verdict_findings = [FINDING]
+    for name, value in changes.items():
+        setattr(scripted, name, value)
+    repo = make_repo(tmp_path)
+    base_tip = tip(repo, "main")
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err and cause in err
+    assert len(scripted.verifier_calls) == 1
+    assert tip(repo, "run/demo") == base_tip
+    events = read_journal(out)
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "failed" and cause in step_end["reason"]
+    assert [e["verdict"] for e in events if e["event"] == "verdict"] == ["REJECT"]
+
+
+def test_a_fixup_that_turns_a_gate_red_fails_the_step_whatever_the_specialist_claims(tmp_path, capsys, scripted):
+    scripted.verdict = "REJECT"
+    scripted.verdict_findings = [FINDING]
+    workflow = WORKFLOW.replace('gates = ["test -f feature.txt"]', 'gates = ["test ! -f fixup-1.txt"]')
+    repo = make_repo(tmp_path, workflow)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "gates red: test ! -f fixup-1.txt" in err
+    assert len(scripted.verifier_calls) == 1
+    gates = [(e["round"], e["green"]) for e in read_journal(out) if e["event"] == "gate-result"]
+    assert gates == [(0, True), (1, False)]

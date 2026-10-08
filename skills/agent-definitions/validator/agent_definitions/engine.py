@@ -298,6 +298,21 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),
     )
+    if result.end_state != adapters.FINISHED or result.exit_status != 0:
+        raise _StepFailed(f"the fix-up specialist ended {result.end_state} with exit status {result.exit_status}")
+    try:
+        report = read_specialist_report(report_path, ticket.id)
+    except ReportError as error:
+        step.journal.append(
+            "fixup-report", ticket=ticket.id, round=round_number, valid=False, path=str(report_path), reason=str(error)
+        )
+        raise _StepFailed(str(error)) from None
+    step.journal.append(
+        "fixup-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None
+    )
+    if report.status != "committed":
+        detail = f": {report.blocked_reason}" if report.blocked_reason else ""
+        raise _StepFailed(f"the fix-up specialist reported status {report.status!r}{detail}")
     try:
         brief = fixup_brief(step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
     except BriefError as error:
