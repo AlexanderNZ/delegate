@@ -22,10 +22,14 @@ EXIT_SUCCEEDED: int = 0
 EXIT_FAILED: int = 1
 EXIT_ERROR: int = 2
 EXIT_PROBLEM: int = 3
+EXIT_VERDICT: int = 4
 
 # The role that each adapter-result event and each report event belongs to.
 AGENT_RESULT_ROLES: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up specialist", "verify-result": "verifier"}
 AGENT_REPORT_ROLES: dict[str, str] = {"report-validation": "specialist", "fixup-report": "fix-up specialist", "verify-report": "verifier"}
+
+# The value of `--until` that makes `watch` exit at a verifier verdict.
+UNTIL_VERDICT: str = "verdict"
 
 # Event fields that the line of an event leaves out: the long ones.
 LONG_FIELDS: frozenset[str] = frozenset({"output_tail"})
@@ -35,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
     parser.add_argument("run_id", nargs="?", help="the run to follow; default is the newest run of the repository")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
+    parser.add_argument(
+        "--until", choices=[UNTIL_VERDICT],
+        help="also exit when a verifier verdict is written to the journal; default is to follow the run to its end",
+    )
     parser.add_argument("--poll-seconds", type=float, default=1.0, help="how often to read the journal; default 1")
     return parser
 
@@ -102,6 +110,13 @@ def main(argv: list[str] | None = None) -> int:
                 if problem is not None:
                     print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
                     return EXIT_PROBLEM
+                if args.until == UNTIL_VERDICT and event["event"] == "verdict":
+                    findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
+                    print(
+                        f"watch: verdict: ticket {event['ticket']} round {event['round']}: {event['verdict']}"
+                        + (f": {findings}" if findings else "")
+                    )
+                    return EXIT_VERDICT
                 if event["event"] == "run-end":
                     return EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED
             time.sleep(args.poll_seconds)
