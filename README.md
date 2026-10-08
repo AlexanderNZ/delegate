@@ -48,6 +48,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [How to bootstrap a monorepo](docs/how-to/bootstrap-a-monorepo.md): one gate block, one skill and one agent pair for each stack, and a workflow with a stack for each pair.
 - [How to run an economy chain](docs/how-to/run-an-economy-chain.md): write a chain of tickets, run it, read the result, and merge the run branch.
 - [How to watch and resume a run](docs/how-to/watch-and-resume-a-run.md): follow a run with `status` and `watch`, go on from a position, and resume a run after Ctrl-C or a kill.
+- [How to point the tiers at a gateway](docs/how-to/point-the-tiers-at-a-gateway.md): write your own tier file, give it with `--tiers`, and see the engine ask the harness for your models.
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
 - [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, the journal, the resume of a stopped run, and the run lock.
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
