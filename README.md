@@ -15,6 +15,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 ## Docs
 
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
+- [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, and the journal.
 
 ## Generated files
 

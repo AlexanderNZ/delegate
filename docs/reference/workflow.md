@@ -15,7 +15,8 @@ Options of `delegate run`:
 | Option | Meaning |
 |---|---|
 | `<workflow>` | The path of the workflow file. |
-| `--dry-run` | Validate the file and print the plan. This option is required. A run without it is not available yet, and the command exits 2. |
+| `--dry-run` | Validate the file and print the plan. Without this option, the command builds the tickets. See [the run reference](run.md). |
+| `--repo <dir>` | The git repository to build in. The default is the current directory. |
 | `--tiers <file>` | The path of a tier file. The default is the bundled tier table. The valid tier names are the tier names of this table. Put this option after `run`. |
 
 ## Exit codes
@@ -24,7 +25,7 @@ Options of `delegate run`:
 |---|---|
 | 0 | The workflow is valid. The plan is on stdout. |
 | 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the stack. |
-| 2 | A usage error, for example a missing `--dry-run`. |
+| 2 | A usage error. |
 
 The command reports all problems of a file in one run, not only the first.
 
@@ -67,7 +68,7 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 | `base-branch` | string | The branch that the run starts from. |
 | `run-branch` | string | The branch that the engine owns and accepted work lands on. It must differ from `base-branch`. |
 | `mode` | string | `assure` or `economy`. |
-| `adapter` | string | The name of the harness adapter: `claude-code`, `opencode`, or `cursor`. |
+| `adapter` | string | The name of the harness adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. See [the run reference](run.md#the-adapter-interface). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
 | `stacks` | table | One sub-table for each stack. See [Stacks](#stacks). |
 | `tickets` | array of tables | At least one `[[tickets]]` table. See [Tickets](#tickets). |
