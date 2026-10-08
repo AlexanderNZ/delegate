@@ -13,6 +13,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from .cli import add_opencode_override_flags, apply_opencode_override
 from .engine import EngineError, run_workflow, workflow_of_run
 from .tiers import Tiers, load_tiers
 from .workflow import WorkflowError, load_workflow, plan_order
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository to build in; default is the current directory")
     parser.add_argument("--tiers", type=Path, help="path to a tiers.toml; default is the bundled table")
+    add_opencode_override_flags(parser)
     return parser
 
 
@@ -49,6 +51,25 @@ def _load_tiers(path: Path | None) -> Tiers:
         raise TierFileError(f"tier file {path} is not usable: {error!r}") from None
 
 
+def _override_tiers(tiers: Tiers, args: argparse.Namespace) -> Tiers:
+    """The tier table with the OpenCode override of the command line applied.
+
+    A model that the override names must be in the allowed set, which
+    `--opencode-allow` extends. A run has no validator step, so this check is
+    the one that stops a model no provider serves (ADR 0003).
+    """
+    try:
+        overridden = apply_opencode_override(tiers, args)
+    except ValueError as error:
+        raise TierFileError(str(error)) from None
+    for tier, model in args.opencode_model or []:
+        if model not in overridden.allowed_models["opencode"]:
+            raise TierFileError(
+                f"--opencode-model {tier}={model}: {model!r} is not an allowed OpenCode model; name it with --opencode-allow {model}"
+            )
+    return overridden
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -63,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
     try:
-        tiers = _load_tiers(args.tiers)
+        tiers = _override_tiers(_load_tiers(args.tiers), args)
         workflow = load_workflow(args.workflow, tiers)
     except TierFileError as error:
         print(f"delegate run: {error}", file=sys.stderr)

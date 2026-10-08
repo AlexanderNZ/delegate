@@ -44,14 +44,18 @@ def add_opencode_override_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def tiers_from_args(args: argparse.Namespace) -> Tiers:
-    """The tier table with any override applied."""
-    tiers = load_tiers(args.tiers)
+def apply_opencode_override(tiers: Tiers, args: argparse.Namespace) -> Tiers:
+    """The tier table with the OpenCode override of the arguments applied. Raise ValueError for an unknown tier."""
     models = dict(getattr(args, "opencode_model", None) or [])
     allowed = list(getattr(args, "opencode_allow", None) or [])
     if models or allowed:
         tiers = tiers.with_opencode_override(models, allowed)
     return tiers
+
+
+def tiers_from_args(args: argparse.Namespace) -> Tiers:
+    """The tier table with any override applied."""
+    return apply_opencode_override(load_tiers(args.tiers), args)
 
 
 def cmd_render(args: argparse.Namespace) -> int:
