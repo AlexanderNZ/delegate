@@ -17,6 +17,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
 - [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, the journal, the resume of a stopped run, and the run lock.
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
+- [Reference: the `opencode` adapter](docs/reference/opencode-adapter.md): the command, how the adapter selects the agent, the working directory, the end states, the recorded streams, and the live smoke run.
 - [Reference: `delegate status` and `delegate watch`](docs/reference/status-and-watch.md): the state of each ticket of a run, the follow of its journal, the problem events, and the exit code of each reason.
 
 ## Generated files

@@ -18,6 +18,7 @@ Options of `delegate run`:
 | `--dry-run` | Validate the file and print the plan. Without this option, the command builds the tickets. See [the run reference](run.md). |
 | `--repo <dir>` | The git repository to build in. The default is the current directory. |
 | `--tiers <file>` | The path of a tier file. The default is the bundled tier table. The valid tier names are the tier names of this table. Put this option after `run`. |
+| `--opencode-model <tier=model>`, `--opencode-allow <model>` | Change the `opencode` column of the tier table. See [the adapter reference](opencode-adapter.md#the-model). |
 
 ## Exit codes
 
@@ -87,7 +88,7 @@ All fields except `tier-overrides` are required. A field that this reference doe
 | Adapter | Harness |
 |---|---|
 | `claude-code` | Claude Code. See [the adapter reference](claude-code-adapter.md). |
-| `opencode` | OpenCode |
+| `opencode` | OpenCode. See [the adapter reference](opencode-adapter.md). |
 | `cursor` | Cursor `agent` CLI |
 
 ## Tier overrides

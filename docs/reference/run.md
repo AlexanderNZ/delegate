@@ -18,6 +18,8 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists. See [the run lock](#the-run-lock). |
 | `--repo <dir>` | The git repository to build in. The default is the current directory. |
 | `--tiers <file>` | The path of a tier file. The default is the bundled tier table. |
+| `--opencode-model <tier=model>` | The tier uses the model in the `opencode` column of the tier table. Repeat it for more tiers. See [the `opencode` adapter](opencode-adapter.md#the-model). |
+| `--opencode-allow <model>` | Add the model to the set of allowed `opencode` models. A model that `--opencode-model` names must be in this set. |
 
 ## What a run does
 
@@ -288,7 +290,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 
 ## The adapter interface
 
-An adapter is a Python object. It registers by name with `agent_definitions.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values. The adapter `claude-code` has an implementation: see [the `claude-code` adapter](claude-code-adapter.md). A run with `opencode` or `cursor` exits 1 until an implementation registers under that name.
+An adapter is a Python object. It registers by name with `agent_definitions.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values. The adapters `claude-code` and `opencode` have implementations: see [the `claude-code` adapter](claude-code-adapter.md) and [the `opencode` adapter](opencode-adapter.md). A run with `cursor` exits 1 until an implementation registers under that name.
 
 The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
 
