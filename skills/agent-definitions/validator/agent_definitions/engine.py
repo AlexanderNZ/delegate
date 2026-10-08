@@ -458,9 +458,15 @@ def _build_with_continuations(
             try:
                 report = read_specialist_report(report_path, ticket.id)
             except ReportError as error:
-                journal.append("report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error))
+                journal.append(
+                    "report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error),
+                    status=None, blocked_reason=None,
+                )
                 return str(error)
-            journal.append("report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None)
+            journal.append(
+                "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
+                status=report.status, blocked_reason=report.blocked_reason,
+            )
             if report.status != "committed":
                 detail = f": {report.blocked_reason}" if report.blocked_reason else ""
                 return f"the specialist reported status {report.status!r}{detail}"
@@ -633,11 +639,13 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         report = read_specialist_report(report_path, ticket.id)
     except ReportError as error:
         step.journal.append(
-            "fixup-report", ticket=ticket.id, round=round_number, valid=False, path=str(report_path), reason=str(error)
+            "fixup-report", ticket=ticket.id, round=round_number, valid=False, path=str(report_path), reason=str(error),
+            status=None, blocked_reason=None,
         )
         raise _StepFailed(str(error)) from None
     step.journal.append(
-        "fixup-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None
+        "fixup-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None,
+        status=report.status, blocked_reason=report.blocked_reason,
     )
     if report.status != "committed":
         detail = f": {report.blocked_reason}" if report.blocked_reason else ""

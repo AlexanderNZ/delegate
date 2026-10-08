@@ -276,7 +276,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `run_branch`, `tickets` (the ids in plan order) |
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
-| `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid) |
+| `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
@@ -290,7 +290,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
 | `fixup-start` | `ticket`, `round` (1 or 2), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
 | `fixup-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` (the adapter result of the fix-up specialist) |
-| `fixup-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid) |
+| `fixup-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid), `status`, `blocked_reason` (as in `report-validation`) |
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built) |

@@ -21,6 +21,11 @@ from .runs import RunsError, journal_of
 EXIT_SUCCEEDED: int = 0
 EXIT_FAILED: int = 1
 EXIT_ERROR: int = 2
+EXIT_PROBLEM: int = 3
+
+# The role that each adapter-result event and each report event belongs to.
+AGENT_RESULT_ROLES: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up specialist", "verify-result": "verifier"}
+AGENT_REPORT_ROLES: dict[str, str] = {"report-validation": "specialist", "fixup-report": "fix-up specialist", "verify-report": "verifier"}
 
 # Event fields that the line of an event leaves out: the long ones.
 LONG_FIELDS: frozenset[str] = frozenset({"output_tail"})
@@ -43,6 +48,43 @@ def format_event(event: dict[str, object]) -> str:
     return " ".join([str(event["seq"]), str(event["time"]), str(event["event"]), *fields])
 
 
+class _Tracker:
+    """Reads the events of one journal in order and finds the problem events.
+
+    It keeps the last result of each gate command of each ticket, because the
+    gates of a step are not green only when the step ends with a red gate.
+    """
+
+    def __init__(self) -> None:
+        self._gates: dict[str, dict[str, bool]] = {}
+
+    def problem(self, event: dict[str, object]) -> str | None:
+        """The reason that the event is a problem, or `None`. Call it for every event, in order."""
+        kind, ticket = str(event["event"]), str(event.get("ticket"))
+        if kind == "gate-result":
+            self._gates.setdefault(ticket, {})[str(event["command"])] = bool(event["green"])
+        elif kind in AGENT_RESULT_ROLES:
+            state, status = event["end_state"], event["exit_status"]
+            # A specialist that ends capped continues; any other agent that ends capped fails its step.
+            failed = state == "failed" or (state == "finished" and status != 0) or (state == "capped" and kind != "adapter-result")
+            if failed:
+                return f"the {AGENT_RESULT_ROLES[kind]} ended {state} with exit status {status}"
+        elif kind in AGENT_REPORT_ROLES:
+            role = AGENT_REPORT_ROLES[kind]
+            if not event["valid"]:
+                return f"the {role} returned no valid result: {event['reason']}"
+            status, detail = event.get("status"), event.get("blocked_reason")
+            if status is not None and status != "committed":
+                subject = "the step" if kind == "report-validation" else f"the {role}"
+                return f"{subject} ended {status}" + (f": {detail}" if detail else "")
+        elif kind == "continuation" and int(event["count"]) >= 2:  # type: ignore[call-overload]
+            return f"the step continued {event['count']} times (limit {event['limit']}, trigger {event['trigger']})"
+        elif kind == "step-end" and event["state"] == "failed":
+            red = [command for command, green in self._gates.get(ticket, {}).items() if not green]
+            return f"the gates are not green: {'; '.join(red)}" if red else f"the step failed: {event['reason']}"
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.poll_seconds <= 0:
@@ -50,12 +92,16 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
     try:
         journal = journal_of(args.repo, args.run_id)
-        offset, next_seq = 0, 1
+        offset, next_seq, tracker = 0, 1, _Tracker()
         while True:
             events, offset = read_new_events(journal, offset, next_seq)
             next_seq += len(events)
             for event in events:
                 print(format_event(event), flush=True)
+                problem = tracker.problem(event)
+                if problem is not None:
+                    print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
+                    return EXIT_PROBLEM
                 if event["event"] == "run-end":
                     return EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED
             time.sleep(args.poll_seconds)
