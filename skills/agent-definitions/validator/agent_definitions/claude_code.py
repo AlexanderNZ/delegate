@@ -9,28 +9,15 @@ copies that stream to a file and reads the final `result` event from it.
 
 from __future__ import annotations
 
-import json
 import subprocess
-from pathlib import Path
 
-from .adapters import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
+from .adapters import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult, read_events, stream_path
 
 # The command that starts the harness.
 COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
 TIER_COLUMN: str = "claude-code"
-
-
-def _stream_path(report_path: Path) -> Path:
-    """The file for the event stream: beside the report, and never over an earlier stream."""
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    path = report_path.parent / f"{report_path.stem}.stream.jsonl"
-    number = 1
-    while path.exists():
-        number += 1
-        path = report_path.parent / f"{report_path.stem}.stream-{number}.jsonl"
-    return path
 
 
 def _end_state(result: dict[str, object]) -> str:
@@ -60,7 +47,7 @@ class ClaudeCodeAdapter:
         ]
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
-        stream = _stream_path(request.report_path)
+        stream = stream_path(request.report_path)
         with stream.open("w") as out:
             process = subprocess.run(command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd)
         text = stream.read_text()
@@ -69,15 +56,7 @@ class ClaudeCodeAdapter:
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
         end_state, session_id = FAILED, None
-        lines = text.splitlines()
-        for number, line in enumerate(lines, start=1):
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError as error:
-                # A killed harness can leave half a line at the end. A bad line anywhere else is not a harness event stream.
-                if number == len(lines):
-                    break
-                raise AdapterError(f"{stream}: line {number} is not JSON: {error}") from None
+        for event in read_events(stream):
             if event.get("type") == "result":
                 end_state, session_id = _end_state(event), event["session_id"]
         if process.returncode != 0 and end_state == FINISHED:
