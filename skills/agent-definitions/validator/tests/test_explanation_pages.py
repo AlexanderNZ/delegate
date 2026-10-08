@@ -7,6 +7,7 @@ its ticket names. The pages are outside the package source, so a Nix build that
 copies only the package skips these cases with a reason.
 """
 
+import datetime
 import re
 
 import pytest
@@ -19,6 +20,7 @@ PAGES = [
     "why-the-verifier-is-blind.md",
     "why-each-specialist-has-a-twin.md",
     "the-mode-trade-off.md",
+    "prior-art.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -46,6 +48,10 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("a cheaper mode never means a weaker verifier", r"weaker verifier"),
         ("the trust rules are the same in both modes", r"invariants"),
         ("the page says how to choose", r"choose"),
+    ],
+    "prior-art.md": [
+        ("the page says when to choose this kit and when to choose another tool", r"choose"),
+        ("the page says the kit takes the planning output of mattpocock/skills as input", r"to-tickets"),
     ],
 }
 
@@ -92,3 +98,43 @@ def test_a_page_gives_the_reasons_of_its_ticket(page):
     text = prose(page).lower()
     missing = [reason for reason, pattern in REASONS[page] if not re.search(pattern, text)]
     assert missing == []
+
+
+# The prior art that the ticket names: the heading of its entry, and the primary source that the entry must link.
+PRIOR_ART = {
+    "superpowers": "https://github.com/obra/superpowers",
+    "implement-spec": "https://github.com/mattpocock/skills",
+    "Sandcastle": "https://github.com/mattpocock/sandcastle",
+    "wshobson/agents": "https://github.com/wshobson/agents",
+}
+
+
+def entries(page: str) -> dict[str, str]:
+    """The sections of the page, keyed by the text of their level-two heading."""
+    parts = re.split(r"^## (.+)$", (EXPLANATION / page).read_text(), flags=re.MULTILINE)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+@outside_the_package
+def test_each_prior_art_entry_links_its_primary_source_and_gives_the_date_it_was_read():
+    sections = entries("prior-art.md")
+    problems = []
+    for name, source in PRIOR_ART.items():
+        body = next((text for heading, text in sections.items() if name in heading), None)
+        if body is None:
+            problems.append(f"{name}: no entry")
+            continue
+        if not re.search(r"\]\(" + re.escape(source) + r"[/)#]", body):
+            problems.append(f"{name}: no link to {source}")
+        read = re.search(r"\bRead (\d{4}-\d{2}-\d{2})\b", body)
+        if not read:
+            problems.append(f"{name}: no read date")
+        elif datetime.date.fromisoformat(read.group(1)) > datetime.date.today():
+            problems.append(f"{name}: the read date {read.group(1)} is in the future")
+    assert problems == []
+
+
+@outside_the_package
+def test_the_prior_art_page_holds_one_entry_for_each_tool_of_the_ticket_and_no_other():
+    named = [heading for heading in entries("prior-art.md") if heading.strip() != "How to choose"]
+    assert sorted(next(name for name in PRIOR_ART if name in heading) for heading in named) == sorted(PRIOR_ART)

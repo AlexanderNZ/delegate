@@ -54,6 +54,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [Why the verifier is blind, and why it runs the gates](docs/explanation/why-the-verifier-is-blind.md): the report is a claim, so the verifier gets the task and the diff; the engine runs the gates, and the verifier runs them in a copy that it may break.
 - [Why each specialist has a verifier twin](docs/explanation/why-each-specialist-has-a-twin.md): a verifier needs the skills of the specialist, so one declaration renders both halves of a pair, with a pair for each stack.
 - [The mode trade-off](docs/explanation/the-mode-trade-off.md): why there are two modes, what `assure` and `economy` each give up, and the rules that no mode changes.
+- [Prior art](docs/explanation/prior-art.md): superpowers, mattpocock/skills `implement-spec`, Sandcastle and wshobson/agents. What each does, how this kit differs, and when to choose the other tool.
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
 - [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, the journal, the resume of a stopped run, and the run lock.
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
