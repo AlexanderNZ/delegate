@@ -5,13 +5,14 @@ scripted adapter by name, and calls `delegate.main`. The scripted adapter writes
 a different file for each ticket, so the run branch shows which tickets landed.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
 from agent_definitions import adapters, delegate
 
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
+from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 # Every stack gate lists the text files of the worktree, so the gate output shows what the tree held.
 GATE_LISTING = 'gates = ["ls *.txt"]'
@@ -162,6 +163,34 @@ def test_a_rebase_conflict_fails_that_step_leaves_the_branch_and_worktree_clean_
     assert git(repo, "rev-parse", "run/demo-c~1").strip() == base_tip
     assert git(worktree, "status", "--short") == ""
     assert "rebase" not in git(worktree, "status")
+
+
+def test_a_rebase_that_cannot_start_because_a_tracked_file_is_dirty_fails_only_that_step_and_independent_tickets_continue(tmp_path, capsys, scripted):
+    # The specialist of ticket b leaves a tracked file changed and uncommitted, so git refuses to start the rebase.
+    def report(request, head):
+        own = "b" if "Ticket b" in request.prompt else ("c" if "Ticket c" in request.prompt else "a")
+        if own == "b":
+            (request.cwd / "seed.txt").write_text("left dirty by the specialist\n")
+        return json.dumps(valid_report(own, f"run/demo-{own}", head))
+
+    scripted.report_text = report
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b") + ticket("c"))
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err and "crashed" not in err
+    events = read_journal(out)
+    refused = next(e for e in events if e["event"] == "rebase" and e["ticket"] == "b")
+    assert (refused["result"], refused["files"], refused["to_commit"]) == ("failed", [], None)
+    step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "b")
+    assert step_end["state"] == "failed" and step_end["reason"].startswith("rebase onto run/demo failed:")
+    assert "seed.txt" in step_end["reason"] or "unstaged" in step_end["reason"]
+    assert "ticket b:" in err
+    assert [e["ticket"] for e in events if e["event"] == "verify-start"] == ["a", "c"]
+    run_end = events[-1]
+    assert (run_end["event"], run_end["built"], run_end["failed"], run_end["skipped"]) == ("run-end", ["a", "c"], ["b"], [])
+    assert {"a.txt", "c.txt"} <= set(tree(repo, "run/demo")) and "b.txt" not in tree(repo, "run/demo")
 
 
 def test_a_ticket_that_holds_no_commit_beyond_the_run_branch_after_the_rebase_fails_the_step(tmp_path, capsys, scripted):

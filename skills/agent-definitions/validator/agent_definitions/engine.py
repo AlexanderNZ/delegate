@@ -337,6 +337,13 @@ def _specialist_done(prior: list[dict[str, object]]) -> bool:
     return valid > spawned
 
 
+def _rebase_in_progress(worktree: Path) -> bool:
+    """Tell whether a rebase is in progress in the worktree. `git rebase --abort` fails when none is."""
+    return any(
+        (worktree / _git(worktree, "rev-parse", "--git-path", name)).exists() for name in ("rebase-merge", "rebase-apply")
+    )
+
+
 def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str) -> None:
     """Make the worktree of a ticket, or reuse the one that is there.
 
@@ -345,10 +352,8 @@ def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str) -> Non
     worktree. Raise EngineError when the worktree holds another branch.
     """
     if worktree.is_dir():
-        for name in ("rebase-merge", "rebase-apply"):
-            if (worktree / _git(worktree, "rev-parse", "--git-path", name)).exists():
-                _git(worktree, "rebase", "--abort")
-                break
+        if _rebase_in_progress(worktree):
+            _git(worktree, "rebase", "--abort")
         current = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD")
         if current != branch:
             raise EngineError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
@@ -543,7 +548,8 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
 
     Return None when the branch is rebased and the gates are green, or the
     reason the step fails. A rebase that stops is aborted, so the branch and its
-    worktree keep the state from before the rebase.
+    worktree keep the state from before the rebase. A rebase that git refuses to
+    start, or one that ended with a failed hook, leaves nothing to abort.
     """
     ticket, run_branch = step.ticket, step.workflow.run_branch
     onto = _git(step.repo, "rev-parse", f"refs/heads/{run_branch}")
@@ -551,7 +557,8 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     rebase = subprocess.run(["git", "-C", str(step.worktree), "rebase", run_branch], capture_output=True, text=True)
     if rebase.returncode != 0:
         files = _git(step.worktree, "diff", "--name-only", "--diff-filter=U").splitlines()
-        _git(step.worktree, "rebase", "--abort")
+        if _rebase_in_progress(step.worktree):
+            _git(step.worktree, "rebase", "--abort")
         step.journal.append(
             "rebase", ticket=ticket.id, result="conflict" if files else "failed", onto_commit=onto,
             from_commit=before, to_commit=None, files=files,
