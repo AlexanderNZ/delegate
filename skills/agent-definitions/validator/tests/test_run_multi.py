@@ -126,8 +126,8 @@ def test_when_a_ticket_fails_its_dependants_are_skipped_with_the_reason_and_inde
     assert [e["ticket"] for e in events if e["event"] == "step-start"] == ["a", "c"]
     skips = {e["ticket"]: e for e in events if e["event"] == "skip"}
     assert sorted(skips) == ["b", "d"]
-    assert skips["b"]["blockers"] == ["a"] and "a" in skips["b"]["reason"] and "failed" in skips["b"]["reason"]
-    assert skips["d"]["blockers"] == ["b"] and "b" in skips["d"]["reason"] and "skipped" in skips["d"]["reason"]
+    assert (skips["b"]["blockers"], skips["b"]["reason"]) == (["a"], "blocked by a, which failed")
+    assert (skips["d"]["blockers"], skips["d"]["reason"]) == (["b"], "blocked by b, which was skipped")
     run_end = next(e for e in events if e["event"] == "run-end")
     assert (run_end["result"], run_end["built"], run_end["failed"], run_end["skipped"]) == ("failed", ["c"], ["a"], ["b", "d"])
     assert "c.txt" in tree(repo, "run/demo") and "a.txt" not in tree(repo, "run/demo")
