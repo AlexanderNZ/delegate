@@ -1,6 +1,6 @@
-"""Guards that hold in every harness: no push from a worktree, and no change to a hotspot path.
+"""Guards that hold in every harness: no push from a worktree, no change to a hotspot path, and no change by a verifier.
 
-Both guards use git only, so they hold when a harness has no hook or permission
+The guards use git only, so they hold when a harness has no hook or permission
 system of its own, or when a headless run skips it.
 
 The push guard sets `core.hooksPath` for one worktree, through worktree-scoped
@@ -14,11 +14,19 @@ patterns of the stack. A pattern that ends with `/` names a directory and
 matches every path below it. Any other pattern is matched against the whole
 path with `fnmatch` rules, where `*` also matches `/`, and a pattern that names
 a directory also matches every path below it.
+
+The worktree invariant compares a snapshot of a worktree before and after a
+verifier run. A snapshot holds the HEAD commit and, for each path that
+`git status` reports, the status code and a hash of the content of the file. So a
+verifier that commits, that adds or deletes a file, or that rewrites a file that
+was already changed or untracked, makes the snapshots differ. A file that git
+ignores is not in the snapshot.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import shlex
 import shutil
@@ -36,6 +44,26 @@ exit 1
 
 class GuardError(Exception):
     """A guard cannot be installed or checked. The message names the input at fault."""
+
+
+class InvariantViolation(Exception):
+    """A verifier changed the real worktree. The message names the worktree and each change."""
+
+    def __init__(self, message: str, worktree: Path, head_before: str, head_after: str, changes: list[str]) -> None:
+        super().__init__(message)
+        self.worktree = worktree
+        self.head_before = head_before
+        self.head_after = head_after
+        self.changes = changes
+
+
+@dataclass(frozen=True)
+class WorktreeSnapshot:
+    """The HEAD commit of a worktree and the state of each path that `git status` reports."""
+
+    worktree: Path
+    head: str
+    paths: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -103,3 +131,52 @@ def hotspot_matches(paths: Sequence[str], patterns: Sequence[str]) -> list[Hotsp
         if pattern is not None:
             found.append(HotspotMatch(path, pattern))
     return found
+
+
+def snapshot_worktree(worktree: Path) -> WorktreeSnapshot:
+    """Record the HEAD and the status of `worktree`. Raise GuardError when git fails."""
+    head = _git(worktree, "rev-parse", "HEAD")
+    # The status code starts with a space for a change that is not staged, so the output must not be stripped.
+    r = subprocess.run(
+        ["git", "-C", str(worktree), "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise GuardError(f"git status failed in {worktree}: {r.stderr.strip() or r.returncode}")
+    status = r.stdout
+    paths: dict[str, str] = {}
+    for entry in filter(None, status.split("\0")):
+        code, name = entry[:2], entry[3:]
+        file = worktree / name
+        content = hashlib.sha1(file.read_bytes()).hexdigest() if file.is_file() else "none"
+        paths[name] = f"{code} {content}"
+    return WorktreeSnapshot(worktree, head, paths)
+
+
+def _change(name: str, before: str | None, after: str | None) -> str:
+    """One line for a path whose state differs: its status code before and after, or that its content changed."""
+    code_before, code_after = (before or "clean")[:2].strip() or "clean", (after or "clean")[:2].strip() or "clean"
+    if before is not None and after is not None and code_before == code_after:
+        return f"{name}: content changed (status {code_after})"
+    return f"{name}: status {code_before} -> {code_after}"
+
+
+def check_worktree_unchanged(before: WorktreeSnapshot) -> None:
+    """Raise InvariantViolation, which names each change, when the worktree differs from the snapshot `before`."""
+    after = snapshot_worktree(before.worktree)
+    changes = [
+        _change(name, before.paths.get(name), after.paths.get(name))
+        for name in sorted({*before.paths, *after.paths})
+        if before.paths.get(name) != after.paths.get(name)
+    ]
+    if after.head == before.head and not changes:
+        return
+    parts = list(changes)
+    if after.head != before.head:
+        moved = _git(before.worktree, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", before.head, after.head)
+        changes = [f"{path}: changed between the two HEAD commits" for path in moved.splitlines()] + changes
+        parts = [f"HEAD moved from {before.head} to {after.head}", *changes]
+    raise InvariantViolation(
+        f"the verifier changed the real worktree {before.worktree}: " + "; ".join(parts),
+        before.worktree, before.head, after.head, changes,
+    )

@@ -19,6 +19,11 @@ and spawns a fresh verifier with the scoped brief (the findings and the delta
 from the rejected commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
 the step fails. The run branch moves only on ACCEPT.
 
+The engine records the HEAD and the status of the worktree of the ticket before
+and after each verifier run (see `guards.py`). A difference is an invariant
+violation: the journal records it with the changes, and the run halts. The
+engine removes the temporary copy after every verifier run.
+
 A run holds many tickets, which the engine takes in dependency order. A failed
 step does not end the run. A ticket whose blocker failed or was skipped is
 skipped, and the journal records which blocker. A ticket with no failed blocker
@@ -53,7 +58,10 @@ from pathlib import Path
 from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
-from .guards import GuardError, changed_paths, hotspot_matches, install_push_guard
+from .guards import (
+    GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
+    snapshot_worktree,
+)
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
@@ -309,13 +317,16 @@ def _execute(
             reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal, prior)
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
-            # step unknown, so the run ends here. The journal says why.
-            reason = f"crashed: {type(error).__name__}: {error}"
+            # step unknown, so the run ends here. The journal says why. A verifier
+            # that changed the real worktree also ends the run: the state of the
+            # worktree can no longer be trusted.
+            halted = isinstance(error, InvariantViolation)
+            reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
             journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
             failed.append(ticket.id)
             failures[ticket.id] = reason
             for unreached in order[position + 1 :]:
-                skipped[unreached.id] = f"the run ended after ticket {ticket.id} crashed"
+                skipped[unreached.id] = f"the run ended after ticket {ticket.id} {'halted the run' if halted else 'crashed'}"
                 journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
             break
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
@@ -743,7 +754,14 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
             commit=verified, copy=str(copy),
         )
+        before = snapshot_worktree(step.worktree)
         result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path))
+        # The check runs at once, before the evidence is moved; the journal and the halt come after it.
+        violation: InvariantViolation | None = None
+        try:
+            check_worktree_unchanged(before)
+        except InvariantViolation as found:
+            violation = found
         # The copy goes; the verdict report and the event stream stay as evidence of the run.
         evidence.mkdir(parents=True)
         for entry in scratch.iterdir():
@@ -759,6 +777,12 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(stream),
     )
+    if violation is not None:
+        step.journal.append(
+            "invariant-violation", ticket=ticket.id, round=round_number, worktree=str(violation.worktree),
+            head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
+        )
+        raise violation
     if result.end_state != adapters.FINISHED or result.exit_status != 0:
         raise _StepFailed(f"the verifier ended {result.end_state} with exit status {result.exit_status}")
     try:

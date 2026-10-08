@@ -156,3 +156,30 @@ def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_o
     for name in broken[0]:
         if name not in ("seq", "time", "event"):
             assert f"`{name}`" in rows["`lock-broken`"], name
+
+
+@outside_the_package
+def test_the_reference_lists_the_invariant_violation_event_of_a_real_halted_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
+    scripted = ScriptedAdapter()
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path)
+
+        def write_in_the_real_worktree(request):
+            (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+            (run_dir / "a" / "oops.txt").write_text("by the verifier\n")
+
+        scripted.during_verifier = write_in_the_real_worktree
+        code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    events = read_journal(capsys.readouterr().out)
+    assert code == 1
+    assert "invariant-violation" in [e["event"] for e in events]
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for event in events:
+        row = rows[f"`{event['event']}`"]
+        for field in event:
+            if field not in ("seq", "time", "event"):
+                assert f"`{field}`" in row, (event["event"], field)
+    assert "invariant violation: the verifier changed the real worktree" in REFERENCE.read_text()

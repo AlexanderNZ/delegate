@@ -139,6 +139,17 @@ After the specialist reports `committed` and the branch holds a commit, and befo
 - A match fails the step at once. The engine writes `hotspot-finding` and the step ends with a reason that names each path: `hotspot finding: <path> matches the hotspot '<pattern>'`. No gate runs, no continuation starts, and no verifier starts. The branch and the worktree stay as they are, and the run branch does not move.
 - A change outside the hotspots goes on to the gates and the verification.
 
+### The worktree invariant
+
+The verifier works in a temporary copy. It must not change the real worktree of the ticket, which is the worktree where the specialist built the branch. The engine checks this in every harness, also in one with no command guard.
+
+- Before each verifier run, the engine takes a snapshot of the worktree of the ticket: the HEAD commit, and for each path that `git status` reports, the status code and a hash of the content of the file. A file that git ignores is not in the snapshot. The engine takes the snapshot again when the verifier ends.
+- A difference is an invariant violation. A verifier that commits, that adds or deletes a file, that edits a tracked file, or that rewrites a file which was already changed or untracked, makes the snapshots differ. The engine does this check for the first verifier of a ticket and for the verifier of each fix-up round.
+- A violation halts the run. The engine writes `verify-result`, then `invariant-violation` with the worktree, the HEAD commit before and after, and one entry in `changes` for each path that differs. The engine writes `step-end` with the state `failed` and the reason `invariant violation: ...`. It writes `skip` for each ticket that it did not reach, with the reason `the run ended after ticket <id> halted the run`. It writes `run-end` with the result `failed`. The command prints one line `delegate run: ticket <id>: invariant violation: ...` on stderr, and exits 1.
+- The verdict does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A run that a violation halted cannot be resumed.
+- A verifier that writes only in its temporary copy does not halt the run. The engine removes the copy after each verifier run, also when the run halts.
+- The check covers the worktree of the ticket. It does not cover the main checkout of the repository, which the coordinator can change at any time, and it does not cover a path outside the repository.
+
 ## The rebase onto the run branch
 
 In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
@@ -158,9 +169,10 @@ In `assure` mode, the engine verifies each ticket branch that has green gates. I
 1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. The verifier can break the copy, and cannot reach the real repository through it. The engine makes the copy also when the HEAD of the repository is on the run branch. The engine removes the copy when the verifier ends.
 2. The engine makes the verifier brief with the brief generator (`full_brief`). The brief holds the task (the ticket text), the diff `git diff <run-branch>...<ticket branch>`, the gates of the stack, the path of the copy, and the report path. The brief never holds a line of the specialist report.
 3. The engine spawns the verifier of the stack through the adapter. The working directory is the copy. The tier is `verifier`, whatever the tier of the specialist is. The `verifier` entry of `tier-overrides` replaces it. The model comes from the tier column of the adapter.
-4. The engine reads the verdict report and checks it against the schema.
-5. On ACCEPT, the engine moves the run branch to the commit that the verifier saw. It moves the branch only by fast-forward. The rebase puts the run branch under the ticket branch, so a fast-forward is possible. If the run branch holds a commit that the ticket branch does not hold, the step fails and the run branch does not change.
-6. On REJECT, the run branch does not change, and the engine starts a fix-up round. See [the fix-up round](#the-fix-up-round). After the last round, the step fails, the journal holds the findings, and the command prints them on stderr and exits 1.
+4. The engine checks that the verifier left the real worktree as it was. See [the worktree invariant](#the-worktree-invariant). A difference halts the run before the engine reads the verdict.
+5. The engine reads the verdict report and checks it against the schema.
+6. On ACCEPT, the engine moves the run branch to the commit that the verifier saw. It moves the branch only by fast-forward. The rebase puts the run branch under the ticket branch, so a fast-forward is possible. If the run branch holds a commit that the ticket branch does not hold, the step fails and the run branch does not change.
+7. On REJECT, the run branch does not change, and the engine starts a fix-up round. See [the fix-up round](#the-fix-up-round). After the last round, the step fails, the journal holds the findings, and the command prints them on stderr and exits 1.
 
 The engine keeps the verdict report and the event stream of the verifier in `runs/<run id>/verifier/<ticket id>/`.
 
@@ -223,6 +235,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
 | `branch ... holds no commit beyond <run branch> after the rebase; ...` | The run branch holds the work of the ticket already, so no commit is left. |
 | `the verifier could not start: ...` | The engine could not make the copy or the verifier brief. The message holds the cause. |
+| `invariant violation: the verifier changed the real worktree <path>: ...` | The worktree of the ticket differs after the verifier run. The run halts. See [the worktree invariant](#the-worktree-invariant). |
 | `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, or the exit status is not 0. The engine does not read the verdict report. |
 | `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names another mode than the mode of the run (`full`, or `fix-up` in a fix-up round) is invalid. |
 | `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. |
@@ -313,6 +326,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
 | `verify-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` |
+| `invariant-violation` | `ticket`, `round`, `worktree` (the real worktree of the ticket), `head_before`, `head_after` (its HEAD commit before and after the verifier run), `changes` (a list of strings, one for each path that differs) |
 | `verify-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid) |
 | `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
 | `fixup-start` | `ticket`, `round` (1 or 2), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
