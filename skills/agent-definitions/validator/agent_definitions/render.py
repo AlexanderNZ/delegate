@@ -106,6 +106,32 @@ HOOK_COMMAND_READER = (
 )
 
 
+#: The shell text that examines the arguments of a GET-only command. It reads
+#: "$@", strips quote and backslash characters from each word, and denies a
+#: method flag, a body flag and an output flag, in each spelling. A hyphen-led
+#: word that is not a double-hyphen option is a short flag or a cluster of
+#: short flags (-sX, -XPOST, -dBODY), and it is denied when it holds X, d, f,
+#: F or o. An output flag is the one exception: its path must be in a temp
+#: directory, by the same rule as the temp-write commands.
+GET_ONLY_ARGUMENT_CHECK = (
+    "k=0; "
+    'for a in "$@"; do '
+    'if [ "$k" = 1 ]; then k=0; istmp "$a" || deny "$seg" "An output path is outside a temp directory."; continue; fi; '
+    r'''a=${a//\"/}; a=${a//\'/}; a=${a//\\/}; '''
+    'case "$a" in '
+    '--output=*) istmp "${a#--output=}" || deny "$seg" "An output path is outside a temp directory." ;; '
+    "--output|-o) k=1 ;; "
+    '-o?*) istmp "${a#-o}" || deny "$seg" "An output path is outside a temp directory." ;; '
+    "--method|--method=*|--request|--request=*|--data*|--input|--input=*"
+    '|--field|--field=*|--raw-field|--raw-field=*) deny "$seg" "This command reads only; $a makes it a write." ;; '
+    "--*) ;; "
+    '-*[XdfFo]*) deny "$seg" "This command reads only; $a makes it a write or opens an output file." ;; '
+    "esac; "
+    "done; "
+    '[ "$k" = 0 ] || deny "$seg" "An output flag needs a path argument."'
+)
+
+
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
@@ -137,8 +163,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
 
     `get_only` are the declaration's commands that read only while they stay a
     GET, such as a tracker API client. Each one is permitted alone or with
-    arguments, in that verifier only, and a segment that holds " -X" is a
-    deny. With no such command the branch is absent.
+    arguments, in that verifier only. The guard examines each argument and
+    denies a method flag, a body flag, and an output flag whose path is not in
+    a temp directory (GET_ONLY_ARGUMENT_CHECK). With no such command the
+    branch is absent.
 
     A temp path is a text prefix and a path with no ".." component. The guard
     rejects "..", it does not resolve it, because it reads the command as text
@@ -165,12 +193,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # options that start with "--t" are the target-directory pair, and -T with
     # --no-target-directory changes what the last path means.
     target_flag = "A flag that holds t or T can move the destination, so it is not permitted. Give the destination as the last path."
-    get_only_branch = (
-        f"{_exact_or_prefix(get_only)}) "
-        'case "$seg" in *" -X"*) deny "$seg" "This command reads only; -X makes it a write." ;; esac ;; '
-        if get_only
-        else ""
-    )
+    get_only_branch = f"{_exact_or_prefix(get_only)}) {GET_ONLY_ARGUMENT_CHECK} ;; " if get_only else ""
     segment = (
         '[ -n "$seg" ] || continue; '
         "set -- $seg; "

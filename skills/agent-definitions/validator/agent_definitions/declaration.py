@@ -49,7 +49,7 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
     verifier guard. It must not open a write: a temp-write or temp-destination
     command (those have their own path rules), or a prefix of a known write.
     A getOnlyCommands entry obeys the same rules, because the guard permits it
-    in the same way while its segment holds no "-X".
+    in the same way while its arguments hold no method, body or output flag.
     """
     from .render import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
     from .validate import VERIFIER_BASH_WRITE_PROBES

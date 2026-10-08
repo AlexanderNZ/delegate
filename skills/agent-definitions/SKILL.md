@@ -23,7 +23,7 @@ prompt = "Domain notes the agent needs."
 # pair = false             # a single agent instead of a pair
 # readOnly = true          # with pair = false: render the single agent as a verifier
 # gateCommands = ["npm test", "npx vitest"]   # optional: the gates the verifier may run (see "Gate commands")
-# getOnlyCommands = ["./scripts/api"]          # optional: commands the verifier may run only without -X (see "Gate commands")
+# getOnlyCommands = ["./scripts/api"]          # optional: commands the verifier may run only without a method, body or output flag (see "Gate commands")
 # outputLanguage = "ste"   # optional: "none" (the default) or "ste" (see "Rendering rules")
 # trackedFileBuild = true  # optional: the build reads tracked files only, as a flake does (default false)
 ```
@@ -180,7 +180,19 @@ The reasons are in [ADR 0004](docs/adr/0004-gate-commands-per-repository.md). A 
 - An entry must not open a write: a temp-write or temp-destination command (`rm`, `cp`, and the others keep their path rules), or a prefix of a known write (`git`, `git push`, `git reset`). The declaration parser refuses both.
 - On OpenCode each gate command becomes `<command> *`: allow, after the read commands.
 
-Some commands read only while they stay a GET, for example a repository script `./scripts/api` that sends a GET unless `-X` names another method. A declaration names them with `getOnlyCommands`. The verifier guard permits each one alone or with arguments, in that verifier only, and it denies a segment that holds ` -X`. An entry obeys the same rules as a gate command: plain words, and no write. On OpenCode a `getOnlyCommands` entry is not permitted: a pattern cannot examine the arguments, so it cannot see `-X`. A plain gate command cannot carry this rule, so do not put such a command in `gateCommands`.
+Some commands read only while they stay a GET, for example a repository script `./scripts/api` that sends a GET unless a flag names another method or gives a body. A declaration names them with `getOnlyCommands`. The verifier guard permits each one alone or with arguments, in that verifier only, and it examines every argument. An entry obeys the same rules as a gate command: plain words, and no write. A plain gate command cannot carry the argument rule, so do not put such a command in `gateCommands`.
+
+The guard denies a GET-only command when any argument is one of these flags:
+
+| Kind | Denied spellings |
+|---|---|
+| Method | `-X <m>`, `-X<m>`, `--method <m>`, `--method=<m>`, `--request <m>`, `--request=<m>` |
+| Body | `-d`, `--data`, `--data-*` (for example `--data-raw`), `--input`, `--input=<f>`, `-f`, `-F`, `--field`, `--field=<f>`, `--raw-field`, `--raw-field=<f>` |
+| Output | `-o` and `--output` (also `-o<path>` and `--output=<path>`), unless the path is a temp path |
+
+A single-hyphen word is a short flag or a cluster of short flags, so the guard denies it when it holds `X`, `d`, `f`, `F` or `o` (`-sX` and `-dBODY` deny). It removes quote and backslash characters from each word first, so `'--method' POST` denies. An output flag keeps the rule of the temp-write commands: `-o /tmp/out.json` and `--output=/tmp/out.json` pass, and `-o ./out.json`, `-o /tmp/../x`, and an `-o` with no path deny. The command with no such flag, and the command with read-only arguments (`--paginate`, `--jq .title`, `-H Accept:application/json`), stay permitted. The guard reads text. It does not see an argument that a shell expansion builds, so a GET-only command must not take its arguments from an expansion that an agent controls.
+
+On OpenCode a `getOnlyCommands` entry is not permitted at all: a pattern cannot examine the arguments, so it cannot see a method flag, a body flag or an output flag. This is a limit of OpenCode, not a choice. The OpenCode verifier allows no GET-only command, whatever the flags.
 
 A gate can write: `npm test` can write `node_modules/` and a cache. The guard reads text and cannot confine that, as for `python3`. The verifier method still applies: copy the worktree into a temp directory, and run the gates in the copy.
 
@@ -244,6 +256,7 @@ The kit is `agent-delegation/` and `agent-definitions/` with its `validator/` pa
 - A temp path is a text prefix and a path with no `..` component. The guard rejects `..`, it does not resolve it: the guard reads the command as text, and a resolution needs the file system. `/tmp/../Users/x` is therefore a deny for each temp-write and temp-destination command, and for a redirection target. The rule reads a path component, so a name such as `/tmp/a..b` is permitted. A path that needs `..` must be written out in full.
 - The copy allow reads the source and it does not examine it. A `cp` source can be any path the agent can read, secrets included, and the copy then sits in a temp directory. The temp directory is the boundary, not the source.
 - The OpenCode verifier map holds none of the rules that let a verifier copy a worktree or read it by path: no `cp` rule, no `cd` rule, and no `git -C <path>` rule. A `cp` rule and a `cd` rule must examine a path argument, which an OpenCode pattern cannot do. A `git -C * <read>` rule needs no path examination, but `git -C * diff*` compiles to the anchored `^git -C .* diff.*$`, and that pattern also matches `git -C /x push; git diff`. The OpenCode patterns stay narrow ([ADR 0002](docs/adr/0002-narrow-opencode-push-pattern.md)), and this widening is not permitted, so the OpenCode map stays as it was. An OpenCode verifier therefore cannot make the copy, and it reports the red proof as a command it cannot run.
+- The OpenCode verifier allows no `getOnlyCommands` entry. A GET-only rule examines each argument for a method flag, a body flag and an output flag, and an OpenCode pattern cannot examine arguments. A GET-only command is therefore a deny on OpenCode, bare or with arguments, and a verifier there reports it as a command it cannot run. On Claude Code the guard also cannot see an argument that a shell expansion builds (the guard reads text).
 - The OpenCode verifier map has no `nix develop` rule. A `nix develop * -c *` pattern cannot test the command after `-c`, so it would permit every command in a dev shell. An OpenCode verifier reports a dev-shell gate as a command it cannot run.
 - The OpenCode verifier map does not divide a compound command either, for the same reason as the specialist map: OpenCode v1.18.31 hands the permission check the raw command. `git status && git commit -m x` is one deny on Claude Code and one allow on OpenCode.
 - Frontmatter hooks in a project-scope agent run only after the workspace trust dialog is accepted for the folder the agent file came from, and a `-p` session does not count as accepting it. A project-tier verifier in a folder that is not trusted therefore has a Bash tool with no guard. The global tier is user-scope and it is not affected.

@@ -147,3 +147,108 @@ def test_dash_x_on_a_get_only_command_is_denied_in_every_verifier(api_client, ti
         for command in ("./scripts/api -X POST /repos/o/r/issues", "./scripts/api /repos/o/r/issues/1 -X PATCH"):
             r = _run(hook, command, shell)
             assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+
+
+# --- a GET-only command denies every method flag, body flag and output flag ----
+
+#: Each spelling that can make a GET-only command write, or that writes a file.
+METHOD_AND_BODY_SPELLINGS = (
+    "-X POST",
+    "-XPOST",
+    "--method POST",
+    "--method=POST",
+    "--request POST",
+    "--request=POST",
+    "-d @/tmp/b",
+    "-d title=x",
+    "-dtitle=x",
+    "--data title=x",
+    "--data=title=x",
+    "--data-raw title=x",
+    "--data-binary @/tmp/b",
+    "--data-urlencode title=x",
+    "--input /tmp/b",
+    "--input=/tmp/b",
+    "-f title=x",
+    "-F title=x",
+    "--field title=x",
+    "--field=title=x",
+    "--raw-field title=x",
+    "--raw-field=title=x",
+)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("spelling", METHOD_AND_BODY_SPELLINGS)
+def test_a_get_only_command_with_a_method_or_body_flag_is_denied(api_client, tiers, shell, spelling):
+    hook = _hook(api_client, tiers)
+    for command in (f"./scripts/api {spelling} /repos/o/r", f"./scripts/api /repos/o/r {spelling}"):
+        r = _run(hook, command, shell)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+        assert "makes it a write" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "spelling",
+    ["'-X' POST", '"--method" POST', "'--method=POST'", "\\-X POST", "-H x -XPOST", "-sX POST"],
+)
+def test_a_quoted_or_clustered_method_flag_is_denied(api_client, tiers, shell, spelling):
+    r = _run(_hook(api_client, tiers), f"./scripts/api {spelling} /repos/o/r", shell)
+    assert r.returncode == 2, (shell, spelling, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_get_only_command_with_read_only_arguments_is_permitted(api_client, tiers, shell):
+    hook = _hook(api_client, tiers)
+    for command in (
+        "./scripts/api",
+        "./scripts/api /repos/o/r/issues/1",
+        "./scripts/api --paginate /repos/o/r/issues",
+        "./scripts/api -H Accept:application/json /repos/o/r",
+        "./scripts/api --jq .title /repos/o/r/issues/1",
+        "./scripts/api /repos/o/r/issues?state=open&per_page=5",
+        "./scripts/api -o /tmp/out.json /repos/o/r",
+        "./scripts/api -o/tmp/out.json /repos/o/r",
+        "./scripts/api --output /tmp/out.json /repos/o/r",
+        "./scripts/api --output=/tmp/out.json /repos/o/r",
+        "./scripts/api -o $TMPDIR/out.json /repos/o/r",
+    ):
+        r = _run(hook, command, shell)
+        assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_get_only_command_with_an_output_path_outside_a_temp_directory_is_denied(api_client, tiers, shell):
+    hook = _hook(api_client, tiers)
+    for command in (
+        "./scripts/api -o /Users/x/out.json /repos/o/r",
+        "./scripts/api -o out.json /repos/o/r",
+        "./scripts/api -o/Users/x/out.json /repos/o/r",
+        "./scripts/api --output ./out.json /repos/o/r",
+        "./scripts/api --output=/etc/out.json /repos/o/r",
+        "./scripts/api -o /tmp/../etc/out.json /repos/o/r",
+        "./scripts/api /repos/o/r -o",
+        "./scripts/api /repos/o/r --output",
+        "./scripts/api -so /tmp/out.json /repos/o/r",
+        "./scripts/api >/Users/x/out.json /repos/o/r",
+    ):
+        r = _run(hook, command, shell)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_flag_rule_holds_in_every_verifier_that_names_a_get_only_command(api_client, tiers, shell):
+    [example] = load_declaration(EXAMPLE)
+    for hook in (_hook(api_client, tiers), _hook(example, tiers)):
+        assert _run(hook, "./scripts/api --method POST /x", shell).returncode == 2
+        assert _run(hook, "./scripts/api -f title=x /x", shell).returncode == 2
+        assert _run(hook, "./scripts/api /x", shell).returncode == 0
+        # A command that is not GET-only keeps its own rules.
+        assert _run(hook, "git diff --stat", shell).returncode == 0
+
+
+def test_the_opencode_verifier_still_allows_no_get_only_command_whatever_the_flag(api_client, tiers):
+    perm = _opencode_permission(api_client, tiers)
+    for spelling in ("", "--method POST", "-f title=x", "-o /tmp/out"):
+        assert opencode_bash_action(perm, f"./scripts/api {spelling} /x") == "deny", spelling
