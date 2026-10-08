@@ -13,6 +13,13 @@ from pathlib import Path
 from .tiers import Tiers
 
 
+# The two modes of a run.
+MODES: tuple[str, ...] = ("assure", "economy")
+
+# The harness adapters that a workflow can name. A later change replaces this
+# list with the adapter registry.
+ADAPTERS: tuple[str, ...] = ("claude-code", "cursor", "opencode")
+
 # The roles whose tier a workflow can override.
 ROLES: tuple[str, ...] = ("specialist", "verifier")
 
@@ -139,6 +146,10 @@ def load_workflow(path: Path, tiers: Tiers) -> Workflow:
         for blocker in ticket.blocked_by:
             if blocker not in known_ids:
                 problems.append(f"ticket {ticket.id!r}: unknown blocker {blocker!r}")
+    if data["mode"] not in MODES:
+        problems.append(f"mode: {data['mode']!r} is not a mode; known modes: {', '.join(MODES)}")
+    if data["adapter"] not in ADAPTERS:
+        problems.append(f"adapter: {data['adapter']!r} is not an adapter; known adapters: {', '.join(ADAPTERS)}")
     problems.extend(_tier_override_problems(dict(data.get("tier-overrides", {})), tiers))
     for cycle in _cycles(tickets):
         problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))

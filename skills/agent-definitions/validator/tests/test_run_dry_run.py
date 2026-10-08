@@ -8,6 +8,8 @@ ticket's acceptance criteria, not from the code under test.
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agent_definitions import delegate
 
 VALID = """\
@@ -230,3 +232,34 @@ claude-code-description-chars = 1000
     code, _out, err = run(repo, capsys, "--dry-run")  # the bundled table has no such tier
     assert code == 1
     assert "'gateway-fast'" in err
+
+
+def test_an_unknown_mode_exits_1_and_names_the_field_and_the_modes(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, VALID.replace('mode = "assure"', 'mode = "sprint"'))
+
+    assert code == 1
+    assert out == ""
+    assert "mode" in err
+    assert "'sprint'" in err
+    assert "assure, economy" in err
+
+
+def test_an_unknown_adapter_exits_1_and_names_the_field_and_the_adapters(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, VALID.replace('adapter = "claude-code"', 'adapter = "codex"'))
+
+    assert code == 1
+    assert out == ""
+    assert "adapter" in err
+    assert "'codex'" in err
+    assert "claude-code, cursor, opencode" in err
+
+
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+@pytest.mark.parametrize("adapter", ["claude-code", "opencode", "cursor"])
+def test_each_mode_and_each_built_in_adapter_is_accepted(tmp_path, capsys, mode, adapter):
+    repo = make_repo(tmp_path, VALID.replace('mode = "assure"', f'mode = "{mode}"').replace('adapter = "claude-code"', f'adapter = "{adapter}"'))
+
+    code, out, err = run(repo, capsys, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert f"mode {mode}, adapter {adapter}" in out
