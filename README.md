@@ -50,6 +50,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [How to watch and resume a run](docs/how-to/watch-and-resume-a-run.md): follow a run with `status` and `watch`, go on from a position, and resume a run after Ctrl-C or a kill.
 - [How to point the tiers at a gateway](docs/how-to/point-the-tiers-at-a-gateway.md): write your own tier file, give it with `--tiers`, and see the engine ask the harness for your models.
 - [How to add a harness adapter](docs/how-to/add-a-harness-adapter.md): the parts of the adapter interface, an example adapter, and the contract-test pattern with recorded streams.
+- [How to use the kit after `to-spec` and `to-tickets`](docs/how-to/use-the-kit-after-to-spec-and-to-tickets.md): save the tickets to files, write a workflow that names them, and run the plan.
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
 - [Reference: `delegate run`](docs/reference/run.md): the build of a ticket through a harness adapter, the adapter interface, the specialist report, the journal, the resume of a stopped run, and the run lock.
 - [Reference: the `claude-code` adapter](docs/reference/claude-code-adapter.md): the command, how the adapter selects the agent, the end states, the recorded streams, and the live smoke run.
