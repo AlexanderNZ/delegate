@@ -1,7 +1,7 @@
 """The workflow engine: build each ticket through a harness adapter.
 
-For each ticket the engine makes a worktree from the base branch, spawns the
-stack's specialist through the adapter, checks the specialist's report, runs
+For each ticket the engine makes a worktree from the base branch, installs the
+push guard in it (see `guards.py`), spawns the stack's specialist through the adapter, checks the specialist's report, runs
 the stack's gates itself, and records each event in the journal.
 
 In `assure` mode the engine then verifies the built branch. It makes a
@@ -50,6 +50,7 @@ from pathlib import Path
 from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
+from .guards import GuardError, install_push_guard
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
@@ -344,8 +345,8 @@ def _rebase_in_progress(worktree: Path) -> bool:
     )
 
 
-def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str) -> None:
-    """Make the worktree of a ticket, or reuse the one that is there.
+def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
+    """Make the worktree of a ticket, or reuse the one that is there, and install the push guard in it.
 
     A worktree that a killed run left is reused as it is, except that a rebase
     which the kill stopped is aborted. A branch without a worktree gets a new
@@ -357,12 +358,16 @@ def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str) -> Non
         current = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD")
         if current != branch:
             raise EngineError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
-        return
-    _git(repo, "worktree", "prune")
-    if _branch_exists(repo, branch):
-        _git(repo, "worktree", "add", "-q", str(worktree), branch)
     else:
-        _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), base)
+        _git(repo, "worktree", "prune")
+        if _branch_exists(repo, branch):
+            _git(repo, "worktree", "add", "-q", str(worktree), branch)
+        else:
+            _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), base)
+    try:
+        install_push_guard(repo, worktree, hooks_dir)
+    except GuardError as error:
+        raise EngineError(str(error)) from None
 
 
 def _build_ticket(
@@ -380,10 +385,11 @@ def _build_ticket(
     stack = workflow.stacks[ticket.stack]
     branch = _ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
+    hooks_dir = state_dir / "hooks" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
     if prior is None:
         base_commit = _git(repo, "rev-parse", workflow.base_branch)
-        _prepare_worktree(repo, worktree, branch, workflow.base_branch)
+        _prepare_worktree(repo, worktree, branch, workflow.base_branch, hooks_dir)
         journal.append(
             "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
             base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
@@ -400,7 +406,7 @@ def _build_ticket(
             ).returncode != 0:
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
-        _prepare_worktree(repo, worktree, branch, workflow.base_branch)
+        _prepare_worktree(repo, worktree, branch, workflow.base_branch, hooks_dir)
         specialist_done = _specialist_done(prior)
         continuations = sum(1 for e in prior if e["event"] == "continuation")
         verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")

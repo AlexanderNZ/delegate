@@ -31,7 +31,7 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 
 A step has these parts:
 
-1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`.
+1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the push guard in it. See [the guards](#the-guards).
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the report from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond `base-branch`.
@@ -115,6 +115,19 @@ The branch and the worktree of the ticket stay as the crash left them.
 
 A ticket is skipped when at least one of its blockers is not built. A blocker is not built when its step failed or when it was skipped, so a skip passes down the chain. The engine makes no worktree and no branch for a skipped ticket. The journal records `skip` with the blockers and the reason, for example `blocked by a, which failed`. The command prints one line `delegate run: ticket <id>: skipped: <reason>` on stderr. A ticket with no unbuilt blocker still runs, also after a failed step of another ticket.
 
+## The guards
+
+The guards use git only, so they hold in every harness, also in a headless run that skips the hooks of the harness.
+
+### The push guard
+
+The engine installs the push guard in each worktree that it makes, also in a worktree that a resume uses again.
+
+- The engine sets `extensions.worktreeConfig` in the repository, and sets `core.hooksPath` in the configuration of that one worktree. The main checkout and the other worktrees keep their own hooks.
+- The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the state directory. It holds a `pre-push` hook that prints `delegate: push refused` on stderr and exits 1, so every push from the worktree fails.
+- The directory also holds a wrapper for each other hook of the repository (or of the host, when the host sets `core.hooksPath`). The wrapper runs the original hook with the same arguments and the same input, so those hooks still run for the commits of the specialist.
+- The guard does not stop a push with the `--no-verify` option, because git skips every `pre-push` hook then. It also does not stop a push from a clone or from another directory. It holds against the plain push command of a specialist in the worktree.
+
 ## The rebase onto the run branch
 
 In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
@@ -167,6 +180,7 @@ All files are in `<git common dir>/delegate/`. The working tree of the repositor
 | `runs/<run id>/verifier/<ticket id>/` | The verdict report (`verdict.json`) and the files that the verifier run wrote beside it. |
 | `runs/<run id>/verifier/<ticket id>/fixup-<round>/` | The same files for the verifier of a fix-up round. |
 | `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. |
+| `hooks/<run id>/<ticket id>/` | The hooks directory of the worktree. See [the push guard](#the-push-guard). |
 | `locks/<run branch>.lock` | The lock of a run branch while a run holds it. The branch name is percent-encoded. |
 
 The run id is the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`.
