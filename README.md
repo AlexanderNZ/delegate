@@ -12,6 +12,10 @@ This puts three commands on your PATH: `delegate`, `agent-definitions` and `veri
 
 The two skills are plain Markdown directories: `skills/agent-delegation/` and `skills/agent-definitions/`. Copy or link them into a directory that your harness reads skills from.
 
+## Docs
+
+- [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.
+
 ## Generated files
 
 The files that the tool generates (rendered agents, context skills, delegation docs) belong to you. They need no copyright notice or licence notice from this project.

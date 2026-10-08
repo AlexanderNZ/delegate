@@ -338,3 +338,23 @@ def test_a_run_without_dry_run_exits_2_and_creates_nothing(tmp_path, capsys):
     assert out == ""
     assert "--dry-run" in err
     assert state(repo) == before
+
+
+def test_the_umbrella_help_lists_the_run_subcommand(capsys):
+    try:
+        delegate.main(["--help"])
+    except SystemExit:
+        pass
+
+    assert "run" in capsys.readouterr().out.split()
+
+
+def test_a_tiers_option_before_run_is_a_usage_error(tmp_path, capsys):
+    # `run` takes --tiers after the subcommand, so the umbrella must not drop it before.
+    repo = make_repo(tmp_path, VALID)
+
+    code = delegate.main(["--tiers", "x.toml", "run", str(repo / "workflow.toml"), "--dry-run"])
+
+    out, err = capsys.readouterr()
+    assert (code, out) == (2, "")
+    assert "--tiers" in err
