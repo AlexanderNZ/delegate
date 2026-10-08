@@ -223,3 +223,54 @@ def test_a_branch_with_no_commit_beyond_the_base_fails_the_step_even_when_the_re
     step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
     assert step_end["state"] == "failed"
     assert "no commit" in step_end["reason"] and "main" in step_end["reason"]
+
+
+def tier_file(tmp_path, columns=("claude-code", "opencode")):
+    """A tier table whose model names tell the column and the tier apart."""
+    lines = ['[effort]\nlevels = ["low"]\n\n[effort.opencode]\nvariants = ["high"]\n']
+    for tier in ("strong", "standard", "cheap", "verifier"):
+        lines.append(f"[tiers.{tier}]")
+        lines.extend(f'{column} = "{column}-{tier}-model"' for column in columns)
+        lines.append("")
+    lines.append("[allowed-models]")
+    lines.extend(f"{column} = []" for column in columns)
+    lines.append("\n[budget]\nclaude-code-description-chars = 1\n")
+    path = tmp_path / "tiers.toml"
+    path.write_text("\n".join(lines))
+    return path
+
+
+@pytest.mark.parametrize(
+    ("column", "mode", "override", "expected"),
+    [
+        pytest.param("claude-code", "assure", None, "claude-code-strong-model", id="claude-code-column-assure-is-strong"),
+        pytest.param("opencode", "assure", None, "opencode-strong-model", id="opencode-column-assure-is-strong"),
+        pytest.param("opencode", "economy", None, "opencode-standard-model", id="economy-is-standard"),
+        pytest.param("opencode", "economy", "cheap", "opencode-cheap-model", id="override-by-tier-name"),
+    ],
+)
+def test_the_adapter_receives_the_model_from_its_own_tier_column(tmp_path, capsys, scripted, column, mode, override, expected):
+    scripted.tier_column = column
+    workflow = WORKFLOW.replace('mode = "assure"', f'mode = "{mode}"')
+    if override:
+        workflow = workflow.replace("[stacks.python]", f'[tier-overrides]\nspecialist = "{override}"\n\n[stacks.python]')
+    repo = make_repo(tmp_path, workflow)
+
+    code, out, err = run(repo, capsys, "--tiers", str(tier_file(tmp_path)))
+
+    assert (code, err) == (0, "")
+    assert [call.model for call in scripted.calls] == [expected]
+    step_start = next(e for e in read_journal(out) if e["event"] == "step-start")
+    assert step_start["model"] == expected
+
+
+def test_a_tier_table_without_the_column_of_the_adapter_exits_1_and_names_the_column(tmp_path, capsys, scripted):
+    scripted.tier_column = "cursor"
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys, "--tiers", str(tier_file(tmp_path)))
+
+    assert (code, out) == (1, "")
+    assert "'cursor'" in err and "strong" in err
+    assert "Traceback" not in err
+    assert scripted.calls == []
