@@ -149,3 +149,77 @@ def test_an_invalid_report_fails_the_step_and_the_reason_names_the_field(tmp_pat
     for part in expected:
         assert part in validation["reason"]
         assert part in err
+
+
+def gate_events(out):
+    return [e for e in read_journal(out) if e["event"] == "gate-result"]
+
+
+def test_the_engine_runs_the_gates_in_the_worktree_and_records_each_result(tmp_path, capsys, scripted):
+    # `test -f feature.txt` is green only when the scripted commit is in the worktree the gate runs in.
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    names = event_names(read_journal(out))
+    assert names.index("report-validation") < names.index("gate-result") < names.index("step-end")
+    (gate,) = gate_events(out)
+    assert (gate["ticket"], gate["command"], gate["exit_status"], gate["green"]) == ("a", "test -f feature.txt", 0, True)
+
+
+def test_a_red_gate_is_recorded_red_when_the_report_claims_green(tmp_path, capsys, scripted):
+    scripted.files = {"other.txt": "no feature file\n"}  # the gate looks for feature.txt
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err
+    (gate,) = gate_events(out)
+    assert (gate["command"], gate["exit_status"], gate["green"]) == ("test -f feature.txt", 1, False)
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["state"] == "failed"
+    assert "test -f feature.txt" in step_end["reason"] and "red" in step_end["reason"]
+    assert "test -f feature.txt" in err
+
+
+def test_every_gate_runs_and_its_output_is_recorded_even_when_an_earlier_gate_is_red(tmp_path, capsys, scripted):
+    workflow = WORKFLOW.replace('gates = ["test -f feature.txt"]', 'gates = ["echo first-gate-output; exit 3", "test -f feature.txt"]')
+    repo = make_repo(tmp_path, workflow)
+
+    code, out, err = run(repo, capsys)
+
+    first, second = gate_events(out)
+    assert (first["exit_status"], first["green"]) == (3, False)
+    assert "first-gate-output" in first["output_tail"]
+    assert (second["exit_status"], second["green"]) == (0, True)
+    assert code == 1
+
+
+@pytest.mark.parametrize("status", ["blocked", "partial"])
+def test_a_report_that_is_not_committed_fails_the_step_before_the_gates_run(tmp_path, capsys, scripted, status):
+    scripted.report_text = lambda request, head: json.dumps(
+        valid_report("a", "b", head, status=status, gates_green=False, blocked_reason="the tool is missing")
+    )
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert gate_events(out) == []
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["state"] == "failed"
+    assert status in step_end["reason"] and "the tool is missing" in step_end["reason"]
+
+
+def test_a_branch_with_no_commit_beyond_the_base_fails_the_step_even_when_the_report_says_committed(tmp_path, capsys, scripted):
+    scripted.files = {}  # the scripted specialist commits nothing, but its report claims it did
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["state"] == "failed"
+    assert "no commit" in step_end["reason"] and "main" in step_end["reason"]
