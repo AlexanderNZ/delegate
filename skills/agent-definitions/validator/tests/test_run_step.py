@@ -177,7 +177,8 @@ def test_a_red_gate_is_recorded_red_when_the_report_claims_green(tmp_path, capsy
 
     assert code == 1
     assert "Traceback" not in err
-    (gate,) = gate_events(out)
+    # The specialist continues after a red gate, so the journal holds the gate results of each attempt. The first attempt is first.
+    gate = gate_events(out)[0]
     assert (gate["command"], gate["exit_status"], gate["green"]) == ("test -f feature.txt", 1, False)
     step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
     assert step_end["state"] == "failed"
@@ -191,7 +192,7 @@ def test_every_gate_runs_and_its_output_is_recorded_even_when_an_earlier_gate_is
 
     code, out, err = run(repo, capsys)
 
-    first, second = gate_events(out)
+    first, second = gate_events(out)[:2]  # the gate results of the first attempt, before any continuation
     assert (first["exit_status"], first["green"]) == (3, False)
     assert "first-gate-output" in first["output_tail"]
     assert (second["exit_status"], second["green"]) == (0, True)

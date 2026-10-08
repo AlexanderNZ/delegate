@@ -120,9 +120,19 @@ class ScriptedAdapter:
     holds these requests. `verdict_sequence` gives the verdict of each verifier call in
     turn; the last verdict repeats. A verifier request whose prompt starts with
     "## Findings under verification" gets a report for the mode `fix-up`.
+
+    A specialist request whose prompt holds the section "## Continuation" is a
+    continuation. The adapter then commits `continuation_files[k]` for the k-th
+    continuation (nothing when the list is shorter), and `continuation_calls`
+    holds these requests. `outcomes` gives the (end state, exit status) of each
+    specialist call that is not a fix-up, in call order, the first build
+    included; the last pair repeats. `session_ids` gives the session id of each
+    such call in the same way. `supports_resume` is the `supports_resume`
+    attribute of the adapter.
     """
 
     tier_column: str = "claude-code"
+    supports_resume: bool = False
     files: dict[str, str] = field(default_factory=lambda: {"feature.txt": "feature\n"})
     files_by_ticket: dict[str, dict[str, str]] = field(default_factory=dict)
     failing_tickets: set[str] = field(default_factory=set)
@@ -153,17 +163,26 @@ class ScriptedAdapter:
     fixup_exit_status: int = 0
     fixup_report_text: str | None = None
     fixup_write_report: bool = True
+    continuation_files: list[dict[str, str]] = field(default_factory=list)
+    continuation_calls: list[AdapterRequest] = field(default_factory=list)
+    outcomes: list[tuple[str, int]] = field(default_factory=list)
+    session_ids: list[str] = field(default_factory=list)
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         if request.agent.endswith("verifier"):
             return self._run_verifier(request)
         is_fixup = "## Findings to fix" in request.prompt
-        (self.fixup_calls if is_fixup else self.calls).append(request)
+        is_continuation = not is_fixup and "## Continuation" in request.prompt
+        index = len(self.calls) + len(self.continuation_calls)
+        continuation = len(self.continuation_calls)
+        (self.fixup_calls if is_fixup else self.continuation_calls if is_continuation else self.calls).append(request)
         head = git(request.cwd, "rev-parse", "HEAD").strip()
         ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
         files = self.files_by_ticket.get(ticket, self.files)
         if is_fixup:
             files = self.fixup_files if self.fixup_files is not None else {f"fixup-{len(self.fixup_calls)}.txt": "fix\n"}
+        elif is_continuation:
+            files = self.continuation_files[continuation] if continuation < len(self.continuation_files) else {}
         if files:
             for name, content in files.items():
                 (request.cwd / name).write_text(content)
@@ -193,7 +212,9 @@ class ScriptedAdapter:
             return AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream)
         if ticket in self.failing_tickets:
             return AdapterResult(1, "failed", self.session_id, stream)
-        return AdapterResult(self.exit_status, self.end_state, self.session_id, stream)
+        end_state, exit_status = self.outcomes[min(index, len(self.outcomes) - 1)] if self.outcomes else (self.end_state, self.exit_status)
+        session = self.session_ids[min(index, len(self.session_ids) - 1)] if self.session_ids else self.session_id
+        return AdapterResult(exit_status, end_state, session, stream)
 
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
         turn = len(self.verifier_calls)

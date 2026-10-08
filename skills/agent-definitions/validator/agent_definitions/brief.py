@@ -327,6 +327,48 @@ def specialist_brief(
     return _sections(*pairs)
 
 
+def continuation_brief(
+    ticket: str,
+    text: str,
+    worktree: str | Path,
+    hotspots: Sequence[str],
+    gates: Sequence[str],
+    report_path: str | Path,
+    commits: Sequence[str],
+    reason: str,
+    resumed: bool,
+    gate_output: str | None = None,
+) -> str:
+    """The brief the engine sends a specialist that continues its work in the same worktree.
+
+    It holds the ticket id, the reason the last run stopped, the commits on the
+    branch so far, and the output of the red gates when a gate was the reason.
+
+    A resumed session keeps the context of its first brief, so a resumed
+    brief holds only the continuation. A new agent has no context, so its brief
+    is the full specialist brief with the continuation added.
+    """
+    lines = [
+        f"Ticket {ticket}",
+        "",
+        f"The last run of the specialist on this ticket stopped before the work was done: {reason}.",
+        f"Continue the work in the worktree `{worktree}`. Do not start again. "
+        "Do not amend or rewrite a commit. Add each new change as a new commit.",
+        "",
+    ]
+    if commits:
+        lines += ["The branch holds these commits so far:", "", *(f"- {commit}" for commit in commits)]
+    else:
+        lines += ["The branch holds no commit yet."]
+    if gate_output:
+        lines += ["", "The engine ran the gates after the last run. This is the output of the red gates:", "", "```", gate_output.rstrip("\n"), "```"]
+    lines += ["", f"When you finish, write the report to `{report_path}`, as the first brief says."]
+    section = _sections(("## Continuation", "\n".join(lines)))
+    if resumed:
+        return section
+    return specialist_brief(ticket, text, worktree, hotspots, gates, report_path) + "\n" + section
+
+
 def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:
     """The sections the engine adds to a verifier brief: the working copy and the report path.
 

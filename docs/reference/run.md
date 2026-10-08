@@ -1,6 +1,6 @@
 # Reference: `delegate run`
 
-`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. A ticket that passes all of these is in the built state.
+`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose blocker failed is skipped, and the independent tickets still run.
 
@@ -30,13 +30,34 @@ A step has these parts:
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the report from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond `base-branch`.
-5. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate.
+5. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a continuation. See [the continuation](#the-continuation).
 6. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
 7. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
 
 The engine does not trust the report for the gates. A gate that is red is recorded red when the report says `gates_green` is true.
 
 The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step.
+
+## The continuation
+
+A specialist that ends `capped` or `failed`, or whose gates are red, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
+
+- A specialist ends `capped` or `failed` when the adapter result has the end state `capped` or `failed`, or an exit status other than 0. The engine does not read the report of that run.
+- A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0.
+- A report that is missing, is not valid, or has a status other than `committed` fails the step. It does not start a continuation.
+- The continuation brief holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. The specialist continues from these commits, and adds each change as a new commit.
+- A new agent has no context, so its brief is the full specialist brief with the continuation section added.
+- The tier and the model are those of the first specialist run.
+- The engine journals `continuation` before each continuation, with the count, the trigger, the commits, and the reason.
+
+One count covers the three triggers. Each mode has a continuation limit:
+
+| Mode | Limit |
+|---|---|
+| `assure` | 2 |
+| `economy` | 1 |
+
+When the specialist is not done after the limit, the step fails. The journal records `continuation-limit` with the count, and the reason of the step ends with `the continuation limit of <n> is reached`. The branch and the worktree stay, with all commits. The fix-up specialist of an `assure` round is not continued: its failure fails the step.
 
 ## The skip rule
 
@@ -117,6 +138,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
+| `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, or its gates were still red. `<reason>` is the reason of the last run. |
 | `rebase onto <run branch> stopped with a conflict in <files>` | The rebase of the ticket branch onto the run branch had a conflict. The engine aborted the rebase. |
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
 | `branch ... holds no commit beyond <run branch> after the rebase; ...` | The run branch holds the work of the ticket already, so no commit is left. |
@@ -199,6 +221,8 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
+| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`brief`), `resume_session` (`null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
+| `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
@@ -216,6 +240,6 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 ## Limits of this version
 
 - Every ticket branch starts from `base-branch`, not from the work of the tickets that block it. In `assure` mode, the rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
-- The engine does not continue a capped or failed specialist, and does not resume a run.
+- The engine does not resume a run.
 - `economy` mode does not verify, and it does not move the run branch.
 - A gate has no time limit.

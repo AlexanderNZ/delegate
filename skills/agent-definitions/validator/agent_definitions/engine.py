@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import adapters
 from .adapters import Adapter, AdapterRequest
-from .brief import BriefError, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
+from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
 from .journal import Journal
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
 from .tiers import Tiers
@@ -55,6 +55,12 @@ GATE_OUTPUT_TAIL_CHARS: int = 4000
 # A REJECT in `assure` mode starts at most this many fix-up rounds. Each round
 # is one fix-up commit and one fresh verifier. The limit is the same for every ticket.
 FIXUP_ROUND_LIMIT: int = 2
+
+# The specialist of a ticket continues in the same worktree at most this many
+# times after it ends capped or failed, or after the gates are red. One count
+# covers all three causes. The limit depends on the mode: `assure` pays for
+# more assurance, `economy` for fewer tokens.
+CONTINUATION_LIMIT: dict[str, int] = {"assure": 2, "economy": 1}
 
 BUILT: str = "built"
 FAILED: str = "failed"
@@ -199,36 +205,70 @@ def _build_ticket(
         "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
         base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
     )
-    result = adapter.run(AdapterRequest(
-            stack.specialist, model,
-            specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path),
-            worktree, report_path,
-        ))
-    journal.append(
-        "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
-        session_id=result.session_id, event_stream=str(result.event_stream),
-    )
-    if result.end_state != adapters.FINISHED or result.exit_status != 0:
-        return f"the specialist ended {result.end_state} with exit status {result.exit_status}"
-    try:
-        report = read_specialist_report(report_path, ticket.id)
-    except ReportError as error:
-        journal.append("report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error))
-        return str(error)
-    journal.append("report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None)
-    if report.status != "committed":
-        detail = f": {report.blocked_reason}" if report.blocked_reason else ""
-        return f"the specialist reported status {report.status!r}{detail}"
-    if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
-        return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
-    red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)]
-    if red:
-        return "gates red: " + "; ".join(red)
+    reason = _build_with_continuations(workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal)
+    if reason:
+        return reason
     if workflow.mode == "assure":
         step = _Step(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
         reason = _rebase_onto_run_branch(step)
         return reason if reason else _verify_ticket(step)
     return None
+
+
+def _build_with_continuations(
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, model: str, repo: Path, worktree: Path, branch: str,
+    report_path: Path, journal: Journal,
+) -> str | None:
+    """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
+
+    The specialist continues when it ends capped or failed. Return None when
+    the report is valid and the branch holds green work, or the reason the step
+    fails. A report that is missing, is invalid, or does not say committed
+    fails the step with no continuation. After `CONTINUATION_LIMIT` continuations
+    the step fails, and the journal records the count.
+    """
+    stack = workflow.stacks[ticket.stack]
+    limit = CONTINUATION_LIMIT[workflow.mode]
+    prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
+    continuations = 0
+    while True:
+        result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path))
+        journal.append(
+            "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
+            session_id=result.session_id, event_stream=str(result.event_stream),
+        )
+        if result.end_state != adapters.FINISHED or result.exit_status != 0:
+            trigger = adapters.CAPPED if result.end_state == adapters.CAPPED else adapters.FAILED
+            reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
+        else:
+            try:
+                report = read_specialist_report(report_path, ticket.id)
+            except ReportError as error:
+                journal.append("report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error))
+                return str(error)
+            journal.append("report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None)
+            if report.status != "committed":
+                detail = f": {report.blocked_reason}" if report.blocked_reason else ""
+                return f"the specialist reported status {report.status!r}{detail}"
+            if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
+                return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
+            red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)]
+            if not red:
+                return None
+            trigger = "gates-red"
+            reason = "gates red: " + "; ".join(red)
+        if continuations == limit:
+            journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
+            return f"{reason}; the continuation limit of {limit} is reached"
+        continuations += 1
+        commits = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
+        journal.append(
+            "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger, mode="brief",
+            resume_session=None, commits=commits, reason=reason,
+        )
+        prompt = continuation_brief(
+            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason, resumed=False
+        )
 
 
 def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
