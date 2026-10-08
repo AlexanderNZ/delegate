@@ -252,13 +252,13 @@ The engine finds a built-in adapter by name. Make these changes in the package `
 3. Add the name to `ADAPTERS` in `workflow.py`, so a workflow can name it.
 4. Add a column that `tier_column` names to each tier in `tiers.toml`.
 
-Then check the model. A test runs `delegate run` with the stand-in command and a workflow that names the adapter, and reads the model from the call of the stand-in. It checks that the model is the model of the tier column for the mode. See `tests/test_run_opencode.py` in the repository for the pattern.
+Then check the model. A test runs `delegate run` with the stand-in command and a workflow that names the adapter. It reads the model from the call of the stand-in. The model must be the model of the tier column for the mode. See `tests/test_run_opencode.py` in the repository for the pattern.
 
 A user who cannot change the kit can still add a column in a tier file of their own. See [how to point the tiers at a gateway](point-the-tiers-at-a-gateway.md).
 
 ### 5. Run the harness for real, and write the reference page
 
-The recorded streams show that the adapter reads them. They do not show that the real harness gives them. Run the adapter once against the real harness on a real machine. Put the version of the harness and the date in the reference page of the adapter, with the command, the end states, the recorded streams, and the result of the run. Link the page from the README. See [the OpenCode adapter reference](../reference/opencode-adapter.md) for a page of this kind.
+The recorded streams show that the adapter reads them. They do not show that the real harness gives them. Run the adapter once against the real harness on a real machine. Write the reference page of the adapter. Put in it the version of the harness, the date, the command, the end states, the recorded streams, and the result of the run. Link the page from the README. See [the OpenCode adapter reference](../reference/opencode-adapter.md) for a page of this kind.
 
 ## The contract-test pattern
 

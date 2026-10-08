@@ -93,6 +93,6 @@ git merge --ff-only run/chain
 
 A REJECT starts one fix-up round. The fix-up is a new commit on the end of the chain. A fresh verifier then checks the new commit and the findings. A second REJECT fails the stack, and the run branch does not move.
 
-The verifier starts each finding with the id of its ticket in square brackets, for example `[2] The header row is missing.` The engine uses the label to tell you which ticket a finding is about. See [the chain verification](../reference/run.md#the-chain-verification) for the rules of the finding map.
+The verifier starts each finding with the id of its ticket in square brackets. For example, the finding `[2] The header row is missing.` is about ticket `2`. The engine uses the label to name the ticket. See [the chain verification](../reference/run.md#the-chain-verification) for the rules of the finding map.
 
 To follow a run, or to go on after an interruption, see [how to watch and resume a run](watch-and-resume-a-run.md).
