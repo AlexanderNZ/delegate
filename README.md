@@ -8,7 +8,7 @@
 uv tool install "git+https://github.com/AlexanderNZ/delegate#subdirectory=skills/agent-definitions/validator"
 ```
 
-This puts `agent-definitions` and `verifier-brief` on your PATH. The kit needs Python 3.11 or later and git. Nix is optional.
+This puts three commands on your PATH: `delegate`, `agent-definitions` and `verifier-brief`. `delegate` is the umbrella command. Its subcommands `render`, `validate`, `bootstrap`, `brief full` and `brief fixup` take the same arguments as the standalone commands and give the same result. `agent-definitions` is the standalone renderer and validator, and `verifier-brief` is the standalone brief generator. The kit needs Python 3.11 or later and git. Nix is optional.
 
 The two skills are plain Markdown directories: `skills/agent-delegation/` and `skills/agent-definitions/`. Copy or link them into a directory that your harness reads skills from.
 

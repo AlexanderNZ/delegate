@@ -7,8 +7,11 @@ each case also pins one literal from the specification of the command, so a
 pair of commands that fail alike cannot pass.
 """
 
+import importlib
 import shutil
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -258,3 +261,46 @@ def test_a_tiers_option_before_brief_is_a_usage_error(capsys):
     assert code == 2
     assert out == ""
     assert "--tiers" in err
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+README = Path(__file__).resolve().parents[4] / "README.md"
+COMMANDS = ("delegate", "agent-definitions", "verifier-brief")
+
+
+def declared_scripts() -> dict[str, str]:
+    return tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
+
+
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        ("delegate", delegate.main),
+        ("agent-definitions", cli.main),
+        ("verifier-brief", brief.main),
+    ],
+)
+def test_the_package_installs_each_command_to_its_entry_point(command, target):
+    # `uv tool install` puts on PATH the commands that [project.scripts] declares.
+    module_name, _, attribute = declared_scripts()[command].partition(":")
+    assert getattr(importlib.import_module(module_name), attribute) is target
+
+
+def test_the_package_installs_exactly_the_three_commands():
+    assert sorted(declared_scripts()) == sorted(COMMANDS)
+
+
+def test_the_module_entry_point_lists_the_subcommands():
+    r = subprocess.run(
+        [sys.executable, "-m", "agent_definitions.delegate", "--help"], capture_output=True, text=True
+    )
+    assert r.returncode == 0
+    assert "bootstrap" in r.stdout and "brief" in r.stdout
+
+
+@pytest.mark.skipif(not README.is_file(), reason="the README is outside the package source, as in a Nix build")
+def test_the_readme_install_section_names_all_three_commands():
+    text = README.read_text()
+    install = text.split("## Install", 1)[1].split("\n## ", 1)[0]
+    for command in COMMANDS:
+        assert f"`{command}`" in install, f"the README install section must name {command}"

@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-definitions"
 version = "0.1.0"
-description = "Render specialist-verifier agent pairs for Claude Code and OpenCode from one declaration, and validate rendered agent files."
+description = "Render specialist-verifier agent pairs for Claude Code and OpenCode from one declaration, validate rendered agent files, and build verifier briefs."
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6"]
 
 [project.scripts]
+delegate = "agent_definitions.delegate:main"
 agent-definitions = "agent_definitions.cli:main"
 verifier-brief = "agent_definitions.brief:main"
 
