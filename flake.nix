@@ -43,8 +43,6 @@
             ]))
             pkgs.git
             pkgs.bash
-            # The guard tests run the rendered hooks, which call jq.
-            pkgs.jq
           ];
         };
       });

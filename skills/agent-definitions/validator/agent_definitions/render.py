@@ -96,6 +96,16 @@ def _temp_path_pattern() -> str:
     return "|".join(f"'{p}'*" if "$" in p else f"{p}*" for p in VERIFIER_TEMP_PATH_PREFIXES)
 
 
+#: The shell text that prints the command of a hook input from stdin. It prints
+#: nothing when the input holds no command string, and the verifier guard then
+#: fails closed. A key that is absent, or a body that is not JSON, ends python3
+#: with a non-zero status and no output, which has the same result.
+HOOK_COMMAND_READER = (
+    "python3 -c 'import json,sys; c=json.load(sys.stdin)[\"tool_input\"][\"command\"]; "
+    "sys.stdout.write(c if isinstance(c, str) else \"\")'"
+)
+
+
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
@@ -134,8 +144,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     rejects "..", it does not resolve it, because it reads the command as text
     and a resolution needs the file system.
 
-    The guard fails closed. No jq, no command text, or a shell without the bash
-    string operators all end at exit 2, which blocks the call.
+    The guard fails closed. No python3, no command text, or a shell without the
+    bash string operators all end at exit 2, which blocks the call.
     """
     quote = '\'"\'*|"\'"*'  # a leading double quote or a leading single quote
     redirect = "A redirection writes outside a temp directory."
@@ -213,8 +223,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             f'istmp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
-            'cmd=$(jq -r ".tool_input.command // empty" 2>/dev/null)',
-            '[ -n "$cmd" ] || { echo "verifier guard: no command text, or jq is absent. '
+            f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",
+            '[ -n "$cmd" ] || { echo "verifier guard: no command text, or python3 is absent. '
             'The guard fails closed." >&2; exit 2; }',
             # A tab becomes a space first: the prefix strips cut at a space,
             # and a tab between words must not hide a flag or a write.
@@ -252,11 +262,16 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 
 # A PreToolUse hook on Bash. Exit 2 blocks the call and returns stderr to the
 # agent. A disallowedTools entry with a specifier would remove Bash entirely,
-# so the block is a hook. Fail-open when jq is absent: jq exits 127, the &&
-# chain skips, and the command exits 0.
+# so the block is a hook. The hook reads the command with python3, which the
+# kit already requires, so it needs no jq. The reader exits 3 for a push and 0
+# for any other command. Any other status ends at exit 2: the input holds no
+# command text, or python3 is absent (status 127). The hook fails closed.
 GIT_PUSH_HOOK = (
-    "jq -e '(.tool_input.command // \"\") | test(\"\\\\bgit(\\\\s+-C\\\\s+\\\\S+)?\\\\s+push\\\\b\")' "
-    ">/dev/null && { echo 'git push is blocked for specialist agents. Report the branch to the coordinator.' >&2; exit 2; }; exit 0"
+    r'''python3 -c 'import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"]; '''
+    r'''sys.exit(3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b", c) else 0)' 2>/dev/null; '''
+    "case $? in 0) exit 0 ;; "
+    "3) echo 'git push is blocked for specialist agents. Report the branch to the coordinator.' >&2; exit 2 ;; "
+    "*) echo 'specialist push guard: no command text, or python3 is absent. The guard fails closed.' >&2; exit 2 ;; esac"
 )
 
 

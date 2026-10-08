@@ -80,7 +80,7 @@ Exit conditions. `full` exits 1 when the three-dot diff is empty. `fixup` exits 
 
 Why a command and not a prose instruction: the mode of the brief sets the mode of the verifier (below), and the diff form decides what the verifier reads. Both are easy to get wrong by hand and impossible to see afterwards.
 
-The package lives in `validator/`. Its pytest suite runs in `nix flake check` as the `agent-definitions` check. The suite needs `jq` and `git`; both are `nativeCheckInputs` in `package.nix`.
+The package lives in `validator/`. Its pytest suite runs in `nix flake check` as the `agent-definitions` check. The suite needs `git`, a `nativeCheckInput` in `package.nix`. The guard tests run the rendered hooks with `python3` as the only tool on `PATH`, so the suite needs no `jq`.
 
 ## Bootstrap
 
@@ -159,7 +159,7 @@ Why the hook and not a denylist: a `disallowedTools: Bash(git push *)` entry rem
 
 Read-only means "no write outside a temp directory". It does not mean "no shell". A verifier that cannot run a command cannot run the gates, and the coordinator then does the verifier's work.
 
-On Claude Code the verifier gets `tools: Read, Grep, Glob, Bash` and a `PreToolUse` hook on `Bash`. The hook is one bash line. It reads `.tool_input.command` with jq, turns each tab into a space, divides the command at `&&`, `||`, `;` and `|`, and tests each segment. A segment that is not on the list exits 2, and the message names that segment. It fails closed: no jq, no command text, or a shell without the bash string operators all end at exit 2. The hook carries the marker `# agent-definitions:verifier-guard`, which is what the validator looks for.
+On Claude Code the verifier gets `tools: Read, Grep, Glob, Bash` and a `PreToolUse` hook on `Bash`. The hook is one bash line. It reads `.tool_input.command` with `python3`, turns each tab into a space, divides the command at `&&`, `||`, `;` and `|`, and tests each segment. A segment that is not on the list exits 2, and the message names that segment. It fails closed: no `python3`, no command text, or a shell without the bash string operators all end at exit 2. The hook carries the marker `# agent-definitions:verifier-guard`, which is what the validator looks for.
 
 | Group | Commands |
 |---|---|
@@ -235,7 +235,7 @@ The kit is `agent-delegation/` and `agent-definitions/` with its `validator/` pa
 
 - No harness composes agent files. A project-tier agent is a complete file, never an extension of a global one. Claude Code and Codex replace on a name collision; OpenCode merges per key, which this renderer does not rely on.
 - Docs cannot be attached by path. Put reference material in a skill and list it in `skills`; on OpenCode, name it in the prompt.
-- The git-push hook needs `jq` on the agent's PATH. Without it the hook exits 0 and blocks nothing. The verifier guard is the opposite: it denies when jq is absent.
+- Both Claude Code guards read the hook input with `python3`, which the kit already requires; they need no `jq`. Both fail closed: with no `python3` on the agent's PATH, or with input that holds no command text, each guard exits 2 and blocks the call ([ADR 0005](docs/adr/0005-guards-read-the-hook-input-with-python3.md)).
 - The verifier guard reads the command as text. `python3`, `bash -c`, `env`, and `find` are on the allow list because the gates and the reviews need them, and each of them can write through the guard. The guard does not parse Python and it does not parse a nested shell. This is a contract for the verifier, not a sandbox.
 - The verifier guard divides the command at `&&`, `||`, `;` and `|` without respect for quoting. A separator inside a quoted argument divides the command, and the parts that are not commands are denied. The guard fails closed here.
 - The guard uses the bash string operators. Measured 2026-09-19: under `bash` and under macOS `/bin/sh` it behaves as the table says; under `zsh` it also denies a temp write, because zsh does not divide the segment into words; under `dash` it exits 2 on a syntax error. Each difference is a deny, so the guard stays fail-closed whichever shell runs it.

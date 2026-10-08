@@ -1,9 +1,8 @@
 # The agent-definitions renderer and validator as a Nix-built Python
 # application. pyyaml is the one runtime dependency: agent frontmatter is
 # YAML, and a hand-rolled parser would validate a different language from the
-# one the harness reads. jq is a check input because the tests execute the
-# rendered git-push hook, which is a jq one-liner, against sample hook input.
-# git is a check input because the verifier-brief tests build a scratch
+# one the harness reads. The rendered guards read their hook input with
+# python3, so the check needs no jq. git is a check input because the verifier-brief tests build a scratch
 # repository and read real diffs from it.
 #
 # neutralityDenylist is the path of a private denylist file. With it, the
@@ -13,7 +12,6 @@
 {
   lib,
   python3,
-  jq,
   git,
   neutralityDenylist ? null,
 }:
@@ -38,7 +36,6 @@ python3.pkgs.buildPythonApplication {
 
   nativeCheckInputs = [
     python3.pkgs.pytestCheckHook
-    jq
     git
   ];
   pythonImportsCheck = [ "agent_definitions" ];
