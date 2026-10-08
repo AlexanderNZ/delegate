@@ -1,4 +1,4 @@
-"""The run reference documents the journal, the specialist report and the adapter interface.
+"""The run reference documents the journal, the specialist and verdict reports and the adapter interface.
 
 The reference is outside the package source, as the README is, so a Nix build
 that copies only the package skips these cases with a reason.
@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from agent_definitions import adapters, delegate
-from agent_definitions.reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES
+from agent_definitions.reports import (
+    SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
+)
 
 from .support import ScriptedAdapter, make_repo, read_journal
 
@@ -26,6 +28,7 @@ outside_the_package = pytest.mark.skipif(
     "name",
     [
         *SPECIALIST_REQUIRED, *SPECIALIST_OPTIONAL, *SPECIALIST_STATUSES,
+        *VERIFIER_REQUIRED, *VERIFIER_VERDICTS, "criterion", "evidence",  # the verdict report
         "agent", "model", "prompt", "cwd", "report_path",  # the request of an adapter
         "exit_status", "end_state", "session_id", "event_stream",  # its result
         "finished", "failed", "capped", "tier_column",

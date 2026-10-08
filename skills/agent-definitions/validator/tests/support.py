@@ -74,13 +74,37 @@ def valid_report(ticket: str, branch: str, head_sha: str, **changes: object) -> 
     return report
 
 
+def valid_verdict(verdict: str = "ACCEPT", findings: list[str] | None = None, **changes: object) -> dict[str, object]:
+    """A verifier report that satisfies the schema. `changes` replaces fields."""
+    report: dict[str, object] = {
+        "mode": "full",
+        "verdict": verdict,
+        "criteria": [{"criterion": "The export command writes a CSV file.", "evidence": "feature.txt holds the output."}],
+        "gate_output": "test -f feature.txt: exit 0",
+        "findings": findings if findings is not None else ([] if verdict == "ACCEPT" else ["feature.txt is not a CSV file."]),
+        "unverified": [],
+    }
+    report.update(changes)
+    return report
+
+
 @dataclass
 class ScriptedAdapter:
     """An adapter that does what a test tells it to, in the working directory it receives.
 
-    On each call it writes `files` to the working directory, commits them, and
-    writes the report (valid, or the `report` text you give, or none). `calls`
-    holds every request it received.
+    A request for an agent whose name ends in `verifier` is a verifier run. All
+    other requests are specialist runs.
+
+    On a specialist call it writes `files` to the working directory, commits
+    them, and writes the report (valid, or the `report` text you give, or none).
+    `calls` holds every specialist request it received.
+
+    On a verifier call it writes `verifier_files` to the working directory (a
+    verifier that breaks its copy), and writes the verdict report: `verdict` with
+    `verdict_findings`, or the `verifier_report_text` you give, or none.
+    `verifier_calls` holds every verifier request. `verifier_heads` and
+    `verifier_remotes` hold the HEAD commit and the remotes of the working
+    directory at the time of each call.
     """
 
     tier_column: str = "claude-code"
@@ -92,8 +116,20 @@ class ScriptedAdapter:
     exit_status: int = 0
     session_id: str | None = "session-1"
     calls: list[AdapterRequest] = field(default_factory=list)
+    verdict: str = "ACCEPT"
+    verdict_findings: list[str] | None = None
+    verifier_report_text: str | None = None
+    write_verifier_report: bool = True
+    verifier_files: dict[str, str] = field(default_factory=dict)
+    verifier_end_state: str = "finished"
+    verifier_exit_status: int = 0
+    verifier_calls: list[AdapterRequest] = field(default_factory=list)
+    verifier_heads: list[str] = field(default_factory=list)
+    verifier_remotes: list[list[str]] = field(default_factory=list)
 
     def run(self, request: AdapterRequest) -> AdapterResult:
+        if request.agent.endswith("verifier"):
+            return self._run_verifier(request)
         self.calls.append(request)
         head = git(request.cwd, "rev-parse", "HEAD").strip()
         if self.files:
@@ -118,6 +154,22 @@ class ScriptedAdapter:
         stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
         stream.write_text('{"type":"result"}\n')
         return AdapterResult(self.exit_status, self.end_state, self.session_id, stream)
+
+    def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
+        self.verifier_calls.append(request)
+        self.verifier_heads.append(git(request.cwd, "rev-parse", "HEAD").strip())
+        self.verifier_remotes.append(git(request.cwd, "remote").split())
+        for name, content in self.verifier_files.items():
+            (request.cwd / name).write_text(content)
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.write_verifier_report:
+            text = self.verifier_report_text
+            if text is None:
+                text = json.dumps(valid_verdict(self.verdict, self.verdict_findings))
+            request.report_path.write_text(text)
+        stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
+        stream.write_text('{"type":"result"}\n')
+        return AdapterResult(self.verifier_exit_status, self.verifier_end_state, "verifier-session", stream)
 
 
 def read_journal(stdout: str) -> list[dict[str, object]]:

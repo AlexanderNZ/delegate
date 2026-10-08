@@ -349,7 +349,9 @@ blocked-by = ["a"]
 def test_tickets_are_built_in_dependency_order_each_from_the_base_branch(tmp_path, capsys, scripted):
     # The file lists the dependent ticket b first. The plan must still build a first.
     head, a_ticket, b_ticket = WORKFLOW.split("[[tickets]]")[0], WORKFLOW.split("[[tickets]]")[1], TWO_TICKETS.split("[[tickets]]")[2]
-    repo = make_repo(tmp_path, head + "[[tickets]]" + b_ticket + "[[tickets]]" + a_ticket)
+    workflow = head + "[[tickets]]" + b_ticket + "[[tickets]]" + a_ticket
+    # `economy` mode does not verify, so the second ticket needs no fast-forward of the run branch.
+    repo = make_repo(tmp_path, workflow.replace('mode = "assure"', 'mode = "economy"'))
 
     code, out, err = run(repo, capsys)
 

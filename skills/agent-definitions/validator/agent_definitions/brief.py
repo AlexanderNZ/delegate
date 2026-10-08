@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES
+from .reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS
 
 DELEGATION_DOC = Path("docs") / "agents" / "delegation.md"
 FINDINGS_HEADING = "## Findings under verification"
@@ -191,22 +191,35 @@ def _sections(*pairs: tuple[str, str]) -> str:
 
 
 def full_brief(
-    repo: str | Path, branch: str, base: str, task: str, stacks: Sequence[str] = ()
+    repo: str | Path,
+    branch: str,
+    base: str,
+    task: str,
+    stacks: Sequence[str] = (),
+    gate_commands: Sequence[str] | None = None,
 ) -> str:
     """The first-pass brief: the task, the three-dot diff, and the gates.
 
     The diff is the three-dot form. A two-dot diff reports the base's later
     commits as removals, and the verifier reads those as deletions the
     specialist never made.
+
+    The gates come from the delegation doc of the repository. `gate_commands`
+    replaces them: the workflow engine knows the gate commands of the stack,
+    and a repository need not hold a delegation doc.
     """
     command = f"git diff {base}...{branch}"
     diff = _git(repo, "diff", f"{base}...{branch}")
     if not diff.strip():
         raise BriefError(f"{command} is empty. The branch holds no change to verify.")
+    if gate_commands is None:
+        gates = read_gates(repo, _changed_files(repo, f"{base}...{branch}"), stacks)
+    else:
+        gates = _bash("\n".join(gate_commands))
     return _sections(
         ("## Task", task),
         ("## Diff", f"`{command}`\n\n" + _fenced_diff(diff)),
-        ("## Gates", read_gates(repo, _changed_files(repo, f"{base}...{branch}"), stacks)),
+        ("## Gates", gates),
     )
 
 
@@ -283,6 +296,32 @@ def specialist_brief(
         ("## Gates", "The engine runs these gates itself after you finish.\n\n" + _bash("\n".join(gates))),
         ("## Report", report),
     )
+
+
+def verifier_run_brief(
+    copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path
+) -> str:
+    """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
+
+    The full brief comes from `full_brief`, so it holds the task, the diff and
+    the gates, and never the specialist's report. `copy` is the temporary copy
+    of the branch that the engine prepared.
+    """
+    working_copy = (
+        f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
+        "You may break the copy to prove a test red. Change no file outside it. Never push."
+    )
+    fields = ", ".join(f"`{name}`" for name in VERIFIER_REQUIRED)
+    report = (
+        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
+        "`mode` is `full`. `verdict` is one of " + ", ".join(f"`{v}`" for v in VERIFIER_VERDICTS) + ". "
+        "Each entry of `criteria` is an object with the strings `criterion` and `evidence`. "
+        "`gate_output` holds the output of the gates that you ran. "
+        "A REJECT lists at least one finding in `findings`. "
+        "`unverified` lists what you could not verify."
+    )
+    brief = full_brief(copy, branch, base, task, gate_commands=gates)
+    return brief + "\n" + _sections(("## Working copy", working_copy), ("## Report", report))
 
 
 def main(argv: list[str] | None = None) -> int:

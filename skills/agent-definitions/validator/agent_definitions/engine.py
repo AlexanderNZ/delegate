@@ -4,27 +4,38 @@ For each ticket the engine makes a worktree from the base branch, spawns the
 stack's specialist through the adapter, checks the specialist's report, runs
 the stack's gates itself, and records each event in the journal.
 
+In `assure` mode the engine then verifies the built branch. It makes a
+temporary copy of the branch, builds a full verifier brief with the brief
+generator, spawns the stack's verifier on the verifier tier, and checks the
+verdict report. On ACCEPT the engine fast-forwards the run branch to the
+verified commit. On REJECT the run branch stays as it is, and the run ends.
+
 Standard library and git through subprocess only.
 """
 
 from __future__ import annotations
 
 import secrets
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import adapters
 from .adapters import Adapter, AdapterRequest
-from .brief import specialist_brief
+from .brief import BriefError, specialist_brief, verifier_run_brief
 from .journal import Journal
-from .reports import ReportError, read_specialist_report
+from .reports import ReportError, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Ticket, Workflow, plan_order
 
 # The tier of the specialist role in each mode, before a workflow override.
 SPECIALIST_TIER: dict[str, str] = {"assure": "strong", "economy": "standard"}
+
+# The tier of the verifier role, before a workflow override. It is the same in every mode.
+VERIFIER_TIER: str = "verifier"
 
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
@@ -61,13 +72,16 @@ def _new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
 
 
-def _specialist_model(workflow: Workflow, tiers: Tiers, column: str) -> tuple[str, str]:
-    """The tier of the specialist and its model from the adapter's own tier column."""
-    tier = workflow.tier_overrides.get("specialist", SPECIALIST_TIER[workflow.mode])
+def _role_model(workflow: Workflow, tiers: Tiers, column: str, role: str) -> tuple[str, str]:
+    """The tier of a role and its model from the adapter's own tier column."""
+    default = VERIFIER_TIER if role == "verifier" else SPECIALIST_TIER[workflow.mode]
+    tier = workflow.tier_overrides.get(role, default)
     try:
         return tier, tiers.model_for(tier, column)
     except KeyError:
         raise EngineError(f"the tier table has no {column!r} column for tier {tier!r}") from None
+    except ValueError:
+        raise EngineError(f"the tier table has no tier {tier!r}, which the {role} needs") from None
 
 
 def _branch_exists(repo: Path, name: str) -> bool:
@@ -101,7 +115,9 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     repo = Path(_git(repo, "rev-parse", "--show-toplevel"))
     state_dir = (repo / _git(repo, "rev-parse", "--git-common-dir")).resolve() / "delegate"
     _check_branches(workflow, repo)
-    tier, model = _specialist_model(workflow, tiers, adapter.tier_column)
+    needed = ("specialist", "verifier") if workflow.mode == "assure" else ("specialist",)
+    roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
+    _git(repo, "branch", workflow.run_branch, workflow.base_branch)
 
     run_id = _new_run_id()
     journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
@@ -114,7 +130,7 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     failed: list[str] = []
     failures: dict[str, str] = {}
     for ticket in order:
-        reason = _build_ticket(workflow, ticket, adapter, model, tier, repo, state_dir, run_id, journal)
+        reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
         if reason:
             failed.append(ticket.id)
@@ -126,10 +142,14 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
 
 
 def _build_ticket(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, model: str, tier: str,
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, roles: dict[str, tuple[str, str]],
     repo: Path, state_dir: Path, run_id: str, journal: Journal,
 ) -> str | None:
-    """Build one ticket. Return None when it is built, or the reason it failed."""
+    """Build one ticket. Return None when it is built, or the reason it failed.
+
+    In `assure` mode a ticket is built only when its verifier accepts it.
+    """
+    tier, model = roles["specialist"]
     stack = workflow.stacks[ticket.stack]
     branch = _ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
@@ -165,6 +185,93 @@ def _build_ticket(
     red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal)]
     if red:
         return "gates red: " + "; ".join(red)
+    if workflow.mode == "assure":
+        return _verify_ticket(workflow, ticket, adapter, roles["verifier"], repo, state_dir, run_id, journal)
+    return None
+
+
+def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
+    """Make a self-contained clone at `copy` that holds the base and the branch, with the branch checked out.
+
+    The clone has its own git directory and no remote, so the verifier can break
+    it, and cannot reach the real repository through it.
+    """
+    _git(repo, "clone", "-q", "--no-checkout", str(repo), str(copy))
+    _git(copy, "branch", base, f"origin/{base}")
+    _git(copy, "checkout", "-q", "-b", branch, f"origin/{branch}")
+    _git(copy, "remote", "remove", "origin")
+
+
+def _verify_ticket(
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, role: tuple[str, str],
+    repo: Path, state_dir: Path, run_id: str, journal: Journal,
+) -> str | None:
+    """Verify the built branch of a ticket blind. Return None on ACCEPT, or the reason the step fails.
+
+    The verifier works in a temporary copy and gets the task, the diff and the
+    gates, never the report of the specialist. On ACCEPT the run branch moves
+    to the commit that the verifier saw, and only by fast-forward.
+    """
+    tier, model = role
+    stack = workflow.stacks[ticket.stack]
+    branch = _ticket_branch(workflow, ticket)
+    verified = _git(repo, "rev-parse", f"refs/heads/{branch}")
+    evidence = state_dir / "runs" / run_id / "verifier" / ticket.id
+    scratch = Path(tempfile.mkdtemp(prefix="delegate-verify-"))
+    try:
+        copy = scratch / "copy"
+        report_path = scratch / "verdict.json"
+        try:
+            _prepare_copy(repo, workflow.run_branch, branch, copy)
+            prompt = verifier_run_brief(copy, branch, workflow.run_branch, ticket.text, stack.gates, report_path)
+        except (EngineError, BriefError) as error:
+            return f"the verifier could not start: {error}"
+        journal.append(
+            "verify-start", ticket=ticket.id, agent=stack.verifier, tier=tier, model=model, commit=verified,
+            copy=str(copy),
+        )
+        result = adapter.run(AdapterRequest(stack.verifier, model, prompt, copy, report_path))
+        # The copy goes; the verdict report and the event stream stay as evidence of the run.
+        evidence.mkdir(parents=True)
+        for entry in scratch.iterdir():
+            if entry != copy:
+                shutil.move(str(entry), evidence / entry.name)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    report_path = evidence / report_path.name
+    stream = result.event_stream
+    if stream.is_relative_to(scratch):
+        stream = evidence / stream.relative_to(scratch)
+    journal.append(
+        "verify-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
+        session_id=result.session_id, event_stream=str(stream),
+    )
+    if result.end_state != adapters.FINISHED or result.exit_status != 0:
+        return f"the verifier ended {result.end_state} with exit status {result.exit_status}"
+    try:
+        report = read_verifier_report(report_path, "full")
+    except ReportError as error:
+        journal.append("verify-report", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error))
+        return str(error)
+    journal.append("verify-report", ticket=ticket.id, valid=True, path=str(report_path), reason=None)
+    journal.append(
+        "verdict", ticket=ticket.id, mode=report.mode, verdict=report.verdict, findings=report.findings,
+        unverified=report.unverified, report=str(report_path),
+    )
+    if report.verdict != "ACCEPT":
+        return "the verifier rejected the branch: " + "; ".join(report.findings)
+    run_tip = _git(repo, "rev-parse", f"refs/heads/{workflow.run_branch}")
+    if subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", run_tip, verified], capture_output=True
+    ).returncode != 0:
+        return (
+            f"run branch {workflow.run_branch} cannot fast-forward to {branch}: "
+            f"it holds a commit that {branch} does not hold"
+        )
+    _git(repo, "update-ref", f"refs/heads/{workflow.run_branch}", verified, run_tip)
+    journal.append(
+        "run-branch-advance", ticket=ticket.id, run_branch=workflow.run_branch, from_commit=run_tip, to_commit=verified
+    )
     return None
 
 
