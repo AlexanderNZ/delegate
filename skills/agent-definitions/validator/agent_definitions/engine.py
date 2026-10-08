@@ -314,7 +314,9 @@ def _execute(
             continue
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
-            reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal, prior)
+            reason = _build_ticket(
+                workflow, ticket, adapter, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
+            )
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
             # step unknown, so the run ends here. The journal says why. A verifier
@@ -339,6 +341,21 @@ def _execute(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
     )
     return RunResult(run_id, journal.path, built, failed, failures, skipped)
+
+
+def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str:
+    """The branch that the next ticket starts from.
+
+    In `assure` mode every ticket starts from the base branch. In `economy`
+    mode the tickets form a chain: a ticket starts from the branch of the last
+    ticket before it, in the order of the plan, that was built. A ticket that
+    failed or was skipped is not part of the chain.
+    """
+    if workflow.mode == "economy":
+        previous = [ticket for ticket in order if ticket.id in built]
+        if previous:
+            return _ticket_branch(workflow, previous[-1])
+    return workflow.base_branch
 
 
 def _specialist_done(prior: list[dict[str, object]]) -> bool:
@@ -387,8 +404,12 @@ def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str, hooks_
 def _build_ticket(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, roles: dict[str, tuple[str, str]],
     repo: Path, state_dir: Path, run_id: str, journal: Journal, prior: list[dict[str, object]] | None = None,
+    start_ref: str | None = None,
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed.
+
+    The branch of the ticket starts from `start_ref`, which is the base branch
+    unless the mode chains the tickets (see `_start_ref`).
 
     In `assure` mode a ticket is built only when its verifier accepts it.
 
@@ -401,9 +422,10 @@ def _build_ticket(
     worktree = state_dir / "worktrees" / run_id / ticket.id
     hooks_dir = state_dir / "hooks" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
+    start_ref = start_ref or workflow.base_branch
     if prior is None:
-        base_commit = _git(repo, "rev-parse", workflow.base_branch)
-        _prepare_worktree(repo, worktree, branch, workflow.base_branch, hooks_dir)
+        base_commit = _git(repo, "rev-parse", start_ref)
+        _prepare_worktree(repo, worktree, branch, start_ref, hooks_dir)
         journal.append(
             "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
             base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
@@ -420,12 +442,16 @@ def _build_ticket(
             ).returncode != 0:
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
-        _prepare_worktree(repo, worktree, branch, workflow.base_branch, hooks_dir)
+        base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
+        _prepare_worktree(repo, worktree, branch, start_ref, hooks_dir)
         specialist_done = _specialist_done(prior)
         continuations = sum(1 for e in prior if e["event"] == "continuation")
         verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")
+    # The commits of a ticket are the commits beyond the point where its branch started. In a chain that
+    # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
+    since = base_commit if workflow.mode == "economy" else workflow.base_branch
     reason = _build_with_continuations(
-        workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal,
+        workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
     )
     if reason:
@@ -439,9 +465,12 @@ def _build_ticket(
 
 def _build_with_continuations(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, model: str, repo: Path, worktree: Path, branch: str,
-    report_path: Path, journal: Journal, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
+    report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
+
+    `since` is the commit or branch where the branch of the ticket started: the commits beyond it
+    are the work of this ticket.
 
     A resume sets `spawned` when the journal shows that the specialist finished
     with a valid report, so the first pass does not spawn it again. It sets
@@ -459,7 +488,7 @@ def _build_with_continuations(
     limit = CONTINUATION_LIMIT[workflow.mode]
     prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
     if interrupted and not spawned:
-        so_far = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
+        so_far = _git(worktree, "log", "--format=%H %s", f"{since}..HEAD").splitlines()
         if so_far:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
@@ -495,9 +524,9 @@ def _build_with_continuations(
             if report.status != "committed":
                 detail = f": {report.blocked_reason}" if report.blocked_reason else ""
                 return f"the specialist reported status {report.status!r}{detail}"
-            if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
-                return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
-            stop = _hotspot_stop(journal, ticket.id, stack, worktree, workflow.base_branch, True, PHASE_BUILD, 0)
+            if _git(repo, "rev-list", "--count", f"{since}..{branch}") == "0":
+                return f"branch {branch} holds no commit beyond {since}, though the report says committed"
+            stop = _hotspot_stop(journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
             if stop:
                 return stop
             outcomes = [(gate, *_run_gate_with_output(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
@@ -513,7 +542,7 @@ def _build_with_continuations(
         continuations += 1
         # A harness that gave no session id cannot resume, so a new agent continues.
         resume_session = result.session_id if result is not None and adapter.supports_resume else None
-        commits = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
+        commits = _git(worktree, "log", "--format=%H %s", f"{since}..HEAD").splitlines()
         journal.append(
             "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,

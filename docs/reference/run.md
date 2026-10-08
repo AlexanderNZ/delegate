@@ -31,10 +31,10 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 
 A step has these parts:
 
-1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the push guard in it. See [the guards](#the-guards).
+1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the push guard in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain).
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the report from the report path and check it against the schema.
-4. Check that the branch holds at least one commit beyond `base-branch`.
+4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, or the tip of the previous ticket in `economy` mode).
 5. Compare the changed paths with the hotspot patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
 6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a continuation. See [the continuation](#the-continuation).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
@@ -161,6 +161,16 @@ In `assure` mode, the engine rebases the ticket branch onto the run branch befor
 - A red gate after the rebase fails the step. No verifier starts.
 
 The engine does not rebase in `economy` mode.
+
+## The economy chain
+
+In `economy` mode, the tickets form a chain. Each ticket branch starts from the tip of the previous ticket, so a dependent ticket sees the work it depends on.
+
+- The previous ticket is the last ticket before it, in the order of the plan, that was built. A ticket that failed or was skipped is not part of the chain, and its branch is not a start point.
+- The first ticket starts from `base-branch`.
+- `step-start` records the start commit in `base_commit`. The commits of a ticket are the commits beyond `base_commit`. The check for a commit, the hotspot guard, and the continuation brief all use this point, so the commits of earlier tickets in the chain do not count for a ticket.
+- The specialist runs on the tier `standard`. The `specialist` entry of `tier-overrides` replaces it.
+- The engine does not rebase in `economy` mode.
 
 ## The verifier step
 
