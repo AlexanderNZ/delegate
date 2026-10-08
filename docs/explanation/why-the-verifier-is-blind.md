@@ -30,4 +30,4 @@ The verifier must not break the real worktree. So the engine prepares a temporar
 
 Blind verification is not a proof. The verifier is a model, and it can miss a defect. The engine's checks are only as good as your gates. If your gates do not test a behaviour, a green gate says nothing about it. The kit gives you independent evidence for each merge. It does not give you certainty.
 
-For the engine, the reports and the journal, see [the `delegate run` reference](../reference/run.md).
+For the limits of the guards that keep the verifier read-only, see [the enforcement model and its limits](the-enforcement-model-and-its-limits.md). For the engine, the reports and the journal, see [the `delegate run` reference](../reference/run.md).

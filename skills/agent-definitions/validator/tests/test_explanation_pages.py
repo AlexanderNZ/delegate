@@ -21,6 +21,7 @@ PAGES = [
     "why-each-specialist-has-a-twin.md",
     "the-mode-trade-off.md",
     "prior-art.md",
+    "the-enforcement-model-and-its-limits.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -48,6 +49,15 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("a cheaper mode never means a weaker verifier", r"weaker verifier"),
         ("the trust rules are the same in both modes", r"invariants"),
         ("the page says how to choose", r"choose"),
+    ],
+    "the-enforcement-model-and-its-limits.md": [
+        ("the engine installs a pre-push hook in each worktree", r"pre-push"),
+        ("the engine checks the diff against the hotspot paths", r"hotspot"),
+        ("the engine checks that the real worktree is unchanged after a verifier", r"unchanged"),
+        ("the guards use git, so they hold in every harness", r"every harness"),
+        ("the harness hooks in the agent files are a second guard", r"second guard"),
+        ("the verifier guard is a contract, not a sandbox", r"not a sandbox"),
+        ("the push hook does not stop a push with --no-verify", r"--no-verify"),
     ],
     "prior-art.md": [
         ("the page says when to choose this kit and when to choose another tool", r"choose"),
@@ -138,3 +148,58 @@ def test_each_prior_art_entry_links_its_primary_source_and_gives_the_date_it_was
 def test_the_prior_art_page_holds_one_entry_for_each_tool_of_the_ticket_and_no_other():
     named = [heading for heading in entries("prior-art.md") if heading.strip() != "How to choose"]
     assert sorted(next(name for name in PRIOR_ART if name in heading) for heading in named) == sorted(PRIOR_ART)
+
+
+SKILL = ROOT / "skills" / "agent-definitions" / "SKILL.md"
+
+# One phrase for each limit of the Limits section of the agent-definitions skill, in the order of the skill.
+# The phrase is in the bullet of the skill and in the same item of the enforcement page.
+LIMIT_PHRASES = [
+    "composes agent files",
+    "attached by path",
+    "hook input",
+    "not a sandbox",
+    "without respect for quoting",
+    "bash string operators",
+    "command substitution",
+    "destination-flag",
+    "`..`",
+    "does not examine it",
+    "no `cp` rule",
+    "`getonlycommands`",
+    "no `nix develop` rule",
+    "does not divide a compound command",
+    "workspace trust",
+    "`*git pu" "sh*`",
+    "read order",
+    "turn cap",
+]
+
+
+def limits_of_the_skill() -> list[str]:
+    """The bullets of the Limits section of the skill, lower case."""
+    section = SKILL.read_text().split("\n## Limits\n", 1)[1]
+    return [bullet.lower() for bullet in re.findall(r"^- (.+(?:\n  .+)*)", section, flags=re.MULTILINE)]
+
+
+@outside_the_package
+def test_the_phrases_of_this_test_name_each_limit_of_the_skill_once():
+    bullets = limits_of_the_skill()
+    assert len(bullets) == len(LIMIT_PHRASES), "the skill has a limit that this test does not name, or the reverse"
+    for number, phrase in enumerate(LIMIT_PHRASES):
+        assert phrase in bullets[number], f"limit {number + 1} of the skill does not hold {phrase!r}"
+        assert [b for b in bullets if phrase in b] == [bullets[number]], f"{phrase!r} names more than one limit"
+
+
+@outside_the_package
+def test_the_enforcement_page_lists_every_limit_of_the_skill_in_the_order_of_the_skill():
+    section = entries("the-enforcement-model-and-its-limits.md")["The limits of the guards"]
+    items = [item.lower() for item in re.findall(r"^\d+\. (.+(?:\n   .+)*)", section, flags=re.MULTILINE)]
+    assert len(items) == len(LIMIT_PHRASES)
+    assert [phrase for phrase, item in zip(LIMIT_PHRASES, items) if phrase not in item] == []
+
+
+@outside_the_package
+def test_the_enforcement_page_links_the_limits_of_the_skill_for_the_full_text():
+    text = (EXPLANATION / "the-enforcement-model-and-its-limits.md").read_text()
+    assert "(../../skills/agent-definitions/SKILL.md#limits)" in text
