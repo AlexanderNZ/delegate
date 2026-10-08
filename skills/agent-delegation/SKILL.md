@@ -214,12 +214,15 @@ one stack.
   brief is unavailable, this is a stop-and-report condition. Do not substitute
   generated content for canonical sources. Report the blocker with what you
   need and wait for the coordinator to provide it. This is not a judgment call.
-- **Verifier** (separate agent or /code-review): every specialist branch gets
-  a verifier — no merge without an independent verifier ACCEPT. The coordinator
+- **Verifier** (separate agent or /code-review): no work reaches the run
+  branch or main without an independent verifier ACCEPT. In `assure` mode
+  every specialist branch gets a verifier. In `economy` mode each stack gets
+  one at the end of the chain (see "The workflow engine and its modes"). The coordinator
   MUST NOT review specialist diffs itself; the coordinator reads the verifier's
-  report. Coordinator-authored review is a protocol violation. Spawn the
-  verifier immediately when a specialist reports — do not batch verifier spawns
-  or wait for other specialists to finish. The coordinator rebases the
+  report. Coordinator-authored review is a protocol violation. In `assure`
+  mode, spawn the verifier immediately when a specialist reports — do not batch
+  verifier spawns or wait for other specialists to finish. In `economy` mode,
+  verification waits for the end of the chain on purpose. The coordinator rebases the
   specialist's branch onto current main BEFORE it spawns the verifier. A
   verifier that reviews a pre-rebase diff sees unrelated changes as removals,
   which produces false positives. For tasks with visual specifications, the
@@ -504,6 +507,88 @@ When a verifier REJECTs:
 
 `verifier-brief` ships with the `agent-definitions` package. An install of the
 package puts both commands on PATH.
+
+## The workflow engine and its modes
+
+### When to use the engine
+`delegate run <workflow> --mode assure|economy` runs a chain of tickets for the
+coordinator. The engine makes the worktrees, spawns the specialists, runs the
+gates itself, generates every verifier brief, spawns the blind verifiers,
+scopes each fix-up, and records each step in a journal.
+
+- Use the engine when the work is a set of tickets with blocking edges, and the
+  repository has gates.
+- Delegate by hand, with the rest of this skill, when the work is one task or
+  when you need your own judgement between steps.
+- The engine never merges to the base branch, never pushes, and never closes a
+  ticket. Those actions stay with the coordinator.
+
+### The two modes
+The modes trade cost against feedback time. The table holds every setting that
+differs between them.
+
+| Setting | `assure` | `economy` |
+| --- | --- | --- |
+| Verifier runs | each branch, at once | each stack, at the end of the chain |
+| Branch starts from | base branch | previous ticket |
+| Specialist tier | `strong` | `standard` |
+| Verifier tier | `verifier` | `verifier` |
+| Fix-up rounds | 2 | 1 |
+| Continuations | 2 | 1 |
+
+- `assure` gives up tokens and wall-clock time. It verifies each branch after
+  the rebase and before the next ticket builds on it, so a defect is found
+  early. Choose it when a defect in one ticket would spoil the tickets that
+  follow.
+- `economy` gives up early discovery. A defect in the first ticket shows only
+  at the end of the chain, after the later tickets built on it. A second REJECT
+  fails the run. Choose it for a long chain of small tickets, when the fewest
+  tokens matter more than the feedback time.
+- The verifier tier is the same in both modes. A cheaper mode never means a
+  weaker verifier.
+
+### The invariants of every mode
+These seven rules hold in every mode. No setting in the table changes them.
+
+1. **Blind verifier.** The verifier gets the task and the diff, never the
+   specialist's report.
+2. **Gates outside the specialist.** The engine runs the gates. Gate evidence
+   never comes from the agent that wrote the code.
+3. **No run-branch change without an ACCEPT.** The run branch moves only after a
+   verifier ACCEPT.
+4. **No specialist push.** A pre-push hook in each worktree refuses every push.
+5. **Single-writer hotspots.** Only the coordinator changes a hotspot path. A
+   specialist diff that touches one stops the step.
+6. **A fix-up is a new commit.** A fix-up never amends or rewrites history.
+7. **No lower verifier tier.** A workflow that puts the verifier below the
+   `verifier` tier is refused when it loads.
+
+### Verification at the end of the chain
+Verification at the end of the chain is legal practice in `economy` mode. It is
+not an exception to the protocol. In `economy` mode, one verifier runs for each
+stack, over the commits of that stack, after the last ticket. All seven
+invariants hold: the verifier is blind, the engine runs the gates, and the run
+branch moves only on ACCEPT.
+
+- A finding carries the label of a ticket id in square brackets. A finding with
+  an unknown label is recorded as unmapped, and the engine does not drop it.
+- A REJECT gets one fix-up round: a new commit on the chain tip, and then a
+  fresh scoped verifier.
+- The rule to verify each branch immediately, after the rebase and before the
+  next ticket builds on it, is the `assure` rule. It does not apply to
+  `economy`, and `economy` does not break it.
+
+### Continuation under the engine
+A specialist that ends capped or failed, or leaves red gates, continues in the
+same worktree. The commits that it already made stay.
+
+- If the harness supports resume, the adapter resumes the harness session.
+  Otherwise the engine starts a new agent in the same worktree, with a
+  continuation brief.
+- Each mode has a continuation limit (see the table). At the limit, the step
+  fails.
+- The engine never starts the task again in a new worktree. This is the same
+  rule as for a capped specialist that you run by hand.
 
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a
