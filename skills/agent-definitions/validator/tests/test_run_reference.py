@@ -84,3 +84,29 @@ def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_
         for field in event:
             if field not in ("seq", "time", "event"):
                 assert f"`{field}`" in row, (event["event"], field)
+
+
+@outside_the_package
+@pytest.mark.parametrize("name", ["resume_session", "supports_resume", "continuation", "continuation-limit"])
+def test_the_reference_names_the_resume_field_and_the_continuation_events(name):
+    assert f"`{name}`" in REFERENCE.read_text()
+
+
+@outside_the_package
+def test_the_reference_lists_the_continuation_events_of_a_real_journal_with_each_of_their_fields(tmp_path, capsys):
+    # A resumed continuation, then a second one that reaches the limit of the mode.
+    scripted = ScriptedAdapter(supports_resume=True, outcomes=[("capped", 0)], session_ids=["sess-1", "sess-2", "sess-3"])
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path)
+        delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    events = read_journal(capsys.readouterr().out)
+    assert {"continuation", "continuation-limit"} <= {e["event"] for e in events}
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for event in events:
+        row = rows[f"`{event['event']}`"]
+        for field in event:
+            if field not in ("seq", "time", "event"):
+                assert f"`{field}`" in row, (event["event"], field)

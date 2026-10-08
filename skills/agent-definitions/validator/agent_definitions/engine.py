@@ -231,8 +231,9 @@ def _build_with_continuations(
     limit = CONTINUATION_LIMIT[workflow.mode]
     prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
     continuations = 0
+    resume_session: str | None = None
     while True:
-        result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path))
+        result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, resume_session))
         journal.append(
             "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
             session_id=result.session_id, event_stream=str(result.event_stream),
@@ -264,14 +265,16 @@ def _build_with_continuations(
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
         continuations += 1
+        # A harness that gave no session id cannot resume, so a new agent continues.
+        resume_session = result.session_id if adapter.supports_resume else None
         commits = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
         journal.append(
-            "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger, mode="brief",
-            resume_session=None, commits=commits, reason=reason,
+            "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
+            mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
         )
         prompt = continuation_brief(
-            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason, resumed=False,
-            gate_output=gate_output,
+            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
+            resumed=resume_session is not None, gate_output=gate_output,
         )
 
 

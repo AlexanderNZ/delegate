@@ -45,8 +45,9 @@ A specialist that ends `capped` or `failed`, or whose gates are red, continues i
 - A specialist ends `capped` or `failed` when the adapter result has the end state `capped` or `failed`, or an exit status other than 0. The engine does not read the report of that run.
 - A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0.
 - A report that is missing, is not valid, or has a status other than `committed` fails the step. It does not start a continuation.
-- The continuation brief holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. The specialist continues from these commits, and adds each change as a new commit.
-- A new agent has no context, so its brief is the full specialist brief with the continuation section added.
+- The continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. The specialist continues from these commits, and adds each change as a new commit.
+- If the adapter has `supports_resume` set to true, and the last result has a `session_id`, the engine resumes that session. It sets `resume_session` in the request to the `session_id` of the last result, so each continuation resumes the newest session. The session keeps the context of the first brief, so the prompt holds only the continuation brief. The journal records the mode `resume`.
+- Otherwise the engine starts a new agent, with `resume_session` set to `None`. A new agent has no context, so its prompt is the full specialist brief with the continuation section added. The journal records the mode `brief`. This is also the mode when the adapter supports resume but the harness gave no session id.
 - The tier and the model are those of the first specialist run.
 - The engine journals `continuation` before each continuation, with the count, the trigger, the commits, and the reason.
 
@@ -155,6 +156,8 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 
 An adapter is a Python object. It registers by name with `agent_definitions.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values, but a run with one of them exits 1 until an implementation registers under that name.
 
+The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
+
 The adapter has the attribute `tier_column`, which names the column of the tier table with its models. The engine resolves the model from that column. The specialist tier is `strong` in `assure` mode and `standard` in `economy` mode. The `specialist` entry of `tier-overrides` replaces it. The verifier tier is `verifier` in every mode. The `verifier` entry of `tier-overrides` replaces it.
 
 The adapter has the method `run(request)`.
@@ -166,6 +169,7 @@ The adapter has the method `run(request)`.
 | `prompt` | The specialist brief, or the verifier brief. |
 | `cwd` | The worktree path for the specialist. The path of the temporary copy for the verifier. |
 | `report_path` | The path where the agent writes its report. |
+| `resume_session` | The session id of the last run, when the engine resumes that session for a continuation. Otherwise `None`. The engine sets it only for an adapter with `supports_resume` set to true. |
 
 `run` returns a result.
 
@@ -221,7 +225,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
-| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`brief`), `resume_session` (`null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
+| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
