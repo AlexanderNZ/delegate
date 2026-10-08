@@ -26,6 +26,21 @@ EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
 
+# The condition of each exit code, for the reference page of `watch`, which generates its exit-code table from this
+# table and from `EXIT_CODES`. The links point into that page.
+EXIT_CODE_CONDITIONS: dict[int, str] = {
+    EXIT_SUCCEEDED: "The journal holds `run-end` with the result `built`.",
+    EXIT_FAILED: "The journal holds `run-end` with the result `failed`.",
+    EXIT_ERROR: (
+        "A usage error, a repository with no run, an unknown run id, a journal that is not valid, "
+        "or a `--from` position beyond the end of the journal."
+    ),
+    EXIT_PROBLEM: "An event is a problem. See [the problem events](#the-problem-events).",
+    EXIT_VERDICT: "`--until verdict` is set and the journal holds a `verdict` event.",
+    EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
+    EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
+}
+
 # The meaning of each exit code. The reference page of `watch` lists the same table.
 EXIT_CODES: dict[int, str] = {
     EXIT_SUCCEEDED: "run succeeded",
@@ -80,11 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stall-minutes", type=_positive, metavar="N",
-        help="exit when the journal and the captured event streams have not changed for N minutes",
+        help="exit when the journal and the captured event streams have not changed for N minutes; N is a number greater than 0",
     )
     parser.add_argument(
         "--max-minutes", type=_positive, metavar="N",
-        help="exit after N minutes, before a harness time limit, and print the position to go on from",
+        help="exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0",
     )
     parser.add_argument(
         "--from", type=_position, default=0, metavar="POSITION", dest="from_position",

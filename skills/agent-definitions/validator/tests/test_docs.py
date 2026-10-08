@@ -89,3 +89,34 @@ def test_a_root_with_no_page_is_an_error_that_names_the_page(tmp_path, capsys):
 
     assert code == 2
     assert "docs/reference/run.md" in err
+
+
+@outside_the_package
+def test_the_command_writes_the_options_of_status_and_of_watch_into_their_page(pages, capsys):
+    page = pages / "docs" / "reference" / "status-and-watch.md"
+    page.write_text(page.read_text().replace("| `--poll-seconds N` |", "| `--old-flag` |"))
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = page.read_text()
+    assert (code, err) == (0, "")
+    assert "| `--poll-seconds <poll-seconds>` | How often to read the journal; default 1. |" in text
+    assert "| `--until verdict` |" in text
+    assert "| `[<run-id>]` | The run to show; default is the newest run of the repository. |" in text
+    assert "--old-flag" not in text
+    assert "### The problem events" in text  # the prose after the section stays
+
+
+@outside_the_package
+def test_the_command_writes_the_exit_code_table_of_watch_with_the_reason_and_the_condition_of_each_code(pages, capsys):
+    page = pages / "docs" / "reference" / "status-and-watch.md"
+    page.write_text(page.read_text().replace("| 5 | stall |", "| 5 | wrong reason |"))
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = page.read_text()
+    assert (code, err) == (0, "")
+    assert "| 5 | stall | `--stall-minutes` is set and nothing changed for that time. |" in text
+    assert "| 0 | run succeeded | The journal holds `run-end` with the result `built`. |" in text
+    assert "wrong reason" not in text
+    assert "Code 2 is also the code that `argparse` gives for a usage error." in text  # the prose after the table stays
