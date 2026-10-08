@@ -10,6 +10,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .tiers import Tiers
+
+
+# The roles whose tier a workflow can override.
+ROLES: tuple[str, ...] = ("specialist", "verifier")
+
 
 @dataclass(frozen=True)
 class Stack:
@@ -89,7 +95,26 @@ def _cycles(tickets: list[Ticket]) -> list[list[str]]:
     return found
 
 
-def load_workflow(path: Path) -> Workflow:
+def _tier_override_problems(overrides: dict[str, str], tiers: Tiers) -> list[str]:
+    """One message for each override whose role or value is not valid.
+
+    A value must be a tier name of the table. A model identifier is a different
+    thing, and the message says so: the workflow names strengths, never models.
+    """
+    models = {model for columns in tiers.tiers.values() for model in columns.values()}
+    models.update(model for allowed in tiers.allowed_models.values() for model in allowed)
+    problems: list[str] = []
+    for role, value in overrides.items():
+        field = f"tier-overrides.{role}"
+        if role not in ROLES:
+            problems.append(f"{field}: unknown role {role!r}; known roles: {', '.join(ROLES)}")
+        elif value not in tiers.tiers:
+            kind = "a model identifier, not a tier name" if value in models or "/" in value else "not a tier name"
+            problems.append(f"{field}: {value!r} is {kind}; known tiers: {', '.join(sorted(tiers.tiers))}")
+    return problems
+
+
+def load_workflow(path: Path, tiers: Tiers) -> Workflow:
     """Read and check a workflow file. Raise WorkflowError with every defect found."""
     data = tomllib.loads(Path(path).read_text())
     stacks = {
@@ -114,6 +139,7 @@ def load_workflow(path: Path) -> Workflow:
         for blocker in ticket.blocked_by:
             if blocker not in known_ids:
                 problems.append(f"ticket {ticket.id!r}: unknown blocker {blocker!r}")
+    problems.extend(_tier_override_problems(dict(data.get("tier-overrides", {})), tiers))
     for cycle in _cycles(tickets):
         problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))
     if problems:

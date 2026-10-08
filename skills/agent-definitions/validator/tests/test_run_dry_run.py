@@ -155,3 +155,78 @@ def test_every_problem_in_one_file_is_reported_in_one_run(tmp_path, capsys):
     assert code == 1
     assert "unknown stack 'rust'" in err
     assert "unknown blocker 'z9'" in err
+
+
+def with_overrides(**roles: str) -> str:
+    lines = "".join(f'{role} = "{tier}"\n' for role, tier in roles.items())
+    return VALID.replace("[stacks.python]", f"[tier-overrides]\n{lines}\n[stacks.python]", 1)
+
+
+def test_a_model_identifier_in_place_of_a_tier_name_exits_1_and_names_the_field(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, with_overrides(specialist="opus"))
+
+    assert code == 1
+    assert out == ""
+    assert "tier-overrides.specialist" in err
+    assert "'opus'" in err
+    assert "model identifier" in err
+    assert "cheap, standard, strong, verifier" in err  # the tier names that are valid
+
+
+def test_a_provider_model_identifier_in_the_verifier_role_is_refused_by_field(tmp_path, capsys):
+    code, _out, err = invalid(tmp_path, capsys, with_overrides(verifier="anthropic/claude-opus-5"))
+
+    assert code == 1
+    assert "tier-overrides.verifier" in err
+    assert "'anthropic/claude-opus-5'" in err
+
+
+def test_a_tier_name_that_does_not_exist_is_refused_by_field(tmp_path, capsys):
+    code, _out, err = invalid(tmp_path, capsys, with_overrides(specialist="turbo"))
+
+    assert code == 1
+    assert "tier-overrides.specialist" in err
+    assert "'turbo'" in err
+
+
+def test_an_override_for_an_unknown_role_is_refused_by_field(tmp_path, capsys):
+    code, _out, err = invalid(tmp_path, capsys, with_overrides(reviewer="cheap"))
+
+    assert code == 1
+    assert "tier-overrides.reviewer" in err
+    assert "specialist, verifier" in err
+
+
+def test_a_tier_name_override_is_accepted_and_shown_in_the_plan(tmp_path, capsys):
+    repo = make_repo(tmp_path, with_overrides(specialist="cheap"))
+
+    code, out, err = run(repo, capsys, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert "tier override specialist: cheap" in out
+
+
+def test_a_tier_file_of_the_user_defines_the_valid_tier_names(tmp_path, capsys):
+    repo = make_repo(tmp_path, with_overrides(specialist="gateway-fast"))
+    tiers = tmp_path / "my-tiers.toml"
+    tiers.write_text(
+        """\
+[effort]
+levels = ["low"]
+[effort.opencode]
+variants = ["high"]
+[tiers.gateway-fast]
+claude-code = "inherit"
+opencode = "gateway/fast-1"
+[allowed-models]
+claude-code = ["inherit"]
+opencode = ["gateway/fast-1"]
+[budget]
+claude-code-description-chars = 1000
+"""
+    )
+
+    assert run(repo, capsys, "--dry-run", "--tiers", str(tiers))[0] == 0
+    code, _out, err = run(repo, capsys, "--dry-run")  # the bundled table has no such tier
+    assert code == 1
+    assert "'gateway-fast'" in err
