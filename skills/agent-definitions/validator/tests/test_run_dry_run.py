@@ -97,3 +97,61 @@ def test_a_valid_workflow_prints_the_plan_in_dependency_order_and_creates_nothin
     assert plan_ids == ["a", "b", "c"]
     assert state(repo) == before
     assert not (repo.parent / "repo-worktrees").exists()
+
+
+def invalid(tmp_path: Path, capsys, workflow: str) -> tuple[int, str, str]:
+    """Run --dry-run on a workflow and check that it created nothing."""
+    repo = make_repo(tmp_path, workflow)
+    before = state(repo)
+    result = run(repo, capsys, "--dry-run")
+    assert state(repo) == before
+    return result
+
+
+def test_an_unknown_stack_exits_1_and_names_the_ticket_and_the_stack(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, VALID.replace('id = "a"\ntext = "First ticket."\nstack = "python"', 'id = "a"\ntext = "First ticket."\nstack = "rust"'))
+
+    assert code == 1
+    assert out == ""
+    assert "ticket 'a'" in err
+    assert "unknown stack 'rust'" in err
+    assert "docs, python" in err  # the known stacks, sorted
+
+
+def test_an_unknown_blocker_exits_1_and_names_the_ticket_and_the_blocker(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, VALID.replace('blocked-by = ["a"]', 'blocked-by = ["z9"]'))
+
+    assert code == 1
+    assert out == ""
+    assert "ticket 'b'" in err
+    assert "unknown blocker 'z9'" in err
+
+
+def test_a_cycle_exits_1_and_names_every_ticket_in_it(tmp_path, capsys):
+    cyclic = VALID.replace('id = "a"\ntext = "First ticket."\nstack = "python"\nblocked-by = []', 'id = "a"\ntext = "First ticket."\nstack = "python"\nblocked-by = ["c"]')
+
+    code, out, err = invalid(tmp_path, capsys, cyclic)
+
+    assert code == 1
+    assert out == ""
+    assert "cycle" in err
+    for ticket_id in ("a", "b", "c"):
+        assert f"'{ticket_id}'" in err
+
+
+def test_a_ticket_that_blocks_itself_is_a_cycle(tmp_path, capsys):
+    code, _out, err = invalid(tmp_path, capsys, VALID.replace('id = "a"\ntext = "First ticket."\nstack = "python"\nblocked-by = []', 'id = "a"\ntext = "First ticket."\nstack = "python"\nblocked-by = ["a"]'))
+
+    assert code == 1
+    assert "cycle" in err
+    assert "'a'" in err
+
+
+def test_every_problem_in_one_file_is_reported_in_one_run(tmp_path, capsys):
+    broken = VALID.replace('stack = "docs"\nblocked-by = ["a"]', 'stack = "rust"\nblocked-by = ["z9"]')
+
+    code, _out, err = invalid(tmp_path, capsys, broken)
+
+    assert code == 1
+    assert "unknown stack 'rust'" in err
+    assert "unknown blocker 'z9'" in err

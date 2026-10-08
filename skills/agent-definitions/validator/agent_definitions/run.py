@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .workflow import load_workflow, plan_order
+from .workflow import WorkflowError, load_workflow, plan_order
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    workflow = load_workflow(args.workflow)
+    try:
+        workflow = load_workflow(args.workflow)
+    except WorkflowError as error:
+        for problem in error.problems:
+            print(f"delegate run: {args.workflow}: {problem}", file=sys.stderr)
+        return 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")
     for number, ticket in enumerate(plan_order(workflow), start=1):
