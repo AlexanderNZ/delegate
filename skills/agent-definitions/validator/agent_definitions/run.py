@@ -82,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"journal {result.journal}")
         for ticket, reason in result.failures.items():
             print(f"delegate run: ticket {ticket}: {reason}", file=sys.stderr)
+        for finding in result.unmapped:
+            print(f"delegate run: unmapped finding: {finding}", file=sys.stderr)
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
         return 0 if result.ok else 1

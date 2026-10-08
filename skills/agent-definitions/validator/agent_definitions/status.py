@@ -55,7 +55,11 @@ def render(events: list[dict[str, object]], journal: Path) -> list[str]:
                 state, reason = str(event["state"]), event["reason"]
             elif kind == "skip":
                 state, reason = SKIPPED, event["reason"]
-        verdicts = [str(e["verdict"]) for e in own if e["event"] == "verdict"]
+        # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
+        verdicts = [
+            str(e["verdict"]) for e in events
+            if e["event"] == "verdict" and (e.get("ticket") == ticket or ticket in e.get("tickets", []))  # type: ignore[operator]
+        ]
         branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), NONE)
         last = str(own[-1]["time"]) if own else NONE
         lines.append(f"ticket {ticket}: state {state}, verdict {verdicts[-1] if verdicts else NONE}, branch {branch}, last event {last}")

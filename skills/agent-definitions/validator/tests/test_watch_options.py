@@ -59,6 +59,20 @@ def test_until_verdict_exits_4_at_the_first_verdict_and_names_the_ticket_the_ver
     assert "watch: verdict: ticket a round 0: REJECT: feature.txt is not a CSV file.; no test" in out.splitlines()
 
 
+def test_until_verdict_names_the_stack_and_its_tickets_for_the_verdict_of_a_chain(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    chain_verdict = ("verdict", {
+        "ticket": "c", "round": 1, "mode": "fix-up", "verdict": "ACCEPT", "findings": [], "unverified": [], "report": "/r.json",
+        "stack": "python", "tickets": ["a", "c"], "mapped": {}, "unmapped": [],
+    })
+    write_journal(repo, "r1", run_start("r1", "a", "c", mode="economy"), step_start("a"), chain_verdict)
+
+    code, out, err = watch(repo, capsys, "--until", "verdict")
+
+    assert (code, err) == (4, "")
+    assert "watch: verdict: stack python (tickets a, c) round 1: ACCEPT" in out.splitlines()
+
+
 def test_until_accepts_only_verdict(tmp_path, capsys):
     repo = bare_repo(tmp_path)
     write_journal(repo, "r1", run_start("r1", "a"))

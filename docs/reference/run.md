@@ -1,6 +1,6 @@
 # Reference: `delegate run`
 
-`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
+`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. In `economy` mode, the engine builds a chain of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
 A coordinator can stop a run and go on later with `--resume <run-id>`. See [the resume](#the-resume). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
 
@@ -27,7 +27,8 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 4. The engine takes the lock.
 5. The engine creates the run branch at `base-branch`, and writes `run-start` to a new journal.
 6. For each ticket in dependency order, the engine does the step below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
-7. The engine writes `run-end`, and releases the lock.
+7. In `economy` mode, the engine verifies the chain. See [the chain verification](#the-chain-verification).
+8. The engine writes `run-end`, and releases the lock.
 
 A step has these parts:
 
@@ -172,9 +173,38 @@ In `economy` mode, the tickets form a chain. Each ticket branch starts from the 
 - The specialist runs on the tier `standard`. The `specialist` entry of `tier-overrides` replaces it.
 - The engine does not rebase in `economy` mode.
 
+## The chain verification
+
+In `economy` mode, the engine verifies once for each stack, after the last ticket of the chain. The engine does not verify a ticket by itself, and it does not move the run branch before the end.
+
+1. The chain holds the tickets that were built. The stacks are the stacks of these tickets, in the order of their first ticket.
+2. For each stack, the engine spawns one verifier. The verifier tier is `verifier`, as in `assure` mode, whatever the tier of the specialists is. The verifier works in a temporary copy of the chain tip. The brief generator makes the brief (`chain_brief`). It holds the text of each ticket of the stack and, for each of them, the diff of the commits that the ticket added (`git diff <base>...<tip>`). It holds no diff of a ticket of another stack. It also tells the verifier to start each finding with the id of its ticket in square brackets, for example `[b] The header row is missing.`
+3. On ACCEPT, the next stack is verified.
+4. On REJECT, the stack gets one fix-up round. The limit is 1 round in `economy` mode. The fix-up is a new commit on the chain tip. It runs in the worktree of the last ticket of the chain, with the specialist of the stack and the findings verbatim. The engine runs the gates of the stack. A fresh verifier then gets the scoped brief: the findings, and the delta from the rejected commit. The steps of [the fix-up round](#the-fix-up-round) apply.
+5. A second REJECT fails the stack, and the run. The engine does not verify the stacks after it.
+6. When every stack is accepted, the engine moves the run branch to the chain tip by fast-forward, and writes `run-branch-advance`. The run branch moves only then.
+
+The events of a stack carry the id of the last ticket of the stack in `ticket`. `verify-start` and `verdict` also carry `stack` and `tickets` (the ids that the verifier saw).
+
+### The finding map
+
+A finding maps to a ticket when it starts with `[<ticket id>]` and the id is a ticket of the stack. The `verdict` event holds `mapped` (a map from a ticket id to its findings, without the label) and `unmapped` (the findings that map to no ticket, unchanged). A finding with an unknown label, or with no label, is unmapped. The engine never drops it: the journal holds it, and the command prints `delegate run: unmapped finding: <finding>` on stderr when the stack fails.
+
+When a stack fails after the fix-up round:
+
+- Each ticket that a finding of the last verdict names fails. The reason is `the verifier rejected the chain after 1 fix-up round: <its findings>`.
+- If no finding names a ticket, every ticket of the stack fails, with the reason `the verifier rejected the branch after 1 fix-up round: <all findings>`.
+- The tickets of the stacks that were not verified fail with the reason `not verified: the chain ended when the verification of the stack '<name>' failed`.
+- The engine writes a new `step-end` with the state `failed` for each of them. The newest `step-end` of a ticket wins, in `status` and in a resume.
+- The run branch does not move.
+
+A ticket that failed in the build is not in the chain. The engine still verifies the tickets that were built. If they are all accepted, the run branch moves to the chain tip, and the run ends `failed` because of the ticket that failed.
+
+A resume that stops before the end of the chain verifies the stacks again. A stack with an ACCEPT verdict in the journal is not verified again. The verifier runs of the stack in the journal count against the fix-up limit.
+
 ## The verifier step
 
-In `assure` mode, the engine verifies each ticket branch that has green gates. In `economy` mode, the engine does not verify, and it does not move the run branch.
+In `assure` mode, the engine verifies each ticket branch that has green gates. In `economy` mode, the engine verifies the chain at the end instead. See [the chain verification](#the-chain-verification). The steps below describe one ticket branch; the chain verification uses the same temporary copy, the same invariant check, and the same verdict report.
 
 1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. The verifier can break the copy, and cannot reach the real repository through it. The engine makes the copy also when the HEAD of the repository is on the run branch. The engine removes the copy when the verifier ends.
 2. The engine makes the verifier brief with the brief generator (`full_brief`). The brief holds the task (the ticket text), the diff `git diff <run-branch>...<ticket branch>`, the gates of the stack, the path of the copy, and the report path. The brief never holds a line of the specialist report.
@@ -188,7 +218,7 @@ The engine keeps the verdict report and the event stream of the verifier in `run
 
 ## The fix-up round
 
-A REJECT in `assure` mode starts a fix-up round. The limit is 2 rounds for each ticket. A round has these parts:
+A REJECT starts a fix-up round. The limit is 2 rounds for each ticket in `assure` mode, and 1 round for each stack in `economy` mode. A round has these parts:
 
 1. The engine writes the findings of the rejected verdict to `runs/<run id>/findings/<ticket id>.fixup-<round>.md`, one finding on each line, with the prefix `- `.
 2. The engine sends the specialist a fix-up brief in the same worktree. The brief holds the ticket, the findings verbatim (`## Findings to fix`), the rejected commit (`## Rejected commit`), the file boundary, the gates, and the report path. The tier and the model are those of the first specialist run.
@@ -224,7 +254,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 
 | Code | Meaning |
 |---|---|
-| 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. |
+| 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
 | 1 | The workflow or the tier file is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 
@@ -248,7 +278,9 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `invariant violation: the verifier changed the real worktree <path>: ...` | The worktree of the ticket differs after the verifier run. The run halts. See [the worktree invariant](#the-worktree-invariant). |
 | `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, or the exit status is not 0. The engine does not read the verdict report. |
 | `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names another mode than the mode of the run (`full`, or `fix-up` in a fix-up round) is invalid. |
-| `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. |
+| `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. In `economy` mode, the text is `after 1 fix-up round`. |
+| `the verifier rejected the chain after 1 fix-up round: <findings>` | `economy` mode. The findings of the last verdict name this ticket. See [the finding map](#the-finding-map). |
+| `not verified: the chain ended when the verification of the stack '<name>' failed` | `economy` mode. The ticket is in a stack after a stack that failed. |
 | `the fix-up specialist ended <state> with exit status <n>` | The adapter result of the fix-up specialist is `failed` or `capped`, or the exit status is not 0. |
 | `the fix-up specialist reported status 'blocked': ...`, and the report errors above | The report of the fix-up specialist is missing, is invalid, or has a status other than `committed`. |
 | `the fix-up of round <n> is refused: ...` | The branch does not hold the rejected commit, or holds no commit beyond it. The message holds the cause from the brief generator. |
@@ -260,7 +292,7 @@ An adapter is a Python object. It registers by name with `agent_definitions.adap
 
 The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
 
-The adapter has the attribute `tier_column`, which names the column of the tier table with its models. The engine resolves the model from that column. The specialist tier is `strong` in `assure` mode and `standard` in `economy` mode. The `specialist` entry of `tier-overrides` replaces it. The verifier tier is `verifier` in every mode. The `verifier` entry of `tier-overrides` replaces it.
+The adapter has the attribute `tier_column`, which names the column of the tier table with its models. The engine resolves the model from that column. The specialist tier is `strong` in `assure` mode and `standard` in `economy` mode. The `specialist` entry of `tier-overrides` replaces it. The verifier tier is `verifier` in every mode. The `verifier` entry of `tier-overrides` replaces it, but it cannot name a weaker tier: the workflow is refused when it loads. See [the workflow reference](workflow.md#tier-overrides).
 
 The adapter has the method `run(request)`.
 
@@ -334,23 +366,24 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock `--break-lock` removed) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
-| `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
+| `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |
 | `verify-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `invariant-violation` | `ticket`, `round`, `worktree` (the real worktree of the ticket), `head_before`, `head_after` (its HEAD commit before and after the verifier run), `changes` (a list of strings, one for each path that differs) |
 | `verify-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid) |
-| `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
-| `fixup-start` | `ticket`, `round` (1 or 2), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
+| `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report). In a chain verification also `stack`, `tickets`, `mapped` (a map from a ticket id to its findings), and `unmapped` (the findings that map to no ticket). |
+| `fixup-start` | `ticket`, `round` (1 or 2; 1 in `economy` mode), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
 | `fixup-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` (the adapter result of the fix-up specialist) |
 | `fixup-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid), `status`, `blocked_reason` (as in `report-validation`) |
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
-| `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built) |
+| `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids) |
 
 ## Limits of this version
 
-- Every ticket branch starts from `base-branch`, not from the work of the tickets that block it. In `assure` mode, the rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
+- In `assure` mode, every ticket branch starts from `base-branch`, not from the work of the tickets that block it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
 - The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
-- `economy` mode does not verify, and it does not move the run branch.
+- In `economy` mode, a defect shows only at the end of the chain. The stack of a rejected chain fails as a whole when no finding names a ticket.
+- In `economy` mode, a fix-up commit goes on the chain tip. A stack that the engine verified before it does not see that commit. The verifier of the fix-up sees only the delta.
 - A gate has no time limit.

@@ -223,6 +223,55 @@ def full_brief(
     )
 
 
+@dataclass(frozen=True)
+class ChainSegment:
+    """One ticket of a chain: its id, its text, and the commits `base..tip` that it added to the chain."""
+
+    ticket: str
+    text: str
+    base: str
+    tip: str
+
+
+def finding_labels_section() -> str:
+    """The section that tells a verifier of a chain to label each finding with a ticket id.
+
+    The engine maps a finding to a ticket by the label `[<ticket id>]` at the
+    start of the finding (`map_findings` in `reports.py` reads it). The text
+    starts with a line break, so it follows another brief as `verifier_run_sections` does.
+    """
+    return "\n" + _sections((
+        "## Finding labels",
+        "This branch holds the work of more than one ticket. Start each finding with the id of the ticket it belongs to, "
+        "in square brackets, for example `[b] The header row is missing.` "
+        "A finding that fits no ticket starts with no label.",
+    ))
+
+
+def chain_brief(repo: str | Path, segments: Sequence[ChainSegment], gate_commands: Sequence[str]) -> str:
+    """The first-pass brief for a chain: the task and the three-dot diff of each ticket, and the gates.
+
+    Each ticket has its own diff `git diff <base>...<tip>`, so the brief holds
+    the commits of the tickets in `segments` and no other commit of the chain.
+    `full_brief` is the form for one ticket, and this is the same form for
+    many, with the labels that map a finding to a ticket.
+    """
+    tasks: list[str] = []
+    diffs: list[str] = []
+    for segment in segments:
+        command = f"git diff {segment.base}...{segment.tip}"
+        diff = _git(repo, "diff", f"{segment.base}...{segment.tip}")
+        if not diff.strip():
+            raise BriefError(f"{command} is empty. The ticket {segment.ticket} holds no change to verify.")
+        tasks.append(f"Ticket {segment.ticket}\n\n{segment.text.rstrip(chr(10))}")
+        diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n" + _fenced_diff(diff))
+    return _sections(
+        ("## Task", "\n\n".join(tasks)),
+        ("## Diff", "\n\n".join(diffs)),
+        ("## Gates", _bash("\n".join(gate_commands))),
+    ) + finding_labels_section()
+
+
 def fixup_brief(
     repo: str | Path,
     branch: str,

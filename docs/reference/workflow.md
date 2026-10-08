@@ -80,7 +80,7 @@ All fields except `tier-overrides` are required. A field that this reference doe
 | Mode | Meaning |
 |---|---|
 | `assure` | The engine verifies each branch at once, after the specialist finishes it. |
-| `economy` | The engine builds a chain, and verifies once for each stack at the end. |
+| `economy` | The engine builds a chain, and verifies once for each stack at the end. Each ticket branch starts from the previous ticket. The specialists run on `standard`. Each REJECT gets one fix-up round. See [the run reference](run.md#the-economy-chain). |
 
 ## Adapters
 

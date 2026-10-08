@@ -194,10 +194,12 @@ def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
                 return EXIT_PROBLEM, position
             if args.until == UNTIL_VERDICT and event["event"] == "verdict":
                 findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
-                print(
-                    f"watch: verdict: ticket {event['ticket']} round {event['round']}: {event['verdict']}"
-                    + (f": {findings}" if findings else "")
+                # The verdict of a chain names a stack and its tickets, not one ticket.
+                subject = (
+                    f"stack {event['stack']} (tickets {', '.join(str(t) for t in event['tickets'])})"  # type: ignore[attr-defined]
+                    if "tickets" in event else f"ticket {event['ticket']}"
                 )
+                print(f"watch: verdict: {subject} round {event['round']}: {event['verdict']}" + (f": {findings}" if findings else ""))
                 return EXIT_VERDICT, position
             if event["event"] == "run-end":
                 return (EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED), position

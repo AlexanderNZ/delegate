@@ -80,6 +80,27 @@ def test_status_shows_the_verdict_of_the_last_round(tmp_path, capsys):
     assert ticket_line(out, "a").startswith("ticket a: state built, verdict ACCEPT, ")
 
 
+def test_status_shows_the_verdict_of_a_chain_for_every_ticket_that_the_verdict_covers(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    chain_verdict = ("verdict", {
+        "ticket": "c", "round": 0, "mode": "full", "verdict": "REJECT", "findings": ["[b] no header"], "unverified": [],
+        "report": "/r.json", "stack": "python", "tickets": ["a", "b", "c"], "mapped": {"b": ["no header"]}, "unmapped": [],
+    })
+    write_journal(
+        repo, "r1", run_start("r1", "a", "b", "c", "d", mode="economy"),
+        *(event for ticket_id in "abc" for event in (step_start(ticket_id), step_end(ticket_id))),
+        chain_verdict, step_end("b", "failed", "no header"), run_end("failed", ["a", "c"], ["b"]),
+    )
+
+    code, out, err = status(repo, capsys, "r1")
+
+    assert (code, err) == (0, "")
+    assert [ticket_line(out, t).split(", branch")[0] for t in "abcd"] == [
+        "ticket a: state built, verdict REJECT", "ticket b: state failed, verdict REJECT",
+        "ticket c: state built, verdict REJECT", "ticket d: state pending, verdict -",
+    ]
+
+
 def test_status_of_an_unknown_run_exits_2_and_names_the_run_id(tmp_path, capsys):
     repo = bare_repo(tmp_path)
     write_journal(repo, "r1", run_start("r1", "a"))

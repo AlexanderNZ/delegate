@@ -24,6 +24,14 @@ and after each verifier run (see `guards.py`). A difference is an invariant
 violation: the journal records it with the changes, and the run halts. The
 engine removes the temporary copy after every verifier run.
 
+In `economy` mode each ticket branch starts from the tip of the previous built
+ticket, and the engine does not verify a ticket by itself. After the last
+ticket, `_ChainRun` verifies once for each stack, over the commits of the
+tickets of that stack. A REJECT gets one fix-up round, as a new commit on the
+chain tip, and then a fresh scoped verifier. A finding maps to a ticket by its
+label, and a finding with no known label is recorded as unmapped. When every
+stack is accepted, the engine fast-forwards the run branch to the chain tip.
+
 A run holds many tickets, which the engine takes in dependency order. A failed
 step does not end the run. A ticket whose blocker failed or was skipped is
 skipped, and the journal records which blocker. A ticket with no failed blocker
@@ -57,14 +65,17 @@ from pathlib import Path
 
 from . import adapters
 from .adapters import Adapter, AdapterRequest
-from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
+from .brief import (
+    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,
+    verifier_run_brief, verifier_run_sections,
+)
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree,
 )
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
+from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
 
@@ -77,9 +88,10 @@ VERIFIER_TIER: str = "verifier"
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
 
-# A REJECT in `assure` mode starts at most this many fix-up rounds. Each round
-# is one fix-up commit and one fresh verifier. The limit is the same for every ticket.
-FIXUP_ROUND_LIMIT: int = 2
+# A REJECT starts at most this many fix-up rounds. Each round is one fix-up
+# commit and one fresh verifier. The limit depends on the mode: `assure` verifies
+# each ticket, and `economy` verifies each stack once, at the end of the chain.
+FIXUP_ROUND_LIMIT: dict[str, int] = {"assure": 2, "economy": 1}
 
 # The specialist of a ticket continues in the same worktree at most this many
 # times after it ends capped or failed, or after the gates are red. One count
@@ -106,6 +118,14 @@ class _StepFailed(Exception):
     """A fix-up round or a verifier run cannot go on. The message is the reason the step fails."""
 
 
+class _Rejected(_StepFailed):
+    """The verifier rejected the branch after the last fix-up round. `findings` holds the findings of the last verdict."""
+
+    def __init__(self, message: str, findings: list[str]) -> None:
+        super().__init__(message)
+        self.findings = findings
+
+
 @dataclass(frozen=True)
 class RunResult:
     run_id: str
@@ -114,6 +134,7 @@ class RunResult:
     failed: list[str]
     failures: dict[str, str]
     skipped: dict[str, str]
+    unmapped: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -215,10 +236,15 @@ def _restore(events: list[dict[str, object]], run_id: str) -> _Progress:
         if kind == "step-start":
             started = ticket
         elif kind == "step-end":
+            # The newest step-end of a ticket wins: the verification at the end of an
+            # `economy` chain can fail a ticket that was built.
+            if ticket in progress.built:
+                progress.built.remove(ticket)
             if event["state"] == BUILT:
                 progress.built.append(ticket)
             else:
-                progress.failed.append(ticket)
+                if ticket not in progress.failed:
+                    progress.failed.append(ticket)
                 progress.failures[ticket] = str(event["reason"])
             if started == ticket:
                 started = None
@@ -260,8 +286,7 @@ def run_workflow(
             f"adapter {workflow.adapter!r} has no implementation yet; registered: {', '.join(adapters.registered_names()) or 'none'}"
         ) from None
     repo, state_dir = state_directory(repo)
-    needed = ("specialist", "verifier") if workflow.mode == "assure" else ("specialist",)
-    roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
+    roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     run_id = resume if resume is not None else _new_run_id()
     try:
         # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
@@ -301,6 +326,7 @@ def _execute(
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
     complete = {*built, *failed, *skipped}
+    ended_early = False
     for position, ticket in enumerate(order):
         if ticket.id in complete:
             continue
@@ -322,7 +348,7 @@ def _execute(
             # step unknown, so the run ends here. The journal says why. A verifier
             # that changed the real worktree also ends the run: the state of the
             # worktree can no longer be trusted.
-            halted = isinstance(error, InvariantViolation)
+            halted, ended_early = isinstance(error, InvariantViolation), True
             reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
             journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
             failed.append(ticket.id)
@@ -337,10 +363,14 @@ def _execute(
             failures[ticket.id] = reason
         else:
             built.append(ticket.id)
+    unmapped: list[str] = []
+    if workflow.mode == "economy" and built and not ended_early:
+        chain = _ChainRun(workflow, order, adapter, roles, repo, state_dir, run_id, journal, built, failed, failures)
+        unmapped = chain.verify()
     journal.append(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
     )
-    return RunResult(run_id, journal.path, built, failed, failures, skipped)
+    return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
 
 
 def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str:
@@ -600,6 +630,11 @@ class _Step:
     state_dir: Path
     run_id: str
     journal: Journal
+    # A step that verifies the chain of a stack (see `_ChainRun`) works on the branch and in the worktree of
+    # the ticket at the tip of the chain, `anchor`, and verifies the tickets in `segments`. The `ticket` of such
+    # a step is made for the stack: it holds the id of the last ticket of the stack and the text of all of them.
+    anchor: Ticket | None = None
+    segments: tuple[ChainSegment, ...] | None = None
 
     @property
     def stack(self) -> Stack:
@@ -607,11 +642,18 @@ class _Step:
 
     @property
     def branch(self) -> str:
-        return _ticket_branch(self.workflow, self.ticket)
+        return _ticket_branch(self.workflow, self.anchor or self.ticket)
 
     @property
     def worktree(self) -> Path:
-        return self.state_dir / "worktrees" / self.run_id / self.ticket.id
+        return self.state_dir / "worktrees" / self.run_id / (self.anchor or self.ticket).id
+
+    @property
+    def chain_fields(self) -> dict[str, object]:
+        """The journal fields that name the stack and the tickets of a chain verification. Empty for one ticket."""
+        if self.segments is None:
+            return {}
+        return {"stack": self.ticket.stack, "tickets": [segment.ticket for segment in self.segments]}
 
     @property
     def run_dir(self) -> Path:
@@ -659,33 +701,42 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
 def _verify_ticket(step: _Step, first_round: int = 0) -> str | None:
     """Verify the built branch of a ticket blind. Return None on ACCEPT, or the reason the step fails.
 
-    A REJECT starts a fix-up round, up to `FIXUP_ROUND_LIMIT` rounds. Each
-    round, and the first pass, spawns a fresh verifier.
+    On ACCEPT the run branch moves to the commit that the verifier saw.
+    """
+    try:
+        return _advance_run_branch(step, _accepted_commit(step, first_round))
+    except _StepFailed as failed:
+        return str(failed)
+
+
+def _accepted_commit(step: _Step, first_round: int = 0) -> str:
+    """Verify the branch of the step blind, and return the commit that a verifier accepted.
+
+    A REJECT starts a fix-up round, up to `FIXUP_ROUND_LIMIT` of the mode.
+    Each round, and the first pass, spawns a fresh verifier. Raise `_Rejected`
+    after the last round, and `_StepFailed` for any other cause.
 
     A resume sets `first_round` to the number of verifier runs that the journal
     holds. The first pass of the resume is a full verification at that round
     number, and the limit counts across the stop.
     """
-    try:
-        if first_round > FIXUP_ROUND_LIMIT:
-            raise _StepFailed(f"the {first_round} verifier runs of the stopped run use up the {FIXUP_ROUND_LIMIT} fix-up rounds")
-        rejected = ""
-        report: VerifierReport | None = None
-        for round_number in range(first_round, FIXUP_ROUND_LIMIT + 1):
-            fixup_body = None
-            if report is not None:
-                fixup_body = _fixup_round(step, round_number, rejected, report.findings)
-            verified = _git(step.repo, "rev-parse", f"refs/heads/{step.branch}")
-            report = _verify_round(step, round_number, fixup_body)
-            if report.verdict == "ACCEPT":
-                return _advance_run_branch(step, verified)
-            rejected = verified
-        assert report is not None
-        raise _StepFailed(
-            f"the verifier rejected the branch after {FIXUP_ROUND_LIMIT} fix-up rounds: " + "; ".join(report.findings)
-        )
-    except _StepFailed as failed:
-        return str(failed)
+    limit = FIXUP_ROUND_LIMIT[step.workflow.mode]
+    if first_round > limit:
+        raise _StepFailed(f"the {first_round} verifier runs of the stopped run use up the {limit} fix-up rounds")
+    rejected = ""
+    report: VerifierReport | None = None
+    for round_number in range(first_round, limit + 1):
+        fixup_body = None
+        if report is not None:
+            fixup_body = _fixup_round(step, round_number, rejected, report.findings)
+        verified = _git(step.repo, "rev-parse", f"refs/heads/{step.branch}")
+        report = _verify_round(step, round_number, fixup_body)
+        if report.verdict == "ACCEPT":
+            return verified
+        rejected = verified
+    assert report is not None
+    rounds = f"{limit} fix-up round{'' if limit == 1 else 's'}"
+    raise _Rejected(f"the verifier rejected the branch after {rounds}: " + "; ".join(report.findings), report.findings)
 
 
 def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> str:
@@ -771,7 +822,11 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
         report_path = scratch / "verdict.json"
         try:
             _prepare_copy(step.repo, step.workflow.run_branch, step.branch, copy)
-            if fixup_body is None:
+            if step.segments is not None:
+                # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
+                first_pass = chain_brief(copy, step.segments, step.stack.gates) if fixup_body is None else fixup_body + finding_labels_section()
+                prompt = first_pass + verifier_run_sections(copy, report_path, mode)
+            elif fixup_body is None:
                 prompt = verifier_run_brief(
                     copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path
                 )
@@ -781,7 +836,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             raise _StepFailed(f"the verifier could not start: {error}") from None
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
-            commit=verified, copy=str(copy),
+            commit=verified, copy=str(copy), **step.chain_fields,
         )
         before = snapshot_worktree(step.worktree)
         result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path))
@@ -824,9 +879,13 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
     step.journal.append(
         "verify-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None
     )
+    chain_fields = step.chain_fields
+    if step.segments is not None:
+        mapped, unmapped = map_findings(report.findings, chain_fields["tickets"])  # type: ignore[arg-type]
+        chain_fields = {**chain_fields, "mapped": mapped, "unmapped": unmapped}
     step.journal.append(
         "verdict", ticket=ticket.id, round=round_number, mode=report.mode, verdict=report.verdict,
-        findings=report.findings, unverified=report.unverified, report=str(report_path),
+        findings=report.findings, unverified=report.unverified, report=str(report_path), **chain_fields,
     )
     return report
 
@@ -850,6 +909,123 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
         "run-branch-advance", ticket=step.ticket.id, run_branch=run_branch, from_commit=run_tip, to_commit=verified
     )
     return None
+
+
+class _ChainRun:
+    """The verification at the end of an `economy` chain.
+
+    The chain holds the tickets that were built, in the order of the plan. Each
+    ticket branch starts from the tip of the previous one, so the last branch
+    holds all the work. For each stack of the chain, in the order of its first
+    ticket, the engine spawns one verifier over the commits of the tickets of
+    that stack: the brief holds a diff for each of those tickets, and none for a
+    ticket of another stack. The verifier works in a copy of the tip.
+
+    A REJECT gets one fix-up round (`FIXUP_ROUND_LIMIT`): a new commit on the
+    chain tip, in the worktree of the last ticket, and a fresh scoped verifier. A
+    second REJECT fails the stack. A finding maps to a ticket by its label (see
+    `map_findings`). The tickets that the findings name fail with their
+    findings. When no finding names a ticket, every ticket of the stack fails.
+    The stacks that the engine did not verify yet fail too: their tickets are
+    not verified, so no one may rely on them. The run branch then does not move.
+
+    When every stack is accepted, the engine moves the run branch to the chain
+    tip by fast-forward.
+    """
+
+    def __init__(
+        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, roles: dict[str, tuple[str, str]], repo: Path,
+        state_dir: Path, run_id: str, journal: Journal, built: list[str], failed: list[str], failures: dict[str, str],
+    ) -> None:
+        self.workflow, self.adapter, self.roles, self.repo = workflow, adapter, roles, repo
+        self.state_dir, self.run_id, self.journal = state_dir, run_id, journal
+        self.chain = [ticket for ticket in order if ticket.id in built]
+        self.built, self.failed, self.failures = built, failed, failures
+
+    def verify(self) -> list[str]:
+        """Verify every stack of the chain and move the run branch. Return the findings that map to no ticket."""
+        try:
+            return self._verify_stacks()
+        except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
+            halted = isinstance(error, InvariantViolation)
+            reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
+            self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built})
+            return []
+
+    def _fail(self, reasons: dict[str, str]) -> None:
+        """Fail the built tickets in `reasons`. The newest `step-end` of a ticket wins, so the journal keeps both."""
+        for ticket_id, reason in reasons.items():
+            self.journal.append("step-end", ticket=ticket_id, state=FAILED, reason=reason)
+            self.built.remove(ticket_id)
+            self.failed.append(ticket_id)
+            self.failures[ticket_id] = reason
+
+    def _segments(self) -> dict[str, ChainSegment]:
+        """For each ticket of the chain, the commits that it added: from where its branch started to its tip now."""
+        events = read_events(self.journal.path)
+        segments: dict[str, ChainSegment] = {}
+        for ticket in self.chain:
+            base = [str(e["base_commit"]) for e in events if e["event"] == "step-start" and e["ticket"] == ticket.id][-1]
+            tip = _git(self.repo, "rev-parse", f"refs/heads/{_ticket_branch(self.workflow, ticket)}")
+            segments[ticket.id] = ChainSegment(ticket.id, ticket.text, base, tip)
+        return segments
+
+    def _verify_stacks(self) -> list[str]:
+        events = read_events(self.journal.path)
+        if any(e["event"] == "run-branch-advance" for e in events):
+            return []  # a resume after the run branch moved: nothing is left to verify
+        tip_ticket = self.chain[-1]
+        segments = self._segments()
+        stacks = list(dict.fromkeys(ticket.stack for ticket in self.chain))
+        last: _Step | None = None
+        for position, name in enumerate(stacks):
+            tickets = [ticket for ticket in self.chain if ticket.stack == name]
+            verdicts = [e["verdict"] for e in events if e["event"] == "verdict" and e.get("stack") == name]
+            step = _Step(
+                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.roles, self.repo,
+                self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
+            )
+            last = step
+            if verdicts and verdicts[-1] == "ACCEPT":
+                continue  # a resume: an earlier run accepted this stack already
+            first_round = sum(1 for e in events if e["event"] == "verify-start" and e.get("stack") == name)
+            try:
+                _accepted_commit(step, first_round)
+            except _StepFailed as failed:
+                return self._reject(failed, tickets, stacks[position + 1 :])
+        assert last is not None
+        reason = _advance_run_branch(last, _git(self.repo, "rev-parse", f"refs/heads/{last.branch}"))
+        if reason:
+            self._fail({ticket.id: reason for ticket in self.chain})
+        return []
+
+    def _reject(self, failed: _StepFailed, tickets: list[Ticket], unverified: list[str]) -> list[str]:
+        """Fail the tickets of a stack that did not pass, and the tickets of the stacks after it. Return the unmapped findings."""
+        mapped: dict[str, list[str]] = {}
+        unmapped: list[str] = []
+        if isinstance(failed, _Rejected):
+            mapped, unmapped = map_findings(failed.findings, [ticket.id for ticket in tickets])
+        limit = FIXUP_ROUND_LIMIT[self.workflow.mode]
+        rounds = f"{limit} fix-up round{'' if limit == 1 else 's'}"
+        reasons = {
+            ticket_id: f"the verifier rejected the chain after {rounds}: " + "; ".join(findings)
+            for ticket_id, findings in mapped.items()
+        }
+        if not reasons:
+            reasons = {ticket.id: str(failed) for ticket in tickets}
+        stack = tickets[0].stack
+        for ticket in self.chain:
+            if ticket.stack in unverified:
+                reasons[ticket.id] = f"not verified: the chain ended when the verification of the stack {stack!r} failed"
+        self._fail(reasons)
+        return unmapped
+
+
+def _chain_text(tickets: list[Ticket]) -> str:
+    """The text of a stack's tickets for the fix-up specialist: the text of one ticket, or each ticket with its id."""
+    if len(tickets) == 1:
+        return tickets[0].text
+    return "\n\n".join(f"Ticket {ticket.id}: {ticket.text.rstrip(chr(10))}" for ticket in tickets)
 
 
 def _run_gate(command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str) -> bool:

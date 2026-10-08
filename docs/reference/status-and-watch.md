@@ -24,7 +24,7 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 | Part | Meaning |
 |---|---|
 | `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`), `built`, `failed`, or `skipped`. |
-| `verdict` | The verdict of the newest `verdict` event of the ticket, or `-` when there is none. |
+| `verdict` | The verdict of the newest `verdict` event of the ticket, or `-` when there is none. A verdict of a chain in `economy` mode covers each ticket in its `tickets` field. |
 | `branch` | The branch of the ticket, from `step-start`, or `-` when the ticket has no step. |
 | `last event` | The time of the newest event of the ticket, or `-` when there is none. |
 
@@ -83,7 +83,7 @@ A specialist that ends `capped` continues, so it is not a problem. The first con
 
 ### The verdict
 
-With `--until verdict`, `watch` exits at the first `verdict` event. The line is `watch: verdict: ticket <id> round <n>: <verdict>: <findings>`. The findings are separated by `; `. Without the option, `watch` goes past each verdict.
+With `--until verdict`, `watch` exits at the first `verdict` event. The line is `watch: verdict: ticket <id> round <n>: <verdict>: <findings>`. For the verdict of a chain in `economy` mode, the line is `watch: verdict: stack <name> (tickets <ids>) round <n>: <verdict>: <findings>`. The findings are separated by `; `. Without the option, `watch` goes past each verdict.
 
 ### The stall
 

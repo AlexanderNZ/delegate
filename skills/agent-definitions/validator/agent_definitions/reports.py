@@ -11,6 +11,8 @@ The message names the field. A field that the schema does not list is ignored.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -161,3 +163,26 @@ def read_verifier_report(path: Path, mode: str) -> VerifierReport:
     return VerifierReport(
         data["mode"], data["verdict"], data["criteria"], data["gate_output"], data["findings"], data["unverified"]
     )
+
+
+# A finding of a chain verifier starts with `[<ticket id>]` to name the ticket that it belongs to.
+FINDING_LABEL = re.compile(r"\[([^\]]+)\][ \t]*(.*)", re.DOTALL)
+
+
+def map_findings(findings: Sequence[str], tickets: Sequence[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Split the findings of a chain verifier into the findings of each ticket and the findings that map to none.
+
+    A finding maps to a ticket when it starts with `[<id>]` and `<id>` is one
+    of `tickets`. The mapped text is the finding without its label. A finding
+    with an unknown label, or with no label, is unmapped: the second value
+    holds it unchanged, in order, so no finding is dropped.
+    """
+    mapped: dict[str, list[str]] = {}
+    unmapped: list[str] = []
+    for finding in findings:
+        match = FINDING_LABEL.match(finding)
+        if match is not None and match.group(1) in tickets:
+            mapped.setdefault(match.group(1), []).append(match.group(2))
+        else:
+            unmapped.append(finding)
+    return mapped, unmapped
