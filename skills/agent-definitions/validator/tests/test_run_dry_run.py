@@ -263,3 +263,35 @@ def test_each_mode_and_each_built_in_adapter_is_accepted(tmp_path, capsys, mode,
 
     assert (code, err) == (0, "")
     assert f"mode {mode}, adapter {adapter}" in out
+
+
+@pytest.mark.parametrize(
+    ("edit", "expected"),
+    [
+        pytest.param(lambda w: w.replace('base-branch = "main"\n', ""), ["base-branch", "missing"], id="missing-base-branch"),
+        pytest.param(lambda w: w.replace('run-branch = "run/demo"', 'run-branch = "main"'), ["run-branch", "base-branch", "'main'"], id="run-branch-equals-base"),
+        pytest.param(lambda w: w.replace("run-branch =", "run_branch ="), ["run_branch", "unknown field"], id="misspelled-field"),
+        pytest.param(lambda w: w.replace('mode = "assure"', "mode = 3"), ["mode", "string"], id="mode-not-a-string"),
+        pytest.param(lambda w: w.replace('specialist = "python-specialist"\n', ""), ["stacks.python.specialist", "missing"], id="stack-without-specialist"),
+        pytest.param(lambda w: w.replace('gates = ["make docs"]', "gates = []"), ["stacks.docs.gates", "at least one"], id="stack-without-gates"),
+        pytest.param(lambda w: w.replace('gates = ["make docs"]', 'gates = "make docs"'), ["stacks.docs.gates", "list of strings"], id="gates-not-a-list"),
+        pytest.param(lambda w: w.replace('hotspots = []\n', ""), ["stacks.docs.hotspots", "missing"], id="stack-without-hotspots"),
+        pytest.param(lambda w: w.replace('text = "First ticket."', 'text = "First ticket."\ntext-file = "tickets/b.md"'), ["ticket 'a'", "text", "text-file", "one of"], id="ticket-with-both-texts"),
+        pytest.param(lambda w: w.replace('text = "First ticket."\n', ""), ["ticket 'a'", "text", "text-file", "one of"], id="ticket-without-text"),
+        pytest.param(lambda w: w.replace("tickets/b.md", "tickets/gone.md"), ["ticket 'b'", "tickets/gone.md", "not found"], id="ticket-file-missing"),
+        pytest.param(lambda w: w.replace('stack = "python"\nblocked-by = []', "blocked-by = []"), ["ticket 'a'", "stack", "missing"], id="ticket-without-stack"),
+        pytest.param(lambda w: w.replace('stack = "python"\nblocked-by = []', 'stack = "python"'), ["ticket 'a'", "blocked-by", "missing"], id="ticket-without-blocked-by"),
+        pytest.param(lambda w: w.replace('id = "a"', 'id = "b"'), ["ticket 'b'", "twice"], id="duplicate-ticket-id"),
+        pytest.param(lambda w: w.replace('id = "a"', "id = 1"), ["ticket", "id", "string"], id="ticket-id-not-a-string"),
+        pytest.param(lambda w: w[: w.index("[[tickets]]")], ["tickets", "at least one"], id="no-tickets"),
+        pytest.param(lambda w: w.replace("[stacks.docs]", "[stacks.docs]\ncolour = 'red'"), ["stacks.docs", "colour", "unknown field"], id="unknown-stack-field"),
+    ],
+)
+def test_a_malformed_field_exits_1_and_names_the_field(tmp_path, capsys, edit, expected):
+    code, out, err = invalid(tmp_path, capsys, edit(VALID))
+
+    assert code == 1
+    assert out == ""
+    assert "Traceback" not in err
+    for part in expected:
+        assert part in err

@@ -121,49 +121,161 @@ def _tier_override_problems(overrides: dict[str, str], tiers: Tiers) -> list[str
     return problems
 
 
+class _Reader:
+    """Reads fields out of parsed TOML and collects a message for each defect.
+
+    Each reader method returns None after it records a problem, so the caller
+    can go on and report every defect of the file in one run.
+    """
+
+    def __init__(self) -> None:
+        self.problems: list[str] = []
+
+    def table(self, value: object, field: str) -> dict[str, object] | None:
+        if not isinstance(value, dict):
+            self.problems.append(f"{field}: must be a table")
+            return None
+        return value
+
+    def refuse_unknown(self, table: dict[str, object], allowed: tuple[str, ...], field: str) -> None:
+        for key in table:
+            if key not in allowed:
+                prefix = f"{field}." if field else ""
+                self.problems.append(f"{prefix}{key}: unknown field; known fields: {', '.join(allowed)}")
+
+    def string(self, table: dict[str, object], key: str, field: str) -> str | None:
+        if key not in table:
+            self.problems.append(f"{field}: field is missing")
+            return None
+        value = table[key]
+        if not isinstance(value, str):
+            self.problems.append(f"{field}: must be a string, not {value!r}")
+            return None
+        if not value.strip():
+            self.problems.append(f"{field}: must not be empty")
+            return None
+        return value
+
+    def string_list(self, table: dict[str, object], key: str, field: str, *, at_least_one: bool) -> list[str] | None:
+        if key not in table:
+            self.problems.append(f"{field}: field is missing")
+            return None
+        value = table[key]
+        if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+            self.problems.append(f"{field}: must be a list of strings, not {value!r}")
+            return None
+        if at_least_one and not value:
+            self.problems.append(f"{field}: needs at least one entry")
+            return None
+        return list(value)
+
+
+TOP_LEVEL_FIELDS: tuple[str, ...] = ("base-branch", "run-branch", "mode", "adapter", "tier-overrides", "stacks", "tickets")
+STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots")
+TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
+
+
+def _read_stacks(reader: _Reader, value: object) -> dict[str, Stack]:
+    stacks: dict[str, Stack] = {}
+    table = reader.table(value, "stacks") if value is not None else None
+    if value is None:
+        reader.problems.append("stacks: field is missing")
+    for name, raw in (table or {}).items():
+        field = f"stacks.{name}"
+        stack = reader.table(raw, field)
+        if stack is None:
+            continue
+        reader.refuse_unknown(stack, STACK_FIELDS, field)
+        specialist = reader.string(stack, "specialist", f"{field}.specialist")
+        verifier = reader.string(stack, "verifier", f"{field}.verifier")
+        gates = reader.string_list(stack, "gates", f"{field}.gates", at_least_one=True)
+        hotspots = reader.string_list(stack, "hotspots", f"{field}.hotspots", at_least_one=False)
+        if None not in (specialist, verifier, gates, hotspots):
+            stacks[name] = Stack(name, specialist, verifier, gates, hotspots)  # type: ignore[arg-type]
+    return stacks
+
+
+def _read_tickets(reader: _Reader, value: object, root: Path) -> list[Ticket]:
+    if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
+        reader.problems.append("tickets: needs at least one [[tickets]] table")
+        return []
+    tickets: list[Ticket] = []
+    seen: set[str] = set()
+    for position, raw in enumerate(value):
+        ticket_id = reader.string(raw, "id", f"tickets[{position}].id")
+        label = f"ticket {ticket_id!r}" if ticket_id is not None else f"tickets[{position}]"
+        reader.refuse_unknown(raw, TICKET_FIELDS, label)
+        if ticket_id is not None and ticket_id in seen:
+            reader.problems.append(f"{label}: id appears twice")
+        if ticket_id is not None:
+            seen.add(ticket_id)
+        text = _read_ticket_text(reader, raw, label, root)
+        stack = reader.string(raw, "stack", f"{label}: stack")
+        blocked_by = reader.string_list(raw, "blocked-by", f"{label}: blocked-by", at_least_one=False)
+        if None not in (ticket_id, text, stack, blocked_by):
+            tickets.append(Ticket(ticket_id, text, stack, blocked_by))  # type: ignore[arg-type]
+    return tickets
+
+
+def _read_ticket_text(reader: _Reader, raw: dict[str, object], label: str, root: Path) -> str | None:
+    """The ticket text: the inline `text`, or the content of the file `text-file`."""
+    if ("text" in raw) == ("text-file" in raw):
+        reader.problems.append(f"{label}: needs exactly one of text and text-file")
+        return None
+    if "text" in raw:
+        return reader.string(raw, "text", f"{label}: text")
+    name = reader.string(raw, "text-file", f"{label}: text-file")
+    if name is None:
+        return None
+    try:
+        return (root / name).read_text()
+    except FileNotFoundError:
+        reader.problems.append(f"{label}: text-file {name!r} not found (looked in {root})")
+    except OSError as error:
+        reader.problems.append(f"{label}: text-file {name!r} cannot be read: {error}")
+    return None
+
+
 def load_workflow(path: Path, tiers: Tiers) -> Workflow:
-    """Read and check a workflow file. Raise WorkflowError with every defect found."""
+    """Read and check a workflow file. Raise WorkflowError with every defect found.
+
+    `text-file` paths are relative to the directory of the workflow file.
+    """
     data = tomllib.loads(Path(path).read_text())
-    stacks = {
-        name: Stack(name, s["specialist"], s["verifier"], list(s["gates"]), list(s["hotspots"]))
-        for name, s in data["stacks"].items()
-    }
-    root = Path(path).parent
-    tickets = [
-        Ticket(
-            t["id"],
-            t["text"] if "text" in t else (root / t["text-file"]).read_text(),
-            t["stack"],
-            list(t["blocked-by"]),
-        )
-        for t in data["tickets"]
-    ]
-    problems: list[str] = []
+    reader = _Reader()
+    reader.refuse_unknown(data, TOP_LEVEL_FIELDS, "")
+    base_branch = reader.string(data, "base-branch", "base-branch")
+    run_branch = reader.string(data, "run-branch", "run-branch")
+    mode = reader.string(data, "mode", "mode")
+    adapter = reader.string(data, "adapter", "adapter")
+    if base_branch is not None and base_branch == run_branch:
+        reader.problems.append(f"run-branch: {run_branch!r} is the base-branch; the run needs its own branch")
+    if mode is not None and mode not in MODES:
+        reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
+    if adapter is not None and adapter not in ADAPTERS:
+        reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(ADAPTERS)}")
+
+    overrides_table = reader.table(data.get("tier-overrides", {}), "tier-overrides") or {}
+    overrides = {role: value for role, value in overrides_table.items() if isinstance(value, str)}
+    for role in overrides_table.keys() - overrides.keys():
+        reader.problems.append(f"tier-overrides.{role}: must be a string, not {overrides_table[role]!r}")
+    reader.problems.extend(_tier_override_problems(overrides, tiers))
+
+    stacks = _read_stacks(reader, data.get("stacks"))
+    tickets = _read_tickets(reader, data.get("tickets"), Path(path).parent)
     known_ids = {t.id for t in tickets}
     for ticket in tickets:
         if ticket.stack not in stacks:
-            problems.append(f"ticket {ticket.id!r}: unknown stack {ticket.stack!r}; known stacks: {', '.join(sorted(stacks))}")
+            known = ", ".join(sorted(stacks))
+            reader.problems.append(f"ticket {ticket.id!r}: unknown stack {ticket.stack!r}; known stacks: {known}")
         for blocker in ticket.blocked_by:
             if blocker not in known_ids:
-                problems.append(f"ticket {ticket.id!r}: unknown blocker {blocker!r}")
-    if data["mode"] not in MODES:
-        problems.append(f"mode: {data['mode']!r} is not a mode; known modes: {', '.join(MODES)}")
-    if data["adapter"] not in ADAPTERS:
-        problems.append(f"adapter: {data['adapter']!r} is not an adapter; known adapters: {', '.join(ADAPTERS)}")
-    problems.extend(_tier_override_problems(dict(data.get("tier-overrides", {})), tiers))
+                reader.problems.append(f"ticket {ticket.id!r}: unknown blocker {blocker!r}")
     for cycle in _cycles(tickets):
-        problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))
-    if problems:
-        raise WorkflowError(problems)
-    return Workflow(
-        data["base-branch"],
-        data["run-branch"],
-        data["mode"],
-        data["adapter"],
-        stacks,
-        tickets,
-        dict(data.get("tier-overrides", {})),
-    )
+        reader.problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))
+    if reader.problems:
+        raise WorkflowError(reader.problems)
+    return Workflow(base_branch, run_branch, mode, adapter, stacks, tickets, overrides)  # type: ignore[arg-type]
 
 
 def plan_order(workflow: Workflow) -> list[Ticket]:
