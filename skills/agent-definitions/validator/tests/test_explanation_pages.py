@@ -18,6 +18,7 @@ EXPLANATION = ROOT / "docs" / "explanation"
 PAGES = [
     "why-the-verifier-is-blind.md",
     "why-each-specialist-has-a-twin.md",
+    "the-mode-trade-off.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -36,6 +37,15 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("one declaration renders both agents, so the pair cannot drift", r"one declaration"),
         ("a generic verifier is right only for docs and configuration", r"generic verifier"),
         ("a monorepo has one pair for each stack", r"each stack"),
+    ],
+    "the-mode-trade-off.md": [
+        ("assure verifies each branch at once and gives up tokens and time", r"`assure`.*at once"),
+        ("economy verifies at the end of the chain and gives up early discovery", r"`economy`.*early"),
+        ("a defect of the first ticket in economy shows late, after later tickets built on it", r"built on it"),
+        ("economy is for the fewest tokens", r"fewest tokens"),
+        ("a cheaper mode never means a weaker verifier", r"weaker verifier"),
+        ("the trust rules are the same in both modes", r"invariants"),
+        ("the page says how to choose", r"choose"),
     ],
 }
 
