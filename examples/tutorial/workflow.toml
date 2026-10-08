@@ -1,0 +1,16 @@
+base-branch = "main"
+run-branch = "run/sample"
+mode = "assure"
+adapter = "claude-code"
+
+[stacks.python]
+specialist = "python-specialist"
+verifier = "python-verifier"
+gates = ["python3 -m unittest"]
+hotspots = ["docs/agents/delegation.md", "workflow.toml"]
+
+[[tickets]]
+id = "1"
+text-file = "ticket.md"
+stack = "python"
+blocked-by = []
