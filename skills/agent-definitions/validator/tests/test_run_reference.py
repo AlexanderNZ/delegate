@@ -32,7 +32,7 @@ outside_the_package = pytest.mark.skipif(
         "agent", "model", "prompt", "cwd", "report_path",  # the request of an adapter
         "exit_status", "end_state", "session_id", "event_stream",  # its result
         "finished", "failed", "capped", "tier_column",
-        "--dry-run", "--repo <dir>", "--tiers <file>",
+        "--dry-run", "--repo <dir>", "--tiers <file>", "--resume <run-id>",
     ],
 )
 def test_the_reference_names_each_report_field_adapter_field_and_option(name):
@@ -110,3 +110,26 @@ def test_the_reference_lists_the_continuation_events_of_a_real_journal_with_each
         for field in event:
             if field not in ("seq", "time", "event"):
                 assert f"`{field}`" in row, (event["event"], field)
+
+
+@outside_the_package
+def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
+    from .support import kill_a_run, read_journal_file, resume_main
+
+    adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}, "b": {"b.txt": "b\n"}}))
+    try:
+        from .test_run_multi import HEAD, ticket
+
+        repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+        run_id, _ = kill_a_run(repo, 3)
+        code, _, _ = resume_main(repo, capsys, run_id)
+    finally:
+        adapters.unregister("scripted")
+    assert code == 0
+    events = read_journal_file(repo, run_id)
+    assert "resume" in [e["event"] for e in events]
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for event in events:
+        for name in event:
+            if name not in ("seq", "time", "event"):
+                assert f"`{name}`" in rows[f"`{event['event']}`"], (event["event"], name)

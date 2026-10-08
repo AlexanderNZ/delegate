@@ -2,7 +2,8 @@
 
 `--dry-run` validates the file and prints the plan in dependency order. It
 creates no branch, no worktree and no journal. Without it, the engine builds
-each ticket through the workflow's harness adapter.
+each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
+with a run that stopped, from its journal.
 """
 
 from __future__ import annotations
@@ -12,15 +13,19 @@ import sys
 import tomllib
 from pathlib import Path
 
-from .engine import EngineError, run_workflow
+from .engine import EngineError, run_workflow, workflow_of_run
 from .tiers import Tiers, load_tiers
 from .workflow import WorkflowError, load_workflow, plan_order
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate run", description="Check a workflow file and print its plan.")
-    parser.add_argument("workflow", type=Path, help="path to the workflow TOML file")
+    parser = argparse.ArgumentParser(prog="delegate run", description="Build the tickets of a workflow file, or check it and print its plan.")
+    parser.add_argument(
+        "workflow", type=Path, nargs="?",
+        help="path to the workflow TOML file; with --resume the default is the file that the run started from",
+    )
     parser.add_argument("--dry-run", action="store_true", help="validate the workflow and print the plan; create nothing")
+    parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository to build in; default is the current directory")
     parser.add_argument("--tiers", type=Path, help="path to a tiers.toml; default is the bundled table")
     return parser
@@ -43,6 +48,16 @@ def _load_tiers(path: Path | None) -> Tiers:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.workflow is None and args.resume is None:
+        parser.error("a workflow file or --resume RUN_ID is required")
+    if args.resume is not None and args.dry_run:
+        parser.error("--resume and --dry-run cannot go together")
+    if args.workflow is None:
+        try:
+            args.workflow = workflow_of_run(args.repo, args.resume)
+        except EngineError as error:
+            print(f"delegate run: {error}", file=sys.stderr)
+            return 1
     try:
         tiers = _load_tiers(args.tiers)
         workflow = load_workflow(args.workflow, tiers)
@@ -55,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not args.dry_run:
         try:
-            result = run_workflow(workflow, args.workflow, args.repo, tiers)
+            result = run_workflow(workflow, args.workflow, args.repo, tiers, resume=args.resume)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

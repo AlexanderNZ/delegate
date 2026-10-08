@@ -2,6 +2,8 @@
 
 `delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
+A coordinator can stop a run and go on later with `--resume <run-id>`. See [the resume](#the-resume).
+
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose blocker failed is skipped, and the independent tickets still run.
 
 To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md).
@@ -10,8 +12,9 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 
 | Option | Meaning |
 |---|---|
-| `<workflow>` | The path of the workflow file. |
+| `<workflow>` | The path of the workflow file. With `--resume`, it is optional: the default is the file that the run started from. |
 | `--dry-run` | Validate the file and print the plan. Create nothing. |
+| `--resume <run-id>` | Go on with the run `<run-id>`. See [the resume](#the-resume). It cannot go with `--dry-run`. |
 | `--repo <dir>` | The git repository to build in. The default is the current directory. |
 | `--tiers <file>` | The path of a tier file. The default is the bundled tier table. |
 
@@ -59,6 +62,30 @@ One count covers the three triggers. Each mode has a continuation limit:
 | `economy` | 1 |
 
 When the specialist is not done after the limit, the step fails. The journal records `continuation-limit` with the count, and the reason of the step ends with `the continuation limit of <n> is reached`. The branch and the worktree stay, with all commits. The fix-up specialist of an `assure` round is not continued: its failure fails the step.
+
+## The resume
+
+`delegate run --resume <run-id>` goes on with a run that stopped. A run stops when its process is killed, or is interrupted with Ctrl-C. Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
+
+The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch`, `run-branch` and the ticket ids must be the same. If one differs, the command exits 1 and names the field. A run that has a `run-end` cannot be resumed.
+
+The engine treats each ticket by what the journal holds for it:
+
+| State in the journal | What the resume does |
+|---|---|
+| `step-end` (built, or failed) | The step is complete. The engine does not build it again, and it gives the adapter no invocation. |
+| `skip` | The ticket stays skipped. |
+| `run-branch-advance`, and no `step-end` | The run branch holds the commit already. The engine writes `step-end` with the state `built`, with no invocation. |
+| `step-start`, and no `step-end` | The step is open. The engine uses its worktree and branch again. See below. |
+| nothing | The ticket did not start. The engine builds it as in a new run. |
+
+An open step goes on as follows:
+
+- The worktree is used again as it is. A rebase that the stop left half done is aborted. If the worktree is gone, the engine makes it again on the same branch.
+- If the journal shows a valid report after the last time the specialist was spawned, the engine does not spawn the specialist again. It runs the gates, and the step goes on from there.
+- Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond `base-branch`, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
+- The continuations that the journal holds count against the limit of the mode.
+- In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of verifier runs that the journal holds, and the limit of two fix-up rounds counts across the stop.
 
 ## A crash in a step
 
@@ -239,6 +266,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
+| `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
@@ -256,6 +284,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 ## Limits of this version
 
 - Every ticket branch starts from `base-branch`, not from the work of the tickets that block it. In `assure` mode, the rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
-- The engine does not resume a run.
+- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run.
+- If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
 - `economy` mode does not verify, and it does not move the run branch.
 - A gate has no time limit.

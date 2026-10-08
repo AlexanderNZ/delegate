@@ -22,6 +22,15 @@ skipped, and the journal records which blocker. A ticket with no failed blocker
 still runs. A rebase conflict fails that step only: the engine aborts the
 rebase, so the branch and its worktree keep the state from before the rebase.
 
+A run can be resumed. `run_workflow` with `resume` opens the journal of an
+earlier run, rebuilds the state from it, and goes on at the first step that is
+not complete. It appends to the journal and never rewrites a line. A step with
+a `step-end` is complete, and the engine never builds it again. A step with a
+`run-branch-advance` has its commit on the run branch already, so the engine
+only closes it. Any other open step restarts in its own worktree, which the
+engine makes again if it is gone. A specialist whose report the journal shows as
+valid is not spawned again.
+
 Standard library and git through subprocess only.
 """
 
@@ -31,14 +40,14 @@ import secrets
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import adapters
 from .adapters import Adapter, AdapterRequest
 from .brief import BriefError, continuation_brief, fixup_brief, specialist_brief, verifier_run_brief, verifier_run_sections
-from .journal import Journal
+from .journal import Journal, JournalError, read_events
 from .reports import ReportError, VerifierReport, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -138,33 +147,133 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
     return f"{workflow.run_branch}-{ticket.id}"
 
 
-def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers) -> RunResult:
-    """Build the tickets of a workflow in dependency order. Return the result of the run."""
+def _state_dir(repo: Path) -> tuple[Path, Path]:
+    """The top level of the repository and the directory where the engine keeps its state."""
+    top = Path(_git(repo, "rev-parse", "--show-toplevel"))
+    return top, (top / _git(top, "rev-parse", "--git-common-dir")).resolve() / "delegate"
+
+
+def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:
+    """Open the journal of an earlier run for appending. Raise EngineError when the run has none or its journal is not valid."""
+    try:
+        journal, events = Journal.reopen(state_dir / "runs" / run_id / "journal.jsonl")
+    except JournalError as error:
+        raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
+    if not events or events[0]["event"] != "run-start":
+        raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
+    return journal, events
+
+
+def workflow_of_run(repo: Path, run_id: str) -> Path:
+    """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown."""
+    _, state_dir = _state_dir(repo)
+    try:
+        events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
+    except JournalError as error:
+        raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
+    if not events or events[0]["event"] != "run-start":
+        raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
+    return Path(str(events[0]["workflow"]))
+
+
+@dataclass
+class _Progress:
+    """What the journal of an earlier run says: the ticket outcomes, and the one step that was open."""
+
+    built: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+    failures: dict[str, str] = field(default_factory=dict)
+    skipped: dict[str, str] = field(default_factory=dict)
+    open_ticket: str | None = None
+    events: list[dict[str, object]] = field(default_factory=list)
+
+
+def _restore(events: list[dict[str, object]], run_id: str) -> _Progress:
+    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended."""
+    progress = _Progress(events=events)
+    started: str | None = None
+    for event in events:
+        kind, ticket = event["event"], str(event.get("ticket"))
+        if kind == "run-end":
+            raise EngineError(f"run {run_id!r} has ended with the result {event['result']!r}; it cannot be resumed")
+        if kind == "step-start":
+            started = ticket
+        elif kind == "step-end":
+            if event["state"] == BUILT:
+                progress.built.append(ticket)
+            else:
+                progress.failed.append(ticket)
+                progress.failures[ticket] = str(event["reason"])
+            if started == ticket:
+                started = None
+        elif kind == "skip":
+            progress.skipped[ticket] = str(event["reason"])
+    progress.open_ticket = started
+    return progress
+
+
+def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str, object], run_id: str) -> None:
+    """Refuse a resume when the workflow is not the one that the run started from. The message names the field."""
+    now: dict[str, object] = {
+        "mode": workflow.mode, "adapter": workflow.adapter, "base_branch": workflow.base_branch,
+        "run_branch": workflow.run_branch, "tickets": [t.id for t in plan_order(workflow)],
+    }
+    for name, value in now.items():
+        if run_start[name] != value:
+            raise EngineError(f"workflow {workflow_path} differs from run {run_id}: {name} was {run_start[name]!r}, is now {value!r}")
+
+
+def run_workflow(
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, *, resume: str | None = None
+) -> RunResult:
+    """Build the tickets of a workflow in dependency order. Return the result of the run.
+
+    With `resume`, the run id of an earlier run, go on with that run: build the
+    tickets that are not complete, and append to its journal.
+    """
     try:
         adapter = adapters.get(workflow.adapter)
     except KeyError:
         raise EngineError(
             f"adapter {workflow.adapter!r} has no implementation yet; registered: {', '.join(adapters.registered_names()) or 'none'}"
         ) from None
-    repo = Path(_git(repo, "rev-parse", "--show-toplevel"))
-    state_dir = (repo / _git(repo, "rev-parse", "--git-common-dir")).resolve() / "delegate"
-    _check_branches(workflow, repo)
+    repo, state_dir = _state_dir(repo)
     needed = ("specialist", "verifier") if workflow.mode == "assure" else ("specialist",)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in needed}
-    _git(repo, "branch", workflow.run_branch, workflow.base_branch)
+    return _execute(workflow, workflow_path, adapter, roles, repo, state_dir, resume)
 
-    run_id = _new_run_id()
-    journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
+
+def _execute(
+    workflow: Workflow, workflow_path: Path, adapter: Adapter, roles: dict[str, tuple[str, str]], repo: Path,
+    state_dir: Path, resume: str | None,
+) -> RunResult:
     order = plan_order(workflow)
-    journal.append(
-        "run-start", run_id=run_id, workflow=str(workflow_path), mode=workflow.mode, adapter=workflow.adapter,
-        base_branch=workflow.base_branch, run_branch=workflow.run_branch, tickets=[t.id for t in order],
-    )
-    built: list[str] = []
-    failed: list[str] = []
-    failures: dict[str, str] = {}
-    skipped: dict[str, str] = {}
+    if resume is None:
+        _check_branches(workflow, repo)
+        _git(repo, "branch", workflow.run_branch, workflow.base_branch)
+        run_id = _new_run_id()
+        journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
+        journal.append(
+            "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
+            base_branch=workflow.base_branch, run_branch=workflow.run_branch, tickets=[t.id for t in order],
+        )
+        progress = _Progress()
+    else:
+        run_id = resume
+        journal, events = _journal_events(state_dir, run_id)
+        progress = _restore(events, run_id)
+        _check_same_run(workflow, workflow_path, events[0], run_id)
+        if not _branch_exists(repo, workflow.run_branch):
+            raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
+        journal.append(
+            "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
+            skipped=list(progress.skipped), open=progress.open_ticket,
+        )
+    built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
+    complete = {*built, *failed, *skipped}
     for position, ticket in enumerate(order):
+        if ticket.id in complete:
+            continue
         blockers = [blocker for blocker in ticket.blocked_by if blocker not in built]
         if blockers:
             reason = "blocked by " + "; ".join(
@@ -173,8 +282,9 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
             skipped[ticket.id] = reason
             journal.append("skip", ticket=ticket.id, blockers=blockers, reason=reason)
             continue
+        prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
-            reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
+            reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal, prior)
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
             # step unknown, so the run ends here. The journal says why.
@@ -198,40 +308,103 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     return RunResult(run_id, journal.path, built, failed, failures, skipped)
 
 
+def _specialist_done(prior: list[dict[str, object]]) -> bool:
+    """True when the journal shows a valid specialist report after the last time the specialist was spawned."""
+    spawned = valid = -1
+    for index, event in enumerate(prior):
+        if event["event"] in ("step-start", "continuation"):
+            spawned = index
+        elif event["event"] == "report-validation" and event["valid"]:
+            valid = index
+    return valid > spawned
+
+
+def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str) -> None:
+    """Make the worktree of a ticket, or reuse the one that is there.
+
+    A worktree that a killed run left is reused as it is, except that a rebase
+    which the kill stopped is aborted. A branch without a worktree gets a new
+    worktree. Raise EngineError when the worktree holds another branch.
+    """
+    if worktree.is_dir():
+        for name in ("rebase-merge", "rebase-apply"):
+            if (worktree / _git(worktree, "rev-parse", "--git-path", name)).exists():
+                _git(worktree, "rebase", "--abort")
+                break
+        current = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD")
+        if current != branch:
+            raise EngineError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
+        return
+    _git(repo, "worktree", "prune")
+    if _branch_exists(repo, branch):
+        _git(repo, "worktree", "add", "-q", str(worktree), branch)
+    else:
+        _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), base)
+
+
 def _build_ticket(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, roles: dict[str, tuple[str, str]],
-    repo: Path, state_dir: Path, run_id: str, journal: Journal,
+    repo: Path, state_dir: Path, run_id: str, journal: Journal, prior: list[dict[str, object]] | None = None,
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed.
 
     In `assure` mode a ticket is built only when its verifier accepts it.
+
+    `prior` holds the journal events of this ticket when the step was open in a
+    run that stopped. The step then goes on in its own worktree.
     """
     tier, model = roles["specialist"]
     stack = workflow.stacks[ticket.stack]
     branch = _ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
-    base_commit = _git(repo, "rev-parse", workflow.base_branch)
-    _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), workflow.base_branch)
-    journal.append(
-        "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
-        base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
+    if prior is None:
+        base_commit = _git(repo, "rev-parse", workflow.base_branch)
+        _prepare_worktree(repo, worktree, branch, workflow.base_branch)
+        journal.append(
+            "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
+            base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
+        )
+        specialist_done, continuations, verify_rounds = False, 0, 0
+    else:
+        advances = [e for e in prior if e["event"] == "run-branch-advance"]
+        if advances:
+            # The run branch holds the commit already. Only the step-end is missing.
+            landed = str(advances[-1]["to_commit"])
+            if subprocess.run(
+                ["git", "-C", str(repo), "merge-base", "--is-ancestor", landed, f"refs/heads/{workflow.run_branch}"],
+                capture_output=True,
+            ).returncode != 0:
+                raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
+            return None
+        _prepare_worktree(repo, worktree, branch, workflow.base_branch)
+        specialist_done = _specialist_done(prior)
+        continuations = sum(1 for e in prior if e["event"] == "continuation")
+        verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")
+    reason = _build_with_continuations(
+        workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal,
+        spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
     )
-    reason = _build_with_continuations(workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal)
     if reason:
         return reason
     if workflow.mode == "assure":
         step = _Step(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
         reason = _rebase_onto_run_branch(step)
-        return reason if reason else _verify_ticket(step)
+        return reason if reason else _verify_ticket(step, verify_rounds)
     return None
 
 
 def _build_with_continuations(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, model: str, repo: Path, worktree: Path, branch: str,
-    report_path: Path, journal: Journal,
+    report_path: Path, journal: Journal, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
+
+    A resume sets `spawned` when the journal shows that the specialist finished
+    with a valid report, so the first pass does not spawn it again. It sets
+    `continuations` to the number the journal holds, so the limit counts across
+    the stop. It sets `interrupted` for a step that a stop left open: when the
+    branch holds commits already, the first prompt is a continuation brief.
 
     The specialist continues when it ends capped or failed. Return None when
     the report is valid and the branch holds green work, or the reason the step
@@ -242,15 +415,24 @@ def _build_with_continuations(
     stack = workflow.stacks[ticket.stack]
     limit = CONTINUATION_LIMIT[workflow.mode]
     prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
-    continuations = 0
+    if interrupted and not spawned:
+        so_far = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
+        if so_far:
+            prompt = continuation_brief(
+                ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
+                "the run was interrupted", resumed=False,
+            )
     resume_session: str | None = None
     while True:
-        result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, resume_session))
-        journal.append(
-            "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
-            session_id=result.session_id, event_stream=str(result.event_stream),
-        )
-        if result.end_state != adapters.FINISHED or result.exit_status != 0:
+        if spawned:
+            spawned, result = False, None
+        else:
+            result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, resume_session))
+            journal.append(
+                "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
+                session_id=result.session_id, event_stream=str(result.event_stream),
+            )
+        if result is not None and (result.end_state != adapters.FINISHED or result.exit_status != 0):
             trigger = adapters.CAPPED if result.end_state == adapters.CAPPED else adapters.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
             gate_output = None
@@ -278,7 +460,7 @@ def _build_with_continuations(
             return f"{reason}; the continuation limit of {limit} is reached"
         continuations += 1
         # A harness that gave no session id cannot resume, so a new agent continues.
-        resume_session = result.session_id if adapter.supports_resume else None
+        resume_session = result.session_id if result is not None and adapter.supports_resume else None
         commits = _git(worktree, "log", "--format=%H %s", f"{workflow.base_branch}..HEAD").splitlines()
         journal.append(
             "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
@@ -368,16 +550,22 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     return None
 
 
-def _verify_ticket(step: _Step) -> str | None:
+def _verify_ticket(step: _Step, first_round: int = 0) -> str | None:
     """Verify the built branch of a ticket blind. Return None on ACCEPT, or the reason the step fails.
 
     A REJECT starts a fix-up round, up to `FIXUP_ROUND_LIMIT` rounds. Each
     round, and the first pass, spawns a fresh verifier.
+
+    A resume sets `first_round` to the number of verifier runs that the journal
+    holds. The first pass of the resume is a full verification at that round
+    number, and the limit counts across the stop.
     """
     try:
+        if first_round > FIXUP_ROUND_LIMIT:
+            raise _StepFailed(f"the {first_round} verifier runs of the stopped run use up the {FIXUP_ROUND_LIMIT} fix-up rounds")
         rejected = ""
         report: VerifierReport | None = None
-        for round_number in range(FIXUP_ROUND_LIMIT + 1):
+        for round_number in range(first_round, FIXUP_ROUND_LIMIT + 1):
             fixup_body = None
             if report is not None:
                 fixup_body = _fixup_round(step, round_number, rejected, report.findings)

@@ -30,7 +30,7 @@ BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 
 # The subcommand that `agent_definitions.run` owns.
 RUN_COMMAND: str = "run"
-RUN_HELP: str = "check a workflow file and print its plan: `run <workflow> --dry-run`"
+RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
 
 TIERS_OPTION: str = "--tiers"
 
