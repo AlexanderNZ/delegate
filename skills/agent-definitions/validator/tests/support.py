@@ -291,7 +291,9 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     import sys
 
     validator = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "PYTHONPATH": str(validator)}
+    # The child must import the package under test first, and still find the dependencies (pyyaml)
+    # that the parent finds through its own PYTHONPATH. A Nix build gives them in no other way.
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(validator), os.environ.get("PYTHONPATH")]))}
     for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
         env[f"GIT_COMMITTER_{key}"] = value
         env[f"GIT_AUTHOR_{key}"] = value
