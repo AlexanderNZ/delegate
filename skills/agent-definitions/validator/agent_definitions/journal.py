@@ -37,6 +37,35 @@ def read_events(path: Path) -> list[dict[str, object]]:
     return events
 
 
+def read_new_events(path: Path, offset: int, next_seq: int) -> tuple[list[dict[str, object]], int]:
+    """The events that a journal holds beyond byte `offset`, with the offset after the last one.
+
+    `next_seq` is the `seq` that the first new event must have. A watcher calls
+    this while the engine appends, so a last line without its newline is not
+    complete yet: it is left for the next call. Raise JournalError when the file
+    is missing or a complete line is not an event with the expected `seq`.
+    """
+    try:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            data = handle.read()
+    except FileNotFoundError:
+        raise JournalError(f"journal {path} not found") from None
+    events: list[dict[str, object]] = []
+    consumed = 0
+    for raw in data.split(b"\n")[:-1]:
+        consumed += len(raw) + 1
+        seq = next_seq + len(events)
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise JournalError(f"journal {path}: line {seq} is not valid JSON: {error}") from None
+        if not isinstance(event, dict) or event.get("seq") != seq or not isinstance(event.get("event"), str):
+            raise JournalError(f"journal {path}: line {seq} is not an event with seq {seq}")
+        events.append(event)
+    return events, offset + consumed
+
+
 class Journal:
     """Appends events to one file."""
 

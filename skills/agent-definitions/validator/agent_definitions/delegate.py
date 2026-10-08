@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli, run, status
+from . import brief, cli, run, status, watch
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -36,6 +36,10 @@ RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry
 STATUS_COMMAND: str = "status"
 STATUS_HELP: str = "print the state of each ticket of a run, from its journal"
 
+# The subcommand that `agent_definitions.watch` owns.
+WATCH_COMMAND: str = "watch"
+WATCH_HELP: str = "follow the journal of a run, print each event, and exit with a code for the reason"
+
 TIERS_OPTION: str = "--tiers"
 
 
@@ -55,6 +59,7 @@ def _help_parser() -> argparse.ArgumentParser:
     sub.add_parser(BRIEF_COMMAND, help=f"{BRIEF_HELP} (as verifier-brief)", add_help=False)
     sub.add_parser(RUN_COMMAND, help=f"{RUN_HELP} (as delegate run)", add_help=False)
     sub.add_parser(STATUS_COMMAND, help=f"{STATUS_HELP} (as delegate status)", add_help=False)
+    sub.add_parser(WATCH_COMMAND, help=f"{WATCH_HELP} (as delegate watch)", add_help=False)
     return parser
 
 
@@ -108,7 +113,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return status.main(args[at + 1 :])
-    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND])
+    if command == WATCH_COMMAND:
+        if at:
+            print(
+                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {WATCH_COMMAND}",
+                file=sys.stderr,
+            )
+            return 2
+        return watch.main(args[at + 1 :])
+    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND, WATCH_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
     return 2
 
