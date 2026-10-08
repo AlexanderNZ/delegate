@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The guard tests run the rendered hooks, which call jq.
+      - name: Install jq
+        run: |
+          if ! command -v jq >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+          jq --version
+
+      - name: Install the package and pytest
+        run: pip install ./skills/agent-definitions/validator pytest
+
+      # The denylist is private, so it comes from a secret. A fork has no
+      # secret: the variable stays unset, and the neutrality test skips with a
+      # notice while the rest of the suite runs.
+      - name: Write the neutrality denylist
+        env:
+          NEUTRALITY_DENYLIST: ${{ secrets.NEUTRALITY_DENYLIST }}
+        run: |
+          if [ -n "$NEUTRALITY_DENYLIST" ]; then
+            path="$RUNNER_TEMP/neutrality-denylist.txt"
+            printf '%s\n' "$NEUTRALITY_DENYLIST" > "$path"
+            echo "AGENT_DEFINITIONS_DENYLIST=$path" >> "$GITHUB_ENV"
+          else
+            echo "::notice::NEUTRALITY_DENYLIST is empty, so the neutrality test skips."
+          fi
+
+      - name: Run the test suite
+        working-directory: skills/agent-definitions/validator
+        run: python -m pytest -rs

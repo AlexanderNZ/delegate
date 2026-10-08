@@ -1,0 +1,50 @@
+# The tier table: one name per strength, one model identifier per harness.
+# A declaration names a tier, never a model, because the harnesses use
+# different identifier spaces.
+#
+# Claude Code files omit the model: the coordinator's spawn call sets it, and
+# effort follows the model through modelSettings.<model>.effortLevel (ADR 0001).
+# OpenCode files carry the model, because OpenCode sets nothing at spawn.
+#
+# The OpenCode identifiers below follow the provider/model-id shape. Verify
+# them with `opencode models` before the first OpenCode rollout.
+
+[effort]
+levels = ["low", "medium", "high", "xhigh", "max"]
+
+[effort.opencode]
+# OpenCode expresses effort as a named variant. Only variants that exist for
+# the chosen model are valid; these are the documented Anthropic built-ins.
+variants = ["high", "max"]
+
+[tiers.strong]
+claude-code = "opus"
+opencode = "anthropic/claude-opus-5"
+
+[tiers.standard]
+claude-code = "sonnet"
+opencode = "anthropic/claude-sonnet-5"
+
+[tiers.cheap]
+claude-code = "haiku"
+opencode = "anthropic/claude-haiku-4-5"
+
+[tiers.verifier]
+claude-code = "opus"
+opencode = "anthropic/claude-opus-5"
+
+[allowed-models]
+claude-code = [
+  "sonnet", "opus", "haiku", "fable", "inherit",
+  "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001", "claude-fable-5-1",
+]
+opencode = [
+  "anthropic/claude-opus-5", "anthropic/claude-sonnet-5",
+  "anthropic/claude-haiku-4-5", "anthropic/claude-fable-5-1",
+]
+
+[budget]
+# Claude Code warns when the combined descriptions of custom subagents exceed
+# 15,000 tokens. Four characters per token is the usual estimate; the limit
+# here is conservative.
+claude-code-description-chars = 48000

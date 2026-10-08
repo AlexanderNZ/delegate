@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-definitions"
+version = "0.1.0"
+description = "Render specialist-verifier agent pairs for Claude Code and OpenCode from one declaration, and validate rendered agent files."
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6"]
+
+[project.scripts]
+agent-definitions = "agent_definitions.cli:main"
+verifier-brief = "agent_definitions.brief:main"
+
+[tool.setuptools]
+packages = ["agent_definitions"]
+
+[tool.setuptools.package-data]
+agent_definitions = ["tiers.toml", "templates/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,26 @@
+# The worked example: one declaration, two harnesses,
+# one specialist-verifier pair. Render with
+#   agent-definitions render skills/agent-definitions/validator/examples/java-spring.toml -o /tmp/agents
+# and validate with
+#   agent-definitions validate /tmp/agents --skills-dir skills
+
+[agents.java-spring]
+description = "Spring Boot backend work: controllers, services, JPA repositories, transactions, and RFC 7807 error responses."
+tier = "standard"
+skills = ["clean-ddd-hexagonal", "api-design-principles", "tdd", "test-quality", "oauth2-resource-server"]
+maxTurns = 60
+# The repository's gates: the verifier may run each one, alone or with
+# arguments. The global list holds no build tool.
+gateCommands = ["./gradlew test", "./gradlew check"]
+# A command that reads only while it stays a GET: here a repository script
+# that sends a GET unless -X names another method. The verifier guard denies
+# it with -X, and the OpenCode map leaves it out.
+getOnlyCommands = ["./scripts/api"]
+# The example sets both options to show them. The default is no language
+# rule and no flake reason.
+outputLanguage = "ste"
+trackedFileBuild = true
+# effort is omitted on purpose: it follows the model through modelSettings (ADR 0001).
+prompt = """
+Transactions are declared one method at a time. A read declares readOnly = true and calls nothing that writes. Error responses are RFC 7807 ProblemDetail. Tests drive the controller and service layer through the public API, never repository internals. A bug fix ships with a failing test first.
+"""

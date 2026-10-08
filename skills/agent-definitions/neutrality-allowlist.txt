@@ -1,0 +1,13 @@
+# The allowlist of the neutrality check (agent_definitions/neutrality.py).
+#
+# One entry on each line: `<path> <term>`. The path is relative to the
+# directory that holds agent-delegation/ and agent-definitions/. An entry
+# permits every line of that file that holds that term. A line that starts
+# with # is a comment. The check does not scan this file.
+#
+# An entry is a permanent exception only. Put a comment line with its reason
+# directly above it. An entry whose file does not hold its term, or that
+# names a file that the check does not scan, is a STALE_ALLOWLIST_ENTRY
+# finding, and the check fails.
+#
+# The kit has no permanent exception, so this file holds no entry.
