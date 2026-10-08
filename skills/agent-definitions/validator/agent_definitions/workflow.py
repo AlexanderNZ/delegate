@@ -12,7 +12,6 @@ from pathlib import Path
 
 from .tiers import Tiers
 
-
 # The two modes of a run.
 MODES: tuple[str, ...] = ("assure", "economy")
 
