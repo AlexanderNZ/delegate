@@ -1,0 +1,15 @@
+{
+  "harness": "OpenCode",
+  "harness_version": "1.15.10",
+  "recorded": "2026-10-08",
+  "recorded_note": "UTC date of the timestamps in the streams; the local date was 2026-10-09 (NZDT). The streams carry no version field, so this file is the record of the version.",
+  "command": "opencode run --format json --model <provider/model> --agent <name> [--session <id>]",
+  "redaction": "The gateway name in the model text and in the error URL is replaced with gateway. The response headers of the error are removed. Nothing else is changed.",
+  "fixtures": {
+    "finished.jsonl": {"end_state": "finished", "how": "agent smoke-agent, a prompt that asks for one sentence; the last step ends with reason stop", "exit_status": 0},
+    "capped.jsonl": {"end_state": "capped", "how": "the output limit of the model set to 30 tokens in the project config; the last step ends with reason length", "exit_status": 0},
+    "failed.jsonl": {"end_state": "failed", "how": "a model that the credential refuses with a 403; the stream holds one error event and the exit status is 0", "exit_status": 0},
+    "step-cap.jsonl": {"end_state": "finished", "how": "agent with steps: 1 and a prompt that needs two tool calls; the stream does not mark the cap, so the end state is finished", "exit_status": 0},
+    "unknown-agent.jsonl": {"end_state": null, "how": "agent no-such-agent; the harness runs its default agent, exits 0, and writes a warning on stderr", "exit_status": 0}
+  }
+}

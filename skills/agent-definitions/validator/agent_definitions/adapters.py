@@ -139,6 +139,10 @@ def get(name: str) -> Adapter:
         from .claude_code import ClaudeCodeAdapter
 
         return ClaudeCodeAdapter()
+    if name == "opencode":
+        from .opencode import OpenCodeAdapter
+
+        return OpenCodeAdapter()
     raise KeyError(name)
 
 
