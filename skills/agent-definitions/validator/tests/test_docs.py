@@ -138,3 +138,26 @@ def test_the_command_writes_the_options_of_render_validate_bootstrap_and_brief_i
     assert "| `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |" in text  # before the subcommand
     assert "--old-flag" not in text
     assert "## `delegate bootstrap`" in text  # the prose of the page stays
+
+
+GUARD_ROWS = [
+    "| git reads | `git diff`, `git log`, `git show`, `git status`, `git ls-files`, `git ls-tree`, `git rev-parse`, `git merge-base`, `git worktree list`, `git branch --show-current` |",
+    "| shell reads | `ls`, `cat`, `head`, `tail`, `sed -n`, `grep`, `rg`, `find`, `wc`, `diff`, `jq`, `shasum`, `stat`, `readlink`, `file`, `which`, `env`, `pwd`, `echo`, `printf`, `date`, `mktemp`, `python3`, `bash -c` |",
+    "| temp writes | `mkdir`, `mv`, `rm`, `tee`, `touch` — each one only when every path argument starts with `/tmp/`, `/private/tmp/`, `$TMPDIR`, or `/var/folders/`. A redirection target obeys the same rule, in every segment. |",
+    "| temp destination | `cp`, `cd` — each one only when the last path argument is a temp path. The earlier path arguments are sources, and a read of any path is a read. |",
+]
+
+
+@outside_the_package
+@pytest.mark.parametrize("page", ["skills/agent-definitions/SKILL.md", "docs/reference/commands.md"])
+def test_the_command_writes_the_guard_table_of_the_verifier_from_the_renderer_constants_into_the_skill_and_the_reference(pages, capsys, page):
+    path = pages / page
+    path.write_text(path.read_text().replace("| shell reads |", "| shell reads (old) |").replace("`git ls-tree`, ", ""))
+
+    code, out, err = docs(capsys, "--root", str(pages))
+
+    text = path.read_text()
+    assert (code, err) == (0, "")
+    for row in GUARD_ROWS:
+        assert row in text
+    assert "(old)" not in text
