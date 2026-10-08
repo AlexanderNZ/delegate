@@ -16,7 +16,7 @@ The kit names no person, company or tracker. Each repository keeps its own gates
 
 This kit does not compete with [mattpocock/skills](https://github.com/mattpocock/skills). That project optimises developer flow and throughput: one session, maximum parallelism, and a human reviewer as the trust point. This kit optimises independent evidence at each merge. It takes the output of that project's planning skills (a spec, and tickets with blocking edges) as its input, and it replaces only the build step.
 
-## Quick start
+## Install
 
 You need Python 3.11 or later, git, and a harness that the engine drives. Claude Code and OpenCode have adapters today. Nix is optional.
 
@@ -26,7 +26,9 @@ uv tool install "git+https://github.com/AlexanderNZ/delegate#subdirectory=skills
 
 This puts three commands on your PATH: `delegate`, `agent-definitions` and `verifier-brief`. `delegate` is the umbrella command. Its subcommands `render`, `validate`, `bootstrap`, `brief full` and `brief fixup` take the same arguments as the standalone commands and give the same result.
 
-Then, in your repository:
+## Quick start
+
+In your repository:
 
 1. Write your gates and hotspots in `docs/agents/delegation.md`.
 2. Run `delegate bootstrap` to write the context skill, the declaration and the agent pair.
@@ -34,6 +36,8 @@ Then, in your repository:
 4. Run `delegate run <workflow>`, and read the result with `delegate status` and `delegate watch`.
 
 The [tutorial](docs/tutorial.md) does all of this once, on a small sample repository.
+
+## Skills
 
 The two skills are plain Markdown directories: `skills/agent-delegation/` and `skills/agent-definitions/`. Copy or link them into a directory that your harness reads skills from.
 
