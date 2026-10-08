@@ -537,10 +537,14 @@ def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
 
     The clone has its own git directory and no remote, so the verifier can break
     it, and cannot reach the real repository through it.
+
+    The clone starts on the branch that the HEAD of the repository names, and
+    that branch can be the run branch. So the clone checks out the ticket branch
+    first, which frees the other names, and then sets the base branch by force.
     """
     _git(repo, "clone", "-q", "--no-checkout", str(repo), str(copy))
-    _git(copy, "branch", base, f"origin/{base}")
-    _git(copy, "checkout", "-q", "-b", branch, f"origin/{branch}")
+    _git(copy, "checkout", "-q", "-B", branch, f"origin/{branch}")
+    _git(copy, "branch", "-f", base, f"origin/{base}")
     _git(copy, "remote", "remove", "origin")
 
 

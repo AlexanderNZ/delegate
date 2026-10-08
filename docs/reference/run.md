@@ -155,7 +155,7 @@ The engine does not rebase in `economy` mode.
 
 In `assure` mode, the engine verifies each ticket branch that has green gates. In `economy` mode, the engine does not verify, and it does not move the run branch.
 
-1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. The verifier can break the copy, and cannot reach the real repository through it. The engine removes the copy when the verifier ends.
+1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. The verifier can break the copy, and cannot reach the real repository through it. The engine makes the copy also when the HEAD of the repository is on the run branch. The engine removes the copy when the verifier ends.
 2. The engine makes the verifier brief with the brief generator (`full_brief`). The brief holds the task (the ticket text), the diff `git diff <run-branch>...<ticket branch>`, the gates of the stack, the path of the copy, and the report path. The brief never holds a line of the specialist report.
 3. The engine spawns the verifier of the stack through the adapter. The working directory is the copy. The tier is `verifier`, whatever the tier of the specialist is. The `verifier` entry of `tier-overrides` replaces it. The model comes from the tier column of the adapter.
 4. The engine reads the verdict report and checks it against the schema.
