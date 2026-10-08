@@ -1,6 +1,9 @@
 """The OpenCode adapter: drive `opencode run` in JSON mode.
 
-The command is `opencode run --format json --model <model> --agent <agent>`.
+The command is `opencode run --format json --model <model> --agent <agent>
+--dir <working directory>`. The harness takes its project from the PWD variable
+that a caller inherits, not from the working directory of the process, so the
+command names the directory.
 The prompt goes on standard input, never in argv, so a long brief meets no
 argument limit and shows in no process list. The harness writes one JSON event
 on each line of standard output. The adapter copies that stream to a file and
@@ -53,7 +56,7 @@ class OpenCodeAdapter:
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
-        command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", request.agent]
+        command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", request.agent, "--dir", str(request.cwd)]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = stream_path(request.report_path)

@@ -206,3 +206,19 @@ def test_each_recorded_stream_is_in_the_manifest_with_the_harness_version_and_th
                 adapters.get("opencode").run(request(scenario, agent=facts["agent"]))
         else:
             assert adapters.get("opencode").run(request(scenario)).end_state == facts["end_state"]
+
+
+def test_the_command_names_the_working_directory_because_the_harness_takes_its_project_from_the_inherited_PWD_variable(tmp_path, monkeypatch):
+    # Measured: with the working directory set by the caller and PWD left over from the caller's shell,
+    # the harness searched the agents of the caller's directory and ran its tools there.
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    monkeypatch.setenv("PWD", str(tmp_path))
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    adapters.get("opencode").run(request(tmp_path, cwd=worktree))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv[argv.index("--dir") + 1] == str(worktree)
+    assert call["cwd"] == str(worktree.resolve())
