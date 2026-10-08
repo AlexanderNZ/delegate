@@ -105,6 +105,16 @@ class ScriptedAdapter:
     `verifier_calls` holds every verifier request. `verifier_heads` and
     `verifier_remotes` hold the HEAD commit and the remotes of the working
     directory at the time of each call.
+
+    A specialist request whose prompt holds the section "## Findings to fix" is
+    a fix-up. The adapter then commits `fixup_files` (by default one new file
+    for each fix-up), or amends the last commit when `fixup_amend` is set, or
+    commits nothing when `fixup_commit` is false. It ends with `fixup_end_state`
+    and `fixup_exit_status`, and writes the report `fixup_report_text` (by
+    default a valid report) unless `fixup_write_report` is false. `fixup_calls`
+    holds these requests. `verdict_sequence` gives the verdict of each verifier call in
+    turn; the last verdict repeats. A verifier request whose prompt starts with
+    "## Findings under verification" gets a report for the mode `fix-up`.
     """
 
     tier_column: str = "claude-code"
@@ -126,25 +136,43 @@ class ScriptedAdapter:
     verifier_calls: list[AdapterRequest] = field(default_factory=list)
     verifier_heads: list[str] = field(default_factory=list)
     verifier_remotes: list[list[str]] = field(default_factory=list)
+    verdict_sequence: list[str] = field(default_factory=list)
+    fixup_files: dict[str, str] | None = None
+    fixup_commit: bool = True
+    fixup_amend: bool = False
+    fixup_calls: list[AdapterRequest] = field(default_factory=list)
+    fixup_end_state: str = "finished"
+    fixup_exit_status: int = 0
+    fixup_report_text: str | None = None
+    fixup_write_report: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         if request.agent.endswith("verifier"):
             return self._run_verifier(request)
-        self.calls.append(request)
+        is_fixup = "## Findings to fix" in request.prompt
+        (self.fixup_calls if is_fixup else self.calls).append(request)
         head = git(request.cwd, "rev-parse", "HEAD").strip()
-        if self.files:
-            for name, content in self.files.items():
+        files = self.files
+        if is_fixup:
+            files = self.fixup_files if self.fixup_files is not None else {f"fixup-{len(self.fixup_calls)}.txt": "fix\n"}
+        if files:
+            for name, content in files.items():
                 (request.cwd / name).write_text(content)
             git(request.cwd, "add", "-A")
-        if self.commit and self.files:
+        if is_fixup and self.fixup_amend:
+            git(request.cwd, "commit", "-q", "--amend", "-m", "amended work")
+            head = git(request.cwd, "rev-parse", "HEAD").strip()
+        elif (self.fixup_commit if is_fixup else self.commit) and files:
             git(request.cwd, "commit", "-q", "-m", f"scripted work ({request.agent})")
             head = git(request.cwd, "rev-parse", "HEAD").strip()
-        if self.write_report:
+        if (self.fixup_write_report if is_fixup else self.write_report):
             branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
             ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
-            if callable(self.report_text):
+            if is_fixup and self.fixup_report_text is not None:
+                text = self.fixup_report_text
+            elif callable(self.report_text):
                 text = self.report_text(request, head)
-            elif self.report_text is not None:
+            elif not is_fixup and self.report_text is not None:
                 text = self.report_text
             else:
                 text = json.dumps(valid_report(ticket, branch, head))
@@ -153,9 +181,12 @@ class ScriptedAdapter:
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
         stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
         stream.write_text('{"type":"result"}\n')
+        if is_fixup:
+            return AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream)
         return AdapterResult(self.exit_status, self.end_state, self.session_id, stream)
 
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
+        turn = len(self.verifier_calls)
         self.verifier_calls.append(request)
         self.verifier_heads.append(git(request.cwd, "rev-parse", "HEAD").strip())
         self.verifier_remotes.append(git(request.cwd, "remote").split())
@@ -165,11 +196,13 @@ class ScriptedAdapter:
         if self.write_verifier_report:
             text = self.verifier_report_text
             if text is None:
-                text = json.dumps(valid_verdict(self.verdict, self.verdict_findings))
+                verdict = self.verdict_sequence[min(turn, len(self.verdict_sequence) - 1)] if self.verdict_sequence else self.verdict
+                mode = "fix-up" if request.prompt.startswith("## Findings under verification") else "full"
+                text = json.dumps(valid_verdict(verdict, self.verdict_findings, mode=mode))
             request.report_path.write_text(text)
         stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
         stream.write_text('{"type":"result"}\n')
-        return AdapterResult(self.verifier_exit_status, self.verifier_end_state, "verifier-session", stream)
+        return AdapterResult(self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream)
 
 
 def read_journal(stdout: str) -> list[dict[str, object]]:

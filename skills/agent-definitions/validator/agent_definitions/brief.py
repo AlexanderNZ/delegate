@@ -230,12 +230,16 @@ def fixup_brief(
     findings: str,
     authorised: str | None = None,
     stacks: Sequence[str] = (),
+    gate_commands: Sequence[str] | None = None,
 ) -> str:
     """The scoped brief: the findings verbatim, the delta, and the gates.
 
     The delta exists only when the specialist added the fix-up on top of the
     rejected commit. An amend or a rebase destroys it, so both states stop the
     command instead of producing a brief that hides the loss.
+
+    The gates come from the delegation doc of the repository. `gate_commands`
+    replaces them, as in `full_brief`.
     """
     _git(repo, "rev-parse", "--verify", f"{rejected}^{{commit}}")
     ancestor = subprocess.run(
@@ -260,17 +264,32 @@ def fixup_brief(
     if authorised:
         pairs.append(("## Coordinator-authorised additions", authorised))
     pairs.append(("## Delta", f"`{command}`\n\n" + _fenced_diff(delta)))
-    pairs.append(("## Gates", read_gates(repo, _changed_files(repo, f"{rejected}..{branch}"), stacks)))
+    if gate_commands is None:
+        gates = read_gates(repo, _changed_files(repo, f"{rejected}..{branch}"), stacks)
+    else:
+        gates = _bash("\n".join(gate_commands))
+    pairs.append(("## Gates", gates))
     return _sections(*pairs)
 
 
 def specialist_brief(
-    ticket: str, text: str, worktree: str | Path, hotspots: Sequence[str], gates: Sequence[str], report_path: str | Path
+    ticket: str,
+    text: str,
+    worktree: str | Path,
+    hotspots: Sequence[str],
+    gates: Sequence[str],
+    report_path: str | Path,
+    rejected: str | None = None,
+    findings: str | None = None,
 ) -> str:
     """The brief the engine sends a specialist: the ticket, the file boundary, the gates, the report path.
 
     The ticket text is behavioural and holds no path. The file boundary is the
     worktree, and the hotspot patterns that only the coordinator may change.
+
+    With `rejected` and `findings` the brief is a fix-up brief. It adds the
+    findings verbatim and the rejected commit, and it tells the specialist to
+    add the fix as a new commit on top of the rejected commit.
     """
     if hotspots:
         reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
@@ -290,12 +309,44 @@ def specialist_brief(
         "`gates_green` states whether the gates passed in your run. "
         "Optional fields: " + ", ".join(f"`{name}`" for name in SPECIALIST_OPTIONAL) + "."
     )
-    return _sections(
-        ("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}"),
+    pairs = [("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}")]
+    if rejected is not None and findings is not None:
+        pairs.append(("## Findings to fix", findings.rstrip("\n")))
+        pairs.append((
+            "## Rejected commit",
+            f"A verifier rejected the commit `{rejected}`. Fix the findings above in this worktree. "
+            f"Add the fix as a new commit on top of `{rejected}`. "
+            "Do not amend, rebase or reset: a verifier reads only the delta from the rejected commit, "
+            "and the engine refuses a branch that no longer holds it.",
+        ))
+    pairs += [
         ("## File boundary", boundary),
         ("## Gates", "The engine runs these gates itself after you finish.\n\n" + _bash("\n".join(gates))),
         ("## Report", report),
+    ]
+    return _sections(*pairs)
+
+
+def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:
+    """The sections the engine adds to a verifier brief: the working copy and the report path.
+
+    `copy` is the temporary copy of the branch that the engine prepared. `mode`
+    is `full` or `fix-up`, and the report must name it.
+    """
+    working_copy = (
+        f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
+        "You may break the copy to prove a test red. Change no file outside it. Never push."
     )
+    fields = ", ".join(f"`{name}`" for name in VERIFIER_REQUIRED)
+    report = (
+        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
+        f"`mode` is `{mode}`. `verdict` is one of " + ", ".join(f"`{v}`" for v in VERIFIER_VERDICTS) + ". "
+        "Each entry of `criteria` is an object with the strings `criterion` and `evidence`. "
+        "`gate_output` holds the output of the gates that you ran. "
+        "A REJECT lists at least one finding in `findings`. "
+        "`unverified` lists what you could not verify."
+    )
+    return "\n" + _sections(("## Working copy", working_copy), ("## Report", report))
 
 
 def verifier_run_brief(
@@ -307,21 +358,7 @@ def verifier_run_brief(
     the gates, and never the specialist's report. `copy` is the temporary copy
     of the branch that the engine prepared.
     """
-    working_copy = (
-        f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
-        "You may break the copy to prove a test red. Change no file outside it. Never push."
-    )
-    fields = ", ".join(f"`{name}`" for name in VERIFIER_REQUIRED)
-    report = (
-        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
-        "`mode` is `full`. `verdict` is one of " + ", ".join(f"`{v}`" for v in VERIFIER_VERDICTS) + ". "
-        "Each entry of `criteria` is an object with the strings `criterion` and `evidence`. "
-        "`gate_output` holds the output of the gates that you ran. "
-        "A REJECT lists at least one finding in `findings`. "
-        "`unverified` lists what you could not verify."
-    )
-    brief = full_brief(copy, branch, base, task, gate_commands=gates)
-    return brief + "\n" + _sections(("## Working copy", working_copy), ("## Report", report))
+    return full_brief(copy, branch, base, task, gate_commands=gates) + verifier_run_sections(copy, report_path, "full")
 
 
 def main(argv: list[str] | None = None) -> int:

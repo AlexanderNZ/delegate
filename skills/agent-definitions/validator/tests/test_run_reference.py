@@ -40,8 +40,9 @@ def test_the_reference_names_each_report_field_adapter_field_and_option(name):
 
 
 @outside_the_package
-def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys):
-    adapters.register("scripted", ScriptedAdapter())
+@pytest.mark.parametrize("verdicts", [pytest.param([], id="first-pass-accept"), pytest.param(["REJECT", "ACCEPT"], id="fixup-round")])
+def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, verdicts):
+    adapters.register("scripted", ScriptedAdapter(verdict_sequence=verdicts, verdict_findings=["feature.txt is not a CSV file."] if verdicts else None))
     try:
         repo = make_repo(tmp_path)
         code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
@@ -49,6 +50,7 @@ def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fiel
         adapters.unregister("scripted")
     events = read_journal(capsys.readouterr().out)
     assert code == 0
+    assert ("fixup-start" in [e["event"] for e in events]) == bool(verdicts)
     rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
     for event in events:
         row = rows[f"`{event['event']}`"]

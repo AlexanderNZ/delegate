@@ -1,6 +1,6 @@
 # Reference: `delegate run`
 
-`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A ticket that passes all of these is in the built state.
+`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. A ticket that passes all of these is in the built state.
 
 To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md).
 
@@ -44,9 +44,22 @@ In `assure` mode, the engine verifies each ticket branch that has green gates. I
 3. The engine spawns the verifier of the stack through the adapter. The working directory is the copy. The tier is `verifier`, whatever the tier of the specialist is. The `verifier` entry of `tier-overrides` replaces it. The model comes from the tier column of the adapter.
 4. The engine reads the verdict report and checks it against the schema.
 5. On ACCEPT, the engine moves the run branch to the commit that the verifier saw. It moves the branch only by fast-forward. If the run branch holds a commit that the ticket branch does not hold, the step fails and the run branch does not change.
-6. On REJECT, the run branch does not change. The step fails, the journal holds the findings, and the command prints them on stderr and exits 1.
+6. On REJECT, the run branch does not change, and the engine starts a fix-up round. See [the fix-up round](#the-fix-up-round). After the last round, the step fails, the journal holds the findings, and the command prints them on stderr and exits 1.
 
 The engine keeps the verdict report and the event stream of the verifier in `runs/<run id>/verifier/<ticket id>/`.
+
+## The fix-up round
+
+A REJECT in `assure` mode starts a fix-up round. The limit is 2 rounds for each ticket. A round has these parts:
+
+1. The engine writes the findings of the rejected verdict to `runs/<run id>/findings/<ticket id>.fixup-<round>.md`, one finding on each line, with the prefix `- `.
+2. The engine sends the specialist a fix-up brief in the same worktree. The brief holds the ticket, the findings verbatim (`## Findings to fix`), the rejected commit (`## Rejected commit`), the file boundary, the gates, and the report path. The tier and the model are those of the first specialist run.
+3. The fix must be a new commit on top of the rejected commit. The engine asks the brief generator (`fixup_brief`) for the fix-up verifier brief. The generator refuses when the rejected commit is not an ancestor of the branch (the specialist amended or rewrote history), and when the branch tip is the rejected commit (the specialist added no commit). A refusal fails the step, and the journal records the reason in `fixup-refused`.
+4. The engine runs the gates of the stack itself. A red gate fails the step.
+5. The engine spawns a fresh verifier in a new temporary copy. The brief starts with `## Findings under verification`, so the verifier works in the mode `fix-up`. The brief holds the findings verbatim, the delta `git diff <rejected commit>..<ticket branch>` (not the full diff), the gates, the path of the copy, and the report path. It never holds a line of a specialist report. The verdict report must name the mode `fix-up`.
+6. On ACCEPT, the engine moves the run branch to the tip that the verifier saw, by fast-forward only. On REJECT, the next round starts. Its rejected commit is the tip that the last verifier saw, so its delta holds only the newest fix-up.
+
+Each round spawns a new verifier with a new session. The engine never resumes a verifier session. After the second round, a REJECT fails the step with the reason `the verifier rejected the branch after 2 fix-up rounds: <findings>`, and the run ends.
 
 ## Where the engine writes
 
@@ -56,7 +69,10 @@ All files are in `<git common dir>/delegate/`. The working tree of the repositor
 |---|---|
 | `runs/<run id>/journal.jsonl` | The journal of the run. |
 | `runs/<run id>/reports/<ticket id>.specialist.json` | The report path that the brief gives the specialist. |
+| `runs/<run id>/findings/<ticket id>.fixup-<round>.md` | The findings that start a fix-up round. |
+| `runs/<run id>/reports/<ticket id>.fixup-<round>.specialist.json` | The report path that the fix-up brief gives the specialist. |
 | `runs/<run id>/verifier/<ticket id>/` | The verdict report (`verdict.json`) and the files that the verifier run wrote beside it. |
+| `runs/<run id>/verifier/<ticket id>/fixup-<round>/` | The same files for the verifier of a fix-up round. |
 | `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. |
 
 The run id is the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`.
@@ -83,8 +99,9 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. |
 | `the verifier could not start: ...` | The engine could not make the copy or the verifier brief. The message holds the cause. |
 | `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, or the exit status is not 0. The engine does not read the verdict report. |
-| `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names a mode other than `full` is invalid. |
-| `the verifier rejected the branch: <findings>` | The verdict is REJECT. |
+| `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names another mode than the mode of the run (`full`, or `fix-up` in a fix-up round) is invalid. |
+| `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. |
+| `the fix-up of round <n> is refused: ...` | The branch does not hold the rejected commit, or holds no commit beyond it. The message holds the cause from the brief generator. |
 | `run branch <name> cannot fast-forward to <branch>: ...` | The verdict is ACCEPT, but the run branch holds a commit that the ticket branch does not hold. |
 
 ## The adapter interface
@@ -139,7 +156,7 @@ The verifier writes a JSON object to the report path. A field that this table do
 
 | Field | Type | Meaning |
 |---|---|---|
-| `mode` | string | The mode of the verifier. It must be `full`. |
+| `mode` | string | The mode of the verifier. It must be `full` in the first pass and `fix-up` in a fix-up round. |
 | `verdict` | string | `ACCEPT` or `REJECT`. |
 | `criteria` | list of objects | One object for each acceptance criterion, with the strings `criterion` and `evidence`. An ACCEPT needs at least one. |
 | `gate_output` | string | The output of the gates that the verifier ran. |
@@ -156,11 +173,14 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid) |
-| `gate-result` | `ticket`, `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
-| `verify-start` | `ticket`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
-| `verify-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
-| `verify-report` | `ticket`, `valid`, `path`, `reason` (`null` when valid) |
-| `verdict` | `ticket`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
+| `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
+| `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
+| `verify-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` |
+| `verify-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid) |
+| `verdict` | `ticket`, `round`, `mode`, `verdict`, `findings`, `unverified`, `report` (the path of the verdict report) |
+| `fixup-start` | `ticket`, `round` (1 or 2), `rejected_commit`, `findings_file`, `agent`, `tier`, `model` |
+| `fixup-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` (the adapter result of the fix-up specialist) |
+| `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built) |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed` (lists of ticket ids) |
@@ -169,6 +189,6 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 
 - Every ticket branch starts from `base-branch`, not from the work of the tickets that block it. In `assure` mode, a ticket that follows an accepted ticket cannot fast-forward the run branch, and its step fails. The engine does not rebase the branch onto the run branch yet.
 - The first failed step ends the run. No later ticket starts.
-- The engine does not continue a capped or failed specialist, does not resume a run, and does not start a fix-up round after a REJECT.
+- The engine does not continue a capped or failed specialist, and does not resume a run.
 - `economy` mode does not verify, and it does not move the run branch.
 - A gate has no time limit.
