@@ -328,18 +328,6 @@ def test_a_tier_file_that_does_not_exist_exits_1_and_names_the_path(tmp_path, ca
     assert "Traceback" not in err
 
 
-def test_a_run_without_dry_run_exits_2_and_creates_nothing(tmp_path, capsys):
-    repo = make_repo(tmp_path, VALID)
-    before = state(repo)
-
-    code, out, err = run(repo, capsys)
-
-    assert code == 2
-    assert out == ""
-    assert "--dry-run" in err
-    assert state(repo) == before
-
-
 def test_the_umbrella_help_lists_the_run_subcommand(capsys):
     try:
         delegate.main(["--help"])

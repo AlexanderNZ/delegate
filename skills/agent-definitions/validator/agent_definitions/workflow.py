@@ -10,13 +10,14 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import adapters
 from .tiers import Tiers
 
 # The two modes of a run.
 MODES: tuple[str, ...] = ("assure", "economy")
 
-# The harness adapters that a workflow can name. A later change replaces this
-# list with the adapter registry.
+# The built-in harness adapters. A workflow can name these, and any adapter
+# that is registered in `adapters` (a test registers a scripted one).
 ADAPTERS: tuple[str, ...] = ("claude-code", "cursor", "opencode")
 
 # The roles whose tier a workflow can override.
@@ -258,8 +259,9 @@ def load_workflow(path: Path, tiers: Tiers) -> Workflow:
         reader.problems.append(f"run-branch: {run_branch!r} is the base-branch; the run needs its own branch")
     if mode is not None and mode not in MODES:
         reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
-    if adapter is not None and adapter not in ADAPTERS:
-        reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(ADAPTERS)}")
+    known_adapters = sorted({*ADAPTERS, *adapters.registered_names()})
+    if adapter is not None and adapter not in known_adapters:
+        reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(known_adapters)}")
 
     overrides_table = reader.table(data.get("tier-overrides", {}), "tier-overrides") or {}
     overrides = {role: value for role, value in overrides_table.items() if isinstance(value, str)}
