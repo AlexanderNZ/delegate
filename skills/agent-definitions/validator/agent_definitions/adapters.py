@@ -25,13 +25,19 @@ END_STATES: tuple[str, ...] = (FINISHED, FAILED, CAPPED)
 
 @dataclass(frozen=True)
 class AdapterRequest:
-    """What the engine gives an adapter for one agent run."""
+    """What the engine gives an adapter for one agent run.
+
+    `resume_session` is the session id of an earlier run that the adapter
+    resumes. The engine sets it only for an adapter whose `supports_resume` is
+    true, and only for a continuation. It is `None` for a new agent.
+    """
 
     agent: str
     model: str
     prompt: str
     cwd: Path
     report_path: Path
+    resume_session: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,9 +60,14 @@ class Adapter(Protocol):
     `tier_column` names the column of the tier table that holds this harness's
     models. The engine resolves the model from that column, so an adapter never
     chooses its own model.
+
+    `supports_resume` is true when the harness can resume a session. For a
+    continuation the engine then passes the session id of the last run in
+    `AdapterRequest.resume_session`. Otherwise the engine starts a new agent.
     """
 
     tier_column: str
+    supports_resume: bool
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
 

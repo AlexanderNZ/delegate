@@ -240,6 +240,7 @@ def _build_with_continuations(
         if result.end_state != adapters.FINISHED or result.exit_status != 0:
             trigger = adapters.CAPPED if result.end_state == adapters.CAPPED else adapters.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
+            gate_output = None
         else:
             try:
                 report = read_specialist_report(report_path, ticket.id)
@@ -252,11 +253,13 @@ def _build_with_continuations(
                 return f"the specialist reported status {report.status!r}{detail}"
             if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
                 return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
-            red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)]
+            outcomes = [(gate, *_run_gate_with_output(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
+            red = [(gate, output) for gate, green, output in outcomes if not green]
             if not red:
                 return None
             trigger = "gates-red"
-            reason = "gates red: " + "; ".join(red)
+            reason = "gates red: " + "; ".join(gate for gate, _ in red)
+            gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
         if continuations == limit:
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -267,7 +270,8 @@ def _build_with_continuations(
             resume_session=None, commits=commits, reason=reason,
         )
         prompt = continuation_brief(
-            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason, resumed=False
+            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason, resumed=False,
+            gate_output=gate_output,
         )
 
 
@@ -525,10 +529,17 @@ def _run_gate(command: str, ticket: str, worktree: Path, journal: Journal, round
     `round_number` is 0 for the first build and the fix-up round for a later run.
     `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
     """
+    return _run_gate_with_output(command, ticket, worktree, journal, round_number, phase)[0]
+
+
+def _run_gate_with_output(
+    command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
+) -> tuple[bool, str]:
+    """Run one gate command as `_run_gate` does. Return whether it is green, and the tail of its output."""
     r = subprocess.run(["bash", "-c", command], cwd=worktree, capture_output=True, text=True)
     output = (r.stdout + r.stderr)[-GATE_OUTPUT_TAIL_CHARS:]
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, exit_status=r.returncode, green=r.returncode == 0,
         output_tail=output,
     )
-    return r.returncode == 0
+    return r.returncode == 0, output
