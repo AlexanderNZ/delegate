@@ -102,9 +102,14 @@ class ScriptedAdapter:
     On a verifier call it writes `verifier_files` to the working directory (a
     verifier that breaks its copy), and writes the verdict report: `verdict` with
     `verdict_findings`, or the `verifier_report_text` you give, or none.
-    `verifier_calls` holds every verifier request. `verifier_heads` and
+    `during_verifier` runs while the verifier runs, so a test can change the
+    real repository then. `verifier_calls` holds every verifier request. `verifier_heads` and
     `verifier_remotes` hold the HEAD commit and the remotes of the working
     directory at the time of each call.
+
+    `files_by_ticket` replaces `files` for a ticket whose id it holds, and a
+    ticket id in `failing_tickets` ends `failed` with exit status 1, so a test
+    scripts one ticket on its own.
 
     A specialist request whose prompt holds the section "## Findings to fix" is
     a fix-up. The adapter then commits `fixup_files` (by default one new file
@@ -119,6 +124,8 @@ class ScriptedAdapter:
 
     tier_column: str = "claude-code"
     files: dict[str, str] = field(default_factory=lambda: {"feature.txt": "feature\n"})
+    files_by_ticket: dict[str, dict[str, str]] = field(default_factory=dict)
+    failing_tickets: set[str] = field(default_factory=set)
     commit: bool = True
     write_report: bool = True
     report_text: str | Callable[[AdapterRequest, str], str] | None = None
@@ -133,6 +140,7 @@ class ScriptedAdapter:
     verifier_files: dict[str, str] = field(default_factory=dict)
     verifier_end_state: str = "finished"
     verifier_exit_status: int = 0
+    during_verifier: Callable[[AdapterRequest], None] | None = None
     verifier_calls: list[AdapterRequest] = field(default_factory=list)
     verifier_heads: list[str] = field(default_factory=list)
     verifier_remotes: list[list[str]] = field(default_factory=list)
@@ -152,7 +160,8 @@ class ScriptedAdapter:
         is_fixup = "## Findings to fix" in request.prompt
         (self.fixup_calls if is_fixup else self.calls).append(request)
         head = git(request.cwd, "rev-parse", "HEAD").strip()
-        files = self.files
+        ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
+        files = self.files_by_ticket.get(ticket, self.files)
         if is_fixup:
             files = self.fixup_files if self.fixup_files is not None else {f"fixup-{len(self.fixup_calls)}.txt": "fix\n"}
         if files:
@@ -167,7 +176,6 @@ class ScriptedAdapter:
             head = git(request.cwd, "rev-parse", "HEAD").strip()
         if (self.fixup_write_report if is_fixup else self.write_report):
             branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
-            ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
             if is_fixup and self.fixup_report_text is not None:
                 text = self.fixup_report_text
             elif callable(self.report_text):
@@ -183,6 +191,8 @@ class ScriptedAdapter:
         stream.write_text('{"type":"result"}\n')
         if is_fixup:
             return AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream)
+        if ticket in self.failing_tickets:
+            return AdapterResult(1, "failed", self.session_id, stream)
         return AdapterResult(self.exit_status, self.end_state, self.session_id, stream)
 
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
@@ -192,6 +202,8 @@ class ScriptedAdapter:
         self.verifier_remotes.append(git(request.cwd, "remote").split())
         for name, content in self.verifier_files.items():
             (request.cwd / name).write_text(content)
+        if self.during_verifier is not None:
+            self.during_verifier(request)
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
         if self.write_verifier_report:
             text = self.verifier_report_text

@@ -7,13 +7,20 @@ the stack's gates itself, and records each event in the journal.
 In `assure` mode the engine then verifies the built branch. It makes a
 temporary copy of the branch, builds a full verifier brief with the brief
 generator, spawns the stack's verifier on the verifier tier, and checks the
-verdict report. On ACCEPT the engine fast-forwards the run branch to the
+verdict report. Before the verifier starts, the engine rebases the ticket
+branch onto the run branch, and runs the gates again on the rebased tree. On ACCEPT the engine fast-forwards the run branch to the
 verified commit. On REJECT the engine starts a fix-up round: it writes the
 findings to a file, sends the specialist a fix-up brief in the same worktree,
 requires the fix as a new commit on top of the rejected commit, runs the gates,
 and spawns a fresh verifier with the scoped brief (the findings and the delta
 from the rejected commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
-the run ends. The run branch moves only on ACCEPT.
+the step fails. The run branch moves only on ACCEPT.
+
+A run holds many tickets, which the engine takes in dependency order. A failed
+step does not end the run. A ticket whose blocker failed or was skipped is
+skipped, and the journal records which blocker. A ticket with no failed blocker
+still runs. A rebase conflict fails that step only: the engine aborts the
+rebase, so the branch and its worktree keep the state from before the rebase.
 
 Standard library and git through subprocess only.
 """
@@ -51,6 +58,13 @@ FIXUP_ROUND_LIMIT: int = 2
 
 BUILT: str = "built"
 FAILED: str = "failed"
+SKIPPED: str = "skipped"
+
+# The `phase` of a gate result in the journal: the gates after the specialist
+# built the ticket, after the rebase onto the run branch, and after a fix-up.
+PHASE_BUILD: str = "build"
+PHASE_REBASE: str = "rebase"
+PHASE_FIXUP: str = "fixup"
 
 
 class EngineError(Exception):
@@ -68,6 +82,7 @@ class RunResult:
     built: list[str]
     failed: list[str]
     failures: dict[str, str]
+    skipped: dict[str, str]
 
     @property
     def ok(self) -> bool:
@@ -142,16 +157,27 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     built: list[str] = []
     failed: list[str] = []
     failures: dict[str, str] = {}
+    skipped: dict[str, str] = {}
     for ticket in order:
+        blockers = [blocker for blocker in ticket.blocked_by if blocker not in built]
+        if blockers:
+            reason = "blocked by " + "; ".join(
+                f"{blocker}, which {'failed' if blocker in failed else 'was skipped'}" for blocker in blockers
+            )
+            skipped[ticket.id] = reason
+            journal.append("skip", ticket=ticket.id, blockers=blockers, reason=reason)
+            continue
         reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
         if reason:
             failed.append(ticket.id)
             failures[ticket.id] = reason
-            break
-        built.append(ticket.id)
-    journal.append("run-end", result=BUILT if not failed else FAILED, built=built, failed=failed)
-    return RunResult(run_id, journal.path, built, failed, failures)
+        else:
+            built.append(ticket.id)
+    journal.append(
+        "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
+    )
+    return RunResult(run_id, journal.path, built, failed, failures, skipped)
 
 
 def _build_ticket(
@@ -195,11 +221,13 @@ def _build_ticket(
         return f"the specialist reported status {report.status!r}{detail}"
     if _git(repo, "rev-list", "--count", f"{workflow.base_branch}..{branch}") == "0":
         return f"branch {branch} holds no commit beyond {workflow.base_branch}, though the report says committed"
-    red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal, round_number=0)]
+    red = [gate for gate in stack.gates if not _run_gate(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)]
     if red:
         return "gates red: " + "; ".join(red)
     if workflow.mode == "assure":
-        return _verify_ticket(_Step(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal))
+        step = _Step(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
+        reason = _rebase_onto_run_branch(step)
+        return reason if reason else _verify_ticket(step)
     return None
 
 
@@ -243,6 +271,42 @@ class _Step:
     @property
     def run_dir(self) -> Path:
         return self.state_dir / "runs" / self.run_id
+
+
+def _rebase_onto_run_branch(step: _Step) -> str | None:
+    """Rebase the ticket branch onto the run branch, then run the gates again on the rebased tree.
+
+    Return None when the branch is rebased and the gates are green, or the
+    reason the step fails. A rebase that stops is aborted, so the branch and its
+    worktree keep the state from before the rebase.
+    """
+    ticket, run_branch = step.ticket, step.workflow.run_branch
+    onto = _git(step.repo, "rev-parse", f"refs/heads/{run_branch}")
+    before = _git(step.worktree, "rev-parse", "HEAD")
+    rebase = subprocess.run(["git", "-C", str(step.worktree), "rebase", run_branch], capture_output=True, text=True)
+    if rebase.returncode != 0:
+        files = _git(step.worktree, "diff", "--name-only", "--diff-filter=U").splitlines()
+        _git(step.worktree, "rebase", "--abort")
+        step.journal.append(
+            "rebase", ticket=ticket.id, result="conflict" if files else "failed", onto_commit=onto,
+            from_commit=before, to_commit=None, files=files,
+        )
+        if files:
+            return f"rebase onto {run_branch} stopped with a conflict in {', '.join(files)}"
+        return f"rebase onto {run_branch} failed: {rebase.stderr.strip() or rebase.returncode}"
+    after = _git(step.worktree, "rev-parse", "HEAD")
+    step.journal.append(
+        "rebase", ticket=ticket.id, result="rebased", onto_commit=onto, from_commit=before, to_commit=after, files=[]
+    )
+    if _git(step.repo, "rev-list", "--count", f"{run_branch}..{step.branch}") == "0":
+        return (
+            f"branch {step.branch} holds no commit beyond {run_branch} after the rebase; "
+            f"{run_branch} holds its work already"
+        )
+    red = [gate for gate in step.stack.gates if not _run_gate(gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE)]
+    if red:
+        return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
+    return None
 
 
 def _verify_ticket(step: _Step) -> str | None:
@@ -318,7 +382,10 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
-    red = [gate for gate in step.stack.gates if not _run_gate(gate, ticket.id, step.worktree, step.journal, round_number)]
+    red = [
+        gate for gate in step.stack.gates
+        if not _run_gate(gate, ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
+    ]
     if red:
         raise _StepFailed("gates red: " + "; ".join(red))
     return brief
@@ -412,15 +479,16 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     return None
 
 
-def _run_gate(command: str, ticket: str, worktree: Path, journal: Journal, round_number: int) -> bool:
+def _run_gate(command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str) -> bool:
     """Run one gate command in the worktree, record the result, and return True when it is green.
 
     `round_number` is 0 for the first build and the fix-up round for a later run.
+    `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
     """
     r = subprocess.run(["bash", "-c", command], cwd=worktree, capture_output=True, text=True)
     output = (r.stdout + r.stderr)[-GATE_OUTPUT_TAIL_CHARS:]
     journal.append(
-        "gate-result", ticket=ticket, round=round_number, command=command, exit_status=r.returncode, green=r.returncode == 0,
+        "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, exit_status=r.returncode, green=r.returncode == 0,
         output_tail=output,
     )
     return r.returncode == 0

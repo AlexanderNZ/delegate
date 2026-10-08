@@ -249,20 +249,25 @@ def test_the_event_stream_of_the_verifier_survives_the_removal_of_its_copy(tmp_p
     assert json.loads(open(verdict["report"]).read())["verdict"] == "ACCEPT"
 
 
-def test_an_accepted_ticket_that_cannot_fast_forward_the_run_branch_fails_and_the_run_branch_keeps_the_accepted_work(
+def test_an_accepted_ticket_that_cannot_fast_forward_the_run_branch_fails_and_the_run_branch_keeps_the_commit_that_landed_meanwhile(
     tmp_path, capsys, scripted
 ):
-    # Ticket b builds from the base branch, and the run branch has moved on to the work of ticket a.
-    # The rebase of b onto the run branch is a later step; until then the engine refuses the move.
-    workflow = WORKFLOW + '\n[[tickets]]\nid = "b"\ntext = "The export command writes a header row."\nstack = "python"\nblocked-by = ["a"]\n'
-    scripted.files = {"feature.txt": "feature\n"}
-    repo = make_repo(tmp_path, workflow)
+    repo = make_repo(tmp_path)
+
+    def land_a_commit_on_the_run_branch(request):
+        # The coordinator commits on the run branch while the verifier runs.
+        git(repo, "worktree", "add", "-q", str(tmp_path / "coordinator"), "run/demo")
+        (tmp_path / "coordinator" / "hand.txt").write_text("by hand\n")
+        git(tmp_path / "coordinator", "add", "-A")
+        git(tmp_path / "coordinator", "commit", "-q", "-m", "a commit by hand")
+
+    scripted.during_verifier = land_a_commit_on_the_run_branch
 
     code, out, err = run(repo, capsys)
 
     assert code == 1
     assert "Traceback" not in err
     assert "run/demo" in err and "fast-forward" in err
-    assert tip(repo, "run/demo") == tip(repo, "run/demo-a")
-    run_end = next(e for e in read_journal(out) if e["event"] == "run-end")
-    assert (run_end["built"], run_end["failed"]) == (["a"], ["b"])
+    assert git(repo, "show", "run/demo:hand.txt") == "by hand\n"
+    assert "feature.txt" not in git(repo, "ls-tree", "-r", "--name-only", "run/demo")
+    assert "run-branch-advance" not in event_names(read_journal(out))

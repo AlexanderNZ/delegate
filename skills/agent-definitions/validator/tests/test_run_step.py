@@ -164,8 +164,9 @@ def test_the_engine_runs_the_gates_in_the_worktree_and_records_each_result(tmp_p
     assert (code, err) == (0, "")
     names = event_names(read_journal(out))
     assert names.index("report-validation") < names.index("gate-result") < names.index("step-end")
-    (gate,) = gate_events(out)
+    gate, after_rebase = gate_events(out)  # the second run is the gate after the rebase onto the run branch
     assert (gate["ticket"], gate["command"], gate["exit_status"], gate["green"]) == ("a", "test -f feature.txt", 0, True)
+    assert (after_rebase["phase"], after_rebase["green"]) == ("rebase", True)
 
 
 def test_a_red_gate_is_recorded_red_when_the_report_claims_green(tmp_path, capsys, scripted):

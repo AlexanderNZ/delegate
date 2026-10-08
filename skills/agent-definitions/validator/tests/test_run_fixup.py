@@ -240,4 +240,4 @@ def test_a_fixup_that_turns_a_gate_red_fails_the_step_whatever_the_specialist_cl
     assert "gates red: test ! -f fixup-1.txt" in err
     assert len(scripted.verifier_calls) == 1
     gates = [(e["round"], e["green"]) for e in read_journal(out) if e["event"] == "gate-result"]
-    assert gates == [(0, True), (1, False)]
+    assert gates == [(0, True), (0, True), (1, False)]  # the build, the rebase, then the fix-up

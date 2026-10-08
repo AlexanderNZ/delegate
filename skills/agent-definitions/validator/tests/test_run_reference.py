@@ -57,3 +57,30 @@ def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fiel
         for field in event:
             if field not in ("seq", "time", "event"):
                 assert f"`{field}`" in row, (event["event"], field)
+
+
+@outside_the_package
+def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_run_with_each_of_their_fields(tmp_path, capsys, monkeypatch):
+    from .test_run_multi import HEAD, ticket
+
+    for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
+    # Ticket a fails, b is skipped; c and d write the same file, so the rebase of d conflicts.
+    scripted = ScriptedAdapter(
+        files_by_ticket={"c": {"shared.txt": "c\n"}, "d": {"shared.txt": "d\n"}}, failing_tickets={"a"}
+    )
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c") + ticket("d"))
+        delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    events = read_journal(capsys.readouterr().out)
+    assert {"skip", "rebase"} <= {e["event"] for e in events}
+    assert {e["result"] for e in events if e["event"] == "rebase"} == {"rebased", "conflict"}
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for event in events:
+        row = rows[f"`{event['event']}`"]
+        for field in event:
+            if field not in ("seq", "time", "event"):
+                assert f"`{field}`" in row, (event["event"], field)
