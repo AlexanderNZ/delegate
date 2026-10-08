@@ -29,3 +29,24 @@ def rendered(tmp_path, java_spring, tiers):
         for name, content in files.items():
             (d / name).write_text(content)
     return tmp_path
+
+
+@pytest.fixture
+def git_identity(monkeypatch):
+    """The rebase writes commits, so git needs a committer. This sets the environment of the process, which is the real boundary."""
+    for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
+
+
+@pytest.fixture
+def scripted(git_identity):
+    """A scripted adapter registered as `scripted`. Each ticket a to d writes its own file."""
+    from agent_definitions import adapters
+
+    from .support import ScriptedAdapter
+
+    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
+    adapters.register("scripted", adapter)
+    yield adapter
+    adapters.unregister("scripted")

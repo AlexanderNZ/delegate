@@ -164,7 +164,7 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
     failed: list[str] = []
     failures: dict[str, str] = {}
     skipped: dict[str, str] = {}
-    for ticket in order:
+    for position, ticket in enumerate(order):
         blockers = [blocker for blocker in ticket.blocked_by if blocker not in built]
         if blockers:
             reason = "blocked by " + "; ".join(
@@ -173,7 +173,19 @@ def run_workflow(workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tie
             skipped[ticket.id] = reason
             journal.append("skip", ticket=ticket.id, blockers=blockers, reason=reason)
             continue
-        reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
+        try:
+            reason = _build_ticket(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
+        except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
+            # An exception that the engine did not plan for leaves the state of the
+            # step unknown, so the run ends here. The journal says why.
+            reason = f"crashed: {type(error).__name__}: {error}"
+            journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
+            failed.append(ticket.id)
+            failures[ticket.id] = reason
+            for unreached in order[position + 1 :]:
+                skipped[unreached.id] = f"the run ended after ticket {ticket.id} crashed"
+                journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
+            break
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
         if reason:
             failed.append(ticket.id)

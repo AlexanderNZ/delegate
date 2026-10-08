@@ -87,7 +87,7 @@ def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_
 
 
 @outside_the_package
-@pytest.mark.parametrize("name", ["resume_session", "supports_resume", "continuation", "continuation-limit"])
+@pytest.mark.parametrize("name", ["resume_session", "supports_resume", "continuation", "continuation-limit", "crashed: <exception type>: <message>"])
 def test_the_reference_names_the_resume_field_and_the_continuation_events(name):
     assert f"`{name}`" in REFERENCE.read_text()
 

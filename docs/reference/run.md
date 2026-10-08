@@ -60,6 +60,17 @@ One count covers the three triggers. Each mode has a continuation limit:
 
 When the specialist is not done after the limit, the step fails. The journal records `continuation-limit` with the count, and the reason of the step ends with `the continuation limit of <n> is reached`. The branch and the worktree stay, with all commits. The fix-up specialist of an `assure` round is not continued: its failure fails the step.
 
+## A crash in a step
+
+An exception that the engine did not plan for is a crash. Examples are an exception from the adapter, and a failure of git in the middle of a step. A crash leaves the state of the step unknown, so it ends the run. The engine does these things in order:
+
+1. It writes `step-end` with the state `failed`. The `reason` is `crashed: <exception type>: <message>`.
+2. It writes `skip` for each ticket that it did not reach. The `blockers` list is empty, and the reason is `the run ended after ticket <id> crashed`.
+3. It writes `run-end` with the result `failed`.
+4. The command prints one line `delegate run: ticket <id>: crashed: ...` on stderr, and exits 1.
+
+The branch and the worktree of the ticket stay as the crash left them.
+
 ## The skip rule
 
 A ticket is skipped when at least one of its blockers is not built. A blocker is not built when its step failed or when it was skipped, so a skip passes down the chain. The engine makes no worktree and no branch for a skipped ticket. The journal records `skip` with the blockers and the reason, for example `blocked by a, which failed`. The command prints one line `delegate run: ticket <id>: skipped: <reason>` on stderr. A ticket with no unbuilt blocker still runs, also after a failed step of another ticket.
@@ -139,6 +150,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
+| `crashed: <exception type>: <message>` | An exception from the adapter or from git ended the step. See [a crash in a step](#a-crash-in-a-step). |
 | `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, or its gates were still red. `<reason>` is the reason of the last run. |
 | `rebase onto <run branch> stopped with a conflict in <files>` | The rebase of the ticket branch onto the run branch had a conflict. The engine aborted the rebase. |
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
@@ -227,7 +239,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
-| `skip` | `ticket`, `blockers` (the ids of the blockers that are not built), `reason` |
+| `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy) |
 | `verify-result` | `ticket`, `round`, `exit_status`, `end_state`, `session_id`, `event_stream` |

@@ -129,6 +129,10 @@ class ScriptedAdapter:
     included; the last pair repeats. `session_ids` gives the session id of each
     such call in the same way. `supports_resume` is the `supports_resume`
     attribute of the adapter.
+
+    `on_specialist` runs at the start of every specialist request, before the
+    adapter touches the working directory. A test uses it to raise an error, to
+    break the repository, or to start another command while the run holds its lock.
     """
 
     tier_column: str = "claude-code"
@@ -167,10 +171,13 @@ class ScriptedAdapter:
     continuation_calls: list[AdapterRequest] = field(default_factory=list)
     outcomes: list[tuple[str, int]] = field(default_factory=list)
     session_ids: list[str] = field(default_factory=list)
+    on_specialist: Callable[[AdapterRequest], None] | None = None
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         if request.agent.endswith("verifier"):
             return self._run_verifier(request)
+        if self.on_specialist is not None:
+            self.on_specialist(request)
         is_fixup = "## Findings to fix" in request.prompt
         is_continuation = not is_fixup and "## Continuation" in request.prompt
         index = len(self.calls) + len(self.continuation_calls)
@@ -248,3 +255,90 @@ def read_journal(stdout: str) -> list[dict[str, object]]:
 
 def event_names(events: list[dict[str, object]]) -> list[str]:
     return [str(e["event"]) for e in events]
+
+
+# A script that runs `delegate run` in a child process, and kills the child with SIGKILL
+# at the start of the adapter call whose number is argv[3]. A killed process cannot clean up,
+# so it leaves what a real kill leaves: an open journal, a lock, and a worktree.
+KILL_SCRIPT = """\
+import os, signal, sys
+from agent_definitions import adapters, delegate
+from tests.support import ScriptedAdapter
+
+class Killer(ScriptedAdapter):
+    seen = 0
+
+    def run(self, request):
+        type(self).seen += 1
+        if type(self).seen == int(sys.argv[3]):
+            os.kill(os.getpid(), signal.SIGKILL)
+        return super().run(request)
+
+adapters.register("scripted", Killer(files_by_ticket={t: {t + ".txt": t + "\\n"} for t in "abcd"}))
+sys.exit(delegate.main(["run", sys.argv[1], "--repo", sys.argv[2]]))
+"""
+
+
+def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
+    """Run `workflow.toml` of `repo` in a child process that SIGKILLs itself before its Nth adapter call.
+
+    A specialist or a verifier call counts as one call each. Return the run id
+    and the process id of the child.
+    """
+    import os
+    import signal
+    import subprocess as sp
+    import sys
+
+    validator = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(validator)}
+    for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
+        env[f"GIT_COMMITTER_{key}"] = value
+        env[f"GIT_AUTHOR_{key}"] = value
+    child = sp.Popen(
+        [sys.executable, "-c", KILL_SCRIPT, str(repo / "workflow.toml"), str(repo), str(kill_before_call)],
+        cwd=validator, env=env, stdout=sp.PIPE, stderr=sp.PIPE, text=True,
+    )
+    _, err = child.communicate(timeout=300)
+    assert child.returncode == -signal.SIGKILL, (child.returncode, err)
+    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    return run_dir.name, child.pid
+
+
+def journal_path(repo: Path, run_id: str) -> Path:
+    return repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl"
+
+
+def read_journal_file(repo: Path, run_id: str) -> list[dict[str, object]]:
+    return [json.loads(line) for line in journal_path(repo, run_id).read_text().splitlines()]
+
+
+def run_main(capsys, *argv: str) -> tuple[int, str, str]:
+    """Call `delegate run <argv>` and return the exit code, stdout and stderr."""
+    from agent_definitions import delegate
+
+    code = delegate.main(["run", *argv])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def resume_main(repo: Path, capsys, run_id: str, *extra: str) -> tuple[int, str, str]:
+    return run_main(capsys, "--resume", run_id, "--repo", str(repo), *extra)
+
+
+def ticket_of(request: AdapterRequest) -> str:
+    """The ticket id that a specialist or verifier prompt names first."""
+    match = re.search(r"Ticket (\w+)", request.prompt)
+    assert match is not None, request.prompt
+    return match.group(1)
+
+
+def tree(repo: Path, branch: str) -> list[str]:
+    return git(repo, "ls-tree", "-r", "--name-only", branch).split()
+
+
+def finished_run(repo: Path, capsys) -> str:
+    """Run `workflow.toml` of `repo` to its end and return the run id."""
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert (code, err) == (0, "")
+    return next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
