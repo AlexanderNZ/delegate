@@ -65,16 +65,42 @@ def daemon_pid(path: Path) -> int | None:
         return client.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID
 
 
-def git_has_a_daemon_backend() -> bool:
-    """Whether this git can run `git fsmonitor--daemon`.
+NO_DAEMON_REASON: str = (
+    "this environment cannot run an fsmonitor daemon, for example a build sandbox or a git with no backend"
+)
 
-    git builds the daemon for macOS and Windows only. Elsewhere the command dies
-    with "not supported on this platform", so the probe asks git in a new repository.
+
+def why_no_daemon_can_start() -> str | None:
+    """None when a daemon can start here, or the reason to skip when it cannot.
+
+    A git backend is not enough: git builds the daemon for macOS and Windows only
+    (elsewhere the command dies with "not supported on this platform"), and a
+    build sandbox that has a backend can still refuse to run the daemon. So the
+    probe starts a daemon in a short temporary repository, checks that it
+    listens, and stops it. The path is short because of the socket path limit.
+    The probe sets LC_ALL=C because git translates its messages.
     """
-    with tempfile.TemporaryDirectory() as probe:
-        subprocess.run(["git", "init", "--quiet", probe], check=True, capture_output=True)
-        result = git_status(Path(probe), "fsmonitor--daemon", "status")
-    return "not supported on this platform" not in result.stderr
+    env = {**os.environ, "LC_ALL": "C"}
+    probe = Path(tempfile.mkdtemp(prefix="fp", dir="/tmp"))
+    try:
+        subprocess.run(["git", "init", "--quiet", str(probe)], check=True, capture_output=True, env=env)
+        started = subprocess.run(
+            ["git", "-C", str(probe), "fsmonitor--daemon", "start"], capture_output=True, text=True, env=env
+        )
+        try:
+            if started.returncode != 0:
+                if "not supported on this platform" in started.stderr:
+                    return "this git has no fsmonitor daemon backend on this platform, so no daemon can leak"
+                return NO_DAEMON_REASON
+            if daemon_pid(probe) is None:
+                return NO_DAEMON_REASON
+            return None
+        finally:
+            subprocess.run(
+                ["git", "-C", str(probe), "fsmonitor--daemon", "stop"], capture_output=True, text=True, env=env
+            )
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 def alive(pid: int) -> bool:
@@ -175,8 +201,9 @@ def test_a_run_leaves_the_configuration_of_the_user_and_of_the_repository_as_it_
 def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_removes_the_copy(
     tmp_path, capsys, registered, monkeypatch
 ):
-    if not git_has_a_daemon_backend():
-        pytest.skip("this git has no fsmonitor daemon backend on this platform, so no daemon can leak")
+    reason = why_no_daemon_can_start()
+    if reason is not None:
+        pytest.skip(reason)
     repo = make_repo(tmp_path)
     # The socket of the daemon has a path limit of about 100 characters. The temporary directory of a Nix shell is longer.
     short = Path(tempfile.mkdtemp(prefix="fs", dir="/tmp"))
