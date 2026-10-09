@@ -10,6 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .adapters.git import GitVersionControl
 from .journal import JournalError, read_events
 from .runs import RunsError, journal_of
 
@@ -71,7 +72,7 @@ def render(events: list[dict[str, object]], journal: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        journal = journal_of(args.repo, args.run_id)
+        journal = journal_of(args.repo, args.run_id, GitVersionControl())
         events = read_events(journal)
         if not events:
             raise JournalError(f"journal {journal} holds no event")

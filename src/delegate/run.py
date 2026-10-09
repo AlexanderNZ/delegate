@@ -14,6 +14,7 @@ import tomllib
 from pathlib import Path
 
 from . import adapters
+from .adapters.git import GitVersionControl
 from .cli import add_opencode_override_flags, apply_opencode_override
 from .engine import EngineError, run_workflow, workflow_of_run
 from .tiers import Tiers, load_tiers
@@ -74,13 +75,15 @@ def _override_tiers(tiers: Tiers, args: argparse.Namespace) -> Tiers:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # The composition point also makes the version-control backend that the engine drives.
+    vcs = GitVersionControl()
     if args.workflow is None and args.resume is None:
         parser.error("a workflow file or --resume RUN_ID is required")
     if args.resume is not None and args.dry_run:
         parser.error("--resume and --dry-run cannot go together")
     if args.workflow is None:
         try:
-            args.workflow = workflow_of_run(args.repo, args.resume)
+            args.workflow = workflow_of_run(args.repo, args.resume, vcs)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
@@ -103,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: adapter {workflow.adapter!r} has no implementation yet; registered: {registered}", file=sys.stderr)
             return 1
         try:
-            result = run_workflow(workflow, args.workflow, args.repo, tiers, adapter, resume=args.resume, break_lock=args.break_lock)
+            result = run_workflow(workflow, args.workflow, args.repo, tiers, adapter, vcs, resume=args.resume, break_lock=args.break_lock)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

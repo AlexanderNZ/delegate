@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+from .adapters.git import GitVersionControl
 from .journal import JournalError, read_new_events
 from .runs import RunsError, journal_of
 
@@ -169,7 +170,7 @@ def _last_change(journal: Path, streams: set[Path]) -> float:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        journal = journal_of(args.repo, args.run_id)
+        journal = journal_of(args.repo, args.run_id, GitVersionControl())
         code, position = _follow(args, journal)
     except (RunsError, JournalError) as error:
         print(f"delegate watch: {error}", file=sys.stderr)

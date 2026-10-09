@@ -59,6 +59,8 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +77,7 @@ from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .ports import harness
 from .ports.harness import Adapter, AdapterRequest
+from .ports.vcs import VcsError, VersionControl
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -164,19 +167,26 @@ def _role_model(workflow: Workflow, tiers: Tiers, column: str, role: str) -> tup
         raise EngineError(f"the tier table has no tier {tier!r}, which the {role} needs") from None
 
 
-def _branch_exists(repo: Path, name: str) -> bool:
-    return subprocess.run(
-        ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{name}"], capture_output=True
-    ).returncode == 0
+@contextmanager
+def _vcs_errors() -> Iterator[None]:
+    """Turn a failure of the version-control port into an EngineError with the same message."""
+    try:
+        yield
+    except VcsError as error:
+        raise EngineError(str(error)) from None
 
 
-def _check_branches(workflow: Workflow, repo: Path) -> None:
+def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
     """Refuse a run whose base branch is missing or whose ticket branch is taken. Create nothing."""
-    if not _branch_exists(repo, workflow.base_branch):
+    with _vcs_errors():
+        base_exists = vcs.branch_exists(repo, workflow.base_branch)
+    if not base_exists:
         raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
     for ticket in workflow.tickets:
         branch = _ticket_branch(workflow, ticket)
-        if _branch_exists(repo, branch):
+        with _vcs_errors():
+            taken = vcs.branch_exists(repo, branch)
+        if taken:
             raise EngineError(f"branch {branch!r} for ticket {ticket.id!r} exists already; delete it or choose another run-branch")
 
 
@@ -184,10 +194,14 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
     return f"{workflow.run_branch}-{ticket.id}"
 
 
-def state_directory(repo: Path) -> tuple[Path, Path]:
-    """The top level of the repository and the directory where the engine keeps its state."""
-    top = Path(_git(repo, "rev-parse", "--show-toplevel"))
-    return top, (top / _git(top, "rev-parse", "--git-common-dir")).resolve() / "delegate"
+def state_directory(repo: Path, vcs: VersionControl) -> tuple[Path, Path]:
+    """The top level of the repository and the directory where the engine keeps its state.
+
+    Raise EngineError when `repo` is not inside a repository.
+    """
+    with _vcs_errors():
+        top = vcs.repository_root(repo)
+        return top, vcs.shared_data_directory(top) / "delegate"
 
 
 def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:
@@ -201,9 +215,9 @@ def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[st
     return journal, events
 
 
-def workflow_of_run(repo: Path, run_id: str) -> Path:
+def workflow_of_run(repo: Path, run_id: str, vcs: VersionControl) -> Path:
     """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown."""
-    _, state_dir = state_directory(repo)
+    _, state_dir = state_directory(repo, vcs)
     try:
         events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
     except JournalError as error:
@@ -266,13 +280,14 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
 
 
 def run_workflow(
-    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, *, resume: str | None = None,
-    break_lock: bool = False,
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, *,
+    resume: str | None = None, break_lock: bool = False,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
-    The caller picks the adapter that the workflow names. The engine knows the
-    harness port only, never an adapter module.
+    The caller picks the adapter that the workflow names, and the version-control
+    backend `vcs`. The engine knows the ports only, never an adapter module. The
+    run branch, the worktrees and the file-watcher setting come from `vcs`.
 
     With `resume`, the run id of an earlier run, go on with that run: build the
     tickets that are not complete, and append to its journal.
@@ -282,27 +297,28 @@ def run_workflow(
     removes a lock whose process no longer exists, and never one whose process
     is alive.
     """
-    repo, state_dir = state_directory(repo)
+    repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     run_id = resume if resume is not None else _new_run_id()
     try:
         # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
         check_free(state_dir, workflow.run_branch, break_stale=break_lock)
         if resume is None:
-            _check_branches(workflow, repo)
+            _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
-            return _execute(workflow, workflow_path, adapter, roles, repo, state_dir, run_id, resume is not None, broken)
+            return _execute(workflow, workflow_path, adapter, vcs, roles, repo, state_dir, run_id, resume is not None, broken)
     except LockError as error:
         raise EngineError(str(error)) from None
 
 
 def _execute(
-    workflow: Workflow, workflow_path: Path, adapter: Adapter, roles: dict[str, tuple[str, str]], repo: Path,
-    state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
+    workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]],
+    repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
 ) -> RunResult:
     order = plan_order(workflow)
     if not resuming:
-        _git(repo, "branch", workflow.run_branch, workflow.base_branch)
+        with _vcs_errors():
+            vcs.create_branch(repo, workflow.run_branch, workflow.base_branch)
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
         journal.append(
             "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
@@ -313,7 +329,9 @@ def _execute(
         journal, events = _journal_events(state_dir, run_id)
         progress = _restore(events, run_id)
         _check_same_run(workflow, workflow_path, events[0], run_id)
-        if not _branch_exists(repo, workflow.run_branch):
+        with _vcs_errors():
+            run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
+        if not run_branch_exists:
             raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
@@ -338,7 +356,7 @@ def _execute(
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
             reason = _build_ticket(
-                workflow, ticket, adapter, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
+                workflow, ticket, adapter, vcs, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
             )
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
@@ -423,38 +441,26 @@ def _rebase_in_progress(worktree: Path) -> bool:
     )
 
 
-def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
-    """Make the worktree of a ticket, or reuse the one that is there, and install the push guard in it.
+def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
+    """Make the worktree of a ticket through the port, or reuse the one that is there, and install the push guard in it.
 
-    The worktree gets `core.fsmonitor=false` in its own configuration, so that no
-    fsmonitor daemon starts for it, whatever the global setting of the user is.
+    The port keeps the file watcher off for the worktree (`core.fsmonitor=false`
+    in its own configuration), whatever the global setting of the user is.
 
     A worktree that a killed run left is reused as it is, except that a rebase
     which the kill stopped is aborted. A branch without a worktree gets a new
     worktree. Raise EngineError when the worktree holds another branch.
     """
-    if worktree.is_dir():
-        if _rebase_in_progress(worktree):
-            _git(worktree, "rebase", "--abort")
-        current = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD")
-        if current != branch:
-            raise EngineError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
-    else:
-        _git(repo, "worktree", "prune")
-        if _branch_exists(repo, branch):
-            _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", str(worktree), branch)
-        else:
-            _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", "-b", branch, str(worktree), base)
+    with _vcs_errors():
+        vcs.ensure_worktree(repo, worktree, branch, base)
     try:
         install_push_guard(repo, worktree, hooks_dir)
-        # The guard has set `extensions.worktreeConfig`, so this reaches only this worktree.
-        _git(worktree, "config", "--worktree", "core.fsmonitor", "false")
     except GuardError as error:
         raise EngineError(str(error)) from None
 
 
 def _build_ticket(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, roles: dict[str, tuple[str, str]],
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]],
     repo: Path, state_dir: Path, run_id: str, journal: Journal, prior: list[dict[str, object]] | None = None,
     start_ref: str | None = None,
 ) -> str | None:
@@ -476,8 +482,9 @@ def _build_ticket(
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
     start_ref = start_ref or workflow.base_branch
     if prior is None:
-        base_commit = _git(repo, "rev-parse", start_ref)
-        _prepare_worktree(repo, worktree, branch, start_ref, hooks_dir)
+        with _vcs_errors():
+            base_commit = vcs.commit_of(repo, start_ref)
+        _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         journal.append(
             "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
             base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
@@ -495,7 +502,7 @@ def _build_ticket(
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
-        _prepare_worktree(repo, worktree, branch, start_ref, hooks_dir)
+        _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         specialist_done = _specialist_done(prior)
         continuations = sum(1 for e in prior if e["event"] == "continuation")
         verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")

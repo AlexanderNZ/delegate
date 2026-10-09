@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import EngineError, state_directory
+from .ports.vcs import VersionControl
 
 JOURNAL_NAME: str = "journal.jsonl"
 
@@ -32,14 +33,14 @@ def _start_time(journal: Path) -> datetime:
         raise RunsError(f"journal {journal}: the first line is not an event with a time") from None
 
 
-def journal_of(repo: Path, run_id: str | None) -> Path:
+def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
     """The journal file of the run `run_id`, or of the newest run when `run_id` is `None`.
 
     Raise RunsError when `repo` is not a git repository, when the run is
     unknown, or when the repository has no run.
     """
     try:
-        _, state = state_directory(repo)
+        _, state = state_directory(repo, vcs)
     except EngineError as error:
         raise RunsError(f"{repo} is not a git repository: {error}") from None
     runs = state / "runs"
