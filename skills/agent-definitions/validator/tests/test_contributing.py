@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import re
+import shutil
 
 import pytest
 import yaml
@@ -70,8 +71,12 @@ def test_the_setup_installs_with_pip_and_runs_pytest_and_names_no_nix_command():
 
 
 @outside_the_package
-def test_the_setup_names_every_tool_that_ci_installs_besides_python():
-    assert "jq" in section("Set up")
+def test_the_setup_lists_python_and_git_and_no_other_tool_because_ci_installs_no_other_tool():
+    need = next(line for line in section("Set up").splitlines() if line.startswith("You need"))
+
+    assert re.search(r"Python 3\.11 or later and git\.", need)
+    assert "jq" not in section("Set up"), "the guards read their input with python3, not with jq"
+    assert not any(step.get("run", "").lstrip().startswith(("apt", "sudo apt", "brew")) for step in ci_steps())
 
 
 @outside_the_package
@@ -85,16 +90,23 @@ def test_the_test_first_rule_is_stated_with_the_red_before_green_order():
 
 
 @outside_the_package
-def test_the_regeneration_command_runs_and_finds_every_generated_section_current(monkeypatch):
+def test_the_documented_regeneration_command_writes_a_copy_of_the_pages_that_its_check_then_accepts(tmp_path, monkeypatch):
+    # The test runs on a copy. The drift test of each generated section lives in test_docs.py and is the only one.
     regenerate = bash_commands("Regenerate the docs")
     assert regenerate == ["delegate docs"]
-    monkeypatch.chdir(ROOT)
-    out, err = io.StringIO(), io.StringIO()
+    shutil.copytree(ROOT / "docs", tmp_path / "docs")
+    skill = tmp_path / "skills" / "agent-definitions" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    shutil.copy(ROOT / "skills" / "agent-definitions" / "SKILL.md", skill)
+    monkeypatch.chdir(tmp_path)
 
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = delegate.main([*regenerate[0].split()[1:], "--check"])
+    def run(argv: list[str]) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            return delegate.main(argv), err.getvalue()
 
-    assert (code, err.getvalue()) == (0, "")
+    assert run(regenerate[0].split()[1:]) == (0, "")
+    assert run([*regenerate[0].split()[1:], "--check"]) == (0, "")
 
 
 @outside_the_package
