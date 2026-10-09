@@ -7,10 +7,12 @@ against a real temporary git repository.
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from . import test_changelog
 from .pages import ROOT, outside_the_package
 from .support import git
 
@@ -366,6 +368,29 @@ def test_apply_fails_for_a_date_that_is_not_a_real_date_in_the_form_year_month_d
     assert done.returncode == 2 and done.stdout == ""
     assert repr(date) in done.stderr
     assert git(repo, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("unreleased", ["", "### Added\n\n- A thing.\n\n"], ids=["notes-from-commits", "unreleased-body"])
+def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_after_apply_on_a_copy_of_the_real_files(tmp_path, monkeypatch, unreleased):
+    repo = make_repo(tmp_path)
+    changelog = (repo / "CHANGELOG.md")
+    changelog.write_text(test_changelog.CHANGELOG.read_text().replace("## [Unreleased]\n\n", f"## [Unreleased]\n\n{unreleased}", 1))
+    (repo / "pyproject.toml").write_text(test_changelog.PYPROJECT.read_text())
+    git(repo, "add", "-A")
+    commit(repo, "docs: the real files")
+    git(repo, "tag", "v0.1.0")
+    commit(repo, "feat: a change for the next release")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    monkeypatch.setattr(test_changelog, "CHANGELOG", changelog)
+    monkeypatch.setattr(test_changelog, "PYPROJECT", repo / "pyproject.toml")
+    assert tomllib.loads((repo / "pyproject.toml").read_text())["project"]["version"] == "0.2.0"
+    test_changelog.test_the_changelog_has_an_entry_with_a_date_for_the_version_of_the_package()
+    test_changelog.test_the_first_release_is_the_oldest_entry_and_an_unreleased_section_comes_before_it()
+    test_changelog.test_the_entry_for_the_first_release_names_each_part_of_the_kit_that_a_user_can_run()
+    assert ("A thing." if unreleased else "a change for the next release") in test_changelog.entry("0.2.0")
 
 
 def test_apply_writes_no_file_when_the_notes_for_an_empty_unreleased_body_cannot_be_made(tmp_path):
