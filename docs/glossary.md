@@ -1,6 +1,6 @@
 # Glossary
 
-This page explains the terms that the docs use. The entries are in alphabetical order. Each entry says what the term is and why it is important. Then it links the page that explains the term in full. When the docs use more than one word for a concept, the entry has the preferred word, and a line "Not:" lists the other words.
+This page explains the terms that the docs use. The entries are in alphabetical order. Each entry says what the term is and why it is important. Then it links the page that explains the term in full. When the docs use more than one word for a concept, the entry has the preferred word, and a line "Not:" lists the other words. For the kit at a glance, read [the overview](overview.md) first.
 
 ## ACCEPT
 

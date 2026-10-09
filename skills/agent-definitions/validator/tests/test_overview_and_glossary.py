@@ -5,6 +5,11 @@ on the spot. The entries are in alphabetical order, each entry links the page
 that gives the detail, and each link reaches a page and a heading that exist.
 The glossary is in ASD-STE100, so each sentence has 25 words or fewer.
 
+The overview is the kit at a glance. It gives the problem, the idea, what the
+kit is not, the mental model, the parts of the kit and where to go next, in
+that order. Each term that it puts in bold links its glossary entry. The README
+docs map links the overview and the glossary first, as the place to start.
+
 The pages are outside the package source, so a Nix build that copies only the
 package skips these cases with a reason.
 """
@@ -16,6 +21,25 @@ from .pages import ROOT, outside_the_package
 
 DOCS = ROOT / "docs"
 GLOSSARY = DOCS / "glossary.md"
+OVERVIEW = DOCS / "overview.md"
+README = ROOT / "README.md"
+
+# The sections of the overview, in the order of the ticket and the coordinator's adjustment.
+OVERVIEW_SECTIONS = [
+    "The problem",
+    "The idea",
+    "What delegate is not",
+    "The mental model",
+    "The parts of the kit",
+    "Where to go next",
+]
+
+# The four verbs that name the loop from a ticket to a merge, in their order.
+LOOP = ["Brief", "Build", "Verify", "Merge"]
+
+# A term in bold, as the overview writes it at its first use: the bold text is the link text of its glossary entry.
+BOLD = re.compile(r"\*\*([^*]+)\*\*")
+BOLD_GLOSSARY_LINK = re.compile(r"\[\*\*([^*]+)\*\*\]\(glossary\.md#([^)\s]+)\)")
 
 FENCED = re.compile(r"^(`{3,}).*?^\1$", flags=re.DOTALL | re.MULTILINE)
 LINK = re.compile(r"\]\(([^)\s]+)\)")
@@ -100,3 +124,64 @@ def test_the_glossary_keeps_each_sentence_to_25_words_or_fewer():
     text = re.sub(r"`[^`]*`", "CODE", re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", " ".join(lines)))  # an inline code span counts as one word
     sentences = re.split(r"(?<=[.:?!])\s+", text)
     assert [s for s in sentences if len(s.split()) > 25] == []
+
+
+def overview_sections() -> dict[str, str]:
+    """The sections of the overview, keyed by the text of their level-two heading."""
+    parts = re.split(r"^## (.+)$", prose(OVERVIEW.read_text()), flags=re.MULTILINE)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+@outside_the_package
+def test_the_overview_gives_its_sections_in_the_order_of_the_ticket():
+    headings = re.findall(r"^## (.+)$", prose(OVERVIEW.read_text()), flags=re.MULTILINE)
+    assert headings == OVERVIEW_SECTIONS
+
+
+@outside_the_package
+def test_the_overview_says_near_the_top_that_it_is_the_kit_at_a_glance():
+    opening = prose(OVERVIEW.read_text()).split("\n## ", 1)[0]
+    assert "at a glance" in opening
+
+
+@outside_the_package
+def test_the_mental_model_names_the_loop_with_the_four_verbs_in_order():
+    model = overview_sections()["The mental model"]
+    positions = [model.find(verb) for verb in LOOP]
+    assert -1 not in positions, f"a verb of the loop is missing: {dict(zip(LOOP, positions))}"
+    assert positions == sorted(positions)
+
+
+@outside_the_package
+def test_every_term_in_bold_in_the_overview_has_a_glossary_entry():
+    bold = BOLD.findall(prose(OVERVIEW.read_text()))
+    assert bold, "the overview puts no term in bold, so this check would check nothing"
+    glossary = {term(heading) for heading, _ in entries()}
+    assert sorted({b for b in bold if term(b) not in glossary}) == []
+
+
+@outside_the_package
+def test_every_term_in_bold_in_the_overview_links_its_glossary_entry():
+    text = prose(OVERVIEW.read_text())
+    anchor_of = {term(heading): slug(heading) for heading, _ in entries()}
+    linked = BOLD_GLOSSARY_LINK.findall(text)
+    unlinked = [b for b in BOLD.findall(text) if b not in {name for name, _ in linked}]
+    wrong_anchor = [(name, anchor) for name, anchor in linked if anchor_of.get(term(name)) != anchor]
+    assert (unlinked, wrong_anchor) == ([], [])
+
+
+@outside_the_package
+def test_the_overview_puts_each_term_in_bold_once():
+    bold = [term(b) for b in BOLD.findall(prose(OVERVIEW.read_text()))]
+    assert sorted({b for b in bold if bold.count(b) > 1}) == []
+
+
+@outside_the_package
+def test_every_link_of_the_overview_reaches_a_page_and_a_heading_that_exist():
+    assert broken_links(OVERVIEW) == []
+
+
+@outside_the_package
+def test_the_readme_docs_map_starts_with_the_overview_and_then_the_glossary():
+    docs_map = README.read_text().split("\n## Docs\n", 1)[1].split("\n## ", 1)[0]
+    assert LINK.findall(docs_map)[:2] == ["docs/overview.md", "docs/glossary.md"]

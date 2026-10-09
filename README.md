@@ -43,6 +43,9 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 
 ## Docs
 
+Start with the first two pages.
+
+- [Start here: the kit at a glance](docs/overview.md): the problem, the idea, what the kit is not, and the loop from a ticket to a merge (Brief, Build, Verify, Merge), with one ticket followed through it.
 - [Glossary](docs/glossary.md): every term of these docs, in alphabetical order, with what it is, why it matters, and the page with the detail.
 - [Tutorial: from install to one verified ticket](docs/tutorial.md): bootstrap a sample repository, run one ticket in `assure` mode on Claude Code, and read the verdict and the journal. Its sample files are in [`examples/tutorial`](examples/tutorial).
 - [How to bootstrap a single-stack repository](docs/how-to/bootstrap-a-single-stack-repository.md): write the delegation document and a skill, run `delegate bootstrap`, check the pair, and name it in a workflow.
