@@ -187,6 +187,8 @@ I made it this way for three reasons. A run that stops, after Ctrl-C, a kill or 
 - The engine drives each harness through an adapter. Claude Code and OpenCode have one today.
 - The tier table maps each tier to a model for each harness, so a workflow never names a model.
 
+The two skills are in `skills/`, and the package that holds every command is in `src/delegate/`. [The layout of the repository](reference/layout.md) gives the place of each part and the direction of imports in the package.
+
 ## Where to go next
 
 - [The tutorial](tutorial.md) runs the loop once, from install to one verified ticket. Start there.

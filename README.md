@@ -76,6 +76,7 @@ Start with the first two pages.
 - [Reference: `delegate status` and `delegate watch`](docs/reference/status-and-watch.md): the state of each ticket of a run, the follow of its journal, the problem events, and the exit code of each reason.
 - [Reference: `render`, `validate`, `bootstrap` and `brief`](docs/reference/commands.md): the options of each command, the commands that the verifier guard permits, and the finding codes of the validator.
 - [Reference: `delegate docs`](docs/reference/docs.md): the command that writes the generated sections of these pages from the code. After a change to a flag, an exit code, a guard command or a finding code, run `delegate docs`; a test fails when a committed page differs from the code.
+- [Reference: the layout of the repository](docs/reference/layout.md): the place of each part of the repository, the groups of modules in the package, and the dependency rule that a test holds.
 - [Future ideas](docs/future-ideas.md): ideas to investigate, not promises and not a plan: a benchmark from real tickets, more of the coordinator role in the engine, the next step up the ladder, and a Cursor adapter.
 - [The agent rules of this repository](docs/agents/delegation.md): the gates and the hotspots that bind every agent that works on the kit itself.
 

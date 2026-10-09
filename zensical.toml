@@ -45,6 +45,7 @@ nav = [
     { "delegate docs" = "reference/docs.md" },
     { "The claude-code adapter" = "reference/claude-code-adapter.md" },
     { "The opencode adapter" = "reference/opencode-adapter.md" },
+    { "The layout of the repository" = "reference/layout.md" },
   ] },
   { "Future ideas" = "future-ideas.md" },
   { "Glossary" = "glossary.md" },

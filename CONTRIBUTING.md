@@ -17,6 +17,10 @@ These are the commands that CI runs, so a green run on your machine is a green r
 
 One test checks the tree against a private list of terms. The list is not in the repository. Without it, that test skips with a notice, and the rest of the suite runs. You do not need the list.
 
+## Find your way around
+
+The package is in `src/delegate/`, its tests are in `tests/`, and the two skills are in `skills/`. [The layout of the repository](docs/reference/layout.md) gives the place of each part, the groups of modules, and the dependency rule that `tests/test_architecture.py` holds.
+
 ## Write the test first
 
 Write the failing test before the code that makes it pass. Run the test, and read the failure. The test must fail for the reason that you want to fix. Then write the least code that makes it pass.
