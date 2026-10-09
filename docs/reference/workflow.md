@@ -10,15 +10,7 @@ delegate run <workflow> --dry-run
 
 The command validates the file and prints the plan in dependency order. The command creates no branch, no worktree, and no journal. It changes nothing.
 
-Options of `delegate run`:
-
-| Option | Meaning |
-|---|---|
-| `<workflow>` | The path of the workflow file. |
-| `--dry-run` | Validate the file and print the plan. Without this option, the command builds the tickets. See [the run reference](run.md). |
-| `--repo <dir>` | The git repository to build in. The default is the current directory. |
-| `--tiers <file>` | The path of a tier file. The default is the bundled tier table. The valid tier names are the tier names of this table. Put this option after `run`. |
-| `--opencode-model <tier=model>`, `--opencode-allow <model>` | Change the `opencode` column of the tier table. See [the adapter reference](opencode-adapter.md#the-model). |
+The options of `delegate run` are in [the options of the run reference](run.md#options). Without `--dry-run`, the command builds the tickets. A tier file from `--tiers` sets the valid tier names. The options `--opencode-model` and `--opencode-allow` change the `opencode` column of the tier table. See [the adapter reference](opencode-adapter.md#the-model).
 
 ## Exit codes
 

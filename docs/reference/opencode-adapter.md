@@ -24,12 +24,9 @@ The adapter passes no permission option. The permission rules of the repository 
 
 ## The model
 
-The adapter reads the `opencode` column of the tier table, so a `--tiers` file changes the model for this adapter. Two options change the column from the command line. Put them after `run`. Both can be repeated.
+The adapter reads the `opencode` column of the tier table, so a `--tiers` file changes the model for this adapter. Two options change the column from the command line: `--opencode-model` and `--opencode-allow`. Put them after `run`. Both can be repeated. [The options of the run reference](run.md#options) list them.
 
-| Option | Meaning |
-|---|---|
-| `--opencode-model <tier=model>` | The tier uses the model in the `opencode` column. A tier that the option does not name keeps its value. The column `claude-code` does not change. An unknown tier name exits 1. |
-| `--opencode-allow <model>` | Add the model to the set of allowed `opencode` models. It extends the set; the default models stay allowed. |
+`--opencode-model` sets the model of one tier in the `opencode` column. A tier that the option does not name keeps its value. The column `claude-code` does not change. An unknown tier name exits 1. `--opencode-allow` extends the set of allowed `opencode` models; the default models stay allowed.
 
 A model that `--opencode-model` names must be in the allowed set, or the command exits 1 and names the model. A run has no validation step for the rendered agents, so this check stops a model that no provider serves. The options are the same as the options of `render` and `validate`.
 
