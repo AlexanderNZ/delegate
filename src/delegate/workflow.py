@@ -7,17 +7,17 @@ dependency order. Nothing here touches git or the harness.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import adapters
 from .tiers import Tiers
 
 # The two modes of a run.
 MODES: tuple[str, ...] = ("assure", "economy")
 
 # The built-in harness adapters. A workflow can name these, and any adapter
-# that is registered in `adapters` (a test registers a scripted one).
+# that the caller of `load_workflow` reports as registered (a test registers a scripted one).
 ADAPTERS: tuple[str, ...] = ("claude-code", "cursor", "opencode")
 
 # The roles whose tier a workflow can override.
@@ -261,7 +261,7 @@ def _read_ticket_text(reader: _Reader, raw: dict[str, object], label: str, root:
     return None
 
 
-def load_workflow(path: Path, tiers: Tiers) -> Workflow:
+def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] = ()) -> Workflow:
     """Read and check a workflow file. Raise WorkflowError with every defect found.
 
     `text-file` paths are relative to the directory of the workflow file.
@@ -284,7 +284,7 @@ def load_workflow(path: Path, tiers: Tiers) -> Workflow:
         reader.problems.append(f"run-branch: {run_branch!r} is the base-branch; the run needs its own branch")
     if mode is not None and mode not in MODES:
         reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
-    known_adapters = sorted({*ADAPTERS, *adapters.registered_names()})
+    known_adapters = sorted({*ADAPTERS, *registered_adapters})
     if adapter is not None and adapter not in known_adapters:
         reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(known_adapters)}")
 

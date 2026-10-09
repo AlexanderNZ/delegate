@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import subprocess
 
-from .adapters import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult, read_events, stream_path
+from ..ports.harness import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
+from .streams import read_events, stream_path
 
 # The command that starts the harness.
 COMMAND: str = "claude"

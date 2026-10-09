@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from delegate import adapters
-from delegate.adapters import AdapterRequest
+from delegate.ports.harness import AdapterError, AdapterRequest
 
 from . import opencode_fake
 
@@ -133,7 +133,7 @@ def test_a_harness_that_writes_no_event_raises_with_its_own_message(tmp_path, mo
         stderr="Error: Configuration is invalid at /work/opencode.json\n  Missing key provider.gateway.models.qwen.limit.context\n",
     )
 
-    with pytest.raises(adapters.AdapterError, match="status 1.*Configuration is invalid"):
+    with pytest.raises(AdapterError, match="status 1.*Configuration is invalid"):
         adapters.get("opencode").run(request(tmp_path))
 
 
@@ -144,7 +144,7 @@ def test_an_agent_that_the_harness_does_not_find_raises_because_the_harness_runs
         stderr='\x1b[93m\x1b[1m! \x1b[0magent "no-such-agent" not found. Falling back to default agent\n',
     )
 
-    with pytest.raises(adapters.AdapterError, match="no-such-agent.*not found"):
+    with pytest.raises(AdapterError, match="no-such-agent.*not found"):
         adapters.get("opencode").run(request(tmp_path, agent="no-such-agent"))
 
 
@@ -178,7 +178,7 @@ def test_a_line_that_is_not_json_before_the_end_of_the_stream_raises_and_names_t
     broken.write_text("\n".join([lines[0], "this is not json", *lines[1:]]) + "\n")
     opencode_fake.install(tmp_path, monkeypatch, str(broken))
 
-    with pytest.raises(adapters.AdapterError, match="line 2 is not JSON"):
+    with pytest.raises(AdapterError, match="line 2 is not JSON"):
         adapters.get("opencode").run(request(tmp_path))
 
 
@@ -188,7 +188,7 @@ def test_a_step_finish_event_with_no_reason_raises_and_names_the_stream(tmp_path
     odd.write_text(lines[0] + "\n" + '{"type":"step_finish","sessionID":"ses_x","part":{"type":"step-finish"}}\n')
     opencode_fake.install(tmp_path, monkeypatch, str(odd))
 
-    with pytest.raises(adapters.AdapterError, match="step_finish.*reason"):
+    with pytest.raises(AdapterError, match="step_finish.*reason"):
         adapters.get("opencode").run(request(tmp_path))
 
 
@@ -202,7 +202,7 @@ def test_each_recorded_stream_is_in_the_manifest_with_the_harness_version_and_th
         scenario.mkdir()
         opencode_fake.install(scenario, monkeypatch, name, exit_status=facts["exit_status"], stderr=facts.get("stderr", ""))
         if facts["end_state"] is None:
-            with pytest.raises(adapters.AdapterError):
+            with pytest.raises(AdapterError):
                 adapters.get("opencode").run(request(scenario, agent=facts["agent"]))
         else:
             assert adapters.get("opencode").run(request(scenario)).end_state == facts["end_state"]

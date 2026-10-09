@@ -7,16 +7,21 @@ The rule, in words:
 * `ports` holds the interfaces that the domain drives. It imports neither
   `adapters` nor `cli`.
 * `adapters` implement the ports, and `cli` drives the domain. Both point
-  inward, so both may import the contexts and the ports.
+  inward, so both may import the contexts and the ports. `adapters` never
+  imports `cli`.
+* The engine and the workflow reader are flat modules of the run context. They
+  never import `adapters`. The command-line driver is the composition point: it
+  picks the adapter and hands it to the engine.
 
 The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
 standard library. It runs no code of the package and needs no other tool.
 
 A layer is a subpackage directory of the package. A flat module that carries the
-name of a layer, such as `adapters.py` or `run.py`, is not part of that layer
-yet. It joins the layer when a later ticket moves it into the subpackage. An
-import is a violation by the name of its target, so `from delegate import
+name of a layer, such as `run.py`, is not part of that layer yet. It joins the
+layer when a later ticket moves it into the subpackage. Until then a flat module
+that holds domain code has its own entry in `FLAT_FORBIDDEN`. An import is a
+violation by the name of its target, so `from delegate import
 adapters` breaks the rule whether `adapters` is a module or a subpackage.
 """
 
@@ -33,6 +38,13 @@ FORBIDDEN = {
     "run": {"adapters", "cli"},
     "definitions": {"adapters", "cli"},
     "ports": {"adapters", "cli"},
+    "adapters": {"cli"},
+}
+
+# Flat module -> the layers that it never imports, until a later ticket moves it into its layer.
+FLAT_FORBIDDEN = {
+    "engine": {"adapters", "cli"},
+    "workflow": {"adapters", "cli"},
 }
 
 
@@ -62,13 +74,15 @@ def violations(package_dir: Path) -> list[str]:
         relative = path.relative_to(package_dir.parent).with_suffix("")
         parts = relative.parts
         layer = layer_of(parts)
-        if layer not in FORBIDDEN:
+        rules = FORBIDDEN.get(layer) if layer else FLAT_FORBIDDEN.get(parts[-1]) if len(parts) == 2 else None
+        if rules is None:
             continue
+        layer = layer or parts[-1]
         package = parts[:-1]
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             for target in targets(node, package, name):
-                if len(target) > 1 and target[0] == name and target[1] in FORBIDDEN[layer]:
+                if len(target) > 1 and target[0] == name and target[1] in rules:
                     found.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}: {layer} imports {target[1]}")
     return sorted(set(found))
 
@@ -102,6 +116,11 @@ def test_the_package_follows_the_dependency_rule():
         ("run/bad.py", "def late():\n    from ..cli import main\n", "run", "cli"),
         ("ports/bad.py", "from delegate.adapters import Adapter\n", "ports", "adapters"),
         ("ports/bad.py", "from .. import cli\n", "ports", "cli"),
+        ("adapters/bad.py", "from delegate.cli import main\n", "adapters", "cli"),
+        ("adapters/bad.py", "from .. import cli\n", "adapters", "cli"),
+        ("engine.py", "from delegate.adapters import get\n", "engine", "adapters"),
+        ("engine.py", "from . import adapters\n", "engine", "adapters"),
+        ("workflow.py", "from .adapters import registered_names\n", "workflow", "adapters"),
     ],
 )
 def test_a_planted_bad_import_fails_the_rule(tmp_path, where, source, layer, forbidden):
@@ -122,7 +141,17 @@ def test_an_inward_import_passes_the_rule(tmp_path):
 
 
 def test_an_outer_layer_may_import_inward(tmp_path):
-    source = "from delegate.run import something\nfrom delegate.ports import other\n"
+    source = "from delegate.run import something\nfrom delegate.ports.harness import other\n"
     copy = planted_copy(tmp_path, "adapters/fine.py", source)
 
     assert violations(copy) == []
+
+
+def test_the_harness_port_and_the_adapters_are_inside_the_layers_that_the_rule_covers():
+    covered = {
+        ".".join(path.relative_to(PACKAGE.parent).with_suffix("").parts)
+        for layer in ("ports", "adapters")
+        for path in (PACKAGE / layer).rglob("*.py")
+    }
+
+    assert {"delegate.ports.harness", "delegate.adapters.claude_code", "delegate.adapters.opencode"} <= covered

@@ -13,6 +13,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from . import adapters
 from .cli import add_opencode_override_flags, apply_opencode_override
 from .engine import EngineError, run_workflow, workflow_of_run
 from .tiers import Tiers, load_tiers
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     try:
         tiers = _override_tiers(_load_tiers(args.tiers), args)
-        workflow = load_workflow(args.workflow, tiers)
+        workflow = load_workflow(args.workflow, tiers, adapters.registered_names())
     except TierFileError as error:
         print(f"delegate run: {error}", file=sys.stderr)
         return 1
@@ -94,8 +95,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: {args.workflow}: {problem}", file=sys.stderr)
         return 1
     if not args.dry_run:
+        # The composition point: the workflow names the adapter, and this driver picks it for the engine.
         try:
-            result = run_workflow(workflow, args.workflow, args.repo, tiers, resume=args.resume, break_lock=args.break_lock)
+            adapter = adapters.get(workflow.adapter)
+        except KeyError:
+            registered = ", ".join(adapters.registered_names()) or "none"
+            print(f"delegate run: adapter {workflow.adapter!r} has no implementation yet; registered: {registered}", file=sys.stderr)
+            return 1
+        try:
+            result = run_workflow(workflow, args.workflow, args.repo, tiers, adapter, resume=args.resume, break_lock=args.break_lock)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

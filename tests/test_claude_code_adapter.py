@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from delegate import adapters
-from delegate.adapters import AdapterRequest
+from delegate.ports.harness import AdapterError, AdapterRequest
 
 from . import claude_fake
 
@@ -95,7 +95,7 @@ def test_a_stream_cut_off_before_its_result_gives_the_end_state_failed_and_no_se
 def test_a_harness_that_starts_no_session_raises_with_its_own_message(tmp_path, monkeypatch):
     claude_fake.install(tmp_path, monkeypatch, "", exit_status=1, stderr="--agent 'no-such-agent' not found. Available agents: python-specialist\n")
 
-    with pytest.raises(adapters.AdapterError, match="no-such-agent.*not found"):
+    with pytest.raises(AdapterError, match="no-such-agent.*not found"):
         adapters.get("claude-code").run(request(tmp_path, agent="no-such-agent"))
 
 
@@ -140,7 +140,7 @@ def test_a_line_that_is_not_json_before_the_end_of_the_stream_raises_and_names_t
     broken.write_text("\n".join([lines[0], "this is not json", *lines[1:]]) + "\n")
     claude_fake.install(tmp_path, monkeypatch, str(broken))
 
-    with pytest.raises(adapters.AdapterError, match="line 2 is not JSON"):
+    with pytest.raises(AdapterError, match="line 2 is not JSON"):
         adapters.get("claude-code").run(request(tmp_path))
 
 

@@ -6,7 +6,7 @@ You do not read the engine for this. You need the interface below, one recorded 
 
 ## The interface
 
-An adapter is one object behind one interface. It lives in `delegate/adapters.py`.
+An adapter is one object behind one interface. The interface is the harness port, in `delegate/ports/harness.py`. The adapters are in the package `delegate/adapters/`.
 
 The engine gives the adapter an `AdapterRequest`. It has these fields:
 
@@ -30,7 +30,7 @@ The adapter class has two attributes and one method:
 - `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a [**continuation**](../glossary.md#continuation).
 - `run`: takes the request and returns the result.
 
-The module also gives you three more parts. `AdapterError` is for a harness that cannot run the agent at all. `stream_path` gives a file for the stream, beside the [**report**](../glossary.md#report). `read_events` reads a line-delimited JSON stream. `register` adds an adapter to the registry under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
+The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/streams.py` gives you two helpers. `stream_path` gives a file for the stream, beside the [**report**](../glossary.md#report). `read_events` reads a line-delimited JSON stream. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
 ## Steps
 
@@ -56,9 +56,8 @@ from __future__ import annotations
 
 import subprocess
 
-from delegate.adapters import (
-    CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult, read_events, stream_path,
-)
+from delegate.adapters.streams import read_events, stream_path
+from delegate.ports.harness import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
 
 # The command that starts the harness.
 COMMAND: str = "myharness"
@@ -143,7 +142,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from delegate.adapters import AdapterError, AdapterRequest
+from delegate.ports.harness import AdapterError, AdapterRequest
 
 from myharness import MyHarnessAdapter
 
@@ -245,10 +244,10 @@ Three more cases belong in the file for a real harness. Give one case for a stre
 
 ### 4. Connect the adapter to the kit
 
-The engine finds a built-in adapter by name. Make these changes in the package `delegate`:
+The command-line driver finds a built-in adapter by name and hands it to the engine. The engine imports the port only. Make these changes in the package `delegate`:
 
-1. Put the adapter module beside `claude_code.py` and `opencode.py`.
-2. Add a branch for the name in `adapters.get`.
+1. Put the adapter module in `delegate/adapters/`, beside `claude_code.py` and `opencode.py`.
+2. Add a branch for the name in `get` in `delegate/adapters/__init__.py`.
 3. Add the name to `ADAPTERS` in `workflow.py`, so a [**workflow**](../glossary.md#workflow) can name it.
 4. Add a column that `tier_column` names to each tier in `tiers.toml`.
 

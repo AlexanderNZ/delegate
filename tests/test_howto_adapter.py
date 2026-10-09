@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
+from delegate.ports import harness
 
 from .pages import HOW_TO, file_block, outside_the_package, write_files
 
@@ -26,9 +26,9 @@ SOURCE = Path(__file__).resolve().parents[1] / "src"
 @pytest.mark.parametrize(
     "part",
     [
-        *(field.name for field in dataclasses.fields(adapters.AdapterRequest)),  # the request
-        *(field.name for field in dataclasses.fields(adapters.AdapterResult)),  # the result
-        *adapters.END_STATES,
+        *(field.name for field in dataclasses.fields(harness.AdapterRequest)),  # the request
+        *(field.name for field in dataclasses.fields(harness.AdapterResult)),  # the result
+        *harness.END_STATES,
         "tier_column", "supports_resume", "run", "AdapterRequest", "AdapterResult", "AdapterError",
         "register", "read_events", "stream_path",
     ],

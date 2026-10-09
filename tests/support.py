@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from delegate.adapters import AdapterRequest, AdapterResult
+from delegate.ports.harness import AdapterRequest, AdapterResult
 
 WORKFLOW = """\
 base-branch = "main"

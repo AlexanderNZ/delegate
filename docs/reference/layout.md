@@ -24,14 +24,15 @@ The repository holds three things: two skills that an agent reads, one Python pa
 
 ## The package
 
-The modules of `src/delegate/` fall into five groups. Each group does one job.
+The modules of `src/delegate/` fall into six groups. Each group does one job.
 
 | Group | Modules | Job |
 | --- | --- | --- |
 | Definitions | `declaration.py`, `render.py`, `validate.py`, `bootstrap.py`, `templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
 | Briefs | `brief.py` | Build a [**verifier**](../glossary.md#verifier) brief from the [**ticket**](../glossary.md#ticket), the diff and the [**gates**](../glossary.md#gate), and never from the [**report**](../glossary.md#report). |
 | Run | `run.py`, `workflow.py`, `engine.py`, `guards.py`, `journal.py`, `lock.py`, `reports.py`, `runs.py`, `tiers.py`, `tiers.toml`, `status.py`, `watch.py` | Check a [**workflow**](../glossary.md#workflow), build its tickets, hold the guards, write the [**journal**](../glossary.md#journal), and report the state of a [**run**](../glossary.md#run). |
-| [**Adapters**](../glossary.md#adapter) | `adapters.py`, `claude_code.py`, `opencode.py` | Drive one harness through its [**headless**](../glossary.md#headless) command line. |
+| [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py` | Implement the harness port. Each one drives one harness through its [**headless**](../glossary.md#headless) command line. The package also holds the registry of adapters by name. |
+| Ports | `ports/harness.py` | The interface that the [**engine**](../glossary.md#engine) drives to run one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. |
 | Commands and checks | `delegate.py`, `cli.py`, `reference.py`, `neutrality.py` | The command-line entry points, the generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). |
 
 ## The dependency rule
@@ -47,17 +48,21 @@ flowchart LR
   adapters --> run
 ```
 
-Three rules follow, and `tests/test_architecture.py` holds them:
+Five rules follow, and `tests/test_architecture.py` holds them:
 
 - `run` never imports `adapters` or `cli`.
 - `definitions` never imports `adapters` or `cli`.
 - `ports` never imports `adapters` or `cli`.
+- `adapters` never imports `cli`.
+- `engine.py` and `workflow.py` never import `adapters`. They are flat modules of the Run context until a later step moves them. The engine knows the harness port only.
 
-A layer is a subpackage of `src/delegate/`. Today `definitions/` and `ports/` exist and are empty, and the other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
+A layer is a subpackage of `src/delegate/`. Today `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test names the two flat modules of the Run context that it checks already, `engine.py` and `workflow.py`. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
+
+The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter.
 
 ## Where to change what
 
-- A new harness: an adapter module beside `claude_code.py`, a [**contract test**](../glossary.md#contract-test) in `tests/`, and recorded streams in `tests/fixtures/`. See [how to add a harness adapter](../how-to/add-a-harness-adapter.md).
+- A new harness: an adapter module in `adapters/`, beside `claude_code.py`, a [**contract test**](../glossary.md#contract-test) in `tests/`, and recorded streams in `tests/fixtures/`. See [how to add a harness adapter](../how-to/add-a-harness-adapter.md).
 - A new flag, exit code, guard command or [**finding code**](../glossary.md#finding-code): change the code, then run `delegate docs`. See [`delegate docs`](docs.md).
 - A new decision: an [**ADR**](../glossary.md#adr) in `docs/adr/`, and a line in [the decision records](../explanation/decision-records.md).
 - The gates and the hotspots of this repository: `docs/agents/delegation.md`.

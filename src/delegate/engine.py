@@ -63,8 +63,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import adapters
-from .adapters import Adapter, AdapterRequest
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,
     verifier_run_brief, verifier_run_sections,
@@ -75,6 +73,8 @@ from .guards import (
 )
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
+from .ports import harness
+from .ports.harness import Adapter, AdapterRequest
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -266,10 +266,13 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
 
 
 def run_workflow(
-    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, *, resume: str | None = None,
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, *, resume: str | None = None,
     break_lock: bool = False,
 ) -> RunResult:
-    """Build the tickets of a workflow in dependency order. Return the result of the run.
+    """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
+
+    The caller picks the adapter that the workflow names. The engine knows the
+    harness port only, never an adapter module.
 
     With `resume`, the run id of an earlier run, go on with that run: build the
     tickets that are not complete, and append to its journal.
@@ -279,12 +282,6 @@ def run_workflow(
     removes a lock whose process no longer exists, and never one whose process
     is alive.
     """
-    try:
-        adapter = adapters.get(workflow.adapter)
-    except KeyError:
-        raise EngineError(
-            f"adapter {workflow.adapter!r} has no implementation yet; registered: {', '.join(adapters.registered_names()) or 'none'}"
-        ) from None
     repo, state_dir = state_directory(repo)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     run_id = resume if resume is not None else _new_run_id()
@@ -559,8 +556,8 @@ def _build_with_continuations(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream),
             )
-        if result is not None and (result.end_state != adapters.FINISHED or result.exit_status != 0):
-            trigger = adapters.CAPPED if result.end_state == adapters.CAPPED else adapters.FAILED
+        if result is not None and (result.end_state != harness.FINISHED or result.exit_status != 0):
+            trigger = harness.CAPPED if result.end_state == harness.CAPPED else harness.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
             gate_output = None
         else:
@@ -793,7 +790,7 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),
     )
-    if result.end_state != adapters.FINISHED or result.exit_status != 0:
+    if result.end_state != harness.FINISHED or result.exit_status != 0:
         raise _StepFailed(f"the fix-up specialist ended {result.end_state} with exit status {result.exit_status}")
     try:
         report = read_specialist_report(report_path, ticket.id)
@@ -895,7 +892,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
         )
         raise violation
-    if result.end_state != adapters.FINISHED or result.exit_status != 0:
+    if result.end_state != harness.FINISHED or result.exit_status != 0:
         raise _StepFailed(f"the verifier ended {result.end_state} with exit status {result.exit_status}")
     try:
         report = read_verifier_report(report_path, mode)
