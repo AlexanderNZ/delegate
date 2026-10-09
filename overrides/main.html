@@ -1,0 +1,59 @@
+{#-
+  The delegate theme. design/README.md is the spec.
+
+  - A reference page sets `man`, `man_name` and `synopsis` in its front matter.
+    The page then gets the man header line above the breadcrumb, and the NAME
+    and SYNOPSIS block directly after its h1. The generated sections of the page
+    do not change.
+  - `heading_numbers: false` in the front matter turns off the section numbers,
+    for a page whose headings already start with a number.
+  - The previous and next links sit at the end of the content column.
+-#}
+{% extends "base.html" %}
+
+{% block container %}
+  {% set meta = page.meta or {} %}
+  {% set classes = [] %}
+  {% if meta.man %}{% set classes = classes + ["dlg-ref"] %}{% endif %}
+  {% if meta.heading_numbers == false %}{% set classes = classes + ["dlg-nonum"] %}{% endif %}
+  <div class="md-content" data-md-component="content">
+    <div class="dlg-content {{ classes | join(' ') }}">
+      {% if meta.man %}
+        <div class="dlg-man" aria-hidden="true">
+          <span>{{ meta.man | e }}</span><span>{{ config.site_name | e }} Manual</span><span>{{ meta.man | e }}</span>
+        </div>
+      {% endif %}
+      {% include "partials/dlg-breadcrumb.html" %}
+      <article class="md-content__inner md-typeset">
+        <a id="__skip" tabindex="-1"></a>
+        {% block content %}
+          {% if meta.man_name and "</h1>" in page.content %}
+            {% set parts = page.content | split("</h1>", 1) | list %}
+            {{ parts[0] }}</h1>
+            <dl class="dlg-name">
+              <dt>NAME</dt>
+              <dd class="dlg-name__name">{{ meta.man_name | e }}</dd>
+              {% if meta.synopsis %}
+                <dt>SYNOPSIS</dt>
+                <dd class="dlg-name__synopsis">
+                  {% if meta.synopsis is string %}
+                    <div>{{ meta.synopsis | e }}</div>
+                  {% else %}
+                    {% for line in meta.synopsis %}<div>{{ line | e }}</div>{% endfor %}
+                  {% endif %}
+                </dd>
+              {% endif %}
+            </dl>
+            {{ parts[1] }}
+          {% else %}
+            {% include "partials/content.html" %}
+          {% endif %}
+        {% endblock %}
+      </article>
+      {% include "partials/dlg-pager.html" %}
+    </div>
+  </div>
+{% endblock %}
+
+{#- The previous and next links are in the content column, so the page footer is empty. -#}
+{% block footer %}{% endblock %}

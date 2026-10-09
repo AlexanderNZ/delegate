@@ -1,0 +1,20 @@
+{#- The previous and next links, and the version line. There is no revision-date source, so the line gives the version only. -#}
+{% if page.previous_page or page.next_page %}
+  <nav class="dlg-pager" aria-label="{{ lang.t('footer') }}">
+    {% if page.previous_page %}
+      <a class="dlg-pager__prev" href="{{ page.previous_page.url | url }}" rel="prev">
+        <span class="dlg-pager__dir">← {{ lang.t("footer.previous") }}</span>
+        <span class="dlg-pager__title">{{ page.previous_page.title }}</span>
+      </a>
+    {% else %}
+      <span></span>
+    {% endif %}
+    {% if page.next_page %}
+      <a class="dlg-pager__next" href="{{ page.next_page.url | url }}" rel="next">
+        <span class="dlg-pager__dir">{{ lang.t("footer.next") }} →</span>
+        <span class="dlg-pager__title">{{ page.next_page.title }}</span>
+      </a>
+    {% endif %}
+  </nav>
+{% endif %}
+<p class="dlg-version">Version main</p>

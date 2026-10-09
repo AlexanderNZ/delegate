@@ -1,0 +1,10 @@
+{#- The breadcrumb: the site name, the sections above the page, and the page. -#}
+<nav class="dlg-breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ nav.items[0].url | url }}">{{ config.site_name }}</a></li>
+    {% for item in page.ancestors | reverse %}
+      <li>{{ item.title }}</li>
+    {% endfor %}
+    <li aria-current="page">{{ page.title }}</li>
+  </ol>
+</nav>

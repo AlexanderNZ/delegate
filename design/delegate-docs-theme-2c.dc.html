@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&amp;family=Open+Sans:wght@400;600;700&amp;family=Noto+Sans+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<script src="content.js"></script>
+<style>html,body{margin:0;padding:0}*{box-sizing:border-box}a{color:oklch(0.48 0.13 255);text-decoration:none}a:hover{text-decoration:underline}input::placeholder{color:#8a8580}</style>
+</helmet>
+<div style="min-height:100vh; background:{{ c.stage }}; color:{{ c.ink }}; font-family:'Noto Serif', Georgia, serif;">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 16px; background:#f3f2ef; border-bottom:1px solid #dcdad5; font:12px/1.4 ui-monospace, Menlo, monospace; color:#3a3a3a;">
+    <span style="font-weight:700;">2c · Guide + quiet reference</span><span style="color:#8a8580;">2a with the reference page in 1a's vocabulary</span>
+    <div style="display:flex; gap:2px; margin-left:auto; flex-wrap:wrap;">
+      <sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="6"><button onClick="{{ tb.go }}" style="font:inherit; border:0; cursor:pointer; padding:4px 10px; border-radius:3px; background:{{ tb.bg }}; color:{{ tb.fg }};">{{ tb.label }}</button></sc-for>
+      <button onClick="{{ toggleDark }}" style="font:inherit; border:1px solid #c9c6c0; background:#fff; cursor:pointer; padding:3px 10px; border-radius:3px; margin-left:8px;">{{ darkLabel }}</button>
+    </div>
+  </div>
+  <div style="padding:{{ L.stagePad }};">
+    <div style="max-width:{{ L.frameW }}; margin:0 auto; background:{{ c.bg }}; border:{{ L.frameBorder }}; border-radius:{{ L.frameRadius }}; overflow:hidden;">
+      <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ true }}">
+        <header style="display:flex; align-items:center; gap:20px; height:56px; padding:0 28px; border-bottom:1px solid {{ c.rule }}; font-family:'Open Sans', sans-serif;">
+          <a onClick="{{ goHome }}" style="display:flex; align-items:baseline; gap:8px; cursor:pointer; color:{{ c.ink }}; text-decoration:none;"><span style="font-weight:700; font-size:18px;">delegate</span><span style="font-size:15px; color:{{ c.muted }};">Reference Guide</span></a>
+          <span style="font-size:12px; padding:2px 8px; border:1px solid {{ c.rule }}; border-radius:3px; color:{{ c.muted }};">main</span>
+          <a href="https://github.com/AlexanderNZ/delegate" style="margin-left:auto; font-size:14px; color:{{ c.link }};">AlexanderNZ/delegate</a>
+        </header>
+      </sc-if>
+      <sc-if value="{{ isMobile }}">
+        <header style="display:flex; align-items:center; gap:12px; height:52px; padding:0 18px; border-bottom:1px solid {{ c.rule }}; background:{{ c.side }}; font-family:'Open Sans', sans-serif;">
+          <span style="font-weight:700; font-size:17px;">delegate</span><span style="font-size:14px; color:{{ c.muted }};">Reference Guide</span>
+          <span style="margin-left:auto; font-size:13px; font-weight:600; padding:6px 12px; border:1px solid {{ c.rule }}; border-radius:4px; color:{{ c.ink }};">Contents</span>
+        </header>
+      </sc-if>
+      <div style="display:grid; grid-template-columns:{{ L.cols }};">
+        <aside style="display:{{ L.side }}; background:{{ c.side }}; border-right:1px solid {{ c.rule }}; padding:24px 20px 40px; font-family:'Open Sans', sans-serif; font-size:14px; line-height:1.5;">
+          <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:24px;">
+            <label style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.muted }};">Quick search</label>
+            <input onFocus="{{ goSearch }}" placeholder="Search the guide" style="font:14px 'Open Sans', sans-serif; padding:7px 10px; border:1px solid {{ c.rule }}; border-radius:4px; background:{{ c.bg }}; color:{{ c.ink }};">
+          </div>
+          <div style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:{{ c.muted }}; margin-bottom:10px;">Table of Contents</div>
+          <nav style="display:flex; flex-direction:column; gap:2px;">
+            <sc-for list="{{ nav }}" as="s" hint-placeholder-count="6">
+              <div style="display:flex; flex-direction:column; gap:2px; margin-bottom:6px;">
+                <a onClick="{{ s.go }}" style="display:flex; gap:6px; cursor:pointer; color:{{ c.ink }}; font-weight:600; text-decoration:none;"><span style="color:{{ c.muted }}; min-width:20px;">{{ s.num }}</span><span>{{ s.title }}</span></a>
+                <sc-for list="{{ s.toc }}" as="t"><div style="display:flex; gap:6px; padding-left:26px; color:{{ c.muted }}; font-size:13px;"><span style="min-width:28px;">{{ s.num }}{{ t.num }}</span><span>{{ t.text }}</span></div></sc-for>
+                <sc-for list="{{ s.children }}" as="ch">
+                  <a onClick="{{ ch.go }}" style="display:flex; gap:6px; padding-left:26px; cursor:pointer; color:{{ c.link }}; font-size:13.5px; text-decoration:none;"><span style="color:{{ c.muted }}; min-width:28px;">{{ ch.num }}</span><span>{{ ch.title }}</span></a>
+                  <sc-for list="{{ ch.toc }}" as="t"><div style="display:flex; gap:6px; padding-left:60px; color:{{ c.muted }}; font-size:12.5px;"><span>{{ t.text }}</span></div></sc-for>
+                </sc-for>
+              </div>
+            </sc-for>
+          </nav>
+        </aside>
+        <main style="min-width:0; padding:{{ L.mainPad }};">
+          <div style="max-width:760px;">
+          <sc-if value="{{ isDoc }}" hint-placeholder-val="{{ true }}">
+            <sc-if value="{{ isRef }}"><div style="display:flex; justify-content:space-between; gap:8px; font:13px 'Noto Sans Mono', monospace; color:{{ c.muted }}; padding-bottom:10px; margin-bottom:18px; border-bottom:1px solid {{ c.rule }};"><span>{{ man }}</span><span>delegate Manual</span><span>{{ man }}</span></div></sc-if>
+            <div style="display:flex; gap:6px; font:13px 'Open Sans', sans-serif; color:{{ c.muted }}; margin-bottom:14px;"><span>delegate</span><span>›</span><sc-if value="{{ hasSection }}"><span>{{ sectionName }}</span><span>›</span></sc-if><span>{{ navTitle }}</span></div>
+            <h1 style="font:400 38px/1.2 'Open Sans', sans-serif; letter-spacing:-0.01em; color:{{ c.ink }}; margin:0 0 24px; text-wrap:pretty;"><sc-for list="{{ titleRuns }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.85em;">{{ r.t }}</code></sc-if></sc-for></h1>
+            <sc-if value="{{ isRef }}"><div style="display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px 16px; margin:0 0 30px; padding:0 0 20px; border-bottom:1px solid {{ c.rule }}; font-size:14px; line-height:1.55;"><span style="font:700 11.5px/1.9 'Open Sans', sans-serif; letter-spacing:0.12em; color:{{ c.head }};">NAME</span><span style="font-family:'Noto Sans Mono', monospace;">{{ manName }}</span><span style="font:700 11.5px/1.9 'Open Sans', sans-serif; letter-spacing:0.12em; color:{{ c.head }};">SYNOPSIS</span><span style="font-family:'Noto Sans Mono', monospace; color:{{ c.codeInk }};">{{ synopsis }}</span></div></sc-if>
+            <sc-for list="{{ blocks }}" as="b" hint-placeholder-count="8">
+              <sc-if value="{{ b.h2Ref }}"><h2 onMouseEnter="{{ b.enter }}" onMouseLeave="{{ b.leave }}" style="display:flex; gap:10px; align-items:baseline; font:700 16px/1.3 'Open Sans', sans-serif; color:{{ c.ink }}; margin:40px 0 14px; padding:9px 12px; background:{{ c.sub }}; border:1px solid {{ c.subBd }};"><span style="color:{{ c.muted }}; font-weight:600;">{{ b.num }}</span><span><sc-for list="{{ b.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.9em;">{{ r.t }}</code></sc-if></sc-for></span><a style="opacity:{{ b.pil }}; font-weight:400; color:{{ c.muted }}; text-decoration:none;">¶</a></h2></sc-if>
+              <sc-if value="{{ b.tblRef }}"><div style="overflow-x:auto; overflow-y:hidden; margin:0 0 22px;"><div style="font:700 11.5px 'Open Sans', sans-serif; letter-spacing:0.12em; text-transform:uppercase; color:{{ c.head }}; margin:0 0 8px;">{{ b.caption }}</div><table style="width:100%; border-collapse:collapse; font-size:15px; line-height:1.55; border-top:1px solid {{ c.rule }}; border-bottom:1px solid {{ c.rule }};"><thead><tr><sc-for list="{{ b.head }}" as="hc"><th style="text-align:left; padding:8px 12px; border-bottom:1px solid {{ c.rule }}; font:700 13.5px 'Open Sans', sans-serif; color:{{ c.muted }};"><sc-for list="{{ hc.runs }}" as="r">{{ r.t }}</sc-for></th></sc-for></tr></thead><tbody><sc-for list="{{ b.rows }}" as="row"><tr style="background:{{ row.bg }};"><sc-for list="{{ row.cells }}" as="cell"><td style="vertical-align:top; padding:8px 12px;"><sc-for list="{{ cell.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.86em; color:{{ c.codeInk }}; overflow-wrap:anywhere;">{{ r.t }}</code></sc-if></sc-for></td></sc-for></tr></sc-for></tbody></table></div></sc-if>
+              <sc-if value="{{ b.h2Std }}"><h2 onMouseEnter="{{ b.enter }}" onMouseLeave="{{ b.leave }}" style="display:flex; gap:10px; align-items:baseline; font:400 27px/1.25 'Open Sans', sans-serif; color:{{ c.head }}; margin:44px 0 14px; padding-bottom:8px; border-bottom:1px solid {{ c.rule }};"><span>{{ b.num }}</span><span><sc-for list="{{ b.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.85em;">{{ r.t }}</code></sc-if></sc-for></span><a style="opacity:{{ b.pil }}; font-size:20px; color:{{ c.muted }}; text-decoration:none;">¶</a></h2></sc-if>
+              <sc-if value="{{ b.isH3 }}"><h3 onMouseEnter="{{ b.enter }}" onMouseLeave="{{ b.leave }}" style="display:flex; gap:10px; align-items:baseline; font:400 21px/1.3 'Open Sans', sans-serif; color:{{ c.head }}; margin:30px 0 10px;"><span>{{ b.num }}</span><span>{{ b.text }}</span><a style="opacity:{{ b.pil }}; font-size:16px; color:{{ c.muted }}; text-decoration:none;">¶</a></h3></sc-if>
+              <sc-if value="{{ b.isP }}"><p style="font-size:17px; line-height:1.7; margin:0 0 16px; text-wrap:pretty;"><sc-for list="{{ b.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.84em; background:{{ c.code }}; color:{{ c.codeInk }}; padding:1px 5px; border-radius:3px;">{{ r.t }}</code></sc-if><sc-if value="{{ r.bold }}"><strong>{{ r.t }}</strong></sc-if><sc-if value="{{ r.em }}"><em>{{ r.t }}</em></sc-if><sc-if value="{{ r.link }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; cursor:pointer;">{{ r.t }}</a></sc-if><sc-if value="{{ r.term }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; font-weight:700; cursor:pointer;">{{ r.t }}</a></sc-if><sc-if value="{{ r.linkCode }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; cursor:pointer; font-family:'Noto Sans Mono', monospace; font-size:0.84em;">{{ r.t }}</a></sc-if></sc-for></p></sc-if>
+              <sc-if value="{{ b.isUl }}"><ul style="margin:0 0 18px; padding-left:24px; display:flex; flex-direction:column; gap:8px; font-size:17px; line-height:1.65;"><sc-for list="{{ b.items }}" as="it"><li style="text-wrap:pretty;"><sc-for list="{{ it.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.84em; background:{{ c.code }}; color:{{ c.codeInk }}; padding:1px 5px; border-radius:3px;">{{ r.t }}</code></sc-if><sc-if value="{{ r.bold }}"><strong>{{ r.t }}</strong></sc-if><sc-if value="{{ r.em }}"><em>{{ r.t }}</em></sc-if><sc-if value="{{ r.link }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; cursor:pointer;">{{ r.t }}</a></sc-if><sc-if value="{{ r.term }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; font-weight:700; cursor:pointer;">{{ r.t }}</a></sc-if><sc-if value="{{ r.linkCode }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; cursor:pointer; font-family:'Noto Sans Mono', monospace; font-size:0.84em;">{{ r.t }}</a></sc-if></sc-for></li></sc-for></ul></sc-if>
+              <sc-if value="{{ b.isOl }}"><ol style="margin:0 0 18px; padding-left:28px; display:flex; flex-direction:column; gap:8px; font-size:17px; line-height:1.65;"><sc-for list="{{ b.items }}" as="it"><li style="text-wrap:pretty;"><sc-for list="{{ it.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.84em; background:{{ c.code }}; color:{{ c.codeInk }}; padding:1px 5px; border-radius:3px;">{{ r.t }}</code></sc-if><sc-if value="{{ r.link }}"><a onClick="{{ r.go }}" style="color:{{ c.link }}; cursor:pointer;">{{ r.t }}</a></sc-if><sc-if value="{{ r.em }}"><em>{{ r.t }}</em></sc-if></sc-for></li></sc-for></ol></sc-if>
+              <sc-if value="{{ b.isCode }}"><div style="position:relative; margin:0 0 20px; background:{{ c.code }}; border:1px solid {{ c.rule }}; border-radius:4px;"><span style="position:absolute; top:6px; right:10px; font:600 11px 'Open Sans', sans-serif; letter-spacing:0.06em; text-transform:uppercase; color:{{ c.muted }};">{{ b.lang }}</span><pre style="margin:0; padding:18px 20px; overflow-x:auto; font:14px/1.55 'Noto Sans Mono', monospace; color:{{ c.ink }};">{{ b.text }}</pre></div></sc-if>
+              <sc-if value="{{ b.tblStd }}"><div style="overflow-x:auto; overflow-y:hidden; margin:0 0 22px;"><table style="width:100%; border-collapse:collapse; font-size:15px; line-height:1.55; border:1px solid {{ c.rule }};"><thead><tr><sc-for list="{{ b.head }}" as="hc"><th style="text-align:left; padding:9px 12px; background:{{ c.side }}; border:1px solid {{ c.rule }}; font:700 13.5px 'Open Sans', sans-serif;"><sc-for list="{{ hc.runs }}" as="r">{{ r.t }}</sc-for></th></sc-for></tr></thead><tbody><sc-for list="{{ b.rows }}" as="row"><tr><sc-for list="{{ row.cells }}" as="cell"><td style="vertical-align:top; padding:9px 12px; border:1px solid {{ c.rule }};"><sc-for list="{{ cell.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.86em; color:{{ c.codeInk }}; overflow-wrap:anywhere;">{{ r.t }}</code></sc-if></sc-for></td></sc-for></tr></sc-for></tbody></table></div></sc-if>
+              <sc-if value="{{ b.isNote }}"><div style="display:grid; grid-template-columns:96px minmax(0,1fr); margin:4px 0 22px;"><div style="display:flex; align-items:center; justify-content:center; border-right:1px solid {{ c.rule }}; padding:10px 0; font:700 12px 'Open Sans', sans-serif; letter-spacing:0.1em; color:{{ b.nfg }};">{{ b.label }}</div><div style="padding:10px 0 10px 20px; font-size:16.5px; line-height:1.65; color:{{ c.inkSoft }}; text-wrap:pretty;"><sc-for list="{{ b.runs }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.84em; background:{{ c.code }}; color:{{ c.codeInk }}; padding:1px 5px; border-radius:3px;">{{ r.t }}</code></sc-if></sc-for></div></div></sc-if>
+            </sc-for>
+            <nav style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:56px; padding-top:20px; border-top:1px solid {{ c.rule }}; font-family:'Open Sans', sans-serif;">
+              <div><sc-if value="{{ hasPrev }}"><a onClick="{{ prev.go }}" style="display:flex; flex-direction:column; gap:2px; cursor:pointer; text-decoration:none;"><span style="font-size:12px; color:{{ c.muted }};">← Previous</span><span style="font-size:15px; color:{{ c.link }};">{{ prev.title }}</span></a></sc-if></div>
+              <div style="text-align:right;"><sc-if value="{{ hasNext }}"><a onClick="{{ next.go }}" style="display:flex; flex-direction:column; gap:2px; cursor:pointer; text-decoration:none; align-items:flex-end;"><span style="font-size:12px; color:{{ c.muted }};">Next →</span><span style="font-size:15px; color:{{ c.link }};">{{ next.title }}</span></a></sc-if></div>
+            </nav>
+            <footer style="margin-top:36px; font:12.5px 'Open Sans', sans-serif; color:{{ c.muted }};">Version main · Last updated 2026-10-09</footer>
+          </sc-if>
+          <sc-if value="{{ isSearch }}">
+            <h1 style="font:400 38px/1.2 'Open Sans', sans-serif; margin:0 0 20px;">Search results</h1>
+            <div style="display:flex; gap:8px; margin-bottom:12px;"><input value="{{ query }}" readOnly="{{ true }}" style="flex:1; font:16px 'Open Sans', sans-serif; padding:9px 12px; border:1px solid {{ c.rule }}; border-radius:4px; background:{{ c.bg }}; color:{{ c.ink }};"><button style="font:600 14px 'Open Sans', sans-serif; padding:0 18px; border:1px solid {{ c.rule }}; border-radius:4px; background:{{ c.side }}; color:{{ c.ink }};">Search</button></div>
+            <p style="font:14px 'Open Sans', sans-serif; color:{{ c.muted }}; margin:0 0 28px;">{{ resultCount }} pages match “{{ query }}”.</p>
+            <div style="display:flex; flex-direction:column; gap:26px;">
+              <sc-for list="{{ results }}" as="res" hint-placeholder-count="6">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  <a onClick="{{ res.go }}" style="display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; cursor:pointer; font:600 18px 'Open Sans', sans-serif; color:{{ c.link }}; text-decoration:none;"><span>{{ res.title }}</span><sc-if value="{{ res.hasSection }}"><span style="font-weight:400; font-size:15px; color:{{ c.muted }};">› {{ res.section }}</span></sc-if></a>
+                  <span style="font:12.5px 'Noto Sans Mono', monospace; color:{{ c.muted }};">{{ res.file }}</span>
+                  <p style="margin:4px 0 0; font-size:16px; line-height:1.6; color:{{ c.inkSoft }};"><sc-for list="{{ res.snippet }}" as="r"><sc-if value="{{ r.plain }}">{{ r.t }}</sc-if><sc-if value="{{ r.hl }}"><mark style="background:{{ c.mark }}; color:{{ c.ink }}; padding:0 2px;">{{ r.t }}</mark></sc-if><sc-if value="{{ r.code }}"><code style="font-family:'Noto Sans Mono', monospace; font-size:0.85em;">{{ r.t }}</code></sc-if></sc-for></p>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const LIGHT = { stage: '#ffffff', bg: '#ffffff', ink: 'oklch(0.27 0.01 60)', inkSoft: 'oklch(0.36 0.01 60)', head: 'oklch(0.5 0.14 35)', link: 'oklch(0.48 0.13 255)', muted: 'oklch(0.52 0.01 60)', rule: 'oklch(0.9 0.005 80)', side: 'oklch(0.975 0.004 80)', code: 'oklch(0.965 0.004 80)', codeInk: 'oklch(0.36 0.03 35)', mark: 'oklch(0.93 0.09 95)', warn: 'oklch(0.5 0.14 35)', sub: 'oklch(0.93 0.012 240)', subBd: 'oklch(0.86 0.015 240)', stripe: 'oklch(0.975 0.004 80)', tab: 'oklch(0.76 0.15 65)', tabInk: 'oklch(0.25 0.03 60)' };
+const DARK = { stage: 'oklch(0.2 0.006 60)', bg: 'oklch(0.2 0.006 60)', ink: 'oklch(0.9 0.006 80)', inkSoft: 'oklch(0.82 0.006 80)', head: 'oklch(0.75 0.12 40)', link: 'oklch(0.76 0.1 255)', muted: 'oklch(0.66 0.01 70)', rule: 'oklch(0.32 0.008 60)', side: 'oklch(0.23 0.006 60)', code: 'oklch(0.25 0.006 60)', codeInk: 'oklch(0.85 0.05 40)', mark: 'oklch(0.45 0.08 95)', warn: 'oklch(0.75 0.12 40)', sub: 'oklch(0.27 0.012 240)', subBd: 'oklch(0.35 0.015 240)', stripe: 'oklch(0.23 0.006 60)', tab: 'oklch(0.7 0.14 65)', tabInk: 'oklch(0.2 0.03 60)' };
+class Component extends DCLogic {
+  state = { page: (() => { try { return localStorage.getItem('dlg-2c-page'); } catch (e) { return null; } })() || 'overview', dark: false, hover: null };
+  componentDidMount() { if (!window.DelegateDocs) this.t = setInterval(() => { if (window.DelegateDocs) { clearInterval(this.t); this.forceUpdate(); } }, 40); }
+  componentWillUnmount() { clearInterval(this.t); }
+  renderVals() {
+    const c = this.state.dark ? DARK : LIGHT;
+    const D = window.DelegateDocs;
+    const mob = this.state.page === 'mobile';
+    const L = mob
+      ? { stagePad: '32px 16px', frameW: '390px', frameBorder: '1px solid ' + c.rule, frameRadius: '24px', cols: 'minmax(0,1fr)', side: 'none', mainPad: '24px 20px 40px' }
+      : { stagePad: '0', frameW: 'none', frameBorder: '0', frameRadius: '0', cols: '290px minmax(0,1fr)', side: 'block', mainPad: '40px 56px 64px' };
+    if (!D) return { c, L, tabs: [], nav: [], blocks: [] };
+    const v = D.build(this, { key: 'dlg-2c-page', numbered: true, rowA: c.bg, rowB: c.stripe, noteTone: { nfg: c.link }, warnTone: { nfg: c.warn } });
+    const isRef = v.pageId === 'run';
+    let last = 'Summary';
+    const blocks = v.blocks.map((b) => { if (b.isH2 || b.isH3) last = b.text; return { ...b, h2Ref: false, h2Std: b.isH2, tblRef: b.isTable && isRef, tblStd: b.isTable && !isRef, caption: last }; });
+    return { ...v, blocks, isRef, c: mob ? { ...c, stage: this.state.dark ? 'oklch(0.16 0.005 60)' : '#ecebe8' } : c, L };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{#-
+  The delegate header: the name, "Reference Guide", the version, the repository
+  link and the palette toggle. Search moves to the sidebar. The search dialog
+  stays here, closed until the sidebar field or the keyboard opens it. Under the
+  drawer breakpoint, the "Contents" button opens the sidebar.
+-#}
+<header class="md-header dlg-header" data-md-component="header">
+  <nav class="md-header__inner" aria-label="{{ lang.t('header') }}">
+    <a href="{{ nav.items[0].url | url }}" class="dlg-brand" title="{{ config.site_name | e }}">
+      <span class="dlg-brand__name">{{ config.site_name }}</span>
+      <span class="dlg-brand__guide">Reference Guide</span>
+    </a>
+    <span class="dlg-version-pill">main</span>
+    <span class="dlg-header__spacer"></span>
+    {% if config.repo_url %}
+      <a class="dlg-repo" href="{{ config.repo_url }}">{{ config.repo_name }}</a>
+    {% endif %}
+    {% if config.theme.palette and not config.theme.palette is mapping %}
+      {% include "partials/palette.html" %}
+      {% include "partials/javascripts/palette.html" %}
+    {% endif %}
+    <label class="dlg-contents" for="__drawer">Contents</label>
+    {% if "search" in config.plugins %}
+      {% set search = config.plugins["search"] | attr("config") %}
+      {% if search.enabled %}
+        {% include "partials/search.html" %}
+      {% endif %}
+    {% endif %}
+  </nav>
+</header>

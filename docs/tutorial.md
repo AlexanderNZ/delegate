@@ -1,3 +1,7 @@
+---
+heading_numbers: false
+---
+
 # Tutorial: from install to one verified ticket
 
 In this tutorial you run `delegate` once, from start to end. You make a small sample repository. You bootstrap an agent pair for it. You build one ticket in `assure` mode on Claude Code. You read the verdict and the journal.

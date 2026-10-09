@@ -1,0 +1,19 @@
+{#-
+  The sidebar: a quick-search field that opens the search dialog, then the
+  numbered table of contents. CSS counters number the items; the nav titles in
+  zensical.toml do not change. The h2s of the current page are listed under it
+  (the toc.integrate feature).
+-#}
+{% import "partials/nav-item.html" as item with context %}
+<nav class="md-nav md-nav--primary md-nav--integrated dlg-nav" aria-label="{{ lang.t('nav') }}" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">{{ config.site_name }}</label>
+  <div class="dlg-nav__label" id="dlg-quick-search">Quick search</div>
+  <input class="dlg-quicksearch" type="search" placeholder="Search the guide" aria-labelledby="dlg-quick-search" autocomplete="off" readonly>
+  <div class="dlg-nav__label">Table of contents</div>
+  <ul class="md-nav__list" data-md-scrollfix>
+    {% for nav_item in nav.items %}
+      {% set path = "__nav_" ~ loop.index %}
+      {{ item.render(nav_item, path, 1) }}
+    {% endfor %}
+  </ul>
+</nav>

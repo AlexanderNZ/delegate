@@ -1,3 +1,9 @@
+---
+man: DELEGATE-RUN(1)
+man_name: "delegate-run — build the tickets of a workflow"
+synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--break-lock] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+---
+
 # Reference: `delegate run`
 
 `delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. In `economy` mode, the engine builds a chain of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.

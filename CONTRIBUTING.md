@@ -54,6 +54,9 @@ The first command builds the site into `site/`, and it fails on a dead link or a
 - A new page in `docs/` needs a line in the `nav` of `zensical.toml`. A test fails when a page is missing there.
 - The tooltips come from `docs/glossary.md`. `delegate docs` writes them to `includes/abbreviations.md`, and a test fails when that file is stale.
 - To name the file that a code block holds, write the name as a title after the language: `toml title="workflow.toml"`. A bare word after the language does not render on the site, and a test fails on it.
+- The theme is in `overrides/` (templates), `docs/stylesheets/delegate.css` and `docs/javascripts/delegate.js`. Its spec and prototype are in `design/`. Change the theme there, not in the pages.
+- A reference page carries its man-page data in its front matter: `man`, `man_name` and `synopsis`. The theme shows them above the page text. A test fails when the synopsis names an option that the command does not have.
+- A page whose headings start with a number sets `heading_numbers: false` in its front matter, so the theme does not number them again.
 
 ## Date every harness fact
 

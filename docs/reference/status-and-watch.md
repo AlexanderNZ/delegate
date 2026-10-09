@@ -1,3 +1,11 @@
+---
+man: DELEGATE-STATUS(1)
+man_name: "delegate-status, delegate-watch — show the state of a run"
+synopsis:
+  - "delegate status [<run-id>] [--repo <repo>]"
+  - "delegate watch [<run-id>] [--repo <repo>] [--until verdict] [--stall-minutes <n>] [--max-minutes <n>] [--from <position>] [--poll-seconds <n>]"
+---
+
 # Reference: `delegate status` and `delegate watch`
 
 `delegate status` and `delegate watch` show the state of a run. They read only the journal of the run and the event-stream files that the journal names. They need no adapter, no workflow file, and no tool beyond git, which finds the state directory. They do not need `jq`.

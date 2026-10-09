@@ -1,3 +1,9 @@
+---
+man: DELEGATE-DOCS(1)
+man_name: "delegate-docs — write the generated sections of the reference pages"
+synopsis: "delegate docs [--root <root>] [--check]"
+---
+
 # Reference: `delegate docs`
 
 The reference pages of this repository hold hand-written prose and generated sections. `delegate docs` writes the generated sections from the code, so a page cannot drift from the parsers, the exit codes, the renderer constants or the validator. This is the one command that regenerates every generated page.

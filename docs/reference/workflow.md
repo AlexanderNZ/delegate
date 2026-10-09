@@ -1,3 +1,8 @@
+---
+man: DELEGATE-WORKFLOW(5)
+man_name: "workflow.toml — the workflow file of a delegation run"
+---
+
 # Reference: the workflow file
 
 A workflow file is a TOML file that describes one delegation run. The coordinator writes it. The engine reads it.

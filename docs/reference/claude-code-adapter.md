@@ -1,3 +1,9 @@
+---
+man: DELEGATE-CLAUDE-CODE(7)
+man_name: "claude-code — the adapter that drives Claude Code in headless mode"
+synopsis: 'adapter = "claude-code"'
+---
+
 # Reference: the `claude-code` adapter
 
 The `claude-code` adapter drives Claude Code in headless mode. A workflow selects it with `adapter = "claude-code"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).

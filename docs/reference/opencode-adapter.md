@@ -1,3 +1,9 @@
+---
+man: DELEGATE-OPENCODE(7)
+man_name: "opencode — the adapter that drives OpenCode in headless mode"
+synopsis: 'adapter = "opencode"'
+---
+
 # Reference: the `opencode` adapter
 
 The `opencode` adapter drives OpenCode in headless mode. A workflow selects it with `adapter = "opencode"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).

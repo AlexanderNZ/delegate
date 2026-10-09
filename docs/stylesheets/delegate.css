@@ -1,0 +1,1085 @@
+/*
+ * The delegate docs theme: "2c — Guide + quiet reference".
+ * design/README.md is the spec, and design/delegate-docs-theme-2c.dc.html the prototype.
+ * Zensical loads Noto Serif and Noto Sans Mono from theme.font; Open Sans and the
+ * 600 weight of Noto Sans Mono come from here.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&family=Noto+Sans+Mono:wght@400;600&display=swap");
+
+/* ---------- Tokens ---------- */
+
+[data-md-color-scheme="default"] {
+  --dlg-bg: #ffffff;
+  --dlg-ink: oklch(0.27 0.01 60);
+  --dlg-ink-soft: oklch(0.36 0.01 60);
+  --dlg-head: oklch(0.5 0.14 35);
+  --dlg-link: oklch(0.48 0.13 255);
+  --dlg-muted: oklch(0.52 0.01 60);
+  --dlg-rule: oklch(0.9 0.005 80);
+  --dlg-side: oklch(0.975 0.004 80);
+  --dlg-code-bg: oklch(0.965 0.004 80);
+  --dlg-code-ink: oklch(0.36 0.03 35);
+  --dlg-stripe: oklch(0.975 0.004 80);
+  --dlg-mark: oklch(0.93 0.09 95);
+}
+
+[data-md-color-scheme="slate"] {
+  --dlg-bg: oklch(0.2 0.006 60);
+  --dlg-ink: oklch(0.9 0.006 80);
+  --dlg-ink-soft: oklch(0.82 0.006 80);
+  --dlg-head: oklch(0.75 0.12 40);
+  --dlg-link: oklch(0.76 0.1 255);
+  --dlg-muted: oklch(0.66 0.01 70);
+  --dlg-rule: oklch(0.32 0.008 60);
+  --dlg-side: oklch(0.23 0.006 60);
+  --dlg-code-bg: oklch(0.25 0.006 60);
+  --dlg-code-ink: oklch(0.85 0.05 40);
+  --dlg-stripe: oklch(0.23 0.006 60);
+  --dlg-mark: oklch(0.45 0.08 95);
+}
+
+[data-md-color-scheme] {
+  --dlg-sans: "Open Sans", system-ui, sans-serif;
+  --dlg-serif: "Noto Serif", Georgia, serif;
+  --dlg-mono: "Noto Sans Mono", ui-monospace, monospace;
+
+  --md-default-bg-color: var(--dlg-bg);
+  --md-default-fg-color: var(--dlg-ink);
+  --md-default-fg-color--light: var(--dlg-muted);
+  --md-default-fg-color--lighter: var(--dlg-rule);
+  --md-default-fg-color--lightest: var(--dlg-rule);
+  --md-primary-fg-color: var(--dlg-bg);
+  --md-primary-bg-color: var(--dlg-ink);
+  --md-accent-fg-color: var(--dlg-link);
+  --md-typeset-color: var(--dlg-ink);
+  --md-typeset-a-color: var(--dlg-link);
+  --md-typeset-mark-color: var(--dlg-mark);
+  --md-code-bg-color: var(--dlg-code-bg);
+  --md-code-fg-color: var(--dlg-ink);
+  --md-footer-bg-color: var(--dlg-bg);
+  --md-footer-fg-color: var(--dlg-ink);
+  /* Code is set in one ink; comments are muted and strings take the code ink. */
+  --md-code-hl-color: var(--dlg-code-bg);
+  --md-code-hl-number-color: var(--dlg-ink);
+  --md-code-hl-special-color: var(--dlg-ink);
+  --md-code-hl-function-color: var(--dlg-ink);
+  --md-code-hl-constant-color: var(--dlg-ink);
+  --md-code-hl-keyword-color: var(--dlg-ink);
+  --md-code-hl-string-color: var(--dlg-code-ink);
+  --md-code-hl-name-color: var(--dlg-ink);
+  --md-code-hl-operator-color: var(--dlg-ink);
+  --md-code-hl-punctuation-color: var(--dlg-ink);
+  --md-code-hl-comment-color: var(--dlg-muted);
+  --md-code-hl-generic-color: var(--dlg-ink);
+  --md-code-hl-variable-color: var(--dlg-ink);
+}
+
+body {
+  background: var(--dlg-bg);
+}
+
+/* ---------- Header ---------- */
+
+.md-header.dlg-header {
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  height: 56px;
+  background: var(--dlg-bg);
+  color: var(--dlg-ink);
+  border-bottom: 1px solid var(--dlg-rule);
+  box-shadow: none;
+}
+
+.dlg-header .md-header__inner {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  max-width: none;
+  margin: 0;
+  padding: 0 28px;
+  font-family: var(--dlg-sans);
+}
+
+.dlg-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--dlg-ink);
+}
+
+.dlg-brand:hover {
+  text-decoration: none;
+}
+
+.dlg-brand__name {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.dlg-brand__guide {
+  font-weight: 400;
+  font-size: 15px;
+  color: var(--dlg-muted);
+}
+
+.dlg-version-pill {
+  margin-left: 20px;
+  padding: 2px 8px;
+  border: 1px solid var(--dlg-rule);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dlg-muted);
+}
+
+.dlg-header__spacer {
+  margin-left: auto;
+}
+
+.dlg-repo {
+  font-size: 14px;
+  color: var(--dlg-link);
+}
+
+.dlg-repo:hover {
+  text-decoration: underline;
+}
+
+.dlg-header .md-header__option {
+  margin-left: 14px;
+}
+
+.dlg-header .md-header__option .md-header__button {
+  margin: 0;
+  padding: 4px;
+  color: var(--dlg-muted);
+}
+
+.dlg-header .md-header__option .md-header__button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.dlg-contents {
+  display: none;
+}
+
+/* ---------- Body grid and sidebar ---------- */
+
+@media screen and (min-width: 76.25em) {
+  .md-main__inner.md-grid {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    max-width: none;
+    margin: 0;
+    /* The sidebar background runs the full height of the page. */
+    background: linear-gradient(to right, var(--dlg-side) 289px, var(--dlg-rule) 289px, var(--dlg-rule) 290px, transparent 290px);
+  }
+
+  .md-sidebar--primary {
+    position: sticky;
+    top: 56px;
+    align-self: start;
+    width: 290px;
+    height: calc(100vh - 56px);
+    max-height: calc(100vh - 56px);
+    padding: 0;
+  }
+
+  .md-sidebar--primary .md-sidebar__scrollwrap {
+    margin: 0;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .md-sidebar--primary .md-sidebar__inner {
+    padding: 24px 20px 40px;
+  }
+}
+
+.md-sidebar--secondary {
+  display: none;
+}
+
+.dlg-nav {
+  font-family: var(--dlg-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+
+.dlg-nav .md-nav__link,
+.dlg-nav .md-nav__link .md-ellipsis {
+  line-height: 1.5;
+}
+
+.dlg-nav > .md-nav__title {
+  display: none;
+}
+
+.dlg-nav__label {
+  margin-bottom: 6px;
+  font-family: var(--dlg-sans);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dlg-muted);
+}
+
+.dlg-quicksearch {
+  display: block;
+  width: 100%;
+  margin: 0 0 24px;
+  padding: 7px 10px;
+  border: 1px solid var(--dlg-rule);
+  border-radius: 4px;
+  background: var(--dlg-bg);
+  color: var(--dlg-ink);
+  font-family: var(--dlg-sans);
+  font-size: 14px;
+  cursor: text;
+}
+
+.dlg-quicksearch::placeholder {
+  color: var(--dlg-muted);
+  opacity: 1;
+}
+
+.dlg-nav .md-nav__list {
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dlg-nav > .md-nav__list {
+  gap: 0;
+  margin-top: 10px;
+}
+
+.dlg-nav .md-nav__item {
+  margin: 0;
+  padding: 0;
+}
+
+.dlg-nav .md-nav__link {
+  display: flex;
+  align-items: baseline;
+  column-gap: 0;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.dlg-nav .md-nav__link .md-ellipsis {
+  white-space: normal;
+  overflow: visible;
+}
+
+.dlg-nav a.md-nav__link:hover .md-ellipsis {
+  text-decoration: underline;
+}
+
+.dlg-nav .md-nav__icon,
+.dlg-nav .md-nav .md-nav__title,
+.dlg-nav .md-nav__toggle,
+.dlg-nav label.md-nav__link--active {
+  display: none;
+}
+
+.dlg-nav .md-nav {
+  background: none;
+}
+
+/* Zensical sets the h2 text of the page in a .md-typeset span; it keeps the sidebar type. */
+.dlg-nav .md-typeset {
+  font: inherit;
+  color: inherit;
+}
+
+.dlg-nav.md-nav--primary .md-nav__item .md-nav__link--active,
+.dlg-nav.md-nav--primary .md-nav__link:focus,
+.dlg-nav.md-nav--primary .md-nav__link:hover {
+  background: none;
+}
+
+[dir] .dlg-nav.md-nav--integrated > .md-nav__list > .md-nav__item .md-nav--secondary,
+[dir] .dlg-nav.md-nav--integrated .md-nav__item .md-nav--secondary {
+  margin: 2px 0 0;
+  border: 0;
+}
+
+.md-sidebar--primary .md-sidebar__scrollwrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dlg-rule) transparent;
+}
+
+/* Search lives in the sidebar; the header keeps the dialog, not its button. */
+.dlg-header .md-search__button {
+  display: none;
+}
+
+/* Top level: "1. Start here". */
+.dlg-nav > .md-nav__list {
+  counter-reset: dlg-l1;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item {
+  counter-increment: dlg-l1;
+  margin-bottom: 6px;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav__link {
+  font-weight: 600;
+  color: var(--dlg-ink);
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav__link::before {
+  content: counter(dlg-l1) ".";
+  flex: none;
+  min-width: 20px;
+  margin-right: 6px;
+  font-weight: 400;
+  color: var(--dlg-muted);
+}
+
+/* Children: "3.1. Bootstrap a single-stack repository". */
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav:not(.md-nav--secondary) {
+  margin-top: 2px;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav:not(.md-nav--secondary) > .md-nav__list {
+  counter-reset: dlg-l2;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav:not(.md-nav--secondary) > .md-nav__list > .md-nav__item {
+  counter-increment: dlg-l2;
+  padding-left: 26px;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav:not(.md-nav--secondary) > .md-nav__list > .md-nav__item > .md-nav__link {
+  font-size: 13.5px;
+  color: var(--dlg-link);
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav:not(.md-nav--secondary) > .md-nav__list > .md-nav__item > .md-nav__link::before {
+  content: counter(dlg-l1) "." counter(dlg-l2) ".";
+  flex: none;
+  min-width: 28px;
+  margin-right: 6px;
+  color: var(--dlg-muted);
+}
+
+/* The h2s of the current page. */
+.dlg-nav .md-nav--secondary > .md-nav__list {
+  counter-reset: dlg-toc;
+}
+
+.dlg-nav .md-nav--secondary > .md-nav__list > .md-nav__item {
+  counter-increment: dlg-toc;
+  margin: 0;
+}
+
+.dlg-nav .md-nav--secondary .md-nav__link {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dlg-muted);
+}
+
+.dlg-nav .md-nav--secondary .md-nav__link--active,
+.dlg-nav .md-nav--secondary .md-nav__link:hover {
+  color: var(--dlg-ink);
+}
+
+/* Only the h2s; the h3s stay on the page. */
+.dlg-nav .md-nav--secondary .md-nav__item .md-nav {
+  display: none;
+}
+
+/* Under a top-level page: "1.1. The problem". */
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav--secondary > .md-nav__list > .md-nav__item {
+  padding-left: 26px;
+}
+
+.dlg-nav > .md-nav__list > .md-nav__item > .md-nav--secondary > .md-nav__list > .md-nav__item > .md-nav__link::before {
+  content: counter(dlg-l1) "." counter(dlg-toc) ".";
+  flex: none;
+  min-width: 28px;
+  margin-right: 6px;
+}
+
+body:has(.dlg-nonum) .dlg-nav > .md-nav__list > .md-nav__item > .md-nav--secondary > .md-nav__list > .md-nav__item > .md-nav__link::before {
+  content: none;
+}
+
+/* Under a child page: the text only. */
+.dlg-nav .md-nav__list .md-nav__list .md-nav--secondary > .md-nav__list > .md-nav__item {
+  padding-left: 34px;
+}
+
+/* ---------- Content column ---------- */
+
+.md-content {
+  max-width: none;
+  margin: 0;
+  padding: 40px 56px 64px;
+  background: var(--dlg-bg);
+}
+
+.dlg-content {
+  max-width: 760px;
+}
+
+.md-content__inner {
+  margin: 0;
+  padding: 0;
+}
+
+.md-content__inner::before {
+  display: none;
+}
+
+.md-content__inner > :last-child {
+  margin-bottom: 0;
+}
+
+.dlg-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  font-family: var(--dlg-sans);
+  font-size: 13px;
+  color: var(--dlg-muted);
+}
+
+.dlg-breadcrumb li + li::before {
+  content: "›";
+  margin-right: 6px;
+}
+
+.dlg-breadcrumb a {
+  color: var(--dlg-muted);
+}
+
+/* ---------- Type ---------- */
+
+.md-typeset {
+  font-family: var(--dlg-serif);
+  font-size: 17px;
+  line-height: 1.7;
+  letter-spacing: normal;
+  color: var(--dlg-ink);
+  counter-reset: dlg-h2;
+}
+
+.md-typeset p {
+  margin: 0 0 16px;
+  text-wrap: pretty;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-family: var(--dlg-sans);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+.md-typeset h1 {
+  margin: 0 0 24px;
+  font-size: 38px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--dlg-ink);
+  text-wrap: pretty;
+}
+
+.md-typeset h1 code {
+  padding: 0;
+  font-size: 0.85em;
+  color: inherit;
+  background: none;
+}
+
+.md-typeset h2 {
+  margin: 44px 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--dlg-rule);
+  font-size: 27px;
+  line-height: 1.25;
+  color: var(--dlg-head);
+  counter-increment: dlg-h2;
+  counter-reset: dlg-h3;
+}
+
+.md-typeset h3 {
+  margin: 30px 0 10px;
+  font-size: 21px;
+  line-height: 1.3;
+  color: var(--dlg-head);
+  counter-increment: dlg-h3;
+}
+
+.md-typeset h4 {
+  margin: 24px 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dlg-ink);
+}
+
+.md-typeset h2::before {
+  content: counter(dlg-h2) ".";
+  margin-right: 10px;
+}
+
+.md-typeset h3::before {
+  content: counter(dlg-h2) "." counter(dlg-h3) ".";
+  margin-right: 10px;
+}
+
+.dlg-nonum .md-typeset h2::before,
+.dlg-nonum .md-typeset h3::before {
+  content: none;
+}
+
+.md-typeset h2 code,
+.md-typeset h3 code {
+  padding: 0;
+  color: inherit;
+  background: none;
+}
+
+.md-typeset .headerlink {
+  margin-left: 10px;
+  color: var(--dlg-muted);
+  opacity: 0;
+  transition: none;
+}
+
+.md-typeset h2 .headerlink {
+  font-size: 20px;
+}
+
+.md-typeset h3 .headerlink {
+  font-size: 16px;
+}
+
+.md-typeset :is(h1, h2, h3, h4):hover .headerlink,
+.md-typeset .headerlink:focus {
+  opacity: 1;
+  color: var(--dlg-muted);
+}
+
+.md-typeset ul,
+.md-typeset ol {
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+
+.md-typeset ol {
+  padding-left: 28px;
+}
+
+.md-typeset ul li,
+.md-typeset ol li {
+  margin: 0 0 8px;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.md-typeset li > p {
+  margin-bottom: 8px;
+}
+
+.md-typeset li > ul,
+.md-typeset li > ol {
+  margin: 8px 0 0;
+}
+
+.md-typeset a {
+  color: var(--dlg-link);
+  text-decoration: none;
+}
+
+.md-typeset a:hover,
+.md-typeset a:focus {
+  color: var(--dlg-link);
+  text-decoration: underline;
+}
+
+.md-typeset a strong {
+  font-weight: 700;
+  color: var(--dlg-link);
+}
+
+.md-typeset abbr {
+  text-decoration: none;
+  border-bottom: 0;
+}
+
+.md-typeset mark {
+  padding: 0 2px;
+  background: var(--dlg-mark);
+  color: var(--dlg-ink);
+}
+
+/* ---------- Code ---------- */
+
+.md-typeset code,
+.md-typeset kbd,
+.md-typeset pre {
+  font-family: var(--dlg-mono);
+}
+
+.md-typeset code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.84em;
+  color: var(--dlg-code-ink);
+  background: var(--dlg-code-bg);
+  word-break: normal;
+}
+
+.md-typeset a code {
+  padding: 0;
+  color: var(--dlg-link);
+  background: none;
+}
+
+.md-typeset .highlight {
+  position: relative;
+  margin: 0 0 20px;
+  border: 1px solid var(--dlg-rule);
+  border-radius: 4px;
+  background: var(--dlg-code-bg);
+}
+
+.md-typeset .highlight pre {
+  margin: 0;
+}
+
+.md-typeset .highlight pre > code {
+  display: block;
+  padding: 18px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--dlg-ink);
+  background: none;
+  overflow-x: auto;
+}
+
+/* A block with a file name: the name sits in a quiet bar above the code. */
+.md-typeset .highlight .filename {
+  display: block;
+  margin: 0;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--dlg-rule);
+  font-family: var(--dlg-mono);
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--dlg-muted);
+  background: none;
+}
+
+.md-typeset .highlight .filename::before {
+  display: none;
+}
+
+/* The language label, written by delegate.js from the highlight class. */
+.md-typeset .highlight[data-dlg-lang]::after {
+  content: attr(data-dlg-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-family: var(--dlg-sans);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dlg-muted);
+  pointer-events: none;
+}
+
+.md-typeset .highlight:has(.filename)[data-dlg-lang]::after {
+  top: 7px;
+}
+
+/* The copy button shows on hover, in place of the label. */
+.md-typeset .highlight:hover[data-dlg-lang]::after {
+  visibility: hidden;
+}
+
+.md-typeset .md-code__nav,
+.md-typeset .md-clipboard {
+  top: 4px;
+  right: 6px;
+  opacity: 0;
+}
+
+.md-typeset .highlight:hover .md-code__nav,
+.md-typeset .highlight:hover .md-clipboard,
+.md-typeset .md-code__nav:focus-within,
+.md-typeset .md-clipboard:focus {
+  opacity: 1;
+}
+
+.md-typeset .md-code__button,
+.md-typeset .md-clipboard {
+  color: var(--dlg-muted);
+  background: none;
+}
+
+.md-typeset .md-code__button:hover,
+.md-typeset .md-clipboard:hover {
+  color: var(--dlg-ink);
+}
+
+/* ---------- Admonitions ---------- */
+
+.md-typeset div.admonition.admonition,
+.md-typeset details.admonition,
+.md-typeset details {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  margin: 4px 0 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  font-size: inherit;
+}
+
+.md-typeset .admonition > .admonition-title,
+.md-typeset details > summary {
+  grid-column: 1;
+  grid-row: 1 / span 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+  border-right: 1px solid var(--dlg-rule);
+  background: none;
+  font-family: var(--dlg-sans);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dlg-link);
+}
+
+.md-typeset .admonition > .admonition-title::before,
+.md-typeset .admonition > .admonition-title::after,
+.md-typeset details > summary::before,
+.md-typeset details > summary::after {
+  display: none;
+}
+
+.md-typeset .admonition > :not(.admonition-title),
+.md-typeset details > :not(summary) {
+  grid-column: 2;
+  margin: 0;
+  padding: 0 0 0 20px;
+  font-size: 16.5px;
+  line-height: 1.65;
+  color: var(--dlg-ink-soft);
+}
+
+.md-typeset .admonition > :nth-child(2),
+.md-typeset details > :nth-child(2) {
+  padding-top: 10px;
+}
+
+.md-typeset .admonition > :last-child,
+.md-typeset details > :last-child {
+  padding-bottom: 10px;
+}
+
+.md-typeset :is(.admonition, details):is(.important, .warning, .danger, .caution, .attention) > :is(.admonition-title, summary) {
+  color: var(--dlg-head);
+}
+
+/* ---------- Tables, guide pages ---------- */
+
+.md-typeset .md-typeset__scrollwrap {
+  margin: 0 0 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.md-typeset .md-typeset__table {
+  display: block;
+  padding: 0;
+}
+
+.md-typeset table:not([class]) {
+  display: table;
+  width: 100%;
+  border: 0;
+  border-collapse: collapse;
+  border-radius: 0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.md-typeset table:not([class]) :is(th, td) {
+  padding: 9px 12px;
+  border: 1px solid var(--dlg-rule);
+  vertical-align: top;
+  text-align: left;
+}
+
+.md-typeset table:not([class]) th {
+  font-family: var(--dlg-sans);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--dlg-ink);
+  background: var(--dlg-side);
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background: none;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) td code {
+  padding: 0;
+  font-size: 0.86em;
+  color: var(--dlg-code-ink);
+  background: none;
+  overflow-wrap: anywhere;
+}
+
+.md-typeset table:not([class]) td a code {
+  color: var(--dlg-link);
+}
+
+/* ---------- Reference pages ---------- */
+
+.dlg-man {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--dlg-rule);
+  font-family: var(--dlg-mono);
+  font-size: 13px;
+  color: var(--dlg-muted);
+}
+
+.md-typeset .dlg-name {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0 0 30px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--dlg-rule);
+}
+
+.md-typeset .dlg-name dt {
+  margin: 0;
+  font-family: var(--dlg-sans);
+  font-weight: 700;
+  font-size: 11.5px;
+  line-height: 1.9;
+  letter-spacing: 0.12em;
+  color: var(--dlg-head);
+}
+
+.md-typeset .dlg-name dd {
+  margin: 0;
+  font-family: var(--dlg-mono);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.md-typeset .dlg-name__name {
+  color: var(--dlg-ink);
+}
+
+.md-typeset .dlg-name__synopsis {
+  color: var(--dlg-code-ink);
+}
+
+.md-typeset .dlg-table-label {
+  margin: 0 0 8px;
+  font-family: var(--dlg-sans);
+  font-weight: 700;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dlg-head);
+}
+
+.dlg-ref .md-typeset table:not([class]) {
+  border-top: 1px solid var(--dlg-rule);
+  border-bottom: 1px solid var(--dlg-rule);
+}
+
+.dlg-ref .md-typeset table:not([class]) :is(th, td) {
+  padding: 8px 12px;
+  border: 0;
+}
+
+.dlg-ref .md-typeset table:not([class]) th {
+  border-bottom: 1px solid var(--dlg-rule);
+  color: var(--dlg-muted);
+  background: none;
+}
+
+.dlg-ref .md-typeset table:not([class]) tbody tr:nth-child(even) {
+  background: var(--dlg-stripe);
+}
+
+/* ---------- Previous and next ---------- */
+
+.dlg-pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--dlg-rule);
+  font-family: var(--dlg-sans);
+}
+
+.dlg-pager a {
+  display: flex;
+  flex-direction: column;
+  color: var(--dlg-link);
+}
+
+.dlg-pager a:hover {
+  text-decoration: none;
+}
+
+.dlg-pager a:hover .dlg-pager__title {
+  text-decoration: underline;
+}
+
+.dlg-pager__next {
+  grid-column: 2;
+  text-align: right;
+}
+
+.dlg-pager__dir {
+  font-size: 12px;
+  color: var(--dlg-muted);
+}
+
+.dlg-pager__title {
+  font-size: 15px;
+}
+
+.dlg-version {
+  margin: 36px 0 0;
+  font-family: var(--dlg-sans);
+  font-size: 12.5px;
+  color: var(--dlg-muted);
+}
+
+.md-footer {
+  display: none;
+}
+
+/* ---------- Narrow screens: the sidebar is the drawer ---------- */
+
+@media screen and (max-width: 76.2375em) {
+  .md-header.dlg-header {
+    height: 52px;
+    background: var(--dlg-side);
+  }
+
+  .dlg-header .md-header__inner {
+    height: 52px;
+    padding: 0 18px;
+  }
+
+  .dlg-brand__name {
+    font-size: 17px;
+  }
+
+  .dlg-brand__guide {
+    font-size: 14px;
+  }
+
+  .dlg-version-pill,
+  .dlg-repo {
+    display: none;
+  }
+
+  .dlg-contents {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 6px 12px;
+    border: 1px solid var(--dlg-rule);
+    border-radius: 4px;
+    font-family: var(--dlg-sans);
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 1.2;
+    color: var(--dlg-ink);
+    background: var(--dlg-bg);
+    cursor: pointer;
+  }
+
+  .md-content {
+    padding: 24px 20px 40px;
+  }
+
+  .md-sidebar--primary,
+  [data-md-toggle="drawer"]:checked ~ .md-container .md-sidebar--primary {
+    /* Zensical slides the drawer 250px; this puts its open edge at the screen edge. */
+    left: -250px;
+    top: 0;
+    height: 100%;
+    background: var(--dlg-side);
+    border-right: 1px solid var(--dlg-rule);
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .md-sidebar--primary .md-sidebar__scrollwrap {
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .md-sidebar--primary .md-sidebar__inner {
+    padding: 24px 20px 40px;
+  }
+
+  /* The drawer shows the whole table of contents, not one level at a time. */
+  .dlg-nav,
+  .dlg-nav .md-nav {
+    position: static;
+    transform: none;
+    visibility: visible;
+    opacity: 1;
+    background: none;
+  }
+
+  .dlg-nav .md-nav__item--section > .md-nav,
+  .dlg-nav .md-nav__toggle ~ .md-nav {
+    display: block;
+    height: auto;
+  }
+
+  .dlg-nav .md-nav__link {
+    padding: 2px 0;
+    border: 0;
+  }
+}

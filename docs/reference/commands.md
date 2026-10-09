@@ -1,3 +1,13 @@
+---
+man: DELEGATE-COMMANDS(1)
+man_name: "delegate-render, delegate-validate, delegate-bootstrap, delegate-brief — render, validate and bootstrap agent pairs, and print a verifier brief"
+synopsis:
+  - "delegate render <declaration> -o <out> [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+  - "delegate validate [--claude-code <dir>] [--opencode <dir>] [--skills-dir <dir>] [--user-skills-dir <dir>]"
+  - "delegate bootstrap --repo <repo> --name <name> --domain <domain> --tier <tier> --skill <name> --reference <path> [<option>...]"
+  - "delegate brief full|fixup [<option>...]"
+---
+
 # Reference: `delegate render`, `validate`, `bootstrap` and `brief`
 
 These four subcommands of `delegate` take the arguments of the standalone commands `agent-definitions` (`render`, `validate`, `bootstrap`) and `verifier-brief` (`brief`). The exit code, the output and the files written are the same for the two spellings: `delegate render ...` is `agent-definitions render ...`, and `delegate brief ...` is `verifier-brief ...`. The tables of options on this page are generated from the argument parsers by `delegate docs`. See [`delegate docs`](docs.md).
