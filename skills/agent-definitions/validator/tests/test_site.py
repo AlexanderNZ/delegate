@@ -118,8 +118,9 @@ def test_the_redirects_are_the_site_root_and_each_renamed_page_and_every_target_
 @outside_the_package
 def test_no_file_links_to_the_old_address_of_a_renamed_page():
     # The redirect key in zensical.toml and the table RENAMED of this file are the only places that name an old address.
-    # The build directory and the caches are not sources.
-    skipped = {".git", ".cache", ".venv", "node_modules", "site", "__pycache__", ".pytest_cache"}
+    # The build directory and the caches are not sources. design/ is the design handoff as it was given, a snapshot
+    # of the docs on the day of the handoff, so its copy of the content keeps the old address.
+    skipped = {".git", ".cache", ".venv", "node_modules", "site", "__pycache__", ".pytest_cache", "design"}
     holding = []
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or skipped & set(path.relative_to(ROOT).parts) or path in (CONFIG, Path(__file__).resolve()):
