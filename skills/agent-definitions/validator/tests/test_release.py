@@ -228,3 +228,77 @@ def test_the_notes_start_after_the_highest_tag_below_the_version_even_when_the_t
 
     assert (done.returncode, done.stderr) == (0, "")
     assert done.stdout == f"### Features\n\n- feat: before the candidate tag ({before})\n\n### Fixes\n\n- fix: after the candidate tag ({after})\n"
+
+
+FILLED = "\n### Added\n\n- A thing.\n"
+
+
+def test_apply_sets_the_version_and_moves_the_unreleased_body_into_a_dated_entry_under_an_empty_unreleased_heading(tmp_path):
+    repo = make_repo(tmp_path, unreleased=FILLED)
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert "0.2.0" in done.stdout
+    assert (repo / "pyproject.toml").read_text() == PYPROJECT.format(version="0.2.0")
+    assert (repo / "CHANGELOG.md").read_text() == """\
+# Changelog
+
+## [Unreleased]
+
+## [0.2.0] - 2026-03-04
+
+### Added
+
+- A thing.
+
+## [0.1.0] - 2026-01-01
+
+The first release.
+"""
+
+
+def test_apply_writes_the_notes_into_the_entry_when_the_unreleased_body_is_empty_and_the_unreleased_heading_stays(tmp_path):
+    repo = make_repo(tmp_path, unreleased="\n \n")
+    git(repo, "tag", "v0.1.0")
+    feat = commit(repo, "feat: add the export")
+    fix = commit(repo, "fix: stop the crash")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert (repo / "CHANGELOG.md").read_text() == f"""\
+# Changelog
+
+## [Unreleased]
+
+## [0.2.0] - 2026-03-04
+
+### Features
+
+- feat: add the export ({feat})
+
+### Fixes
+
+- fix: stop the crash ({fix})
+
+## [0.1.0] - 2026-01-01
+
+The first release.
+"""
+    assert (repo / "pyproject.toml").read_text() == PYPROJECT.format(version="0.2.0")
+
+
+def test_a_second_apply_of_the_same_version_changes_nothing_and_says_so_even_after_the_release_commit_and_tag(tmp_path):
+    repo = make_repo(tmp_path, unreleased=FILLED)
+    assert release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04").returncode == 0
+    git(repo, "commit", "-q", "-am", "release: v0.2.0")
+    git(repo, "tag", "v0.2.0")
+    before = {name: (repo / name).read_bytes() for name in ("pyproject.toml", "CHANGELOG.md")}
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-04-05")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert "nothing to change" in done.stdout
+    assert {name: (repo / name).read_bytes() for name in before} == before
+    assert git(repo, "status", "--porcelain") == ""

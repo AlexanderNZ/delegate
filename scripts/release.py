@@ -15,6 +15,7 @@ The script uses the standard library only.
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import subprocess
 import sys
@@ -127,12 +128,67 @@ def release_notes(repo: Path, version: Version) -> str:
     return "\n\n".join(f"### {title}\n\n" + "\n".join(lines) for title, lines in groups.items() if lines) + "\n"
 
 
+def with_version(pyproject_text: str, version: Version, pyproject: Path) -> str:
+    """The text of `pyproject.toml` with the version of the `[project]` table replaced."""
+    table = re.search(r"^\[project\][ \t]*\n(.*?)(?=^\[|\Z)", pyproject_text, flags=re.MULTILINE | re.DOTALL)
+    if not table:
+        raise ReleaseError(f"{pyproject} has no [project] table")
+    body, count = re.subn(r'^(version\s*=\s*)"[^"]*"', rf'\g<1>"{show(version)}"', table[1], count=1, flags=re.MULTILINE)
+    if count == 0:
+        raise ReleaseError(f'{pyproject} has no line `version = "..."` in its [project] table')
+    return pyproject_text[: table.start(1)] + body + pyproject_text[table.end(1) :]
+
+
+def with_entry(changelog_text: str, repo: Path, version: Version, date: str, changelog: Path) -> str:
+    """The text of the CHANGELOG with a dated entry directly under `## [Unreleased]`.
+
+    The entry takes the body of the Unreleased section, and the section is left
+    empty. When the body is empty, the entry takes the release notes instead.
+    """
+    unreleased = re.search(r"^## \[Unreleased\][ \t]*(?:\n|\Z)(.*?)(?=^## |\Z)", changelog_text, flags=re.MULTILINE | re.DOTALL)
+    if not unreleased:
+        raise ReleaseError(f"{changelog} has no `## [Unreleased]` heading")
+    body = unreleased[1].strip() or release_notes(repo, version).strip()
+    entry = f"## [Unreleased]\n\n## [{show(version)}] - {date}\n\n{body}\n"
+    rest = changelog_text[unreleased.end() :]
+    return changelog_text[: unreleased.start()] + entry + ("\n" + rest if rest else "")
+
+
+def apply(repo: Path, pyproject: Path, version: Version, date: str) -> list[Path]:
+    """Set the version in `pyproject.toml` and add the CHANGELOG entry. Return the files that changed.
+
+    Each part is skipped when it is already done, so a second call changes
+    nothing. Both files are read and checked before either is written.
+    """
+    changelog = repo / "CHANGELOG.md"
+    pyproject_text, changelog_text = read_text(pyproject), read_text(changelog)
+    changes: dict[Path, str] = {}
+    if project_version(pyproject) != version:
+        changes[pyproject] = with_version(pyproject_text, version, pyproject)
+    if not re.search(rf"^## \[{re.escape(show(version))}\] - ", changelog_text, flags=re.MULTILINE):
+        changes[changelog] = with_entry(changelog_text, repo, version, date, changelog)
+    for path, text in changes.items():
+        path.write_text(text)
+    return list(changes)
+
+
 def version_argument(text: str) -> Version:
     """The `type` of a `--version` argument: a bad value is a usage error that names it."""
     try:
         return parse_version(text, "--version")
     except ReleaseError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def date_argument(text: str) -> str:
+    """The `type` of a `--date` argument: a real calendar date written `YYYY-MM-DD`."""
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            raise ValueError
+        datetime.date.fromisoformat(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"--date is {text!r}, but a date must be a real date written YYYY-MM-DD") from error
+    return text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -147,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
     bump.add_argument("--bump", required=True, choices=["patch", "minor", "major"])
     notes = commands.add_parser("notes", help="print the release notes from the commits")
     notes.add_argument("--version", required=True, type=version_argument)
+    edit = commands.add_parser("apply", help="set the version in pyproject.toml and add the CHANGELOG entry")
+    edit.add_argument("--version", required=True, type=version_argument)
+    edit.add_argument("--date", required=True, type=date_argument)
     return parser
 
 
@@ -159,6 +218,12 @@ def main(argv: list[str] | None = None) -> int:
             print(show(next_version(repo, pyproject, args.bump)))
         elif args.command == "notes":
             print(release_notes(repo, args.version), end="")
+        elif args.command == "apply":
+            changed = apply(repo, pyproject, args.version, args.date)
+            if changed:
+                print(f"applied {show(args.version)} to " + " and ".join(path.name for path in changed))
+            else:
+                print(f"nothing to change: {show(args.version)} is already in {pyproject.name} and CHANGELOG.md")
         return 0
     except ReleaseError as error:
         print(f"release.py: error: {error}", file=sys.stderr)
