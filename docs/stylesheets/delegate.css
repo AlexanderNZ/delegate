@@ -652,6 +652,18 @@ body:has(.dlg-nonum) .dlg-nav > .md-nav__list > .md-nav__item > .md-nav--seconda
   border-bottom: 0;
 }
 
+/* A glossary term links its entry, but reads as prose: a dotted underline, not the link colour. */
+.md-typeset a.dlg-term {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--dlg-muted);
+  text-underline-offset: 3px;
+}
+
+.md-typeset a.dlg-term:hover {
+  color: var(--dlg-link);
+}
+
 .md-typeset mark {
   padding: 0 2px;
   background: var(--dlg-mark);

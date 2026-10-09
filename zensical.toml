@@ -12,7 +12,7 @@ docs_dir = "docs"
 site_dir = "site"
 # The theme: design/README.md is the spec, design/delegate-docs-theme-2c.dc.html the prototype.
 extra_css = ["stylesheets/delegate.css"]
-extra_javascript = ["javascripts/delegate.js"]
+extra_javascript = ["javascripts/glossary.js", "javascripts/delegate.js"]
 
 # The sections follow the Diataxis split. "Start here" (the overview) comes
 # first, and "Glossary" comes last.

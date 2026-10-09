@@ -5,6 +5,7 @@ definition as a tooltip. The glossary is the one source. The cases run on a copy
 of the pages, so the repository stays as it is.
 """
 
+import json
 import shutil
 
 import pytest
@@ -55,7 +56,7 @@ def docs(capsys, *argv):
 
 
 @outside_the_package
-def test_each_term_of_the_glossary_becomes_one_abbreviation_with_its_first_sentence_as_plain_text(pages, capsys):
+def test_each_term_of_the_glossary_becomes_its_abbreviations_with_its_first_sentence_as_plain_text(pages, capsys):
     (pages / "docs" / "glossary.md").write_text(GLOSSARY)
 
     code, out, err = docs(capsys, "--root", str(pages))
@@ -65,9 +66,100 @@ def test_each_term_of_the_glossary_becomes_one_abbreviation_with_its_first_sente
     assert (pages / FILE).read_text() == (
         f"{HEADER}\n\n"
         "*[ACCEPT]: ACCEPT is the verdict that a verifier gives when the work does what the ticket asks.\n"
+        "*[ACCEPTs]: ACCEPT is the verdict that a verifier gives when the work does what the ticket asks.\n"
         "*[assure]: assure is the mode that verifies each ticket branch at once, before the next ticket builds on it.\n"
         "*[Agent pair]: An agent pair is a specialist and its verifier.\n"
+        "*[Agent pairs]: An agent pair is a specialist and its verifier.\n"
+        "*[agent pair]: An agent pair is a specialist and its verifier.\n"
+        "*[agent pairs]: An agent pair is a specialist and its verifier.\n"
     )
+
+
+# An abbreviation matches its exact text, so the file holds each form that the prose uses.
+FORMS_GLOSSARY = """# Glossary
+
+## Worktree
+
+A worktree is a second working directory of one git repository.
+
+## Fix-up
+
+A fix-up is a new commit that answers the findings of a REJECT.
+
+## Run
+
+A run is one pass of the engine through a workflow.
+
+## Twin
+
+See [Verifier](#verifier).
+
+## Verifier
+
+A verifier is an agent that checks the work of a specialist.
+"""
+
+
+@outside_the_package
+def test_a_term_gets_its_lowercase_and_plural_forms_so_that_each_use_in_the_prose_shows_the_tooltip(pages, capsys):
+    (pages / "docs" / "glossary.md").write_text(FORMS_GLOSSARY)
+
+    docs(capsys, "--root", str(pages))
+    terms = [line.split("]:")[0].removeprefix("*[") for line in (pages / FILE).read_text().splitlines() if line.startswith("*[")]
+
+    assert {"Worktree", "Worktrees", "worktree", "worktrees", "Fix-up", "Fix-ups", "fix-up", "fix-ups"} <= set(terms)
+
+
+@outside_the_package
+def test_a_term_that_is_also_an_everyday_verb_keeps_only_its_glossary_form(pages, capsys):
+    """"I run the tests" is not the term run. The bold link at its first use still links it."""
+    (pages / "docs" / "glossary.md").write_text(FORMS_GLOSSARY)
+
+    docs(capsys, "--root", str(pages))
+    terms = [line.split("]:")[0].removeprefix("*[") for line in (pages / FILE).read_text().splitlines() if line.startswith("*[")]
+
+    assert [term for term in terms if term.casefold().startswith("run")] == ["Run"]
+
+
+@outside_the_package
+def test_a_pointer_entry_keeps_only_its_glossary_form(pages, capsys):
+    """A pointer names a synonym that the docs avoid, so its other forms would only mark the prose of other tools."""
+    (pages / "docs" / "glossary.md").write_text(FORMS_GLOSSARY)
+
+    docs(capsys, "--root", str(pages))
+    terms = [line.split("]:")[0].removeprefix("*[") for line in (pages / FILE).read_text().splitlines() if line.startswith("*[")]
+
+    assert [term for term in terms if term.casefold().startswith("twin")] == ["Twin"]
+
+
+SCRIPT = "docs/javascripts/glossary.js"
+
+
+@outside_the_package
+def test_the_command_writes_a_map_from_each_form_of_a_term_to_the_anchor_of_its_entry(pages, capsys):
+    (pages / "docs" / "glossary.md").write_text(FORMS_GLOSSARY)
+
+    code, out, err = docs(capsys, "--root", str(pages))
+    text = (pages / SCRIPT).read_text()
+    mapping = json.loads(text[text.index("{"): text.rindex("}") + 1])
+
+    assert (code, err) == (0, "")
+    assert f"updated {SCRIPT}" in out
+    assert mapping["worktrees"] == "worktree"
+    assert mapping["Fix-ups"] == "fix-up"
+    assert mapping["Twin"] == "twin"
+    assert "window.DLG_GLOSSARY" in text
+
+
+@outside_the_package
+def test_the_check_fails_and_names_the_map_when_the_map_is_stale(pages, capsys):
+    (pages / "docs" / "glossary.md").write_text(FORMS_GLOSSARY)
+    docs(capsys, "--root", str(pages))
+    (pages / SCRIPT).write_text("window.DLG_GLOSSARY = {};\n")
+
+    code, out, err = docs(capsys, "--root", str(pages), "--check")
+
+    assert code == 1 and SCRIPT in err
 
 
 @outside_the_package

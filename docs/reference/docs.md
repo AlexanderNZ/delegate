@@ -40,20 +40,22 @@ A generated section sits between two markers in the page:
 
 Do not edit the text between the markers. To change a flag description, change the `help` text of the parser. To change a page, change the prose outside the markers.
 
-## The abbreviations file
+## The abbreviations file and the glossary map
 
-`delegate docs` also writes `includes/abbreviations.md` from `docs/glossary.md`. The docs site adds that file to every page, so each term of the glossary shows its definition as a tooltip.
+`delegate docs` also writes two files from `docs/glossary.md`. The docs site adds `includes/abbreviations.md` to every page, so each term of the glossary shows its definition as a tooltip. And `docs/javascripts/glossary.js` maps each form of each term to the anchor of its entry, so the site links each term to the glossary.
 
 - Each `##` heading of the glossary is a term. The first sentence of the first paragraph under it is the definition, as plain text. A link keeps its label, and an inline-code mark is removed.
-- The file holds one line `*[term]: definition` for each term, in the order of the glossary. With no glossary, the file holds only its header.
+- An abbreviation matches its exact text, so each term has more than one form: the glossary form and its plural, and the lowercase of both when the term starts with a capital and then a lowercase letter. A term in code, such as `assure`, has no plural.
+- A pointer entry, and a term that is also an everyday word (blind, brief, built, finding, report, resume, run, skill, skip, step), keeps only its glossary form. "I run the tests" is not the term run.
+- `includes/abbreviations.md` holds one line `*[form]: definition` for each form, in the order of the glossary. With no glossary, the file holds only its header.
 - An entry with no text is an error. A term that appears twice is an error. The command names the term on stderr, exits 2, and writes nothing.
-- With `--check`, a missing file or a file that differs from the glossary makes the command exit 1. It names `includes/abbreviations.md` on stderr.
+- With `--check`, a missing file or a file that differs from the glossary makes the command exit 1. It names the file on stderr.
 
-The file is outside `docs/`, so the site does not show it as a page.
+The abbreviations file is outside `docs/`, so the site does not show it as a page. On the site, a short script wraps each term in a link to its entry, except a term in a heading, a term in a link, and a term on the glossary page.
 
 ## The test
 
-The test suite holds one drift test for each generated section, and one for the abbreviations file. The test fails when the section in the committed page differs from the text that the code builds, and its message tells the reader to run `delegate docs`. A change to a flag with no regeneration therefore fails the suite.
+The test suite holds one drift test for each generated section, and one for the abbreviations file and the glossary map. The test fails when the section in the committed page differs from the text that the code builds, and its message tells the reader to run `delegate docs`. A change to a flag with no regeneration therefore fails the suite.
 
 ## The generated sections
 

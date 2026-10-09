@@ -7,6 +7,23 @@
     if (match) block.setAttribute("data-dlg-lang", match[1]);
   });
 
+  // Each glossary term links its entry. `delegate docs` writes DLG_GLOSSARY, a map from each
+  // form of a term to its anchor, from docs/glossary.md. A term in a link or a heading stays as it is.
+  var glossary = window.DLG_GLOSSARY || {};
+  var config = document.getElementById("__config");
+  var base = config ? JSON.parse(config.textContent).base : ".";
+  if (!/\/glossary\/?$/.test(location.pathname)) {
+    document.querySelectorAll(".md-typeset abbr").forEach(function (abbr) {
+      var anchor = glossary[abbr.textContent];
+      if (!anchor || abbr.closest("a, h1, h2, h3, h4, h5, h6")) return;
+      var link = document.createElement("a");
+      link.className = "dlg-term";
+      link.href = base + "/glossary/#" + anchor;
+      abbr.parentNode.insertBefore(link, abbr);
+      link.appendChild(abbr);
+    });
+  }
+
   // A diagram sits in a figure box that may scroll sideways on a narrow screen.
   document.querySelectorAll(".md-typeset .mermaid").forEach(function (diagram) {
     var figure = document.createElement("div");

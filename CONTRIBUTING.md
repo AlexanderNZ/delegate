@@ -55,7 +55,7 @@ The first command builds the site into `site/`, and it fails on a dead link or a
 - To change the version, change `.zensical-version`. The version is in no other file.
 - A link from a page in `docs/` to a file outside `docs/` must be a full URL, because the build cannot follow it.
 - A new page in `docs/` needs a line in the `nav` of `zensical.toml`. A test fails when a page is missing there.
-- The tooltips come from `docs/glossary.md`. `delegate docs` writes them to `includes/abbreviations.md`, and a test fails when that file is stale.
+- The tooltips and the glossary links come from `docs/glossary.md`. `delegate docs` writes them to `includes/abbreviations.md` and `docs/javascripts/glossary.js`, and a test fails when either file is stale.
 - To name the file that a code block holds, write the name as a title after the language: `toml title="workflow.toml"`. A bare word after the language does not render on the site, and a test fails on it.
 - A diagram is a Mermaid block (```` ```mermaid ````) or an SVG with a text alternative. For an SVG, follow the `tufte-data-viz` rules, and give a light and a dark version. Never draw a diagram with box-drawing characters or arrows in a code block: it renders as code, scrolls sideways, and the theme cannot style it. A test fails on it.
 - The theme is in `overrides/` (templates), `docs/stylesheets/delegate.css` and `docs/javascripts/delegate.js`. Its spec and prototype are in `design/`. Change the theme there, not in the pages.

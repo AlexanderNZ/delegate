@@ -12,6 +12,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - An explanation page, "Why the model should not matter": the lineage of the kit, the thesis as a table, five lessons, and a recommendation (not a rule) for which model verifies.
 - The prior art page has a "Built on" part (the ladder of Bassim Eledath and the planning skills of Matt Pocock, with what each gave) before an "Alongside" part. The page "Why each specialist has a verifier twin" is now "Why each specialist has its own verifier", and its old address redirects.
 - A "Future ideas" page: ideas to investigate, not promises, each with the idea, why it matters, and the open questions.
+- Every use of a glossary term on the site shows its definition on hover and links its glossary entry. `delegate docs` writes the lowercase and plural forms of each term, and `docs/javascripts/glossary.js`, a map from each form to its entry. On every page, the first use of each term is in bold and links the glossary, and a test holds this.
+- A reference page, "The layout of the repository": the place of each part, the groups of modules in the package, and the dependency rule.
 
 ### Changed
 

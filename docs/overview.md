@@ -2,7 +2,7 @@
 
 Models are different. That sounds like a silly thing to say. It stops being silly when I notice that they differ the way people differ.
 
-`delegate` is the machine I built so that the model I pick changes one thing only: how good the code is. This page is the kit at a glance: the problem, the idea, where the kit sits on the [**ladder**](glossary.md#ladder) that it climbs, the team, and how one [**ticket**](glossary.md#ticket) moves from the [**brief**](glossary.md#brief) to the merge. It is not a tutorial and it is not a reference. It links both at the end. Each term is in bold where it first appears, and it links its entry in the [glossary](glossary.md).
+`delegate` is the machine I built so that the model I pick changes one thing only: how good the code is. This page is the kit at a glance: the problem, the idea, where the kit sits on the [**ladder**](glossary.md#ladder) that it climbs, the team, and how one [**ticket**](glossary.md#ticket) moves from the [**brief**](glossary.md#brief) to the merge. It is not a tutorial and it is not a reference. It links both at the end. Each term is in bold where it first appears, and it links its entry in the [glossary](glossary.md). After that, a dotted underline marks the term: hover for its definition, or follow it to its entry.
 
 ## The problem
 
