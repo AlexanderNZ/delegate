@@ -21,6 +21,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 - The package, its tests and `pyproject.toml` are now in the repository root, with the code in `src/`. The install command is `uv tool install git+https://github.com/AlexanderNZ/delegate`, with no `#subdirectory=` part. The three commands behave as before.
 - The ADRs are now in `docs/adr/`, and not inside the `agent-definitions` skill. A test fails on a link to an ADR that does not exist.
+- From 1.0 the project follows semantic versioning. The public interface is the workflow file, the commands with their flags and exit codes, and the format of an agent declaration.
 - The README covers the repository side: a short description, a link to the docs site, the status of the project, the install, the layout, development, and contributing. The docs site holds the rest.
 
 ## [0.1.0] - 2026-10-09

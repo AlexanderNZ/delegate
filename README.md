@@ -13,7 +13,7 @@ The docs are at **[alexandernz.github.io/delegate](https://alexandernz.github.io
 
 ## Status
 
-The current release is 0.1.0. The project is young, and it has one maintainer. The workflow file, the flags and the agent declarations can change before 1.0, and [the changelog](CHANGELOG.md) records each change. The engine drives Claude Code and OpenCode today. [Future ideas](docs/future-ideas.md) lists what is under consideration, with no promise of any of it.
+The project follows [semantic versioning](https://semver.org) from 1.0. Its public interface is the workflow file, the commands with their flags and exit codes, and the format of an agent declaration. A change that breaks one of them needs a new major version. [The changelog](CHANGELOG.md) records each change, and [the releases](https://github.com/AlexanderNZ/delegate/releases) hold each version. The project is young, and it has one maintainer. The engine drives Claude Code and OpenCode today. [Future ideas](docs/future-ideas.md) lists what is under consideration, with no promise of any of it.
 
 ## Install
 

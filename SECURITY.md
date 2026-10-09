@@ -4,7 +4,7 @@
 
 ## Supported versions
 
-Only the newest release gets security fixes. The project is before 1.0, so a fix comes in a new release, not in a patch to an old one.
+Only the newest release gets security fixes. A fix comes in a new release, not in a patch to an old one.
 
 ## Report a vulnerability
 
