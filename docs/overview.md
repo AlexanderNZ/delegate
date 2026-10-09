@@ -98,24 +98,47 @@ Follow one ticket through the loop: "The export command writes a header row."
 
 The same ticket, on one page:
 
-```text
-BRIEF    you: ticket in a workflow ──► engine: run branch, worktree, push guard, brief
-            │
-BUILD    specialist: code + test, commit, report ("gates green")
-            │
-         engine: hotspot check, then runs the gates itself
-            │ green                            red ──► continuation, same worktree
-            │
-VERIFY   engine: rebase, gates again, temporary copy
-            │
-         blind verifier: ticket + diff, never the report
-            │
-            ├── REJECT ──► fix-up: new commit, gates, fresh verifier on the delta
-            │                 │
-            │◄──── ACCEPT ────┘          (at the limit: the ticket fails)
-            │
-MERGE    engine: run branch moves forward
-         you:    git merge --ff-only run/demo
+```mermaid
+---
+config:
+  sequence:
+    mirrorActors: false
+    actorFontSize: 15
+    messageFontSize: 15
+    noteFontSize: 15
+---
+sequenceDiagram
+  participant You
+  participant Engine
+  participant Specialist
+  participant Verifier as Blind verifier
+  Note over You,Verifier: Brief
+  You->>Engine: a ticket in a workflow
+  Engine->>Engine: run branch, worktree, push guard
+  Engine->>Specialist: the brief
+  Note over You,Verifier: Build
+  Specialist->>Engine: code and test, a commit, a report
+  Engine->>Engine: hotspot check, then it runs the gates itself
+  opt the gates are red
+    Engine->>Specialist: a continuation in the same worktree
+  end
+  Note over You,Verifier: Verify
+  Engine->>Engine: rebase, gates again, temporary copy
+  Engine->>Verifier: the ticket and the diff, never the report
+  Verifier->>Engine: verdict
+  loop REJECT, up to the limit
+    Engine->>Specialist: fix-up: the findings
+    Specialist->>Engine: a new commit, gates again
+    Engine->>Verifier: a fresh verifier: the findings and the delta
+    Verifier->>Engine: verdict
+  end
+  Note over You,Verifier: Merge
+  alt ACCEPT
+    Engine->>Engine: the run branch moves forward
+    You->>You: git merge --ff-only run/demo
+  else REJECT at the limit
+    Engine-->>You: the ticket fails, and the run branch stays
+  end
 ```
 
 Look at where the evidence comes from. The gate result comes from the engine, not from the agent that wrote the code. The verdict comes from an agent that never saw the report. The merge comes from you. No arrow that carries evidence starts at the specialist.

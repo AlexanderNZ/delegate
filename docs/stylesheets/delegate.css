@@ -72,6 +72,33 @@
   --md-code-hl-comment-color: var(--dlg-muted);
   --md-code-hl-generic-color: var(--dlg-ink);
   --md-code-hl-variable-color: var(--dlg-ink);
+  /* Mermaid diagrams take the same tokens. */
+  --md-mermaid-font-family: var(--dlg-sans);
+  --md-mermaid-node-bg-color: var(--dlg-side);
+  --md-mermaid-node-fg-color: var(--dlg-muted);
+  --md-mermaid-edge-color: var(--dlg-muted);
+  --md-mermaid-label-bg-color: var(--dlg-bg);
+  --md-mermaid-label-fg-color: var(--dlg-ink);
+  --md-mermaid-sequence-actor-bg-color: var(--dlg-side);
+  --md-mermaid-sequence-actor-fg-color: var(--dlg-ink);
+  --md-mermaid-sequence-actor-border-color: var(--dlg-muted);
+  --md-mermaid-sequence-actor-line-color: var(--dlg-rule);
+  --md-mermaid-sequence-actorman-bg-color: var(--dlg-side);
+  --md-mermaid-sequence-actorman-line-color: var(--dlg-muted);
+  --md-mermaid-sequence-box-bg-color: var(--dlg-side);
+  --md-mermaid-sequence-box-fg-color: var(--dlg-ink);
+  --md-mermaid-sequence-label-bg-color: var(--dlg-bg);
+  --md-mermaid-sequence-label-fg-color: var(--dlg-head);
+  --md-mermaid-sequence-loop-bg-color: transparent;
+  --md-mermaid-sequence-loop-border-color: var(--dlg-muted);
+  --md-mermaid-sequence-loop-fg-color: var(--dlg-head);
+  --md-mermaid-sequence-message-fg-color: var(--dlg-ink);
+  --md-mermaid-sequence-message-line-color: var(--dlg-muted);
+  --md-mermaid-sequence-note-bg-color: var(--dlg-code-bg);
+  --md-mermaid-sequence-note-border-color: var(--dlg-rule);
+  --md-mermaid-sequence-note-fg-color: var(--dlg-head);
+  --md-mermaid-sequence-number-bg-color: var(--dlg-muted);
+  --md-mermaid-sequence-number-fg-color: var(--dlg-bg);
 }
 
 body {
@@ -1081,5 +1108,31 @@ body:has(.dlg-nonum) .dlg-nav > .md-nav__list > .md-nav__item > .md-nav--seconda
   .dlg-nav .md-nav__link {
     padding: 2px 0;
     border: 0;
+  }
+}
+
+/* ---------- Diagrams ---------- */
+
+.md-typeset .dlg-figure {
+  margin: 0 0 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.md-typeset .mermaid {
+  margin: 0;
+}
+
+/* A diagram may run past the text column into the empty space on its right, so its
+   text shows at full size. On a narrow screen, it keeps a readable width and scrolls. */
+@media screen and (min-width: 76.25em) {
+  .md-typeset .dlg-figure {
+    width: min(1000px, calc(100vw - 290px - 112px));
+  }
+}
+
+@media screen and (max-width: 76.2375em) {
+  .md-typeset .dlg-figure .mermaid {
+    min-width: 760px;
   }
 }

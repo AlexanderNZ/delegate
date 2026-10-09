@@ -90,7 +90,10 @@ toc.permalink = "¶"
 pymdownx.highlight.anchor_linenums = true
 # The theme reads the language from this class for the label of a code block.
 pymdownx.highlight.pygments_lang_class = true
-pymdownx.superfences = {}
+# A diagram is a Mermaid block or an SVG, never a drawing in a code block (see CONTRIBUTING).
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 # The glossary tooltips: `delegate docs` writes this file, outside docs/, from docs/glossary.md.
 pymdownx.snippets.auto_append = ["includes/abbreviations.md"]
 

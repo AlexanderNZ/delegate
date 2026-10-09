@@ -1,10 +1,18 @@
-// The delegate theme: the three things that CSS and templates cannot do.
+// The delegate theme: the things that CSS and templates cannot do.
 // design/README.md is the spec.
 (function () {
   // A code block shows its language in the top-right corner.
   document.querySelectorAll(".md-typeset .highlight").forEach(function (block) {
     var match = /\blanguage-([\w-]+)/.exec(block.className);
     if (match) block.setAttribute("data-dlg-lang", match[1]);
+  });
+
+  // A diagram sits in a figure box that may scroll sideways on a narrow screen.
+  document.querySelectorAll(".md-typeset .mermaid").forEach(function (diagram) {
+    var figure = document.createElement("div");
+    figure.className = "dlg-figure";
+    diagram.parentNode.insertBefore(figure, diagram);
+    figure.appendChild(diagram);
   });
 
   // On a reference page, each table gets the text of the nearest heading before it as a label.

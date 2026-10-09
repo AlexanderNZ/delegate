@@ -247,3 +247,55 @@ def test_no_fence_in_docs_puts_a_bare_word_after_the_language():
 def test_the_site_directory_is_ignored_by_git():
     ignored = subprocess.run(["git", "check-ignore", "-q", "site/index.html"], cwd=ROOT)
     assert ignored.returncode == 0
+
+
+# Box-drawing characters and drawn arrows. A code block that holds them is a diagram drawn as text.
+DRAWING = re.compile(r"[─-╿←-⇿▲-◄⟵-⟿]")
+
+
+def drawn_diagrams(page: Path, root: Path = ROOT) -> list[str]:
+    """The code blocks of a page that hold a drawing, as `file:line`.
+
+    A diagram in the docs is a Mermaid diagram or an SVG with a text alternative. A drawing in a code block renders
+    as code on the site: it scrolls sideways, and the theme cannot style it.
+    """
+    found: list[str] = []
+    closing, start, drawn = "", 0, False
+    for number, line in enumerate(page.read_text().splitlines(), start=1):
+        if closing:
+            text = line.strip()
+            if text and set(text) == {closing[0]} and len(text) >= len(closing):
+                if drawn:
+                    found.append(f"{page.relative_to(root)}:{start}")
+                closing, drawn = "", False
+            elif DRAWING.search(line):
+                drawn = True
+            continue
+        opened = OPENING_FENCE.match(line)
+        if opened:
+            closing, start = opened.group(1), number
+    return found
+
+
+@outside_the_package
+def test_no_code_block_in_the_docs_holds_a_drawn_diagram():
+    assert [hit for page in sorted(DOCS.rglob("*.md")) for hit in drawn_diagrams(page)] == []
+
+
+def test_the_drawing_check_flags_box_drawing_and_arrows_in_a_block_and_accepts_mermaid_and_prose(tmp_path):
+    page = tmp_path / "page.md"
+    page.write_text(
+        "Prose may use an arrow → in a sentence.\n\n"
+        "```text\nBRIEF  you ──▶ engine\n         │\n```\n\n"
+        "```mermaid\nflowchart TD\n  A --> B\n```\n\n"
+        "```bash\nls -> out\n```\n"
+    )
+
+    assert drawn_diagrams(page, root=tmp_path) == ["page.md:3"]
+
+
+@outside_the_package
+def test_a_mermaid_block_renders_as_a_diagram():
+    fences = config()["markdown_extensions"]["pymdownx"]["superfences"]["custom_fences"]
+
+    assert {"name": "mermaid", "class": "mermaid", "format": "pymdownx.superfences.fence_code_format"} in fences
