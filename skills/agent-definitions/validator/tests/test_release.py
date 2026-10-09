@@ -42,6 +42,12 @@ def make_repo(tmp_path: Path, version: str = "0.1.0", unreleased: str = "") -> P
     return repo
 
 
+def commit(repo: Path, subject: str) -> str:
+    """Add an empty commit with the subject. Return its short sha."""
+    git(repo, "commit", "-q", "--allow-empty", "-m", subject)
+    return git(repo, "rev-parse", "--short", "HEAD").strip()
+
+
 def release(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the script as a command on the repository."""
     return subprocess.run(
@@ -96,3 +102,129 @@ def test_a_bump_that_is_not_patch_minor_or_major_fails_with_a_usage_error(tmp_pa
 
     assert done.returncode == 2
     assert "huge" in done.stderr and done.stdout == ""
+
+
+def test_the_notes_group_the_commits_since_the_tag_by_prefix_oldest_first_and_leave_out_merges(tmp_path):
+    repo = make_repo(tmp_path)
+    commit(repo, "feat: before the tag")
+    git(repo, "tag", "v1.0.0")
+    docs = commit(repo, "docs: explain the tag")
+    first = commit(repo, "feat(cli): add the flag")
+    fix = commit(repo, "fix: stop the crash")
+    other = commit(repo, "chore: tidy")
+    second = commit(repo, "feat: second feature")
+    git(repo, "checkout", "-q", "-b", "side")
+    test = commit(repo, "test: cover the flag")
+    ci = commit(repo, "ci: run on main")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "Merge branch 'side'", "side")
+
+    done = release(repo, "notes", "--version", "1.1.0")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == f"""\
+### Features
+
+- feat(cli): add the flag ({first})
+- feat: second feature ({second})
+
+### Fixes
+
+- fix: stop the crash ({fix})
+
+### Documentation
+
+- docs: explain the tag ({docs})
+
+### Tests
+
+- test: cover the flag ({test})
+
+### CI
+
+- ci: run on main ({ci})
+
+### Other changes
+
+- chore: tidy ({other})
+"""
+
+
+def test_the_notes_of_a_first_release_hold_every_commit_and_leave_out_a_group_with_no_commit(tmp_path):
+    repo = make_repo(tmp_path)
+    fix = commit(repo, "fix: stop the crash")
+    near = commit(repo, "feature flags are on")
+    seed = git(repo, "rev-list", "--max-parents=0", "HEAD").strip()[:7]
+    git(repo, "tag", "v1.0")
+
+    done = release(repo, "notes", "--version", "0.1.0")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == f"""\
+### Fixes
+
+- fix: stop the crash ({fix})
+
+### Other changes
+
+- chore: seed ({seed})
+- feature flags are on ({near})
+"""
+
+
+def test_the_notes_fail_when_no_commit_follows_the_previous_tag_and_name_the_tag(tmp_path):
+    repo = make_repo(tmp_path)
+    git(repo, "tag", "v1.0.0")
+
+    done = release(repo, "notes", "--version", "1.0.1")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert "v1.0.0" in done.stderr
+
+
+def test_the_notes_fail_when_the_path_is_not_a_git_repository(tmp_path):
+    done = release(tmp_path, "notes", "--version", "1.0.0")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert str(tmp_path) in done.stderr
+
+
+@pytest.mark.parametrize("version", ["1.0", "v1.0.0", "1.0.0-rc1", "one"])
+def test_a_version_that_is_not_digits_in_three_parts_fails_and_the_message_names_it(tmp_path, version):
+    done = release(make_repo(tmp_path), "notes", "--version", version)
+
+    assert done.returncode == 2 and done.stdout == ""
+    assert repr(version) in done.stderr
+
+
+def test_the_first_release_fails_when_pyproject_is_missing_and_the_message_names_the_file(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").unlink()
+
+    done = release(repo, "next-version", "--bump", "patch")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert "pyproject.toml" in done.stderr
+
+
+def test_the_first_release_fails_when_the_version_of_pyproject_is_not_semver(tmp_path):
+    done = release(make_repo(tmp_path, version="1.0"), "next-version", "--bump", "patch")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert "'1.0'" in done.stderr
+
+
+def test_the_notes_start_after_the_highest_tag_below_the_version_even_when_the_tag_of_the_version_exists_or_a_tag_is_not_semver(tmp_path):
+    repo = make_repo(tmp_path)
+    git(repo, "tag", "v1.0.0")
+    commit(repo, "fix: in 1.1.0")
+    git(repo, "tag", "v1.1.0")
+    before = commit(repo, "feat: before the candidate tag")
+    git(repo, "tag", "v1.2.0-rc1")
+    after = commit(repo, "fix: after the candidate tag")
+    git(repo, "tag", "v1.2.0")
+
+    done = release(repo, "notes", "--version", "1.2.0")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == f"### Features\n\n- feat: before the candidate tag ({before})\n\n### Fixes\n\n- fix: after the candidate tag ({after})\n"

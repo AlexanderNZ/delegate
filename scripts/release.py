@@ -26,6 +26,19 @@ DEFAULT_PYPROJECT: str = "skills/agent-definitions/validator/pyproject.toml"
 # A release tag is `v<major>.<minor>.<patch>` and nothing else.
 TAG: re.Pattern[str] = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 
+# The conventional prefixes that get their own group in the notes, in the order of the groups.
+GROUPS: list[tuple[str, str]] = [
+    ("feat", "Features"),
+    ("fix", "Fixes"),
+    ("docs", "Documentation"),
+    ("test", "Tests"),
+    ("ci", "CI"),
+]
+OTHER: str = "Other changes"
+
+# The start of a conventional subject: `feat:`, `fix(scope):` or `feat!:`.
+PREFIX: re.Pattern[str] = re.compile(r"(" + "|".join(prefix for prefix, _title in GROUPS) + r")(?:\([^)]*\))?!?:")
+
 Version = tuple[int, int, int]
 
 
@@ -94,6 +107,34 @@ def next_version(repo: Path, pyproject: Path, bump: str) -> Version:
     return major, minor, patch + 1
 
 
+def release_notes(repo: Path, version: Version) -> str:
+    """The Markdown notes of the commits since the newest release tag below `version`, merges left out.
+
+    Without such a tag, the notes cover every commit. A group appears only when
+    it holds a commit. Each group lists its commits oldest first.
+    """
+    below = [tag for tag in release_tags(repo) if tag < version]
+    since = f"v{show(below[-1])}" if below else None
+    log = git(repo, "log", "--no-merges", "--topo-order", "--reverse", "--format=%h%x09%s", f"{since}..HEAD" if since else "HEAD")
+    groups: dict[str, list[str]] = {title: [] for _prefix, title in GROUPS} | {OTHER: []}
+    for line in log.splitlines():
+        sha, _tab, subject = line.partition("\t")
+        match = PREFIX.match(subject)
+        title = next((title for prefix, title in GROUPS if match and match[1] == prefix), OTHER)
+        groups[title].append(f"- {subject} ({sha})")
+    if not any(groups.values()):
+        raise ReleaseError(f"no commits since {since}, so there is nothing to release" if since else "the repository has no commits")
+    return "\n\n".join(f"### {title}\n\n" + "\n".join(lines) for title, lines in groups.items() if lines) + "\n"
+
+
+def version_argument(text: str) -> Version:
+    """The `type` of a `--version` argument: a bad value is a usage error that names it."""
+    try:
+        return parse_version(text, "--version")
+    except ReleaseError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="release.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--repo", type=Path, default=Path("."), help="the repository to read (default: the current directory)")
@@ -104,6 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     bump = commands.add_parser("next-version", help="print the next version")
     bump.add_argument("--bump", required=True, choices=["patch", "minor", "major"])
+    notes = commands.add_parser("notes", help="print the release notes from the commits")
+    notes.add_argument("--version", required=True, type=version_argument)
     return parser
 
 
@@ -114,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "next-version":
             print(show(next_version(repo, pyproject, args.bump)))
+        elif args.command == "notes":
+            print(release_notes(repo, args.version), end="")
         return 0
     except ReleaseError as error:
         print(f"release.py: error: {error}", file=sys.stderr)
