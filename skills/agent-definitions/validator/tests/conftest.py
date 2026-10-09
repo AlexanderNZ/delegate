@@ -18,9 +18,19 @@ def isolated_git_config(monkeypatch):
     its stdin. Git then dies of SIGPIPE (exit 141) after a finished rebase, and a
     test of the run fails for a cause outside the code. Setting the environment
     of the process is the boundary; the test repositories hold all they need.
+
+    The same fixture turns `core.fsmonitor` off for every git command of the
+    suite. With the setting on, git starts a `git fsmonitor--daemon` for each of
+    the hundreds of temporary repositories, and each daemon outlives its
+    directory. The entry goes in the git configuration environment, after any
+    entry that is already there, so a test can still set its own value after it.
     """
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    monkeypatch.setenv(f"GIT_CONFIG_KEY_{count}", "core.fsmonitor")
+    monkeypatch.setenv(f"GIT_CONFIG_VALUE_{count}", "false")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(count + 1))
 
 
 @pytest.fixture(scope="session")
