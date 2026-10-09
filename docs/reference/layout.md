@@ -62,7 +62,7 @@ The composition point is the command-line driver. `delegate run` reads the name 
 
 ## The version-control port
 
-Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The engine already sets up a run through the port: it makes the run branch and the worktrees, and keeps the file watcher off in them, through the port. The engine still runs git itself for the rebase, the commit ranges and the verifier copy. A later step moves those behind the port.
+Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The engine already sets up a run through the port: it makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), and keeps the file watcher off in them, through the port. The engine still runs git itself for the rebase, the commit ranges and the verifier copy. A later step moves those behind the port.
 
 The port speaks the language of the domain. It names no git command and no flag, and a test checks that. Each operation has a test in `tests/test_vcs_git.py`, which runs the git backend on a real temporary repository and calls the port only.
 
