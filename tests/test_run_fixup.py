@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 
 from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, valid_report
 

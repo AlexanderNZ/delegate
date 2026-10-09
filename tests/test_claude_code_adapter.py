@@ -13,8 +13,8 @@ import re
 from pathlib import Path
 
 import pytest
-from agent_definitions import adapters
-from agent_definitions.adapters import AdapterRequest
+from delegate import adapters
+from delegate.adapters import AdapterRequest
 
 from . import claude_fake
 

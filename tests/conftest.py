@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions.declaration import load_declaration
-from agent_definitions.render import render
-from agent_definitions.tiers import load_tiers
+from delegate.declaration import load_declaration
+from delegate.render import render
+from delegate.tiers import load_tiers
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -66,7 +66,7 @@ def git_identity(monkeypatch):
 @pytest.fixture
 def scripted(git_identity):
     """A scripted adapter registered as `scripted`. Each ticket a to d writes its own file."""
-    from agent_definitions import adapters
+    from delegate import adapters
 
     from .support import ScriptedAdapter
 

@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from agent_definitions.validate import (
+from delegate.validate import (
     Finding,
     opencode_bash_action,
     opencode_pattern_matches,
@@ -306,7 +306,7 @@ def test_frontmatter_not_on_first_line_is_reported(rendered, tiers):
 
 
 def test_declaration_rejects_unknown_key():
-    from agent_definitions.declaration import parse_declaration
+    from delegate.declaration import parse_declaration
 
     with pytest.raises(ValueError, match="unknown keys"):
         parse_declaration({"agents": {"x": {"description": "d", "model": "opus"}}})

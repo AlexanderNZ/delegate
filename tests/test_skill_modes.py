@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import delegate, engine, workflow
-from agent_definitions.neutrality import KIT_ROOT_VAR
+from delegate import delegate, engine, workflow
+from delegate.neutrality import KIT_ROOT_VAR
 
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal
 

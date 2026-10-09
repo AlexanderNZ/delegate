@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 
 from .support import (
     ScriptedAdapter, WORKFLOW, bare_repo, make_repo, read_journal, run_end, run_start, step_end, step_start, valid_report, write_journal,

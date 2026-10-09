@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from agent_definitions import brief
+from delegate import brief
 
 # The scratch repository must not read the user's git configuration. A global
 # hook, a signing key, or a different default branch name would change what

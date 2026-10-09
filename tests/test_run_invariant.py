@@ -12,7 +12,7 @@ real worktree, in the way a verifier in any harness could.
 
 import pytest
 
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
 from .test_run_multi import HEAD, ticket

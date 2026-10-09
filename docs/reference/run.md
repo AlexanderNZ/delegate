@@ -303,7 +303,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 
 ## The adapter interface
 
-An adapter is a Python object. It registers by name with `agent_definitions.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values. The adapters `claude-code` and `opencode` have implementations: see [the `claude-code` adapter](claude-code-adapter.md) and [the `opencode` adapter](opencode-adapter.md). A run with `cursor` exits 1 until an implementation registers under that name.
+An adapter is a Python object. It registers by name with `delegate.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values. The adapters `claude-code` and `opencode` have implementations: see [the `claude-code` adapter](claude-code-adapter.md) and [the `opencode` adapter](opencode-adapter.md). A run with `cursor` exits 1 until an implementation registers under that name.
 
 The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
 

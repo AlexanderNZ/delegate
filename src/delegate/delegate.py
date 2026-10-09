@@ -1,7 +1,7 @@
 """delegate: one command over the renderer, the validator, bootstrap and the brief generator.
 
 This module only dispatches. `render`, `validate` and `bootstrap` go to
-`agent_definitions.cli.main`, and `brief` goes to `agent_definitions.brief.main`.
+`delegate.cli.main`, and `brief` goes to `delegate.brief.main`.
 Each one receives the argument list it would receive from its standalone
 command (`agent-definitions` or `verifier-brief`), so the exit code, the output
 and the files written match by construction, and the two standalone parsers
@@ -28,19 +28,19 @@ AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
 BRIEF_COMMAND: str = "brief"
 BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 
-# The subcommand that `agent_definitions.run` owns.
+# The subcommand that `delegate.run` owns.
 RUN_COMMAND: str = "run"
 RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
 
-# The subcommand that `agent_definitions.status` owns.
+# The subcommand that `delegate.status` owns.
 STATUS_COMMAND: str = "status"
 STATUS_HELP: str = "print the state of each ticket of a run, from its journal"
 
-# The subcommand that `agent_definitions.watch` owns.
+# The subcommand that `delegate.watch` owns.
 WATCH_COMMAND: str = "watch"
 WATCH_HELP: str = "follow the journal of a run, print each event, and exit with a code for the reason"
 
-# The subcommand that `agent_definitions.reference` owns.
+# The subcommand that `delegate.reference` owns.
 DOCS_COMMAND: str = "docs"
 DOCS_HELP: str = "write the generated sections of the reference pages from the code, or check that they are current"
 

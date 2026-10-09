@@ -10,7 +10,7 @@ adapter.
 
 import re
 
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 
 from .support import (
     ScriptedAdapter, bare_repo, make_repo, read_journal, run_end, run_start, step_end, step_start, write_journal,

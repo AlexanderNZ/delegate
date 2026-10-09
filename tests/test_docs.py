@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import delegate, reference, validate
+from delegate import delegate, reference, validate
 
 from .pages import repository_root
 

@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from agent_definitions import adapters
+from delegate import adapters
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
 from .support import ScriptedAdapter, git

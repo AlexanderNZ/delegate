@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from agent_definitions import delegate
+from delegate import delegate
 
 from .support import (
     event_names, finished_run, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,

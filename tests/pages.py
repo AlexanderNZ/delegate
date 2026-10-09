@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import delegate
+from delegate import delegate
 
 def repository_root(test_file: Path) -> Path:
     """The directory above the tests directory. A Nix build copies only the

@@ -14,7 +14,7 @@ import tomllib
 import pytest
 import yaml
 
-from agent_definitions import delegate
+from delegate import delegate
 
 from .pages import ROOT, outside_the_package
 

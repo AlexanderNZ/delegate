@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import adapters, delegate
-from agent_definitions.reports import (
+from delegate import adapters, delegate
+from delegate.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 

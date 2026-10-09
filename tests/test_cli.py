@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-from agent_definitions.cli import main
+from delegate.cli import main
 from tests.conftest import EXAMPLE
 
 
@@ -26,5 +26,5 @@ def test_validate_with_nothing_exits_two(capsys):
 
 
 def test_module_entry_point_runs():
-    r = subprocess.run([sys.executable, "-m", "agent_definitions.cli", "--help"], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "-m", "delegate.cli", "--help"], capture_output=True, text=True)
     assert r.returncode == 0 and "render" in r.stdout

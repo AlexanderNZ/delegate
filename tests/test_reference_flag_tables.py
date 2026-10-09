@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from agent_definitions import run
+from delegate import run
 
 from .pages import ROOT, outside_the_package
 

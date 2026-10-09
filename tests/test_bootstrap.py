@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agent_definitions.cli import main
+from delegate.cli import main
 
 DOMAIN = "acme-api is a Spring Boot service: controllers, JPA repositories, and Flyway migrations."
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions.render import GIT_PUSH_HOOK, VERIFIER_BASH_HOOK
+from delegate.render import GIT_PUSH_HOOK, VERIFIER_BASH_HOOK
 
 SHELLS = ("bash", "/bin/sh")
 

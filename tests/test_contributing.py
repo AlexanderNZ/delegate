@@ -17,7 +17,7 @@ import sys
 import pytest
 import yaml
 
-from agent_definitions import delegate
+from delegate import delegate
 
 from .pages import ROOT, Block, blocks, commands, outside_the_package
 

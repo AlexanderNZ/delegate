@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agent_definitions.adapters import AdapterRequest, AdapterResult
+from delegate.adapters import AdapterRequest, AdapterResult
 
 WORKFLOW = """\
 base-branch = "main"
@@ -262,7 +262,7 @@ def event_names(events: list[dict[str, object]]) -> list[str]:
 # so it leaves what a real kill leaves: an open journal, a lock, and a worktree.
 KILL_SCRIPT = """\
 import os, signal, sys
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 from tests.support import ScriptedAdapter
 
 class Killer(ScriptedAdapter):
@@ -317,7 +317,7 @@ def read_journal_file(repo: Path, run_id: str) -> list[dict[str, object]]:
 
 def run_main(capsys, *argv: str) -> tuple[int, str, str]:
     """Call `delegate run <argv>` and return the exit code, stdout and stderr."""
-    from agent_definitions import delegate
+    from delegate import delegate
 
     code = delegate.main(["run", *argv])
     captured = capsys.readouterr()
@@ -352,7 +352,7 @@ def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]
     It uses the journal class of the engine, so each line has `seq` and `time`
     as the engine writes them. Return the path of the journal file.
     """
-    from agent_definitions.journal import Journal
+    from delegate.journal import Journal
 
     path = journal_path(repo, run_id)
     journal = Journal(path)
@@ -363,7 +363,7 @@ def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]
 
 def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
     """Append `(event name, fields)` pairs to an existing journal file, as a run in progress does."""
-    from agent_definitions.journal import Journal
+    from delegate.journal import Journal
 
     journal, _ = Journal.reopen(path)
     for name, fields in events:

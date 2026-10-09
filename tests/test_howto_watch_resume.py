@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import adapters
+from delegate import adapters
 
 from .pages import HOW_TO, Block, follow, new_repo, outside_the_package, write_files
 from .support import ScriptedAdapter, git
@@ -117,7 +117,7 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
 
 KILL = """\
 import os, signal, sys
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 from tests.support import ScriptedAdapter
 from tests.test_howto_watch_resume import FILES
 

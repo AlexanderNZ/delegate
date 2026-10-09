@@ -8,8 +8,8 @@ import pytest
 
 import yaml
 
-from agent_definitions.declaration import Agent, load_declaration
-from agent_definitions.render import (
+from delegate.declaration import Agent, load_declaration
+from delegate.render import (
     GIT_PUSH_HOOK,
     VERIFIER_BASH_HOOK,
     VERIFIER_GUARD_MARKER,
@@ -19,8 +19,8 @@ from agent_definitions.render import (
     render_claude_code,
     verifier_bash_permission,
 )
-from agent_definitions.tiers import load_tiers
-from agent_definitions.validate import opencode_bash_action, split_frontmatter
+from delegate.tiers import load_tiers
+from delegate.validate import opencode_bash_action, split_frontmatter
 
 
 def _fm(path):
@@ -109,7 +109,7 @@ def test_opencode_star_key_survives_yaml_roundtrip(rendered):
 
 
 def test_effort_is_written_only_when_declared(java_spring, tiers):
-    from agent_definitions.render import render
+    from delegate.render import render
 
     (agent,) = java_spring
     agent.effort = "xhigh"
@@ -124,8 +124,8 @@ def test_effort_is_written_only_when_declared(java_spring, tiers):
 
 
 def test_single_read_only_agent_renders_without_twin(tiers):
-    from agent_definitions.declaration import parse_declaration
-    from agent_definitions.render import render
+    from delegate.declaration import parse_declaration
+    from delegate.render import render
 
     agents = parse_declaration({"agents": {"docs-verifier": {"description": "Docs and config review.", "pair": False, "readOnly": True}}})
     out = render(agents, tiers)

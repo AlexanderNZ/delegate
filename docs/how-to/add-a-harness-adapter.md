@@ -6,7 +6,7 @@ You do not read the engine for this. You need the interface below, one recorded 
 
 ## The interface
 
-An adapter is one object behind one interface. It lives in `agent_definitions/adapters.py`.
+An adapter is one object behind one interface. It lives in `delegate/adapters.py`.
 
 The engine gives the adapter an `AdapterRequest`. It has these fields:
 
@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import subprocess
 
-from agent_definitions.adapters import (
+from delegate.adapters import (
     CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult, read_events, stream_path,
 )
 
@@ -143,7 +143,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from agent_definitions.adapters import AdapterError, AdapterRequest
+from delegate.adapters import AdapterError, AdapterRequest
 
 from myharness import MyHarnessAdapter
 
@@ -245,7 +245,7 @@ Three more cases belong in the file for a real harness. Give one case for a stre
 
 ### 4. Connect the adapter to the kit
 
-The engine finds a built-in adapter by name. Make these changes in the package `agent_definitions`:
+The engine finds a built-in adapter by name. Make these changes in the package `delegate`:
 
 1. Put the adapter module beside `claude_code.py` and `opencode.py`.
 2. Add a branch for the name in `adapters.get`.

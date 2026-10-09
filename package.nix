@@ -53,7 +53,7 @@ python3.pkgs.buildPythonApplication {
     python3.pkgs.pytestCheckHook
     git
   ];
-  pythonImportsCheck = [ "agent_definitions" ];
+  pythonImportsCheck = [ "delegate" ];
   # -rs prints the reason of each skipped test, so a skipped neutrality check
   # shows in the build log.
   pytestFlags = [ "-rs" ];

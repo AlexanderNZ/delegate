@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import adapters
+from delegate import adapters
 
 from .pages import HOW_TO, file_block, outside_the_package, write_files
 

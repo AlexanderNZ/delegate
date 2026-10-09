@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from agent_definitions.cli import main
-from agent_definitions.tiers import load_tiers
-from agent_definitions.validate import split_frontmatter
+from delegate.cli import main
+from delegate.tiers import load_tiers
+from delegate.validate import split_frontmatter
 from tests.conftest import EXAMPLE
 
 GATEWAY = {

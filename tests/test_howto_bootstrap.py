@@ -6,7 +6,7 @@ and runs the commands of the page.
 
 import subprocess
 
-from agent_definitions import delegate
+from delegate import delegate
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
 

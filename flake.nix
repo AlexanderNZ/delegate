@@ -57,14 +57,14 @@
               pkgs.git
               pkgs.bash
               pkgs.uv
-              (wrapper "delegate" "agent_definitions.delegate")
-              (wrapper "agent-definitions" "agent_definitions.cli")
-              (wrapper "verifier-brief" "agent_definitions.brief")
+              (wrapper "delegate" "delegate.delegate")
+              (wrapper "agent-definitions" "delegate.cli")
+              (wrapper "verifier-brief" "delegate.brief")
             ];
             # The root comes from git, so the shell works in a subdirectory.
             shellHook = ''
               delegate_root=$(git rev-parse --show-toplevel 2>/dev/null)
-              if [ -d "$delegate_root/src/agent_definitions" ]; then
+              if [ -d "$delegate_root/src/delegate" ]; then
                 export PYTHONPATH="$delegate_root/src''${PYTHONPATH:+:$PYTHONPATH}"
               else
                 echo "delegate dev shell: no delegate working copy here, PYTHONPATH is not set" >&2

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_definitions import adapters, delegate
+from delegate import adapters, delegate
 
 from .support import ScriptedAdapter
 from .pages import repository_root
