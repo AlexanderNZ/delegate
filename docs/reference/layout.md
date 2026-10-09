@@ -1,3 +1,8 @@
+---
+man: DELEGATE-LAYOUT(7)
+man_name: "delegate-layout — the layout of the repository and the dependency rule of the package"
+---
+
 # The layout of the repository
 
 The repository holds three things: two skills that an agent reads, one Python package that holds every command, and the docs. This page gives the place of each part at a high level, and the rule for the direction of imports in the package. It describes the repository as it is today.
