@@ -68,7 +68,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 
 ## Contributing
 
-See [CONTRIBUTING](CONTRIBUTING.md) for the setup with `pip` and `pytest`, the test-first rule, the regeneration command, and the checklist for a new harness adapter.
+See [CONTRIBUTING](CONTRIBUTING.md) for the setup with `pip` and `pytest`, the test-first rule, the regeneration command, and the checklist for a new harness adapter. Each release is listed in the [changelog](CHANGELOG.md).
 
 ## Generated files
 

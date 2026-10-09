@@ -55,3 +55,10 @@ Read [how to add a harness adapter](docs/how-to/add-a-harness-adapter.md) first.
 - [ ] Write a test that runs `delegate run` with the stand-in. It must show that the model on the command is the model of the tier column of the adapter.
 - [ ] Do the live smoke run: run the adapter once against the real harness on a real machine. Write the version of the harness and the date of the run in the reference page.
 - [ ] Write the reference page of the adapter in `docs/reference/`. Link it from `README.md`. Run `delegate docs`.
+
+## Send a change
+
+- Keep each change to one purpose. Put the test and the code that it covers in the same change.
+- Run the whole suite, as the [setup](#set-up) shows. Run `delegate docs --check` too.
+- List the change in `CHANGELOG.md`, under the `Unreleased` heading, in one line.
+- Write the commit subject as a statement of what the change does.

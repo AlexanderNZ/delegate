@@ -138,7 +138,7 @@ def test_every_relative_link_of_contributing_reaches_a_file_and_a_heading():
         if target.startswith(("http://", "https://", "mailto:")):
             continue
         path, _, anchor = target.partition("#")
-        file = ROOT / path
+        file = ROOT / path if path else CONTRIBUTING
         if not file.is_file():
             broken.append(target)
         elif anchor and anchor not in headings_anchors(file.read_text()):
