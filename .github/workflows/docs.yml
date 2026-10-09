@@ -1,0 +1,46 @@
+name: Docs
+
+# Builds the Zensical site on every push and pull request; a dead link or anchor
+# fails the build. The deploy job publishes to GitHub Pages from main, and only
+# when the repository is public, so it starts by itself at the public release.
+# The built site is never part of a release artefact.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # The Zensical version lives only in .zensical-version.
+      - name: Build the site
+        run: uvx "zensical==$(cat .zensical-version)" build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -15,6 +15,8 @@ nix flake check
 
 Without Nix, the same suite runs with `pip` and `pytest`: in `skills/agent-definitions/validator`, run `pip install . pytest` into a Python 3.11+ environment, then `python -m pytest -rs`.
 
+CI runs both gates on every push: the suite on Python 3.11 and 3.13, and `nix flake check` on Linux. The full suite takes a long time on a developer machine. An agent therefore runs the targeted test files of its change, and the coordinator takes the full result from CI before a merge to `main`. The docs site has its own gate: `uvx "zensical==$(cat .zensical-version)" build --strict` from the repository root.
+
 The neutrality check needs `AGENT_DEFINITIONS_DENYLIST`, the path of the private denylist file. Without that variable, the neutrality test skips with a notice, and the rest of the suite runs. CI gives the variable from a secret.
 
 ## Test quality bar

@@ -42,3 +42,15 @@ jobs:
       - name: Run the test suite
         working-directory: skills/agent-definitions/validator
         run: python -m pytest -rs
+
+  # The second gate. It builds the package and runs the suite inside the Nix
+  # build, so a maintainer machine does not have to.
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Check the flake
+        run: nix flake check -L
