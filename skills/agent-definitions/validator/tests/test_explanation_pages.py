@@ -256,6 +256,14 @@ FIRST_USE = {
         r"specialist", r"verifier", r"stack", r"agent pair", r"skills?", r"tier", r"declaration", r"harness", r"validator",
         r"gates?", r"engine", r"mode", r"report",
     ],
+    "why-the-model-should-not-matter.md": [
+        r"protocol", r"coordinator", r"specialist", r"verifier", r"blind", r"skills?", r"headless", r"tier", r"brief",
+        r"declaration", r"harness", r"validator", r"fix-up", r"delta", r"tickets?", r"report", r"run", r"gates?", r"engine",
+        r"journal", r"adapter", r"grilling", r"wayfinder", r"to-spec", r"spec", r"to-tickets", r"ladder", r"file boundary",
+        r"context skill", r"delegation document", r"hotspot", r"push guard", r"verifier guard", r"verdict", r"pre-push`? hook",
+        r"workflow", r"session", r"temporary copy", r"red proof", r"tier table", r"mode", r"economy", r"assure", r"gateway",
+        r"tier file", r"reject",
+    ],
 }
 
 
