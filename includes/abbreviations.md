@@ -42,6 +42,7 @@
 *[Gateway]: A gateway is a service that serves models under its own names, for example the LLM gateway of a company.
 *[Generated section]: A generated section is the part of a reference page between the generated:begin and generated:end markers, which delegate docs writes from the code.
 *[GET-only command]: A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET.
+*[grilling]: grilling is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made.
 *[Harness]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
 *[Harness hook]: A harness hook is a guard in an agent file that the harness runs before a tool call: a push guard for the specialist, and the verifier guard.
 *[Headless]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
@@ -49,6 +50,8 @@
 *[Implementer]: See Specialist.
 *[Invariant]: An invariant is one of the seven rules that hold in every mode, for example "the verifier is blind".
 *[Journal]: The journal is the append-only JSONL file of a run, with one line for each event.
+*[Ladder]: The ladder is the eight levels of agentic engineering of Bassim Eledath, from tab completion to autonomous agent teams.
+*[Levels of agentic engineering]: See Ladder.
 *[Live smoke run]: A live smoke run is one run of an adapter against the real harness on a real machine.
 *[Max turns]: See Turn cap.
 *[Mode]: The mode of a run is assure or economy.
@@ -79,6 +82,7 @@
 *[Step]: A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in assure mode, the verifier.
 *[Step cap]: See Turn cap.
 *[Strength]: See Tier.
+*[Team contract]: The team contract is what every agent gets, whatever its model: a role, the context, the tools, a definition of done, and an independent check.
 *[Temporary copy]: The temporary copy is a clone of the ticket branch that the engine makes for the verifier.
 *[Three-dot diff]: A three-dot diff (git diff <base>...<branch>) shows the changes of a branch since the point where it left the base.
 *[Ticket]: A ticket is one unit of work, written as behaviour, with the tickets that block it.
@@ -87,6 +91,7 @@
 *[Tier table]: The tier table (tiers.toml) maps each tier to one model for each harness, and lists the models that the validator accepts.
 *[to-spec]: to-spec is a planning skill of mattpocock/skills that writes a spec.
 *[to-tickets]: to-tickets is a planning skill of mattpocock/skills that writes tickets with blockers from a spec.
+*[Tracer bullet]: A tracer bullet is a narrow slice of work that goes through every layer and works from end to end.
 *[Turn cap]: A turn cap is the maximum number of turns of an agent run (maxTurns on Claude Code, steps on OpenCode).
 *[Twin]: See Verifier.
 *[Validator]: The validator (delegate validate) checks rendered agent files against the schema of each harness, and writes a finding code for each problem.
@@ -96,6 +101,8 @@
 *[Verifier guard]: The verifier guard is the hook in each rendered verifier that permits a fixed list of commands.
 *[Verifier mode]: The verifier mode is full or fix-up, and the shape of the brief sets it.
 *[Verifier twin]: See Verifier.
+*[Vertical slice]: See Tracer bullet.
+*[wayfinder]: wayfinder is a planning skill of mattpocock/skills for work that is too large for one session.
 *[Workflow]: A workflow is the TOML file that describes one run: the base branch, the run branch, the mode, the adapter, the stacks and the tickets.
 *[Workflow engine]: See Engine.
 *[Working copy]: See Worktree.

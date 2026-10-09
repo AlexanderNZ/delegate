@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640" role="img" aria-labelledby="ladder-title ladder-desc" font-family="'ET Book', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif">
+  <title id="ladder-title">delegate is one vertical slice through levels 2 to 7</title>
+  <desc id="ladder-desc">The eight levels of agentic engineering of Bassim Eledath are the rows. delegate is one vertical line through levels 2 to 7, with what it puts at each level. Level 1 is outside the slice, and level 8 is not attempted. A bracket marks levels 3 to 5, which must hold before more automation. The overview gives the same information as a table.</desc>
+  <style>
+    .bg { fill: #151515; }
+    .text { fill: #dddddd; }
+    .muted { fill: #999999; }
+    .rung { stroke: #444444; }
+    .bracket { stroke: #999999; }
+    .accent { fill: #fc8d62; }
+    .slice { stroke: #fc8d62; }
+    .gap { stroke: #999999; }
+  </style>
+  <rect class="bg" x="0" y="0" width="960" height="640"/>
+
+  <text class="text" x="40" y="44" font-size="23">delegate is one vertical slice through levels 2 to 7</text>
+  <text class="muted" x="40" y="72" font-size="15">Rows: the eight levels of agentic engineering of Bassim Eledath. Line: what delegate puts at each level.</text>
+
+  <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12">
+    <text class="muted" x="190" y="106">Eledath's level</text>
+    <text class="accent" x="605" y="106">delegate</text>
+  </g>
+
+  <g class="rung" stroke-width="1">
+    <line x1="150" y1="116" x2="930" y2="116"/>
+    <line x1="150" y1="178" x2="930" y2="178"/>
+    <line x1="150" y1="240" x2="930" y2="240"/>
+    <line x1="150" y1="302" x2="930" y2="302"/>
+    <line x1="150" y1="364" x2="930" y2="364"/>
+    <line x1="150" y1="426" x2="930" y2="426"/>
+    <line x1="150" y1="488" x2="930" y2="488"/>
+    <line x1="150" y1="550" x2="930" y2="550"/>
+    <line x1="150" y1="612" x2="930" y2="612"/>
+  </g>
+
+  <g class="muted" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" text-anchor="end">
+    <text x="176" y="152">1</text>
+    <text x="176" y="214">2</text>
+    <text x="176" y="276">3</text>
+    <text x="176" y="338">4</text>
+    <text x="176" y="400">5</text>
+    <text x="176" y="462">6</text>
+    <text x="176" y="524">7</text>
+    <text x="176" y="586">8</text>
+  </g>
+
+  <g class="text" font-size="16">
+    <text x="190" y="152">Tab Complete</text>
+    <text x="190" y="214">Agent IDE</text>
+    <text x="190" y="276">Context Engineering</text>
+    <text x="190" y="338">Compounding Engineering</text>
+    <text x="190" y="400">MCP and Skills</text>
+    <text x="190" y="462">Harness Engineering &amp; Automated Feedback Loops</text>
+    <text x="190" y="524">Background Agents</text>
+    <text x="190" y="586">Autonomous Agent Teams</text>
+  </g>
+
+  <g class="bracket" stroke-width="1" fill="none">
+    <polyline points="146,248 140,248 140,418 146,418"/>
+  </g>
+  <text class="muted" font-size="13" font-style="italic" text-anchor="end">
+    <tspan x="132" y="306">Levels 3 to 5</tspan>
+    <tspan x="132" y="324">must hold</tspan>
+    <tspan x="132" y="342">before more</tspan>
+    <tspan x="132" y="360">automation</tspan>
+  </text>
+
+  <line class="slice" x1="585" y1="209" x2="585" y2="519" stroke-width="3"/>
+  <line class="gap" x1="585" y1="527" x2="585" y2="576" stroke-width="1.5" stroke-dasharray="3 4"/>
+  <g class="accent">
+    <circle cx="585" cy="209" r="5"/>
+    <circle cx="585" cy="271" r="5"/>
+    <circle cx="585" cy="333" r="5"/>
+    <circle cx="585" cy="395" r="5"/>
+    <circle cx="585" cy="457" r="5"/>
+    <circle cx="585" cy="519" r="5"/>
+  </g>
+  <circle class="gap" cx="585" cy="581" r="5" fill="none" stroke-width="1.5"/>
+
+  <text class="muted" x="605" y="152" font-size="15" font-style="italic">Outside the slice</text>
+  <g class="text" font-size="15">
+    <text x="605"><tspan x="605" y="204">The harness you already use,</tspan><tspan x="605" y="223">driven headless through an adapter</tspan></text>
+    <text x="605"><tspan x="605" y="266">A brief for each agent: the ticket,</tspan><tspan x="605" y="285">the file boundary and the gates</tspan></text>
+    <text x="605"><tspan x="605" y="328">The delegation document, which</tspan><tspan x="605" y="347">every agent reads through its skill</tspan></text>
+    <text x="605"><tspan x="605" y="390">An agent pair for each stack,</tspan><tspan x="605" y="409">with every skill of that stack</tspan></text>
+    <text x="605"><tspan x="605" y="452">The engine runs the gates itself,</tspan><tspan x="605" y="471">and git guards every worktree</tspan></text>
+    <text x="605"><tspan x="605" y="514">Headless agents in worktrees,</tspan><tspan x="605" y="533">a blind verifier, a journal</tspan></text>
+  </g>
+  <text class="muted" font-size="15" font-style="italic"><tspan x="605" y="576">Not attempted: the engine dispatches,</tspan><tspan x="605" y="595">and the merge stays yours</tspan></text>
+</svg>

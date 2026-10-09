@@ -5,9 +5,9 @@ on the spot. The entries are in alphabetical order, each entry links the page
 that gives the detail, and each link reaches a page and a heading that exist.
 The glossary is in ASD-STE100, so each sentence has 25 words or fewer.
 
-The overview is the kit at a glance. It gives the problem, the idea, what the
-kit is not, the mental model, the parts of the kit and where to go next, in
-that order. Each term that it puts in bold links its glossary entry. The README
+The overview is the kit at a glance. It gives the problem, the idea, the ladder
+visual, the mental model, what the kit is not, the parts of the kit and where to
+go next, in that order. Each term that it puts in bold links its glossary entry. The README
 docs map links the overview and the glossary first, as the place to start.
 
 The pages are outside the package source, so a Nix build that copies only the
@@ -25,12 +25,14 @@ OVERVIEW = DOCS / "overview.md"
 README = ROOT / "README.md"
 REPO_BLOB = re.compile(r"https://github\.com/[^/]+/delegate/blob/main/")  # the full URL of a file of this repository
 
-# The sections of the overview, in the order of the ticket and the coordinator's adjustment.
+# The sections of the overview, in the order of the ticket: the pain, the idea, the visual,
+# the mental model, and what the kit is not. Then the parts and the next pages.
 OVERVIEW_SECTIONS = [
     "The problem",
     "The idea",
-    "What delegate is not",
+    "The ladder",
     "The mental model",
+    "What delegate is not",
     "The parts of the kit",
     "Where to go next",
 ]
@@ -83,7 +85,8 @@ def broken_links(page: Path) -> list[str]:
         file = ((ROOT if in_repo else page.parent) / path).resolve() if path else page
         if not file.is_file():
             broken.append(target)
-        elif anchor and anchor not in anchors(file.read_text()):
+        # Only a Markdown page has headings. The fragment of an image (`#gh-dark-mode-only`) selects a colour scheme.
+        elif anchor and file.suffix == ".md" and anchor not in anchors(file.read_text()):
             broken.append(target)
     return broken
 

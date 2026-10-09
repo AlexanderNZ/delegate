@@ -1,8 +1,10 @@
 # delegate
 
-`delegate` is a kit for delegating implementation work to coding agents, with independent evidence at each merge.
+Models differ the way people do. Two sessions of the same model plan, use tools, read context and write code differently, and one short remark in the conversation changes the code. So you end up managing each model like a person, in prose, and the review loop goes back and forth. We met this as we built our own web apps and projects.
 
-I built it because the usual pattern trusts the agent that wrote the code. One session runs many implementers, a reviewer reads one large diff at the end, and the reviewer takes the implementer's word that the tests pass. This kit does not take that word. The engine runs your gates itself. A blind verifier gets the ticket and the diff, never the implementer's report. Nothing reaches the run branch without an ACCEPT.
+`delegate` is a kit for delegating implementation work to coding agents, with independent evidence at each merge. It fixes everything except the ability of the model. Every agent gets the same team contract, whatever model runs it: a role, the context for that role, the tools it may use, a definition of done, and an independent check. The model you pick then changes one thing: how good the code is.
+
+The independent check does not trust the agent that wrote the code. The usual pattern does: one session runs many implementers, a reviewer reads one large diff at the end, and the reviewer takes the implementer's word that the tests pass. This kit does not take that word. The engine runs your gates itself. A blind verifier gets the ticket and the diff, never the implementer's report. Nothing reaches the run branch without an ACCEPT.
 
 The kit has three parts:
 
@@ -10,11 +12,16 @@ The kit has three parts:
 - A renderer. One declaration renders a specialist and its verifier twin for each harness, and a validator checks the files against the schema of each harness.
 - A workflow engine. `delegate run` drives a harness through its headless command line, makes the worktrees, runs the gates, spawns the verifiers, and records every step in a journal.
 
-The kit names no person, company or tracker. Each repository keeps its own gates, hotspots, models and writing style.
+The skills and the engine name no person, company or tracker. Each repository keeps its own gates, hotspots, models and writing style.
 
 ## Position
 
-This kit does not compete with [mattpocock/skills](https://github.com/mattpocock/skills). That project optimises developer flow and throughput: one session, maximum parallelism, and a human reviewer as the trust point. This kit optimises independent evidence at each merge. It takes the output of that project's planning skills (a spec, and tickets with blocking edges) as its input, and it replaces only the build step.
+This kit builds on two pieces of work. It was only possible because of them.
+
+- *The map:* [the levels of agentic engineering](https://www.bassimeledath.com/blog/levels-of-agentic-engineering) by Bassim Eledath. He describes eight levels, from tab completion to autonomous agent teams, and the rule that levels 3 to 5 must hold before more automation. This kit is one vertical slice through levels 2 to 7. It does not attempt level 8. The [overview](docs/overview.md) draws the slice.
+- *The input:* the planning skills of [mattpocock/skills](https://github.com/mattpocock/skills) by Matt Pocock. `grilling` and `wayfinder` settle the decisions, `to-spec` writes the spec, and `to-tickets` cuts it into tickets with blocking edges. This kit takes those tickets as its input, and it replaces only the build step.
+
+This kit does not compete with mattpocock/skills. Its build skill, `implement-spec`, optimises developer flow and throughput: one session, maximum parallelism, and a human reviewer as the trust point. This kit optimises independent evidence at each merge.
 
 ## Install
 
@@ -45,7 +52,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 
 Start with the first two pages.
 
-- [Start here: the kit at a glance](docs/overview.md): the problem, the idea, what the kit is not, and the loop from a ticket to a merge (Brief, Build, Verify, Merge), with one ticket followed through it.
+- [Start here: the kit at a glance](docs/overview.md): the problem (models differ the way people do), the idea, the ladder that the kit slices through, the loop from a ticket to a merge (Brief, Build, Verify, Merge) with one ticket followed through it, the two dials (tier and mode), and what the kit is not.
 - [Glossary](docs/glossary.md): every term of these docs, in alphabetical order, with what it is, why it matters, and the page with the detail.
 - [Tutorial: from install to one verified ticket](docs/tutorial.md): bootstrap a sample repository, run one ticket in `assure` mode on Claude Code, and read the verdict and the journal. Its sample files are in [`examples/tutorial`](examples/tutorial).
 - [How to bootstrap a single-stack repository](docs/how-to/bootstrap-a-single-stack-repository.md): write the delegation document and a skill, run `delegate bootstrap`, check the pair, and name it in a workflow.

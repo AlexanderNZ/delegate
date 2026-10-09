@@ -206,6 +206,10 @@ A generated section is the part of a reference page between the `generated:begin
 
 A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [gate commands](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#gate-commands).
 
+## `grilling`
+
+`grilling` is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made. The decisions are settled before a spec exists, so no agent guesses them. See [the `grilling` skill](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md) and [the idea](overview.md#the-idea).
+
 ## Harness
 
 A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the `agent` CLI of Cursor. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [the adapters](reference/workflow.md#adapters).
@@ -245,6 +249,18 @@ An invariant is one of the seven rules that hold in every mode, for example "the
 ## Journal
 
 The journal is the append-only JSONL file of a run, with one line for each event. The engine resumes a stopped run from it, and `delegate status` and `delegate watch` read it. See [the journal](reference/run.md#the-journal).
+
+## Ladder
+
+The ladder is the eight levels of agentic engineering of Bassim Eledath, from tab completion to autonomous agent teams. Its rule is that levels 3 to 5 must hold before more automation helps. delegate is one vertical slice through levels 2 to 7.
+
+Not: levels of agentic engineering. Use the long form only for the title of the article.
+
+See [the ladder](overview.md#the-ladder) and [the article](https://www.bassimeledath.com/blog/levels-of-agentic-engineering).
+
+## Levels of agentic engineering
+
+See [Ladder](#ladder).
 
 ## Live smoke run
 
@@ -378,6 +394,10 @@ See [Turn cap](#turn-cap).
 
 See [Tier](#tier).
 
+## Team contract
+
+The team contract is what every agent gets, whatever its model: a role, the context, the tools, a definition of done, and an independent check. The model then changes only the quality of the code. See [the idea](overview.md#the-idea).
+
 ## Temporary copy
 
 The temporary copy is a clone of the ticket branch that the engine makes for the verifier. The verifier can break the copy for a red proof, and the real worktree stays as it was.
@@ -421,6 +441,14 @@ The tier table (`tiers.toml`) maps each tier to one model for each harness, and 
 ## `to-tickets`
 
 `to-tickets` is a planning skill of mattpocock/skills that writes tickets with blockers from a spec. The kit builds those tickets in the order that the blockers set. See [how to use the kit after `to-spec` and `to-tickets`](how-to/use-the-kit-after-to-spec-and-to-tickets.md).
+
+## Tracer bullet
+
+A tracer bullet is a narrow slice of work that goes through every layer and works from end to end. The `to-tickets` skill cuts tickets this way, and delegate is one tracer bullet through levels 2 to 7 of the ladder.
+
+Not: vertical slice.
+
+See [the ladder](overview.md#the-ladder).
 
 ## Turn cap
 
@@ -469,6 +497,14 @@ The verifier mode is `full` or `fix-up`, and the shape of the brief sets it. A f
 ## Verifier twin
 
 See [Verifier](#verifier).
+
+## Vertical slice
+
+See [Tracer bullet](#tracer-bullet).
+
+## `wayfinder`
+
+`wayfinder` is a planning skill of mattpocock/skills for work that is too large for one session. It charts the work as a map of decision tickets, and resolves them one at a time. See [the `wayfinder` skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/wayfinder/SKILL.md) and [the idea](overview.md#the-idea).
 
 ## Workflow
 

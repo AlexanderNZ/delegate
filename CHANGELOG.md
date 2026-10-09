@@ -8,6 +8,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 - A docs site, built from `docs/` with Zensical (pinned in `.zensical-version`). `delegate docs` also writes `includes/abbreviations.md` from the glossary, for the term tooltips of the site.
 - A theme for the docs site: serif body text, numbered sections and a numbered table of contents, and a man-page header with NAME and SYNOPSIS on the reference pages. The spec and the prototype are in `design/`.
+- The overview and the README open with the problem (models differ the way people do), credit the work that the kit builds on (Bassim Eledath's ladder and Matt Pocock's planning skills), and draw the kit as one slice through the ladder.
 
 ## [0.1.0] - 2026-10-09
 
