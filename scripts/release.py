@@ -24,7 +24,7 @@ from pathlib import Path
 DEFAULT_PYPROJECT: str = "skills/agent-definitions/validator/pyproject.toml"
 
 # A release tag is `v<major>.<minor>.<patch>` and nothing else.
-
+TAG: re.Pattern[str] = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 
 Version = tuple[int, int, int]
 
@@ -42,6 +42,16 @@ def git(repo: Path, *args: str) -> str:
     if done.returncode != 0:
         raise ReleaseError(f"git {' '.join(args)} failed in {repo}: {done.stderr.strip()}")
     return done.stdout
+
+
+def release_tags(repo: Path) -> list[Version]:
+    """The versions of the release tags of the repository, oldest first. A tag that is not `vX.Y.Z` is ignored."""
+    found: list[Version] = []
+    for name in git(repo, "tag", "--list").splitlines():
+        match = TAG.fullmatch(name)
+        if match:
+            found.append((int(match[1]), int(match[2]), int(match[3])))
+    return sorted(found)
 
 
 def read_text(path: Path) -> str:
@@ -73,7 +83,15 @@ def show(version: Version) -> str:
 
 
 def next_version(repo: Path, pyproject: Path, bump: str) -> Version:
-    return project_version(pyproject)
+    tags = release_tags(repo)
+    if not tags:
+        return project_version(pyproject)
+    major, minor, patch = tags[-1]
+    if bump == "major":
+        return major + 1, 0, 0
+    if bump == "minor":
+        return major, minor + 1, 0
+    return major, minor, patch + 1
 
 
 def build_parser() -> argparse.ArgumentParser:
