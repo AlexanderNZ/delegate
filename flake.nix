@@ -63,10 +63,11 @@
             ];
             # The root comes from git, so the shell works in a subdirectory.
             shellHook = ''
-              if delegate_root=$(git rev-parse --show-toplevel); then
+              delegate_root=$(git rev-parse --show-toplevel 2>/dev/null)
+              if [ -d "$delegate_root/skills/agent-definitions/validator" ]; then
                 export PYTHONPATH="$delegate_root/skills/agent-definitions/validator''${PYTHONPATH:+:$PYTHONPATH}"
               else
-                echo "delegate dev shell: not in a git working copy, PYTHONPATH is not set" >&2
+                echo "delegate dev shell: no delegate working copy here, PYTHONPATH is not set" >&2
               fi
               unset delegate_root
             '';
