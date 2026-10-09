@@ -51,7 +51,7 @@ def ci_commands() -> list[str]:
 
 
 @outside_the_package
-def test_every_setup_command_of_contributing_is_a_command_that_ci_runs_and_the_test_directory_is_the_one_that_ci_uses():
+def test_every_setup_command_of_contributing_is_a_command_that_ci_runs_and_both_run_from_the_repository_root():
     setup = bash_commands("Set up")
     moves = [command for command in setup if command.startswith("cd ")]
     runs = [command for command in setup if not command.startswith("cd ")]
@@ -59,7 +59,7 @@ def test_every_setup_command_of_contributing_is_a_command_that_ci_runs_and_the_t
     assert runs, "the setup section must give commands"
     assert [command for command in runs if command not in ci_commands()] == []
     test_step = next(step for step in ci_steps() if step.get("name") == "Run the test suite")
-    assert moves == [f"cd {test_step['working-directory']}"]
+    assert moves == [] and "working-directory" not in test_step
 
 
 @outside_the_package
@@ -114,7 +114,7 @@ def test_the_documented_regeneration_command_writes_a_copy_of_the_pages_that_its
 @outside_the_package
 def test_the_harness_fact_rule_names_the_version_and_the_date_and_the_manifest_keys_that_every_recording_holds():
     text = section("Date every harness fact")
-    manifests = sorted((ROOT / "skills" / "agent-definitions" / "validator" / "tests" / "fixtures").glob("*/manifest.json"))
+    manifests = sorted((ROOT / "tests" / "fixtures").glob("*/manifest.json"))
 
     assert re.search(r"version.*date|date.*version", text, flags=re.DOTALL)
     assert "`harness_version`" in text and "`recorded`" in text

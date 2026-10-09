@@ -174,11 +174,8 @@ def test_the_notes_of_a_first_release_hold_every_commit_and_leave_out_a_group_wi
 """
 
 
-def test_without_options_the_script_reads_the_current_directory_and_the_pyproject_of_the_package(tmp_path):
-    repo = make_repo(tmp_path)
-    package = repo / "skills" / "agent-definitions" / "validator"
-    package.mkdir(parents=True)
-    (package / "pyproject.toml").write_text(PYPROJECT.format(version="0.9.1"))
+def test_without_options_the_script_reads_the_current_directory_and_the_pyproject_at_its_root(tmp_path):
+    repo = make_repo(tmp_path, version="0.9.1")
 
     done = subprocess.run([sys.executable, str(SCRIPT), "next-version", "--bump", "major"], cwd=repo, capture_output=True, text=True)
 

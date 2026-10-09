@@ -1,6 +1,6 @@
 # The worked example: one declaration, two harnesses,
 # one specialist-verifier pair. Render with
-#   agent-definitions render skills/agent-definitions/validator/examples/java-spring.toml -o /tmp/agents
+#   agent-definitions render examples/java-spring.toml -o /tmp/agents
 # and validate with
 #   agent-definitions validate /tmp/agents --skills-dir skills
 

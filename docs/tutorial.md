@@ -22,7 +22,7 @@ The tutorial uses real agents, so the run uses tokens of your Claude Code accoun
 ## 1. Install the kit
 
 ```bash
-uv tool install "git+https://github.com/AlexanderNZ/delegate#subdirectory=skills/agent-definitions/validator"
+uv tool install git+https://github.com/AlexanderNZ/delegate
 ```
 
 This puts the commands `delegate`, `agent-definitions` and `verifier-brief` on your PATH. This tutorial uses only `delegate`.

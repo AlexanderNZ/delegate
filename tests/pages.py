@@ -27,11 +27,12 @@ import pytest
 from agent_definitions import delegate
 
 def repository_root(test_file: Path) -> Path:
-    """Four levels up from a test file. A Linux Nix build copies only the package
-    to /build/source, so the path can be shorter: then the root is the top of
-    the path, which holds no README."""
+    """The directory above the tests directory. A Nix build copies only the
+    package, its tests and its example to /build/source, so there the root holds
+    no README. A path with no directory above the tests directory gives the top
+    of the path, which holds no README either."""
     parents = test_file.resolve().parents
-    return parents[4] if len(parents) > 4 else parents[-1]
+    return parents[1] if len(parents) > 1 else parents[-1]
 
 
 ROOT = repository_root(Path(__file__))

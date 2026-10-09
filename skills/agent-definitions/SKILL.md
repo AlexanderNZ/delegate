@@ -28,12 +28,12 @@ prompt = "Domain notes the agent needs."
 # trackedFileBuild = true  # optional: the build reads tracked files only, as a flake does (default false)
 ```
 
-The full example is `validator/examples/java-spring.toml`.
+The full example is `examples/java-spring.toml` in the repository.
 
 ## Commands
 
 ```bash
-agent-definitions render validator/examples/java-spring.toml -o /tmp/agents
+agent-definitions render examples/java-spring.toml -o /tmp/agents
 agent-definitions validate /tmp/agents --skills-dir skills
 ```
 
@@ -80,7 +80,7 @@ Exit conditions. `full` exits 1 when the three-dot diff is empty. `fixup` exits 
 
 Why a command and not a prose instruction: the mode of the brief sets the mode of the verifier (below), and the diff form decides what the verifier reads. Both are easy to get wrong by hand and impossible to see afterwards.
 
-The package lives in `validator/`. Its pytest suite runs in `nix flake check` as the `agent-definitions` check. The suite needs `git`, a `nativeCheckInput` in `package.nix`. The guard tests run the rendered hooks with `python3` as the only tool on `PATH`, so the suite needs no `jq`.
+The package lives in `src/agent_definitions/`, and its tests in `tests/`. Its pytest suite runs in `nix flake check` as the `agent-definitions` check. The suite needs `git`, a `nativeCheckInput` in `package.nix`. The guard tests run the rendered hooks with `python3` as the only tool on `PATH`, so the suite needs no `jq`.
 
 ## Bootstrap
 
@@ -175,7 +175,7 @@ On Claude Code the verifier gets `tools: Read, Grep, Glob, Bash` and a `PreToolU
 
 The temp destination commands (`cp` and `cd`) follow more rules. This is what lets the verifier copy a worktree into a temp directory and go to the copy, which a red proof on a changed copy needs. A redirection does not end the scan. A path argument that comes after a redirection is a deny, in each order and in both the joined form (`>/tmp/log`) and the two-word form (`> /tmp/log`), because the shell removes the redirection and the path stays an argument of the command. A hyphen-led argument that holds `t` or `T`, and a long option that starts with `--t` or `--n`, are each a deny, because such a flag moves the destination into a word that the flag rule drops. Two literal prefixes are not enough: GNU short options cluster, so `cp -Rt /Users/y /tmp/a` still takes the next word as the destination, and a GNU long option accepts an unambiguous abbreviation such as `--targ`. `cp -R`, `cp -a`, `cp -p`, and `cp -Rp` stay permitted.
 
-Each entry matches the command alone or the command with arguments, and never a longer command name: `ls` does not match `lsof`. A segment that starts with `git -C <path>` loses that prefix before the test, so `git -C <path> diff` is the read `git diff`. This lets a verifier with no worktree of its own read a worktree by its path. The path is not examined, because a read of any path is a read. The subcommand after the path is examined, so `git -C <path> push` and `git -C <path> commit` stay denied. A segment that starts with `nix develop -c` or `nix develop <flake-ref> -c` (or `--command`) loses that prefix in the same way, so a gate that runs in a flake dev shell is tested as the gate command: `nix develop -c python3 test.py` is the read `python3 test.py`, and `nix develop -c git push` stays denied. Only a flake reference may come before `-c`. A flag there can write (`--profile` writes a symlink, `--build` runs build phases), so a hyphen-led word denies, and `nix develop` with no `-c` (an interactive shell) denies. A segment that starts with `direnv exec <dir>` loses that prefix too, so a gate that runs with the repository's `.envrc` is tested as the gate command. `direnv allow` writes direnv's allow list, and it denies. The table is generated from `VERIFIER_READ_COMMANDS`, `VERIFIER_TEMP_WRITE_COMMANDS`, `VERIFIER_TEMP_DEST_COMMANDS`, and `VERIFIER_TEMP_PATH_PREFIXES` in `validator/agent_definitions/render.py`. Change the constants there and run `delegate docs`; a test fails when the table differs from the constants. The table holds no build tool and no tracker CLI. A verifier that must run one gets it from its declaration, with `gateCommands` or `getOnlyCommands` (below).
+Each entry matches the command alone or the command with arguments, and never a longer command name: `ls` does not match `lsof`. A segment that starts with `git -C <path>` loses that prefix before the test, so `git -C <path> diff` is the read `git diff`. This lets a verifier with no worktree of its own read a worktree by its path. The path is not examined, because a read of any path is a read. The subcommand after the path is examined, so `git -C <path> push` and `git -C <path> commit` stay denied. A segment that starts with `nix develop -c` or `nix develop <flake-ref> -c` (or `--command`) loses that prefix in the same way, so a gate that runs in a flake dev shell is tested as the gate command: `nix develop -c python3 test.py` is the read `python3 test.py`, and `nix develop -c git push` stays denied. Only a flake reference may come before `-c`. A flag there can write (`--profile` writes a symlink, `--build` runs build phases), so a hyphen-led word denies, and `nix develop` with no `-c` (an interactive shell) denies. A segment that starts with `direnv exec <dir>` loses that prefix too, so a gate that runs with the repository's `.envrc` is tested as the gate command. `direnv allow` writes direnv's allow list, and it denies. The table is generated from `VERIFIER_READ_COMMANDS`, `VERIFIER_TEMP_WRITE_COMMANDS`, `VERIFIER_TEMP_DEST_COMMANDS`, and `VERIFIER_TEMP_PATH_PREFIXES` in `src/agent_definitions/render.py`. Change the constants there and run `delegate docs`; a test fails when the table differs from the constants. The table holds no build tool and no tracker CLI. A verifier that must run one gets it from its declaration, with `gateCommands` or `getOnlyCommands` (below).
 
 ### Gate commands
 
@@ -241,20 +241,20 @@ Decision of 2026-09-19 ([ADR 0001](docs/adr/0001-effort-follows-the-model.md)): 
 
 ## The tier table
 
-`validator/agent_definitions/tiers.toml` is the single source: tier to model per harness, allowed models per harness, effort levels, OpenCode variants, the description budget. A consumer configuration that renders agents, for example a Nix module, reads the same file, so the tiers have one source. The OpenCode identifiers follow the `provider/model-id` shape; confirm them with `opencode models` before the first OpenCode rollout.
+`src/agent_definitions/tiers.toml` is the single source: tier to model per harness, allowed models per harness, effort levels, OpenCode variants, the description budget. A consumer configuration that renders agents, for example a Nix module, reads the same file, so the tiers have one source. The OpenCode identifiers follow the `provider/model-id` shape; confirm them with `opencode models` before the first OpenCode rollout.
 
 The OpenCode column is the one part a caller may override, with the two flags above ([ADR 0003](docs/adr/0003-opencode-model-override.md)). The table stays the source of the defaults and of the whole Claude Code column. Do not edit the OpenCode column for one machine or one job: the table is global, and the override exists so the identifiers can live with whatever configures the provider.
 
 ## Neutrality check
 
-The kit is `agent-delegation/` and `agent-definitions/` with its `validator/` package. The kit must hold no personal or company term. The test `tests/test_neutrality.py::test_the_kit_holds_no_denylisted_term_outside_the_allowlist` reads every file in the kit and fails on each line that holds a term from a denylist, unless the allowlist names that file and that term. The code is `validator/agent_definitions/neutrality.py`.
+The kit is `agent-delegation/` and `agent-definitions/`, the two skill directories in `skills/`. The kit must hold no personal or company term. The test `tests/test_neutrality.py::test_the_kit_holds_no_denylisted_term_outside_the_allowlist` reads every file in the kit and fails on each line that holds a term from a denylist, unless the allowlist names that file and that term. The code is `src/agent_definitions/neutrality.py`.
 
 - **`AGENT_DEFINITIONS_DENYLIST`** is the path of the denylist. The denylist is private, so it is never in the kit: the consumer repository keeps it and gives its path. Without the variable, the test skips with this notice: `neutrality check skipped: AGENT_DEFINITIONS_DENYLIST is not set`. A path with no file, or a denylist with no term, fails the test.
-- **`AGENT_DEFINITIONS_KIT_ROOT`** is the directory that holds both kit directories. It is optional. Without it, the test uses the directory three levels above the test file, which is correct in a checkout. A Nix build copies only `validator/`, so `package.nix` gives the kit as a second source when it gets a `neutralityDenylist` argument.
+- **`AGENT_DEFINITIONS_KIT_ROOT`** is the directory that holds both kit directories. It is optional. Without it, the test uses the `skills/` directory of the repository, which is correct in a checkout. A Nix build copies only the package, its tests and its example, so `package.nix` gives the kit as a second source when it gets a `neutralityDenylist` argument.
 - **The denylist format.** One term on each line. A term has no space. A line that starts with `#` is a comment. The check matches each term case-insensitively, as a substring.
 - **The allowlist format.** The file is `agent-definitions/neutrality-allowlist.txt`. One entry on each line: `<path> <term>`, with the path relative to the directory that holds both kit directories, for example `agent-delegation/SKILL.md sometoken`. An entry permits every line of that file that holds that term. A line that starts with `#` is a comment. An entry is a permanent exception only, with a comment line directly above it that gives its reason. Today the kit has no permanent exception, so the allowlist holds no entry. The check does not scan the allowlist, because the allowlist names the terms. An entry names only a term that its file already holds, so the allowlist shows no term that the kit does not show.
 - **`STALE_ALLOWLIST_ENTRY`.** The check reports an entry whose file does not hold its term, or that names a file that the check does not scan (a missing file, a generated file, or the allowlist). The finding gives the line of the entry, and the test fails. Remove the entry. Without this finding, a term that a change removes from its file stays visible in the allowlist.
-- **Without Nix:** from `validator/`, run `pip install .` and `pytest`, with the denylist path in `AGENT_DEFINITIONS_DENYLIST`.
+- **Without Nix:** from the repository root, run `pip install .` and `pytest`, with the denylist path in `AGENT_DEFINITIONS_DENYLIST`.
 - **The scan skips generated files:** the directories `__pycache__`, `.pytest_cache`, `build` and `*.egg-info`, and the file `.DS_Store`. A pip build or a test run writes them, and they copy kit files.
 
 ## Limits

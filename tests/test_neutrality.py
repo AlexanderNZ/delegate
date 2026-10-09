@@ -11,8 +11,8 @@ import pytest
 
 from agent_definitions.neutrality import DENYLIST_VAR, Finding, StaleEntry, check_kit
 
-# tests/ -> validator/ -> agent-definitions/ -> the directory with both kit dirs.
-KIT_ROOT = Path(__file__).resolve().parents[3]
+# tests/ -> the repository root -> skills/, the directory with both kit dirs.
+KIT_ROOT = Path(__file__).resolve().parents[1] / "skills"
 
 
 def test_the_kit_holds_no_denylisted_term_outside_the_allowlist():
@@ -115,13 +115,13 @@ def test_a_denylist_with_no_usable_term_fails_loud(tmp_path, text):
 
 def test_a_term_matches_in_any_case_in_a_nested_file(tmp_path, denylist):
     kit = _kit(tmp_path / "kit", {
-        "agent-definitions/validator/tests/test_x.py": "x = 1\nURL = 'QUUXCORP.example'\n",
+        "agent-definitions/docs/adr/x.md": "x = 1\nURL = 'QUUXCORP.example'\n",
     })
 
     report = check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
 
     assert report.findings == (
-        Finding("agent-definitions/validator/tests/test_x.py", 2, "quuxcorp"),
+        Finding("agent-definitions/docs/adr/x.md", 2, "quuxcorp"),
     )
 
 
@@ -147,10 +147,10 @@ def test_a_kit_root_without_both_kit_directories_fails_loud(tmp_path, denylist):
 
 
 @pytest.mark.parametrize("rel", [
-    "agent-definitions/validator/agent_definitions/__pycache__/x.txt",
-    "agent-definitions/validator/.pytest_cache/README.md",
-    "agent-definitions/validator/build/lib/x.py",
-    "agent-definitions/validator/agent_definitions.egg-info/PKG-INFO",
+    "agent-definitions/agent_definitions/__pycache__/x.txt",
+    "agent-definitions/.pytest_cache/README.md",
+    "agent-definitions/build/lib/x.py",
+    "agent-definitions/agent_definitions.egg-info/PKG-INFO",
     "agent-delegation/.DS_Store",
 ])
 def test_files_that_a_build_or_the_os_generates_are_not_scanned(tmp_path, denylist, rel):

@@ -20,7 +20,8 @@ from .pages import HOW_TO, Block, follow, new_repo, outside_the_package, write_f
 from .support import ScriptedAdapter, git
 
 PAGE = HOW_TO / "watch-and-resume-a-run.md"
-VALIDATOR = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]  # the child imports `tests` from here and the package from src/
+SOURCE = ROOT / "src"
 
 FILES = {
     ticket: {f"test_{ticket}.py": f"import unittest\n\n\nclass T(unittest.TestCase):\n    def test_{ticket}(self):\n        self.assertTrue(True)\n"}
@@ -139,7 +140,7 @@ def test_the_page_resumes_a_run_that_was_killed_with_break_lock_and_a_resume_wit
     tmp_path, monkeypatch, git_identity, registered, capsys
 ):
     repo = a_repo(tmp_path)
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(VALIDATOR), os.environ.get("PYTHONPATH")]))}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(SOURCE), str(ROOT), os.environ.get("PYTHONPATH")]))}
     child = subprocess.run([sys.executable, "-c", KILL, str(repo)], cwd=repo, env=env, capture_output=True, text=True)
     assert child.returncode == -signal.SIGKILL, child.stderr
     run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name

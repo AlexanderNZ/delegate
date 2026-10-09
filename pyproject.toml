@@ -15,6 +15,7 @@ agent-definitions = "agent_definitions.cli:main"
 verifier-brief = "agent_definitions.brief:main"
 
 [tool.setuptools]
+package-dir = {"" = "src"}
 packages = ["agent_definitions"]
 
 [tool.setuptools.package-data]

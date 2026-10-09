@@ -28,7 +28,7 @@ This kit does not compete with mattpocock/skills. Its build skill, `implement-sp
 You need Python 3.11 or later, git, and a harness that the engine drives. Claude Code and OpenCode have adapters today. Nix is optional.
 
 ```bash
-uv tool install "git+https://github.com/AlexanderNZ/delegate#subdirectory=skills/agent-definitions/validator"
+uv tool install git+https://github.com/AlexanderNZ/delegate
 ```
 
 This puts three commands on your PATH: `delegate`, `agent-definitions` and `verifier-brief`. `delegate` is the umbrella command. Its subcommands `render`, `validate`, `bootstrap`, `brief full` and `brief fixup` take the same arguments as the standalone commands and give the same result.

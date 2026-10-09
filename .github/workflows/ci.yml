@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install the package and pytest
-        run: pip install ./skills/agent-definitions/validator pytest
+        run: pip install . pytest
 
       # The denylist is private, so it comes from a secret. A fork has no
       # secret: the variable stays unset, and the neutrality test skips with a
@@ -40,7 +40,6 @@ jobs:
           fi
 
       - name: Run the test suite
-        working-directory: skills/agent-definitions/validator
         run: python -m pytest -rs
 
   # The second gate. It builds the package and runs the suite inside the Nix

@@ -37,10 +37,10 @@ The push-pattern decision was recorded with no separate reason. The table under 
 
 - 2026-09-19: a review of the first OpenCode specialist map found the anchored compile of `git push*` and the missing `git -C` case. The second deny and the finding `SPECIALIST_CAN_PUSH` came in on the same day, with a test for each harness.
 - 2026-09-19: the source of OpenCode v1.18.31 was read: `packages/core/src/tool/bash.ts` passes the raw command to the permission check.
-- 2026-09-19: the test `test_the_two_harnesses_are_not_equal_on_compound_commands` in [`validator/tests/test_render.py`](../../validator/tests/test_render.py) runs the Claude Code hook and the OpenCode map on the three forms. The hook stops each one. The map allows each one.
+- 2026-09-19: the test `test_the_two_harnesses_are_not_equal_on_compound_commands` in [`tests/test_render.py`](../../../../tests/test_render.py) runs the Claude Code hook and the OpenCode map on the three forms. The hook stops each one. The map allows each one.
 - 2026-09-19: the Claude Code verifier got a `git -C <path> <read>` rule. The OpenCode verifier map stayed unchanged, because `git -C * diff*` also matches `git -C /x push; git diff`, and this decision forbids that widening.
 - 2026-10-08: the Claude Code specialist hook denied a `grep` command whose pattern held the words `git push`. No push was in the command.
-- 2026-10-08: the table below comes from `opencode_bash_action` in [`validator/agent_definitions/validate.py`](../../validator/agent_definitions/validate.py). That function models the rule order and the glob of OpenCode. It is a model, not a run of OpenCode.
+- 2026-10-08: the table below comes from `opencode_bash_action` in [`src/agent_definitions/validate.py`](../../../../src/agent_definitions/validate.py). That function models the rule order and the glob of OpenCode. It is a model, not a run of OpenCode.
 
 | Command | Current map | Current map plus `*git push*` | `*git push*` only |
 |---|---|---|---|

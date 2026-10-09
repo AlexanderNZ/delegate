@@ -4,16 +4,16 @@ This document holds the values that the `agent-delegation` skill asks each repos
 
 ## Domain and stacks
 
-The repository holds a harness-neutral delegation kit. It has one stack: a Python 3.11+ package (`skills/agent-definitions/validator/`) with a pytest suite, two skills as plain Markdown directories, and a Nix flake that is optional.
+The repository holds a harness-neutral delegation kit. It has one stack: a Python 3.11+ package (`src/agent_definitions/`) with a pytest suite in `tests/`, two skills as plain Markdown directories, and a Nix flake that is optional.
 
 ## Verification gates
 
 ```bash
-cd skills/agent-definitions/validator && nix develop -c python3 -m pytest -rs
+nix develop -c python3 -m pytest -rs
 nix flake check
 ```
 
-Without Nix, the same suite runs with `pip` and `pytest`: in `skills/agent-definitions/validator`, run `pip install . pytest` into a Python 3.11+ environment, then `python -m pytest -rs`.
+Without Nix, the same suite runs with `pip` and `pytest`: in the repository root, run `pip install . pytest` into a Python 3.11+ environment, then `python -m pytest -rs`.
 
 CI runs both gates on every push: the suite on Python 3.11 and 3.13, and `nix flake check` on Linux. The full suite takes a long time on a developer machine. An agent therefore runs the targeted test files of its change, and the coordinator takes the full result from CI before a merge to `main`. The docs site has its own gate: `uvx "zensical==$(cat .zensical-version)" build --strict` from the repository root.
 

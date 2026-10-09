@@ -13,6 +13,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - The prior art page has a "Built on" part (the ladder of Bassim Eledath and the planning skills of Matt Pocock, with what each gave) before an "Alongside" part. The page "Why each specialist has a verifier twin" is now "Why each specialist has its own verifier", and its old address redirects.
 - A "Future ideas" page: ideas to investigate, not promises, each with the idea, why it matters, and the open questions.
 
+### Changed
+
+- The package, its tests and `pyproject.toml` are now in the repository root, with the code in `src/`. The install command is `uv tool install git+https://github.com/AlexanderNZ/delegate`, with no `#subdirectory=` part. The three commands behave as before.
+
 ## [0.1.0] - 2026-10-09
 
 The first release.

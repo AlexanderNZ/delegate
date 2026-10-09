@@ -22,7 +22,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-DEFAULT_PYPROJECT: str = "skills/agent-definitions/validator/pyproject.toml"
+DEFAULT_PYPROJECT: str = "pyproject.toml"
 
 # A release tag is `v<major>.<minor>.<patch>` and nothing else.
 TAG: re.Pattern[str] = re.compile(r"v(\d+)\.(\d+)\.(\d+)")

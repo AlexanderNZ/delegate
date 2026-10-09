@@ -39,7 +39,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install the package and pytest
-        run: pip install ./skills/agent-definitions/validator pytest
+        run: pip install . pytest
 
       # The same denylist step as ci.yml, so the neutrality test runs before a release.
       - name: Write the neutrality denylist
@@ -56,7 +56,6 @@ jobs:
 
       # A red suite stops the job here: no commit, no tag, no release.
       - name: Run the test suite
-        working-directory: skills/agent-definitions/validator
         run: python -m pytest -rs
 
       - name: Work out the version

@@ -17,7 +17,7 @@ from agent_definitions.neutrality import KIT_ROOT_VAR
 
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal
 
-KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[3])
+KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[1] / "skills")
 SKILL = KIT_ROOT / "agent-delegation" / "SKILL.md"
 
 in_the_kit = pytest.mark.skipif(not SKILL.is_file(), reason="the protocol skill is outside the package source, as in a Nix build")

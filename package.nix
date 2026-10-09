@@ -7,8 +7,9 @@
 #
 # neutralityDenylist is the path of a private denylist file. With it, the
 # neutrality test scans the kit (agent-delegation/ and agent-definitions/)
-# for its terms. The build copies only this directory, so the kit comes in as
-# a second source. Without it, the neutrality test skips with a notice.
+# for its terms. The build copies only the package, its tests and its example
+# (not the skills or the docs), so the kit comes in as a second source.
+# Without it, the neutrality test skips with a notice.
 {
   lib,
   python3,
@@ -17,10 +18,23 @@
 }:
 let
   kit = lib.fileset.toSource {
-    root = ../..;
+    root = ./skills;
     fileset = lib.fileset.unions [
-      ../../agent-delegation
-      ../../agent-definitions
+      ./skills/agent-delegation
+      ./skills/agent-definitions
+    ];
+  };
+
+  # The package source: the files that the package and its tests read. The
+  # docs, the skills and the README stay out, so the tests that read them skip
+  # with a notice, as they did when this build copied only the package directory.
+  source = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./src
+      ./tests
+      ./examples/java-spring.toml
     ];
   };
 in
@@ -30,7 +44,7 @@ python3.pkgs.buildPythonApplication {
   version = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project.version;
   pyproject = true;
 
-  src = lib.cleanSource ./.;
+  src = source;
 
   build-system = [ python3.pkgs.setuptools ];
   dependencies = [ python3.pkgs.pyyaml ];

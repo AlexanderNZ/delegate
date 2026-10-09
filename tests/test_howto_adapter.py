@@ -19,7 +19,7 @@ from agent_definitions import adapters
 from .pages import HOW_TO, file_block, outside_the_package, write_files
 
 PAGE = HOW_TO / "add-a-harness-adapter.md"
-VALIDATOR = Path(__file__).resolve().parents[1]
+SOURCE = Path(__file__).resolve().parents[1] / "src"
 
 
 @outside_the_package
@@ -42,7 +42,7 @@ def test_the_example_adapter_passes_the_contract_test_of_the_page(tmp_path):
     project = tmp_path / "project"
     written = write_files(PAGE, project)
     assert {"myharness.py", "tests/test_myharness_adapter.py", "tests/fixtures/manifest.json"} <= set(written)
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(VALIDATOR), str(project), os.environ.get("PYTHONPATH")]))}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(SOURCE), str(project), os.environ.get("PYTHONPATH")]))}
 
     done = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"], cwd=project, env=env, capture_output=True, text=True

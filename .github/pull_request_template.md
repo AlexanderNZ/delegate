@@ -29,7 +29,7 @@ Ticket: #
 
 <!-- Run the gates before you open the pull request (`docs/agents/delegation.md`). Check only a gate that ran green. If a gate does not apply, say why. Without Nix, run the suite with pip and pytest: the document gives the steps. -->
 
-- [ ] `cd skills/agent-definitions/validator && nix develop -c python3 -m pytest -rs`: the suite is green
+- [ ] `nix develop -c python3 -m pytest -rs`: the suite is green
 - [ ] `nix flake check`: green
 - [ ] The neutrality check passes (if the change touches `skills/`)
 

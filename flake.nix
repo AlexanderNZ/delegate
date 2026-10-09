@@ -20,7 +20,7 @@
       packages = forAllSystems (
         pkgs:
         let
-          agent-definitions = pkgs.callPackage ./skills/agent-definitions/validator/package.nix { };
+          agent-definitions = pkgs.callPackage ./package.nix { };
         in
         {
           inherit agent-definitions;
@@ -35,7 +35,7 @@
       });
 
       # The shell runs the working copy, so an edit is live with no rebuild.
-      # The three commands are thin wrappers. The shellHook puts the validator
+      # The three commands are thin wrappers. The shellHook puts the src
       # directory of the working copy on PYTHONPATH.
       devShells = forAllSystems (
         pkgs:
@@ -64,8 +64,8 @@
             # The root comes from git, so the shell works in a subdirectory.
             shellHook = ''
               delegate_root=$(git rev-parse --show-toplevel 2>/dev/null)
-              if [ -d "$delegate_root/skills/agent-definitions/validator" ]; then
-                export PYTHONPATH="$delegate_root/skills/agent-definitions/validator''${PYTHONPATH:+:$PYTHONPATH}"
+              if [ -d "$delegate_root/src/agent_definitions" ]; then
+                export PYTHONPATH="$delegate_root/src''${PYTHONPATH:+:$PYTHONPATH}"
               else
                 echo "delegate dev shell: no delegate working copy here, PYTHONPATH is not set" >&2
               fi

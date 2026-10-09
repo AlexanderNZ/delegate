@@ -6,7 +6,7 @@
 
 ## Context
 
-`validator/agent_definitions/tiers.toml` maps each tier to a model for each harness. On Claude Code the spawn call sets the model, so a rendered file has no model. On OpenCode a rendered file names the model of its tier, because OpenCode sets nothing at spawn. OpenCode resolves a model through a provider. The default OpenCode column names `anthropic/` models.
+`src/agent_definitions/tiers.toml` maps each tier to a model for each harness. On Claude Code the spawn call sets the model, so a rendered file has no model. On OpenCode a rendered file names the model of its tier, because OpenCode sets nothing at spawn. OpenCode resolves a model through a provider. The default OpenCode column names `anthropic/` models.
 
 On 2026-09-19, `opencode models` on the machine of the first OpenCode rollout listed no `anthropic/` provider. Its only Claude models came through a company LLM gateway. A part of the machine configuration that belongs to one job set up that gateway as an OpenCode provider. Each rendered OpenCode agent file named a model that OpenCode could not resolve, so each OpenCode spawn of a pair failed. The gateway also served no model of one default family, so one tier needed an older model on that gateway.
 

@@ -1,7 +1,7 @@
 """The neutrality check: the kit holds no personal or company term.
 
 The kit is the two skill directories `agent-delegation/` and
-`agent-definitions/` (with its `validator/` package). The consumer keeps a
+`agent-definitions/`, in `skills/` of the repository. The consumer keeps a
 private denylist outside the kit and gives its path in AGENT_DEFINITIONS_DENYLIST.
 The check reads every file in the kit and reports each line that holds a
 denylisted term, unless the allowlist names that file and that term.
