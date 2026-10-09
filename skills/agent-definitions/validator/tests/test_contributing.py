@@ -8,6 +8,7 @@ copies only the package skips these cases with a reason.
 
 import contextlib
 import io
+import json
 import re
 
 import pytest
@@ -94,3 +95,37 @@ def test_the_regeneration_command_runs_and_finds_every_generated_section_current
         code = delegate.main([*regenerate[0].split()[1:], "--check"])
 
     assert (code, err.getvalue()) == (0, "")
+
+
+@outside_the_package
+def test_the_harness_fact_rule_names_the_version_and_the_date_and_the_manifest_keys_that_every_recording_holds():
+    text = section("Date every harness fact")
+    manifests = sorted((ROOT / "skills" / "agent-definitions" / "validator" / "tests" / "fixtures").glob("*/manifest.json"))
+
+    assert re.search(r"version.*date|date.*version", text, flags=re.DOTALL)
+    assert "`harness_version`" in text and "`recorded`" in text
+    assert manifests, "the repository must hold a recorded manifest for the rule to bind"
+    for manifest in manifests:
+        keys = json.loads(manifest.read_text())
+        assert keys["harness_version"] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", keys["recorded"]), manifest
+
+
+@outside_the_package
+def test_the_adapter_checklist_is_a_list_of_boxes_that_names_the_contract_test_and_the_live_smoke_run():
+    text = section("Add a harness adapter")
+    boxes = re.findall(r"^- \[ \] (.+)$", text, flags=re.MULTILINE)
+
+    assert len(boxes) >= 6
+    assert any("contract test" in box for box in boxes)
+    assert any("live smoke run" in box for box in boxes)
+    assert any("version" in box and "date" in box for box in boxes), "the smoke run box must ask for the version and the date"
+
+
+@outside_the_package
+def test_every_file_that_the_adapter_checklist_names_exists_in_the_repository():
+    text = section("Add a harness adapter")
+    paths = [token for token in re.findall(r"`([^`\s]+)`", text) if "/" in token]
+
+    assert paths, "the checklist must name the files that a contributor changes"
+    assert [path for path in paths if not (ROOT / path).exists()] == []
+    assert "docs/how-to/add-a-harness-adapter.md" in re.findall(r"\]\(([^)\s]+)\)", text)

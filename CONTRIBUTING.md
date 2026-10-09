@@ -35,3 +35,23 @@ delegate docs
 ```
 
 A test fails when a committed section differs from the code. See [the reference for `delegate docs`](docs/reference/docs.md).
+
+## Date every harness fact
+
+A harness changes from one release to the next. So each fact about a harness carries the version of the harness and the date that you measured it. A fact is a command, an option, an event of a stream, or an end state.
+
+- A reference page states the version and the date next to the facts. See [the `claude-code` adapter reference](docs/reference/claude-code-adapter.md) for an example.
+- Each set of recorded streams has a `manifest.json` in `skills/agent-definitions/validator/tests/fixtures/`. The manifest holds the `harness_version` and the `recorded` date of the streams. A test fails when a manifest has no version or no date.
+- Write the date as `YYYY-MM-DD`. Do not write a fact that you did not measure. When you cannot measure it, say so on the page.
+
+## Add a harness adapter
+
+Read [how to add a harness adapter](docs/how-to/add-a-harness-adapter.md) first. It shows the interface and an example. Then tick each box before you send the adapter:
+
+- [ ] Measure the headless command of the harness on a real machine. Record one stream for each end state, and a `manifest.json` with the version of the harness and the date.
+- [ ] Write the adapter module in `skills/agent-definitions/validator/agent_definitions/`, beside `claude_code.py` and `opencode.py`.
+- [ ] Write the contract test in `skills/agent-definitions/validator/tests/`. It replays each recorded stream through a stand-in command. It checks the fields of the result, the model and the agent on the command, and the error for a harness that writes no event.
+- [ ] Connect the adapter. Add a branch for its name in `get` in `skills/agent-definitions/validator/agent_definitions/adapters.py`. Add its name to `ADAPTERS` in `skills/agent-definitions/validator/agent_definitions/workflow.py`. Add a column to each tier in `skills/agent-definitions/validator/agent_definitions/tiers.toml`.
+- [ ] Write a test that runs `delegate run` with the stand-in. It must show that the model on the command is the model of the tier column of the adapter.
+- [ ] Do the live smoke run: run the adapter once against the real harness on a real machine. Write the version of the harness and the date of the run in the reference page.
+- [ ] Write the reference page of the adapter in `docs/reference/`. Link it from `README.md`. Run `delegate docs`.
