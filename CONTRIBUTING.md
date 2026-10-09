@@ -28,7 +28,7 @@ A test drives a public entry point, such as `main(argv)` or the adapter interfac
 
 ## Regenerate the docs
 
-Some sections of the reference pages are generated from the code. Do not edit the text between the `generated:begin` and `generated:end` markers. After you change a flag, an exit code, a guard command or a finding code, run this command from the root of the repository, and commit the pages that it changed:
+Some sections of the reference pages are generated from the code. Do not edit the text between the `generated:begin` and `generated:end` markers. After you change a flag, an exit code, a guard command or a finding code, run this command from the root of the repository. Then commit the pages that it changed:
 
 ```bash
 delegate docs

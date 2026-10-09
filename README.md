@@ -66,6 +66,10 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 - [Reference: `delegate docs`](docs/reference/docs.md): the command that writes the generated sections of these pages from the code. After a change to a flag, an exit code, a guard command or a finding code, run `delegate docs`; a test fails when a committed page differs from the code.
 - [The agent rules of this repository](docs/agents/delegation.md): the gates and the hotspots that bind every agent that works on the kit itself.
 
+## Contributing
+
+See [CONTRIBUTING](CONTRIBUTING.md) for the setup with `pip` and `pytest`, the test-first rule, the regeneration command, and the checklist for a new harness adapter.
+
 ## Generated files
 
 The files that the tool generates (rendered agents, context skills, delegation docs) belong to you. They need no copyright notice or licence notice from this project.

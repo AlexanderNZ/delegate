@@ -129,3 +129,39 @@ def test_every_file_that_the_adapter_checklist_names_exists_in_the_repository():
     assert paths, "the checklist must name the files that a contributor changes"
     assert [path for path in paths if not (ROOT / path).exists()] == []
     assert "docs/how-to/add-a-harness-adapter.md" in re.findall(r"\]\(([^)\s]+)\)", text)
+
+
+@outside_the_package
+def test_every_relative_link_of_contributing_reaches_a_file_and_a_heading():
+    broken = []
+    for target in re.findall(r"\]\(([^)\s]+)\)", CONTRIBUTING.read_text()):
+        if target.startswith(("http://", "https://", "mailto:")):
+            continue
+        path, _, anchor = target.partition("#")
+        file = ROOT / path
+        if not file.is_file():
+            broken.append(target)
+        elif anchor and anchor not in headings_anchors(file.read_text()):
+            broken.append(target)
+    assert broken == []
+
+
+@outside_the_package
+def test_the_prose_keeps_each_sentence_to_25_words_or_fewer():
+    prose = re.sub(r"^(`{3,}).*?^\1$", "", CONTRIBUTING.read_text(), flags=re.DOTALL | re.MULTILINE)
+    lines = [line for line in prose.splitlines() if line.strip() and not line.startswith(("#", "|", "<!--"))]
+    text = re.sub(r"`[^`]*`", "CODE", re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", " ".join(re.sub(r"^\s*(?:[-*]|\d+\.)\s+(?:\[ \]\s+)?", "", line) for line in lines)))  # an inline code span counts as one word
+    sentences = re.split(r"(?<=[.:?!])\s+", text)
+    assert [s for s in sentences if len(s.split()) > 25] == []
+
+
+@outside_the_package
+def test_the_readme_links_contributing():
+    links = re.findall(r"\]\(([^)\s]+)\)", (ROOT / "README.md").read_text())
+    assert "CONTRIBUTING.md" in links
+
+
+def headings_anchors(markdown: str) -> set[str]:
+    """The anchors of the headings of a page, as GitHub builds them."""
+    without_code = re.sub(r"^(`{3,}).*?^\1$", "", markdown, flags=re.DOTALL | re.MULTILINE)
+    return {re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-") for heading in re.findall(r"^#{1,6} (.+)$", without_code, flags=re.MULTILINE)}
