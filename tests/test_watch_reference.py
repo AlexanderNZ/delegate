@@ -27,5 +27,6 @@ def test_each_reason_to_exit_has_its_own_exit_code():
 
 
 @outside_the_package
-def test_the_readme_links_the_reference():
-    assert "docs/reference/status-and-watch.md" in (ROOT / "README.md").read_text()
+def test_the_site_navigation_lists_the_reference():
+    """The README links the site, not each page, so the navigation is where a reader finds this page."""
+    assert '"reference/status-and-watch.md"' in (ROOT / "zensical.toml").read_text()

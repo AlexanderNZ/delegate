@@ -14,11 +14,14 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - A "Future ideas" page: ideas to investigate, not promises, each with the idea, why it matters, and the open questions.
 - Every use of a glossary term on the site shows its definition on hover and links its glossary entry. `delegate docs` writes the lowercase and plural forms of each term, and `docs/javascripts/glossary.js`, a map from each form to its entry. On every page, the first use of each term is in bold and links the glossary, and a test holds this.
 - A reference page, "The layout of the repository": the place of each part, the groups of modules in the package, and the dependency rule.
+- A code of conduct (Contributor Covenant 2.1) and a security policy. Both take reports through the private reporting form of the repository.
+- CONTRIBUTING says what the Nix flake gives, which issue template to use for what, and where to report conduct and security problems.
 
 ### Changed
 
 - The package, its tests and `pyproject.toml` are now in the repository root, with the code in `src/`. The install command is `uv tool install git+https://github.com/AlexanderNZ/delegate`, with no `#subdirectory=` part. The three commands behave as before.
 - The ADRs are now in `docs/adr/`, and not inside the `agent-definitions` skill. A test fails on a link to an ADR that does not exist.
+- The README covers the repository side: a short description, a link to the docs site, the status of the project, the install, the layout, development, and contributing. The docs site holds the rest.
 
 ## [0.1.0] - 2026-10-09
 

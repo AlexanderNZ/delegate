@@ -217,6 +217,7 @@ def test_every_link_of_the_overview_reaches_a_page_and_a_heading_that_exist():
 
 
 @outside_the_package
-def test_the_readme_docs_map_starts_with_the_overview_and_then_the_glossary():
+def test_the_readme_sends_a_first_reader_to_the_overview_before_the_glossary():
     docs_map = README.read_text().split("\n## Docs\n", 1)[1].split("\n## ", 1)[0]
-    assert LINK.findall(docs_map)[:2] == ["docs/overview.md", "docs/glossary.md"]
+    links = [link for link in LINK.findall(docs_map) if link.startswith("docs/")]
+    assert links.index("docs/overview.md") < links.index("docs/glossary.md")

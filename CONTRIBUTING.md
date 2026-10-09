@@ -2,9 +2,11 @@
 
 This page tells you how to set up the repository, how to write a change, and how to send it. You need no Nix and no help from the maintainer.
 
+Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md). To report a vulnerability, follow [the security policy](SECURITY.md), not an issue.
+
 ## Set up
 
-You need Python 3.11 or later and git. The tests of the guards run the rendered hooks, and the hooks read their input with `python3`. Nix is optional. The repository has a flake for people who use Nix, and you can ignore it. If you use Nix with direnv, run `direnv allow` once, and the development shell loads in this directory.
+You need Python 3.11 or later and git. The tests of the guards run the rendered hooks, and the hooks read their input with `python3`. Nix is optional: see [Nix](#nix).
 
 Run these commands from the root of the repository, in a clean Python environment:
 
@@ -16,6 +18,15 @@ python -m pytest -rs
 These are the commands that CI runs, so a green run on your machine is a green run in CI. A test checks that this page and the CI file agree.
 
 One test checks the tree against a private list of terms. The list is not in the repository. Without it, that test skips with a notice, and the rest of the suite runs. You do not need the list.
+
+### Nix
+
+The repository has a Nix flake for people who use Nix. Nothing needs it: the setup above, CI's test jobs and every command of the kit run without it. The flake gives four things:
+
+- **A development shell.** `nix develop` gives the pinned Python with the test dependencies, and sets `PYTHONPATH` to `src`. With direnv, run `direnv allow` once, and the shell loads in this directory.
+- **The package.** `nix build` builds the three commands. `package.nix` reads the version from `pyproject.toml`.
+- **A check.** `nix flake check` builds the package and runs the test suite inside the build. The build holds only the package, its tests and `pyproject.toml`, so the tests of the docs skip there. CI runs this check on Linux.
+- **The skills.** `lib.skills` gives the paths of the two skills, for a Nix configuration that installs them.
 
 ## Find your way around
 
@@ -80,7 +91,17 @@ Read [how to add a harness adapter](docs/how-to/add-a-harness-adapter.md) first.
 - [ ] Connect the adapter. Add a branch for its name in `get` in `src/delegate/adapters.py`. Add its name to `ADAPTERS` in `src/delegate/workflow.py`. Add a column to each tier in `src/delegate/tiers.toml`.
 - [ ] Write a test that runs `delegate run` with the stand-in. It must show that the model on the command is the model of the tier column of the adapter.
 - [ ] Do the live smoke run: run the adapter once against the real harness on a real machine. Write the version of the harness and the date of the run in the reference page.
-- [ ] Write the reference page of the adapter in `docs/reference/`. Link it from `README.md`. Run `delegate docs`.
+- [ ] Write the reference page of the adapter in `docs/reference/`, and add it to the `nav` of `zensical.toml`. Run `delegate docs`.
+
+## Open an issue
+
+Each issue starts from a template, and each template has one job:
+
+- **Bug**: the behaviour disagrees with the docs, a reference page, or the intent of the user. Say what you ran, what you saw, and what you expected.
+- **Task**: work with a decided design, such as a feature, a refactor, or a fix with a known shape.
+- **Decision**: a question that the maintainer must decide before anyone builds, such as scope, a design direction, or a rule of the protocol.
+
+A question that fits none of them is welcome as a blank issue.
 
 ## Send a change
 
