@@ -31,8 +31,8 @@ The modules of `src/delegate/` fall into six groups. Each group does one job.
 | Definitions | `declaration.py`, `render.py`, `validate.py`, `bootstrap.py`, `templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
 | Briefs | `brief.py` | Build a [**verifier**](../glossary.md#verifier) brief from the [**ticket**](../glossary.md#ticket), the diff and the [**gates**](../glossary.md#gate), and never from the [**report**](../glossary.md#report). |
 | Run | `run.py`, `workflow.py`, `engine.py`, `guards.py`, `journal.py`, `lock.py`, `reports.py`, `runs.py`, `tiers.py`, `tiers.toml`, `status.py`, `watch.py` | Check a [**workflow**](../glossary.md#workflow), build its tickets, hold the guards, write the [**journal**](../glossary.md#journal), and report the state of a [**run**](../glossary.md#run). |
-| [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py` | Implement the harness port. Each one drives one harness through its [**headless**](../glossary.md#headless) command line. The package also holds the registry of adapters by name. |
-| Ports | `ports/harness.py` | The interface that the [**engine**](../glossary.md#engine) drives to run one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. |
+| [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py`, `adapters/git.py` | Implement the ports. Each harness adapter drives one harness through its [**headless**](../glossary.md#headless) command line. The git backend implements the version-control port. The package also holds the registry of harness adapters by name. |
+| Ports | `ports/harness.py`, `ports/vcs.py` | The interfaces that the [**engine**](../glossary.md#engine) drives. The harness port runs one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. The version-control port keeps the work of a run: the branches, the commits, the [**worktrees**](../glossary.md#worktree), the rebase, and the [**verifier copy**](../glossary.md#verifier-copy). |
 | Commands and checks | `delegate.py`, `cli.py`, `reference.py`, `neutrality.py` | The command-line entry points, the generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). |
 
 ## The dependency rule
@@ -59,6 +59,24 @@ Five rules follow, and `tests/test_architecture.py` holds them:
 A layer is a subpackage of `src/delegate/`. Today `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test names the two flat modules of the Run context that it checks already, `engine.py` and `workflow.py`. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
 The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter.
+
+## The version-control port
+
+The engine runs git in about thirty places today. Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The engine does not use them yet: a later step moves each git call of the engine behind the port, one at a time.
+
+The port speaks the language of the domain. It names no git command and no flag, and a test checks that. Each operation has a test in `tests/test_vcs_git.py`, which runs the git backend on a real temporary repository and calls the port only.
+
+| Operation | What it does |
+| --- | --- |
+| `repository_root`, `shared_data_directory` | Find the top of the checkout, and the directory that the checkout and all its worktrees share, where the engine keeps its state. |
+| `branch_exists`, `create_branch`, `branch_tip` | Look for a branch, make the [**run branch**](../glossary.md#run-branch) or a ticket branch, and read its newest commit. |
+| `commit_of`, `head_commit`, `commits_since` | Name a commit, and list the commits that a branch holds beyond another. |
+| `ensure_worktree`, `remove_worktree` | Make the [**worktree**](../glossary.md#worktree) of a ticket, or reuse one that a killed run left, and remove it. |
+| `rebase_onto` | Put the commits of a ticket branch on top of the run branch. A conflict or a refusal gives a result, and the worktree keeps the state from before. |
+| `is_ancestor`, `fast_forward_branch` | Ask whether a commit holds another, and move the run branch to a verified commit by fast-forward only. |
+| `make_verifier_copy`, `stop_file_watcher` | Make the [**verifier copy**](../glossary.md#verifier-copy), and stop the background watcher of the file system before a directory goes. |
+
+The git backend keeps one rule for every worktree and every copy that it makes: `core.fsmonitor` is off. With the setting on, git starts a daemon for each repository it touches, and the daemon outlives its directory. A worktree gets the setting in its own configuration, and a copy gets it in its own repository, so the configuration of the user and of the main checkout stays as it was.
 
 ## Where to change what
 

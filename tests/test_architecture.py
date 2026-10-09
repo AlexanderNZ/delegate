@@ -147,11 +147,17 @@ def test_an_outer_layer_may_import_inward(tmp_path):
     assert violations(copy) == []
 
 
-def test_the_harness_port_and_the_adapters_are_inside_the_layers_that_the_rule_covers():
+def test_the_ports_and_the_adapters_are_inside_the_layers_that_the_rule_covers():
     covered = {
         ".".join(path.relative_to(PACKAGE.parent).with_suffix("").parts)
         for layer in ("ports", "adapters")
         for path in (PACKAGE / layer).rglob("*.py")
     }
 
-    assert {"delegate.ports.harness", "delegate.adapters.claude_code", "delegate.adapters.opencode"} <= covered
+    assert {
+        "delegate.ports.harness",
+        "delegate.ports.vcs",
+        "delegate.adapters.claude_code",
+        "delegate.adapters.opencode",
+        "delegate.adapters.git",
+    } <= covered
