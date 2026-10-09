@@ -4,6 +4,10 @@
 [project]
 site_name = "delegate"
 site_description = "A delegation kit: a coordinator, a specialist and a blind verifier, with a workflow engine that builds tickets through a coding-agent harness."
+# The GitHub Pages address. The sitemap and the canonical link of each page use it.
+site_url = "https://alexandernz.github.io/delegate/"
+repo_url = "https://github.com/AlexanderNZ/delegate"
+repo_name = "AlexanderNZ/delegate"
 docs_dir = "docs"
 site_dir = "site"
 
