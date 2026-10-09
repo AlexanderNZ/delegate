@@ -399,6 +399,26 @@ def _specialist_done(prior: list[dict[str, object]]) -> bool:
     return valid > spawned
 
 
+# The limit, in seconds, for the command that stops the fsmonitor daemon of a directory.
+_FSMONITOR_STOP_TIMEOUT: int = 30
+
+
+def _stop_fsmonitor(path: Path) -> None:
+    """Stop the fsmonitor daemon of the repository at `path`, before the directory goes.
+
+    A daemon outlives its directory. Git exits with an error when no daemon
+    runs, or when the directory is not a repository, and both are fine here. A
+    failure to stop never fails the run: this is a clean-up, and it is quiet.
+    """
+    try:
+        subprocess.run(
+            ["git", "-C", str(path), "fsmonitor--daemon", "stop"],
+            capture_output=True, text=True, timeout=_FSMONITOR_STOP_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _rebase_in_progress(worktree: Path) -> bool:
     """Tell whether a rebase is in progress in the worktree. `git rebase --abort` fails when none is."""
     return any(
@@ -408,6 +428,9 @@ def _rebase_in_progress(worktree: Path) -> bool:
 
 def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
     """Make the worktree of a ticket, or reuse the one that is there, and install the push guard in it.
+
+    The worktree gets `core.fsmonitor=false` in its own configuration, so that no
+    fsmonitor daemon starts for it, whatever the global setting of the user is.
 
     A worktree that a killed run left is reused as it is, except that a rebase
     which the kill stopped is aborted. A branch without a worktree gets a new
@@ -422,11 +445,13 @@ def _prepare_worktree(repo: Path, worktree: Path, branch: str, base: str, hooks_
     else:
         _git(repo, "worktree", "prune")
         if _branch_exists(repo, branch):
-            _git(repo, "worktree", "add", "-q", str(worktree), branch)
+            _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", str(worktree), branch)
         else:
-            _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), base)
+            _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", "-b", branch, str(worktree), base)
     try:
         install_push_guard(repo, worktree, hooks_dir)
+        # The guard has set `extensions.worktreeConfig`, so this reaches only this worktree.
+        _git(worktree, "config", "--worktree", "core.fsmonitor", "false")
     except GuardError as error:
         raise EngineError(str(error)) from None
 
@@ -606,13 +631,15 @@ def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
     """Make a self-contained clone at `copy` that holds the base and the branch, with the branch checked out.
 
     The clone has its own git directory and no remote, so the verifier can break
-    it, and cannot reach the real repository through it.
+    it, and cannot reach the real repository through it. The clone sets
+    `core.fsmonitor=false` in its own configuration, so that no fsmonitor daemon
+    starts for it, whatever the global setting of the user is.
 
     The clone starts on the branch that the HEAD of the repository names, and
     that branch can be the run branch. So the clone checks out the ticket branch
     first, which frees the other names, and then sets the base branch by force.
     """
-    _git(repo, "clone", "-q", "--no-checkout", str(repo), str(copy))
+    _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy))
     _git(copy, "checkout", "-q", "-B", branch, f"origin/{branch}")
     _git(copy, "branch", "-f", base, f"origin/{base}")
     _git(copy, "remote", "remove", "origin")
@@ -852,6 +879,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             if entry != copy:
                 shutil.move(str(entry), evidence / entry.name)
     finally:
+        _stop_fsmonitor(scratch / "copy")
         shutil.rmtree(scratch, ignore_errors=True)
     report_path = evidence / report_path.name
     stream = result.event_stream
