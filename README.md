@@ -1,7 +1,7 @@
 # delegate
 
-[![CI](https://github.com/AlexanderNZ/delegate/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexanderNZ/delegate/actions/workflows/ci.yml)
-[![Docs](https://github.com/AlexanderNZ/delegate/actions/workflows/docs.yml/badge.svg)](https://alexandernz.github.io/delegate/)
+[![CI](https://github.com/AlexanderNZ/delegate/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/AlexanderNZ/delegate/actions/workflows/ci.yml)
+[![Docs](https://github.com/AlexanderNZ/delegate/actions/workflows/docs.yml/badge.svg?branch=main&event=push)](https://alexandernz.github.io/delegate/)
 
 `delegate` is a kit for delegating implementation work to coding agents. Every agent gets the same team contract, whatever model runs it: a role, the context for that role, the tools it may use, a definition of done, and an independent check. The engine runs the gates itself, and a blind verifier checks each change before it reaches the run branch. So the choice of model changes one thing only: how good the code is.
 
