@@ -12,6 +12,10 @@ The rule, in words:
 * The engine and the workflow reader are flat modules of the run context. They
   never import `adapters`. The command-line driver is the composition point: it
   picks the adapter and hands it to the engine.
+* The run context never runs git. It keeps the work of a run through the
+  version-control port, and only the git backend in `adapters` runs the
+  command. A call to `subprocess` that names git breaks the rule. A call to
+  `subprocess` for something else, such as a gate command, does not.
 
 The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
@@ -46,6 +50,12 @@ FLAT_FORBIDDEN = {
     "engine": {"adapters", "cli"},
     "workflow": {"adapters", "cli"},
 }
+
+
+# The files of the run context that never run git: these flat modules, until a later ticket moves them,
+# and every file of these layers.
+GIT_FREE_FLAT = {"engine", "workflow"}
+GIT_FREE_LAYERS = {"run"}
 
 
 def layer_of(parts: tuple[str, ...]) -> str | None:
@@ -84,6 +94,47 @@ def violations(package_dir: Path) -> list[str]:
             for target in targets(node, package, name):
                 if len(target) > 1 and target[0] == name and target[1] in rules:
                     found.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}: {layer} imports {target[1]}")
+    return sorted(set(found))
+
+
+def _subprocess_names(tree: ast.AST) -> tuple[set[str], set[str]]:
+    """The names under which a file reaches `subprocess`: the module aliases, and the functions imported from it."""
+    modules: set[str] = set()
+    functions: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "subprocess"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess" and not node.level:
+            functions |= {alias.asname or alias.name for alias in node.names}
+    return modules, functions
+
+
+def _names_git(node: ast.AST) -> bool:
+    """Tell whether an argument of a call holds the word `git` as a command: `"git"`, or a string that starts with `git `."""
+    return any(
+        isinstance(part, ast.Constant) and isinstance(part.value, str) and (part.value == "git" or part.value.startswith("git "))
+        for part in ast.walk(node)
+    )
+
+
+def git_calls(package_dir: Path) -> list[str]:
+    """Every call to `subprocess` that names git in a file of the run context, as `file:line: run context runs git`."""
+    found = []
+    for path in sorted(package_dir.rglob("*.py")):
+        parts = path.relative_to(package_dir.parent).with_suffix("").parts
+        if not (layer_of(parts) in GIT_FREE_LAYERS or (len(parts) == 2 and parts[-1] in GIT_FREE_FLAT)):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        modules, functions = _subprocess_names(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            reaches = (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules) or (
+                isinstance(func, ast.Name) and func.id in functions
+            )
+            if reaches and any(_names_git(argument) for argument in [*node.args, *(k.value for k in node.keywords)]):
+                found.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}: run context runs git")
     return sorted(set(found))
 
 
@@ -161,3 +212,41 @@ def test_the_ports_and_the_adapters_are_inside_the_layers_that_the_rule_covers()
         "delegate.adapters.opencode",
         "delegate.adapters.git",
     } <= covered
+
+
+def test_the_run_context_runs_no_git():
+    assert git_calls(PACKAGE) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "source"),
+    [
+        ("engine.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "status"])\n'),
+        ("engine.py", 'import subprocess as sp\nsp.check_output(["git", "log"])\n'),
+        ("engine.py", 'from subprocess import run\nrun(["git", "log"])\n'),
+        ("engine.py", 'import subprocess\nsubprocess.run(["bash", "-c", "git push"], cwd=".")\n'),
+        ("workflow.py", 'import subprocess\nsubprocess.run(args=["git", "gc"])\n'),
+        ("run/bad.py", 'import subprocess\ndef late():\n    subprocess.Popen(["git", "fetch"])\n'),
+    ],
+)
+def test_a_planted_git_call_fails_the_rule(tmp_path, where, source):
+    copy = planted_copy(tmp_path, where, source)
+
+    found = git_calls(copy)
+
+    assert len(found) == 1
+    assert found[0].startswith(f"delegate/{where}:")
+    assert found[0].endswith("run context runs git")
+
+
+def test_a_gate_command_through_subprocess_passes_the_git_rule(tmp_path):
+    source = 'import subprocess\nsubprocess.run(["bash", "-c", "python -m pytest"], cwd=".")\n'
+    copy = planted_copy(tmp_path, "engine.py", source)
+
+    assert git_calls(copy) == []
+
+
+def test_the_adapters_may_run_git(tmp_path):
+    copy = planted_copy(tmp_path, "adapters/fine.py", 'import subprocess\nsubprocess.run(["git", "status"])\n')
+
+    assert git_calls(copy) == []

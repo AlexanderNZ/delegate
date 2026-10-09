@@ -1,4 +1,4 @@
-"""The engine sets up a run through the version-control port.
+"""The engine keeps the work of a run through the version-control port.
 
 The engine takes the port from its caller, as it takes the harness adapter. Each
 case hands `run_workflow` a spy around the real git backend, on a real temporary
@@ -88,3 +88,48 @@ def test_a_port_that_cannot_make_the_run_branch_stops_the_run_with_an_engine_err
 
     assert not any(name == "ensure_worktree" for name, _ in vcs.calls)
     assert git(repo, "worktree", "list").strip().count("\n") == 0
+
+
+def names(vcs):
+    return {name for name, _ in vcs.calls}
+
+
+def test_the_rebase_the_commit_ranges_the_verifier_copy_and_the_run_branch_move_come_from_the_port(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path)
+    vcs = SpyVcs()
+
+    result = start_run(repo, vcs, scripted_adapter)
+
+    assert result.ok
+    assert {"rebase_onto", "commits_since", "make_verifier_copy", "stop_file_watcher", "fast_forward_branch"} <= names(vcs)
+    (rebase,) = [args for name, args in vcs.calls if name == "rebase_onto"]
+    assert rebase[1] == "run/demo"
+    (copy,) = [args for name, args in vcs.calls if name == "make_verifier_copy"]
+    assert copy[2:] == ("run/demo-a", "run/demo")
+    assert not copy[1].exists()
+    assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-a").strip()
+
+
+def test_a_port_that_cannot_rebase_fails_the_ticket_and_leaves_the_run_branch_where_it_was(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path)
+    before = git(repo, "rev-parse", "main").strip()
+    vcs = SpyVcs(refuse="rebase_onto")
+
+    result = start_run(repo, vcs, scripted_adapter)
+
+    assert result.failed == ["a"]
+    assert "rebase_onto refused by the test" in result.failures["a"]
+    assert git(repo, "rev-parse", "run/demo").strip() == before
+
+
+def test_a_port_that_cannot_make_the_verifier_copy_fails_the_ticket_before_a_verifier_runs(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path)
+    before = git(repo, "rev-parse", "main").strip()
+    vcs = SpyVcs(refuse="make_verifier_copy")
+
+    result = start_run(repo, vcs, scripted_adapter)
+
+    assert result.failed == ["a"]
+    assert "the verifier could not start: make_verifier_copy refused by the test" in result.failures["a"]
+    assert scripted_adapter.verifier_calls == []
+    assert git(repo, "rev-parse", "run/demo").strip() == before

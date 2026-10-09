@@ -50,7 +50,8 @@ only closes it. Any other open step restarts in its own worktree, which the
 engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again.
 
-Standard library and git through subprocess only.
+Standard library only. The engine runs no git command: the version-control port
+keeps the work of a run, and it runs gate commands through `subprocess`.
 """
 
 from __future__ import annotations
@@ -77,7 +78,7 @@ from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .ports import harness
 from .ports.harness import Adapter, AdapterRequest
-from .ports.vcs import VcsError, VersionControl
+from .ports.vcs import REBASED, VcsError, VersionControl
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
 from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -144,13 +145,6 @@ class RunResult:
         return not self.failed
 
 
-def _git(repo: Path, *args: str) -> str:
-    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise EngineError(f"git {' '.join(args)} failed: {r.stderr.strip() or r.returncode}")
-    return r.stdout.strip()
-
-
 def _new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
 
@@ -174,6 +168,32 @@ def _vcs_errors() -> Iterator[None]:
         yield
     except VcsError as error:
         raise EngineError(str(error)) from None
+
+
+def _tip(vcs: VersionControl, repo: Path, branch: str) -> str:
+    """The id of the newest commit of the branch. Raise EngineError when there is no such branch."""
+    with _vcs_errors():
+        return vcs.branch_tip(repo, branch)
+
+
+def _head(vcs: VersionControl, worktree: Path) -> str:
+    """The id of the commit that the worktree has checked out."""
+    with _vcs_errors():
+        return vcs.head_commit(worktree)
+
+
+def _commit_lines(vcs: VersionControl, path: Path, since: str, until: str | None = None) -> list[str]:
+    """The commits beyond `since`, newest first, each as `<id> <subject>`. `until` is the checkout of `path` when it is None."""
+    with _vcs_errors():
+        return [f"{commit.id} {commit.subject}" for commit in vcs.commits_since(path, since, until)]
+
+
+def _holds(vcs: VersionControl, repo: Path, ancestor: str, descendant: str) -> bool:
+    """Tell whether `descendant` holds the commit `ancestor`. A name that is no commit does not hold anything."""
+    try:
+        return vcs.is_ancestor(repo, ancestor, descendant)
+    except VcsError:
+        return False
 
 
 def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
@@ -380,7 +400,7 @@ def _execute(
             built.append(ticket.id)
     unmapped: list[str] = []
     if workflow.mode == "economy" and built and not ended_early:
-        chain = _ChainRun(workflow, order, adapter, roles, repo, state_dir, run_id, journal, built, failed, failures)
+        chain = _ChainRun(workflow, order, adapter, vcs, roles, repo, state_dir, run_id, journal, built, failed, failures)
         unmapped = chain.verify()
     journal.append(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
@@ -412,33 +432,6 @@ def _specialist_done(prior: list[dict[str, object]]) -> bool:
         elif event["event"] == "report-validation" and event["valid"]:
             valid = index
     return valid > spawned
-
-
-# The limit, in seconds, for the command that stops the fsmonitor daemon of a directory.
-_FSMONITOR_STOP_TIMEOUT: int = 30
-
-
-def _stop_fsmonitor(path: Path) -> None:
-    """Stop the fsmonitor daemon of the repository at `path`, before the directory goes.
-
-    A daemon outlives its directory. Git exits with an error when no daemon
-    runs, or when the directory is not a repository, and both are fine here. A
-    failure to stop never fails the run: this is a clean-up, and it is quiet.
-    """
-    try:
-        subprocess.run(
-            ["git", "-C", str(path), "fsmonitor--daemon", "stop"],
-            capture_output=True, text=True, timeout=_FSMONITOR_STOP_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        pass
-
-
-def _rebase_in_progress(worktree: Path) -> bool:
-    """Tell whether a rebase is in progress in the worktree. `git rebase --abort` fails when none is."""
-    return any(
-        (worktree / _git(worktree, "rev-parse", "--git-path", name)).exists() for name in ("rebase-merge", "rebase-apply")
-    )
 
 
 def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
@@ -495,10 +488,7 @@ def _build_ticket(
         if advances:
             # The run branch holds the commit already. Only the step-end is missing.
             landed = str(advances[-1]["to_commit"])
-            if subprocess.run(
-                ["git", "-C", str(repo), "merge-base", "--is-ancestor", landed, f"refs/heads/{workflow.run_branch}"],
-                capture_output=True,
-            ).returncode != 0:
+            if not _holds(vcs, repo, landed, f"refs/heads/{workflow.run_branch}"):
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
@@ -510,21 +500,21 @@ def _build_ticket(
     # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
     since = base_commit if workflow.mode == "economy" else workflow.base_branch
     reason = _build_with_continuations(
-        workflow, ticket, adapter, model, repo, worktree, branch, report_path, journal, since,
+        workflow, ticket, adapter, vcs, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
     )
     if reason:
         return reason
     if workflow.mode == "assure":
-        step = _Step(workflow, ticket, adapter, roles, repo, state_dir, run_id, journal)
+        step = _Step(workflow, ticket, adapter, vcs, roles, repo, state_dir, run_id, journal)
         reason = _rebase_onto_run_branch(step)
         return reason if reason else _verify_ticket(step, verify_rounds)
     return None
 
 
 def _build_with_continuations(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, model: str, repo: Path, worktree: Path, branch: str,
-    report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, model: str, repo: Path, worktree: Path,
+    branch: str, report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
 
@@ -547,7 +537,7 @@ def _build_with_continuations(
     limit = CONTINUATION_LIMIT[workflow.mode]
     prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
     if interrupted and not spawned:
-        so_far = _git(worktree, "log", "--format=%H %s", f"{since}..HEAD").splitlines()
+        so_far = _commit_lines(vcs, worktree, since)
         if so_far:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
@@ -583,7 +573,7 @@ def _build_with_continuations(
             if report.status != "committed":
                 detail = f": {report.blocked_reason}" if report.blocked_reason else ""
                 return f"the specialist reported status {report.status!r}{detail}"
-            if _git(repo, "rev-list", "--count", f"{since}..{branch}") == "0":
+            if not _commit_lines(vcs, repo, since, branch):
                 return f"branch {branch} holds no commit beyond {since}, though the report says committed"
             stop = _hotspot_stop(journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
             if stop:
@@ -601,7 +591,7 @@ def _build_with_continuations(
         continuations += 1
         # A harness that gave no session id cannot resume, so a new agent continues.
         resume_session = result.session_id if result is not None and adapter.supports_resume else None
-        commits = _git(worktree, "log", "--format=%H %s", f"{since}..HEAD").splitlines()
+        commits = _commit_lines(vcs, worktree, since)
         journal.append(
             "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
@@ -631,24 +621,6 @@ def _hotspot_stop(
     return "hotspot finding: " + "; ".join(f"{m.path} matches the hotspot {m.pattern!r}" for m in matches)
 
 
-def _prepare_copy(repo: Path, base: str, branch: str, copy: Path) -> None:
-    """Make a self-contained clone at `copy` that holds the base and the branch, with the branch checked out.
-
-    The clone has its own git directory and no remote, so the verifier can break
-    it, and cannot reach the real repository through it. The clone sets
-    `core.fsmonitor=false` in its own configuration, so that no fsmonitor daemon
-    starts for it, whatever the global setting of the user is.
-
-    The clone starts on the branch that the HEAD of the repository names, and
-    that branch can be the run branch. So the clone checks out the ticket branch
-    first, which frees the other names, and then sets the base branch by force.
-    """
-    _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy))
-    _git(copy, "checkout", "-q", "-B", branch, f"origin/{branch}")
-    _git(copy, "branch", "-f", base, f"origin/{base}")
-    _git(copy, "remote", "remove", "origin")
-
-
 @dataclass(frozen=True)
 class _Step:
     """The state that the verifier step and the fix-up rounds of one ticket share."""
@@ -656,6 +628,7 @@ class _Step:
     workflow: Workflow
     ticket: Ticket
     adapter: Adapter
+    vcs: VersionControl
     roles: dict[str, tuple[str, str]]
     repo: Path
     state_dir: Path
@@ -700,25 +673,24 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     start, or one that ended with a failed hook, leaves nothing to abort.
     """
     ticket, run_branch = step.ticket, step.workflow.run_branch
-    onto = _git(step.repo, "rev-parse", f"refs/heads/{run_branch}")
-    before = _git(step.worktree, "rev-parse", "HEAD")
-    rebase = subprocess.run(["git", "-C", str(step.worktree), "rebase", run_branch], capture_output=True, text=True)
-    if rebase.returncode != 0:
-        files = _git(step.worktree, "diff", "--name-only", "--diff-filter=U").splitlines()
-        if _rebase_in_progress(step.worktree):
-            _git(step.worktree, "rebase", "--abort")
+    onto = _tip(step.vcs, step.repo, run_branch)
+    before = _head(step.vcs, step.worktree)
+    with _vcs_errors():
+        rebase = step.vcs.rebase_onto(step.worktree, run_branch)
+    if rebase.status != REBASED:
+        files = list(rebase.conflicts)
         step.journal.append(
             "rebase", ticket=ticket.id, result="conflict" if files else "failed", onto_commit=onto,
             from_commit=before, to_commit=None, files=files,
         )
         if files:
             return f"rebase onto {run_branch} stopped with a conflict in {', '.join(files)}"
-        return f"rebase onto {run_branch} failed: {rebase.stderr.strip() or rebase.returncode}"
-    after = _git(step.worktree, "rev-parse", "HEAD")
+        return f"rebase onto {run_branch} failed: {rebase.detail}"
+    after = _head(step.vcs, step.worktree)
     step.journal.append(
         "rebase", ticket=ticket.id, result="rebased", onto_commit=onto, from_commit=before, to_commit=after, files=[]
     )
-    if _git(step.repo, "rev-list", "--count", f"{run_branch}..{step.branch}") == "0":
+    if not _commit_lines(step.vcs, step.repo, run_branch, step.branch):
         return (
             f"branch {step.branch} holds no commit beyond {run_branch} after the rebase; "
             f"{run_branch} holds its work already"
@@ -760,7 +732,7 @@ def _accepted_commit(step: _Step, first_round: int = 0) -> str:
         fixup_body = None
         if report is not None:
             fixup_body = _fixup_round(step, round_number, rejected, report.findings)
-        verified = _git(step.repo, "rev-parse", f"refs/heads/{step.branch}")
+        verified = _tip(step.vcs, step.repo, step.branch)
         report = _verify_round(step, round_number, fixup_body)
         if report.verdict == "ACCEPT":
             return verified
@@ -843,7 +815,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
     ticket = step.ticket
     tier, model = step.roles["verifier"]
     mode = "full" if fixup_body is None else "fix-up"
-    verified = _git(step.repo, "rev-parse", f"refs/heads/{step.branch}")
+    verified = _tip(step.vcs, step.repo, step.branch)
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
@@ -852,7 +824,8 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
         copy = scratch / "copy"
         report_path = scratch / "verdict.json"
         try:
-            _prepare_copy(step.repo, step.workflow.run_branch, step.branch, copy)
+            with _vcs_errors():
+                step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = chain_brief(copy, step.segments, step.stack.gates) if fixup_body is None else fixup_body + finding_labels_section()
@@ -883,7 +856,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             if entry != copy:
                 shutil.move(str(entry), evidence / entry.name)
     finally:
-        _stop_fsmonitor(scratch / "copy")
+        step.vcs.stop_file_watcher(scratch / "copy")
         shutil.rmtree(scratch, ignore_errors=True)
     report_path = evidence / report_path.name
     stream = result.event_stream
@@ -928,15 +901,14 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     Return None when it moved, or the reason the step fails.
     """
     run_branch = step.workflow.run_branch
-    run_tip = _git(step.repo, "rev-parse", f"refs/heads/{run_branch}")
-    if subprocess.run(
-        ["git", "-C", str(step.repo), "merge-base", "--is-ancestor", run_tip, verified], capture_output=True
-    ).returncode != 0:
+    run_tip = _tip(step.vcs, step.repo, run_branch)
+    with _vcs_errors():
+        moved = step.vcs.fast_forward_branch(step.repo, run_branch, verified)
+    if not moved:
         return (
             f"run branch {run_branch} cannot fast-forward to {step.branch}: "
             f"it holds a commit that {step.branch} does not hold"
         )
-    _git(step.repo, "update-ref", f"refs/heads/{run_branch}", verified, run_tip)
     step.journal.append(
         "run-branch-advance", ticket=step.ticket.id, run_branch=run_branch, from_commit=run_tip, to_commit=verified
     )
@@ -966,10 +938,10 @@ class _ChainRun:
     """
 
     def __init__(
-        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, roles: dict[str, tuple[str, str]], repo: Path,
+        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]], repo: Path,
         state_dir: Path, run_id: str, journal: Journal, built: list[str], failed: list[str], failures: dict[str, str],
     ) -> None:
-        self.workflow, self.adapter, self.roles, self.repo = workflow, adapter, roles, repo
+        self.workflow, self.adapter, self.vcs, self.roles, self.repo = workflow, adapter, vcs, roles, repo
         self.state_dir, self.run_id, self.journal = state_dir, run_id, journal
         self.chain = [ticket for ticket in order if ticket.id in built]
         self.built, self.failed, self.failures = built, failed, failures
@@ -998,7 +970,7 @@ class _ChainRun:
         segments: dict[str, ChainSegment] = {}
         for ticket in self.chain:
             base = [str(e["base_commit"]) for e in events if e["event"] == "step-start" and e["ticket"] == ticket.id][-1]
-            tip = _git(self.repo, "rev-parse", f"refs/heads/{_ticket_branch(self.workflow, ticket)}")
+            tip = _tip(self.vcs, self.repo, _ticket_branch(self.workflow, ticket))
             segments[ticket.id] = ChainSegment(ticket.id, ticket.text, base, tip)
         return segments
 
@@ -1014,7 +986,7 @@ class _ChainRun:
             tickets = [ticket for ticket in self.chain if ticket.stack == name]
             verdicts = [e["verdict"] for e in events if e["event"] == "verdict" and e.get("stack") == name]
             step = _Step(
-                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.roles, self.repo,
+                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.vcs, self.roles, self.repo,
                 self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
             )
             last = step
@@ -1026,7 +998,7 @@ class _ChainRun:
             except _StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
-        reason = _advance_run_branch(last, _git(self.repo, "rev-parse", f"refs/heads/{last.branch}"))
+        reason = _advance_run_branch(last, _tip(self.vcs, self.repo, last.branch))
         if reason:
             self._fail({ticket.id: reason for ticket in self.chain})
         return []

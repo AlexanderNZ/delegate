@@ -48,13 +48,14 @@ flowchart LR
   adapters --> run
 ```
 
-Five rules follow, and `tests/test_architecture.py` holds them:
+Six rules follow, and `tests/test_architecture.py` holds them:
 
 - `run` never imports `adapters` or `cli`.
 - `definitions` never imports `adapters` or `cli`.
 - `ports` never imports `adapters` or `cli`.
 - `adapters` never imports `cli`.
-- `engine.py` and `workflow.py` never import `adapters`. They are flat modules of the Run context until a later step moves them. The engine knows the harness port only.
+- `engine.py` and `workflow.py` never import `adapters`. They are flat modules of the Run context until a later step moves them. The engine knows the harness port and the version-control port only.
+- `engine.py` and `workflow.py` run no git command. The rule covers every file of `run/` too, when the Run context moves into that subpackage. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
 
 A layer is a subpackage of `src/delegate/`. Today `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test names the two flat modules of the Run context that it checks already, `engine.py` and `workflow.py`. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
@@ -62,7 +63,7 @@ The composition point is the command-line driver. `delegate run` reads the name 
 
 ## The version-control port
 
-Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The engine already sets up a run through the port: it makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), and keeps the file watcher off in them, through the port. The engine still runs git itself for the rebase, the commit ranges and the verifier copy. A later step moves those behind the port.
+Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The engine keeps the work of a run through the port: it makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), keeps the file watcher off in them, rebases a ticket branch onto the run branch, reads the commit ranges, makes the [**verifier copy**](../glossary.md#verifier-copy), and moves the run branch. The engine runs no git command itself, and a test checks that.
 
 The port speaks the language of the domain. It names no git command and no flag, and a test checks that. Each operation has a test in `tests/test_vcs_git.py`, which runs the git backend on a real temporary repository and calls the port only.
 
