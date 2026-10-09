@@ -31,7 +31,7 @@ before the next ticket builds on it. It costs more than `economy`.
 
 ## Agent pair
 
-An agent pair is a specialist and its verifier. See [why](explanation/why-each-specialist-has-a-twin.md).
+An agent pair is a specialist and its verifier. See [why](explanation/why-each-specialist-has-its-own-verifier.md).
 
 Not: pair, specialist-verifier pair.
 """

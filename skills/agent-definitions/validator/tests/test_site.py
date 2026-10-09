@@ -97,7 +97,39 @@ def test_the_navigation_lists_the_sections_in_the_order_of_the_ticket():
 
 @outside_the_package
 def test_the_site_root_opens_the_overview():
-    assert config()["plugins"]["redirects"]["redirect_maps"] == {"index.md": "overview.md"}
+    assert config()["plugins"]["redirects"]["redirect_maps"]["index.md"] == "overview.md"
+
+
+# A page that was renamed keeps its old address: the old path redirects to the new page.
+RENAMED = {
+    "explanation/why-each-specialist-has-a-twin.md": "explanation/why-each-specialist-has-its-own-verifier.md",
+}
+
+
+@outside_the_package
+def test_the_redirects_are_the_site_root_and_each_renamed_page_and_every_target_is_a_page_of_the_navigation():
+    maps = config()["plugins"]["redirects"]["redirect_maps"]
+
+    assert maps == {"index.md": "overview.md", **RENAMED}
+    assert [target for target in maps.values() if target not in nav_targets(config()["nav"])] == []
+    assert [old for old in RENAMED if (DOCS / old).exists()] == [], "an old address is also a page, so the redirect would hide it"
+
+
+@outside_the_package
+def test_no_file_links_to_the_old_address_of_a_renamed_page():
+    # The redirect key in zensical.toml and the table RENAMED of this file are the only places that name an old address.
+    # The build directory and the caches are not sources.
+    skipped = {".git", ".cache", ".venv", "node_modules", "site", "__pycache__", ".pytest_cache"}
+    holding = []
+    for path in sorted(ROOT.rglob("*")):
+        if not path.is_file() or skipped & set(path.relative_to(ROOT).parts) or path in (CONFIG, Path(__file__).resolve()):
+            continue
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            continue
+        holding += [f"{path.relative_to(ROOT)}: {old}" for old in RENAMED if old.rsplit("/", 1)[-1] in text]
+    assert holding == []
 
 
 @outside_the_package

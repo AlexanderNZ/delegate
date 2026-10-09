@@ -20,7 +20,7 @@ An agent pair is a specialist and its verifier, which one declaration renders fo
 
 Not: pair, specialist-verifier pair. Write "agent pair" in full.
 
-See [why each specialist has a verifier twin](explanation/why-each-specialist-has-a-twin.md).
+See [why each specialist has its own verifier](explanation/why-each-specialist-has-its-own-verifier.md).
 
 ## Allowlist
 

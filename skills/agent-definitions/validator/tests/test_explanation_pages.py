@@ -9,6 +9,7 @@ copies only the package skips these cases with a reason.
 
 import datetime
 import re
+import tomllib
 
 import pytest
 
@@ -18,7 +19,7 @@ EXPLANATION = ROOT / "docs" / "explanation"
 
 PAGES = [
     "why-the-verifier-is-blind.md",
-    "why-each-specialist-has-a-twin.md",
+    "why-each-specialist-has-its-own-verifier.md",
     "the-mode-trade-off.md",
     "prior-art.md",
     "the-enforcement-model-and-its-limits.md",
@@ -35,10 +36,10 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("the engine runs the gates outside the specialist", r"engine runs (the|your) gates"),
         ("the verifier runs the gates in a copy it may break", r"temporary copy"),
     ],
-    "why-each-specialist-has-a-twin.md": [
-        ("the twin holds the same skills as the specialist", r"same skills"),
+    "why-each-specialist-has-its-own-verifier.md": [
+        ("the verifier holds the same skills as the specialist", r"same skills"),
         ("a verifier without the skills reads the code and misses the discipline", r"misses the discipline"),
-        ("the twin has a read-only tool set", r"read-only"),
+        ("the verifier has a read-only tool set", r"read-only"),
         ("one declaration renders both agents, so the pair cannot drift", r"one declaration"),
         ("a generic verifier is right only for docs and configuration", r"generic verifier"),
         ("a monorepo has one pair for each stack", r"each stack"),
@@ -67,12 +68,13 @@ REASONS: dict[str, list[tuple[str, str]]] = {
     "prior-art.md": [
         ("the page says when to choose this kit and when to choose another tool", r"choose"),
         ("the page says the kit takes the planning output of mattpocock/skills as input", r"to-tickets"),
+        ("the page says the kit takes that output as its input and would not exist in this form without it", r"would not exist in this form without them"),
     ],
     "why-the-model-should-not-matter.md": [
         ("the kit began as a model router", r"model router"),
         ("the lineage names the maintainer's projects only in general terms", r"our own web apps and projects"),
         ("the rules for each model were prose", r"rules for each model"),
-        ("one declaration renders the specialist and its verifier twin", r"one \W*declaration\W.*verifier twin"),
+        ("one declaration renders the specialist and its verifier", r"one \W*declaration\W.*its verifier"),
         ("a validator turns the rules into build failures", r"build failures?"),
         ("the engine runs the gates itself", r"engine runs the gates itself"),
         ("constraints beat instructions", r"constraints beat instructions"),
@@ -143,9 +145,83 @@ def entries(page: str) -> dict[str, str]:
     return dict(zip(parts[1::2], parts[2::2]))
 
 
+def subentries(page: str, part: str) -> dict[str, str]:
+    """The entries of one part of the page, keyed by the text of their level-three heading."""
+    parts = re.split(r"^### (.+)$", entries(page)[part], flags=re.MULTILINE)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+# The two parts of the prior art page, in order: the work that the kit is built on, then the tools beside it.
+PARTS = ["Built on", "Alongside"]
+
+# The two bodies of work that the kit is built on: the heading of the entry, and the primary source that it must link.
+BUILT_ON = {
+    "Bassim Eledath": "https://www.bassimeledath.com/blog/levels-of-agentic-engineering",
+    "Matt Pocock": "https://github.com/mattpocock/skills",
+}
+
+
+@outside_the_package
+def test_the_prior_art_page_has_a_built_on_part_before_an_alongside_part_and_no_other_part():
+    assert list(entries("prior-art.md")) == PARTS
+
+
+@outside_the_package
+def test_each_built_on_entry_links_its_primary_source_and_gives_the_date_it_was_read():
+    sections = subentries("prior-art.md", "Built on")
+    assert sorted(next((name for name in BUILT_ON if name in heading), heading) for heading in sections) == sorted(BUILT_ON)
+    problems = []
+    for name, source in BUILT_ON.items():
+        body = next(text for heading, text in sections.items() if name in heading)
+        if not re.search(r"\]\(" + re.escape(source) + r"[/)#]", body):
+            problems.append(f"{name}: no link to {source}")
+        read = re.search(r"\bRead (\d{4}-\d{2}-\d{2})\b", body)
+        if not read:
+            problems.append(f"{name}: no read date")
+        elif datetime.date.fromisoformat(read.group(1)) > datetime.date.today():
+            problems.append(f"{name}: the read date {read.group(1)} is in the future")
+    assert problems == []
+
+
+# What each body of work gave the kit, as a pattern for the bullet of each gift. The ticket names them.
+GIFTS = {
+    "Bassim Eledath": [
+        ("the map", r"^- the map\."),
+        ("the order of the climb", r"^- the order of the climb\."),
+        ("the codify loop", r"^- the codify loop\."),
+        ("backpressure", r"^- backpressure\."),
+    ],
+    "Matt Pocock": [
+        ("grilling settles the decisions", r"^- `grilling` settles the decisions"),
+        ("wayfinder maps work bigger than one session", r"^- `wayfinder` maps work that is bigger than one session"),
+        ("to-spec writes the spec", r"^- `to-spec` writes the spec"),
+        ("to-tickets cuts vertical slices sized to one context window", r"^- `to-tickets` cuts .*context window"),
+    ],
+}
+
+
+def plain(markdown: str) -> str:
+    """The text of Markdown without link targets and without emphasis marks."""
+    return re.sub(r"\*+", "", re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", markdown)).lower()
+
+
+@outside_the_package
+@pytest.mark.parametrize("name", list(GIFTS))
+def test_each_built_on_entry_says_what_it_gave_the_kit(name):
+    body = plain(next(text for heading, text in subentries("prior-art.md", "Built on").items() if name in heading))
+    assert [gift for gift, pattern in GIFTS[name] if not re.search(pattern, body, flags=re.MULTILINE)] == []
+
+
+@outside_the_package
+def test_the_built_on_part_says_plainly_that_the_kit_takes_their_output_as_its_input():
+    text = plain(entries("prior-art.md")["Built on"])
+    assert "takes the output of these skills as its input" in text
+    assert "would not exist in this form without them" in text
+
+
 @outside_the_package
 def test_each_prior_art_entry_links_its_primary_source_and_gives_the_date_it_was_read():
-    sections = entries("prior-art.md")
+    sections = subentries("prior-art.md", "Alongside")
     problems = []
     for name, source in PRIOR_ART.items():
         body = next((text for heading, text in sections.items() if name in heading), None)
@@ -164,8 +240,48 @@ def test_each_prior_art_entry_links_its_primary_source_and_gives_the_date_it_was
 
 @outside_the_package
 def test_the_prior_art_page_holds_one_entry_for_each_tool_of_the_ticket_and_no_other():
-    named = [heading for heading in entries("prior-art.md") if heading.strip() != "How to choose"]
+    named = [heading for heading in subentries("prior-art.md", "Alongside") if heading.strip() != "How to choose"]
     assert sorted(next(name for name in PRIOR_ART if name in heading) for heading in named) == sorted(PRIOR_ART)
+
+
+# The glossary terms that each changed page uses, as a pattern for each term. The first use in the prose is a link to the glossary.
+FIRST_USE = {
+    "prior-art.md": [
+        r"ladder", r"brief", r"skills?", r"gates?", r"engine", r"pre-push hook", r"worktrees?", r"grilling", r"wayfinder",
+        r"session", r"spec", r"tracer bullets?", r"tickets?", r"specialist", r"verifier", r"run branch", r"blind",
+        r"harness", r"journal", r"declaration", r"tier table", r"delegation document",
+    ],
+    "why-each-specialist-has-its-own-verifier.md": [
+        r"specialist", r"verifier", r"stack", r"agent pair", r"skills?", r"tier", r"declaration", r"harness", r"validator",
+    ],
+}
+
+
+@outside_the_package
+@pytest.mark.parametrize("page", list(FIRST_USE))
+def test_a_glossary_term_links_the_glossary_at_its_first_use(page):
+    # The text without the title, the headings and the Markdown link targets (a target such as `/skills` or `#to-spec` is not a use).
+    text = "\n".join(line for line in (EXPLANATION / page).read_text().splitlines() if not line.startswith("#"))
+    text = re.sub(r"\]\([^)]*\)", "]", text)
+    unlinked = []
+    for term in FIRST_USE[page]:
+        use = re.search(r"(?<![\w/-])`?" + term + r"(?![\w-])", text, flags=re.IGNORECASE)
+        assert use, f"{page} does not use the term {term!r}"
+        if not text[: use.start()].endswith("[**"):
+            unlinked.append(term)
+    assert unlinked == []
+
+
+@outside_the_package
+def test_the_retitled_page_uses_the_glossary_term_and_its_title_is_the_title_of_its_navigation_entry():
+    page = "why-each-specialist-has-its-own-verifier.md"
+    title = (EXPLANATION / page).read_text().splitlines()[0].removeprefix("# ")
+    config = tomllib.loads((ROOT / "zensical.toml").read_text())["project"]
+    labels = [label for item in config["nav"] for value in item.values() if isinstance(value, list) for entry in value for label, target in entry.items() if target == f"explanation/{page}"]
+
+    assert title == "Why each specialist has its own verifier"
+    assert not re.search(r"\btwin\b", title, flags=re.IGNORECASE), "the glossary says: say verifier, not twin"
+    assert labels == [title]
 
 
 SKILL = ROOT / "skills" / "agent-definitions" / "SKILL.md"

@@ -1,6 +1,6 @@
 # How to bootstrap a single-stack repository
 
-Use this page when your repository has one stack, for example one Python package. You get one agent pair: a specialist and its verifier twin. The pair is for Claude Code and for OpenCode.
+Use this page when your repository has one stack, for example one Python package. You get one agent pair: a specialist and its verifier. The pair is for Claude Code and for OpenCode.
 
 For a repository with more than one stack, see [how to bootstrap a monorepo](bootstrap-a-monorepo.md).
 

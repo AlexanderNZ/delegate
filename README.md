@@ -9,7 +9,7 @@ The independent check does not trust the agent that wrote the code. The usual pa
 The kit has three parts:
 
 - A delegation protocol, shipped as agent skills: a coordinator, a specialist and a verifier, with a brief template, scoped fix-ups and hotspots that only the coordinator writes.
-- A renderer. One declaration renders a specialist and its verifier twin for each harness, and a validator checks the files against the schema of each harness.
+- A renderer. One declaration renders a specialist and its verifier for each harness, and a validator checks the files against the schema of each harness.
 - A workflow engine. `delegate run` drives a harness through its headless command line, makes the worktrees, runs the gates, spawns the verifiers, and records every step in a journal.
 
 The skills and the engine name no person, company or tracker. Each repository keeps its own gates, hotspots, models and writing style.
@@ -64,9 +64,9 @@ Start with the first two pages.
 - [How to use the kit after `to-spec` and `to-tickets`](docs/how-to/use-the-kit-after-to-spec-and-to-tickets.md): save the tickets to files, write a workflow that names them, and run the plan.
 - [Why the model should not matter](docs/explanation/why-the-model-should-not-matter.md): how the kit got its shape, from a model router to rules for each model to contracts for each role to the engine; what varies between models and how the kit fixes it; five lessons; and which model to verify with, as a recommendation and not a rule.
 - [Why the verifier is blind, and why it runs the gates](docs/explanation/why-the-verifier-is-blind.md): the report is a claim, so the verifier gets the task and the diff; the engine runs the gates, and the verifier runs them in a copy that it may break.
-- [Why each specialist has a verifier twin](docs/explanation/why-each-specialist-has-a-twin.md): a verifier needs the skills of the specialist, so one declaration renders both halves of a pair, with a pair for each stack.
+- [Why each specialist has its own verifier](docs/explanation/why-each-specialist-has-its-own-verifier.md): a verifier needs the skills of the specialist, so one declaration renders both halves of a pair, with a pair for each stack.
 - [The mode trade-off](docs/explanation/the-mode-trade-off.md): why there are two modes, what `assure` and `economy` each give up, and the rules that no mode changes.
-- [Prior art](docs/explanation/prior-art.md): superpowers, mattpocock/skills `implement-spec`, Sandcastle and wshobson/agents. What each does, how this kit differs, and when to choose the other tool.
+- [Prior art](docs/explanation/prior-art.md): what the kit is built on (the levels of agentic engineering of Bassim Eledath, and the planning skills of mattpocock/skills), and four projects beside it: superpowers, mattpocock/skills `implement-spec`, Sandcastle and wshobson/agents. What each does, how this kit differs, and when to choose the other tool.
 - [The enforcement model and its limits](docs/explanation/the-enforcement-model-and-its-limits.md): what the engine enforces with git, what it does not stop, and every limit of the guards, so that you trust a guard no further than it goes.
 - [The decision records](docs/explanation/decision-records.md): an index of every ADR of the kit, with the reason in one line for each.
 - [Reference: the workflow file](docs/reference/workflow.md): every workflow field, and the `delegate run <workflow> --dry-run` check.

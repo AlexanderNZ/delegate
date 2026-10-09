@@ -31,7 +31,7 @@ nav = [
   { "Explanation" = [
     { "Why the model should not matter" = "explanation/why-the-model-should-not-matter.md" },
     { "Why the verifier is blind" = "explanation/why-the-verifier-is-blind.md" },
-    { "Why each specialist has a verifier twin" = "explanation/why-each-specialist-has-a-twin.md" },
+    { "Why each specialist has its own verifier" = "explanation/why-each-specialist-has-its-own-verifier.md" },
     { "The mode trade-off" = "explanation/the-mode-trade-off.md" },
     { "Prior art" = "explanation/prior-art.md" },
     { "The enforcement model and its limits" = "explanation/the-enforcement-model-and-its-limits.md" },
@@ -99,3 +99,5 @@ glob = ["agents/**"]
 # The site has no index page, so the root opens the overview.
 [project.plugins.redirects.redirect_maps]
 "index.md" = "overview.md"
+# The old address of the page "Why each specialist has its own verifier", which had the title "Why each specialist has a verifier twin".
+"explanation/why-each-specialist-has-a-twin.md" = "explanation/why-each-specialist-has-its-own-verifier.md"

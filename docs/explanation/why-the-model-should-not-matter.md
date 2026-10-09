@@ -22,7 +22,7 @@ Then I reviewed the transcripts. The review found seven patterns of failure, and
 
 ### Then, contracts for each role
 
-The turn was to stop writing rules for a model, and to write them for a role. One [**declaration**](../glossary.md#declaration) renders a specialist and its verifier twin for each [**harness**](../glossary.md#harness), and the twin carries every [**skill**](../glossary.md#skill) of the specialist. A [**validator**](../glossary.md#validator) turns the rules into build failures: a specialist that can push, a verifier that can write, and a specialist with no twin each fail the build.
+The turn was to stop writing rules for a model, and to write them for a role. One [**declaration**](../glossary.md#declaration) renders a specialist and its verifier for each [**harness**](../glossary.md#harness), and the verifier carries every [**skill**](../glossary.md#skill) of the specialist. A [**validator**](../glossary.md#validator) turns the rules into build failures: a specialist that can push, a verifier that can write, and a specialist with no verifier each fail the build. See [why each specialist has its own verifier](why-each-specialist-has-its-own-verifier.md).
 
 Then we deleted the prose sections for each model, because the agent declarations now enforced them.
 
@@ -34,7 +34,7 @@ What was still prose after that was the part that a person had to remember durin
 
 ### What came from others
 
-Two pieces of work shaped these steps, and neither one is mine.
+Two pieces of work shaped these steps, and neither one is mine. The page on [prior art](prior-art.md) says what each one gave.
 
 Matt Pocock's [planning skills](https://github.com/mattpocock/skills) came first. They were in use before the delegation protocol existed. [**`grilling`**](../glossary.md#grilling) and [**`wayfinder`**](../glossary.md#wayfinder) settle the decisions, [**`to-spec`**](../glossary.md#to-spec) writes the [**spec**](../glossary.md#spec), and [**`to-tickets`**](../glossary.md#to-tickets) cuts the spec into slices, each one a [**ticket**](../glossary.md#ticket). Planning and scope were fixed before any of the steps above, so the kit never had to fix them.
 
@@ -94,7 +94,7 @@ So the inputs of a run are files: the ticket, the [**workflow**](../glossary.md#
 
 Bassim Eledath is blunt about review: "if the same model instance implements and evaluates its own work, it's biased." His rule for it is "Don't let the same model grade its own exam — separate the implementer from the reviewer".
 
-The verifier twin answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh [**session**](../glossary.md#session), no report, the gates run again in a [**temporary copy**](../glossary.md#temporary-copy) that it may break, and a [**red proof**](../glossary.md#red-proof) that each new test can fail. Shared knowledge. Separate work.
+The verifier answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh [**session**](../glossary.md#session), no report, the gates run again in a [**temporary copy**](../glossary.md#temporary-copy) that it may break, and a [**red proof**](../glossary.md#red-proof) that each new test can fail. Shared knowledge. Separate work.
 
 ### The coordinator is the part not yet fixed
 
