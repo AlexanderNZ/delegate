@@ -30,7 +30,7 @@ Four of its skills plan the work before an agent builds it. The kit starts where
 - [**`to-spec`**](../glossary.md#to-spec) writes the [**spec**](../glossary.md#spec) from what the conversation has already settled.
 - [**`to-tickets`**](../glossary.md#to-tickets) cuts the spec into vertical slices, [**tracer bullets**](../glossary.md#tracer-bullet). Each slice names the [**tickets**](../glossary.md#ticket) that block it, and each one is sized to fit one fresh context window.
 
-The last one matters most for the kit. A ticket that fits one context window is a ticket that one [**specialist**](../glossary.md#specialist) can build in one session, and that one [**verifier**](../glossary.md#verifier) can read as one diff. The blockers set the order of a [**chain**](../glossary.md#chain).
+The last one matters most for the kit. A ticket that fits one context window is a ticket that one [**specialist**](../glossary.md#specialist) can build in one session, and that one [**verifier**](../glossary.md#verifier) can read as one diff. The [**blockers**](../glossary.md#blocker) set the order of a [**chain**](../glossary.md#chain).
 
 I say it plainly: the kit takes the output of these skills as its input. I wrote no planning step, because the planning was already done, and done well. To use the two together, see [how to use the kit after `to-spec` and `to-tickets`](../how-to/use-the-kit-after-to-spec-and-to-tickets.md). The same author has a build skill, `implement-spec`, and it is an entry below.
 
