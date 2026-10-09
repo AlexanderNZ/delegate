@@ -1,6 +1,6 @@
 # Glossary
 
-This page explains the terms that the docs use. The entries are in alphabetical order. Each entry says what the term is and why it is important. Then it links the page that explains the term in full. When the docs use more than one word for a concept, the entry has the preferred word, and a line "Not:" lists the other words. For the kit at a glance, read [the overview](overview.md) first.
+This page explains the terms that the docs use. The entries are in alphabetical order. Each entry says what the term is and why it is important. Then it links the page that explains the term in full. When the docs use more than one word for a concept, the entry has the preferred word, and a line "Not:" lists the other words. Each other word that you can look up has its own short entry, which says "See" and names the preferred word. For the kit at a glance, read [the overview](overview.md) first.
 
 ## ACCEPT
 
@@ -24,7 +24,7 @@ See [why each specialist has a verifier twin](explanation/why-each-specialist-ha
 
 ## Allowlist
 
-The allowlist is the file in the kit that names each permitted exception to the neutrality check. Each entry is a permanent exception with a reason, so the list stays short and visible. It is not the list of commands of the [verifier guard](#verifier-guard). See [the neutrality check](../skills/agent-definitions/SKILL.md#neutrality-check).
+The allowlist is the file in the kit that names each permitted exception to the neutrality check. Each entry is a permanent exception with a reason, so the list stays short and visible. It is not the list of commands of the [verifier guard](#verifier-guard). See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
 
 ## Anchoring
 
@@ -36,7 +36,7 @@ ASD-STE100 Simplified Technical English is a standard of controlled English: sho
 
 Not: STE. Use "STE" only for the option value `ste`.
 
-See [the output language](../skills/agent-delegation/SKILL.md#output-language-asd-ste100-simplified-technical-english).
+See [the output language](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#output-language-asd-ste100-simplified-technical-english).
 
 ## `assure`
 
@@ -60,7 +60,7 @@ See [the tickets of a workflow](reference/workflow.md#tickets).
 
 ## Bootstrap
 
-Bootstrap is the command `delegate bootstrap`, which writes the context skill, the declaration and the agent pair of a repository from one set of arguments. The docs and the agents come from the same answers, so they cannot drift apart. See [the bootstrap rules](../skills/agent-definitions/SKILL.md#bootstrap).
+Bootstrap is the command `delegate bootstrap`, which writes the context skill, the declaration and the agent pair of a repository from one set of arguments. The docs and the agents come from the same answers, so they cannot drift apart. See [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
 
 ## Brief
 
@@ -78,13 +78,17 @@ Built is the state of a ticket that passed each part of its step. Together with 
 
 A chain is the sequence of tickets in `economy` mode: each ticket branch starts from the branch of the previous ticket. One verifier checks each stack at the end of the chain, so a long chain costs fewer tokens. See [the economy chain](reference/run.md#the-economy-chain).
 
+## Command guard
+
+See [Verifier guard](#verifier-guard).
+
 ## Context skill
 
 A context skill is the skill that `delegate bootstrap` writes for a repository. It reads the reference documents of the repository when the agent loads it, so no copy of a document goes out of date.
 
 Not: repo-context skill.
 
-See [the bootstrap rules](../skills/agent-definitions/SKILL.md#bootstrap).
+See [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
 
 ## Continuation
 
@@ -96,11 +100,15 @@ A contract test replays a recorded event stream through a stand-in harness comma
 
 ## Coordinator
 
-The coordinator is the person who directs the work, from a terminal or from an interactive harness session. The coordinator owns each action that the engine never does: the merge, the push, and the close of a ticket. See [the roles](../skills/agent-delegation/SKILL.md#roles).
+The coordinator is the person who directs the work, from a terminal or from an interactive harness session. The coordinator owns each action that the engine never does: the merge, the push, and the close of a ticket. See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
 
 ## Declaration
 
-A declaration is a TOML file that describes an agent pair: the domain, the tier, the skills, the references and the gate commands. The renderer writes both halves of the pair from it, for each harness. See [what a declaration is](../skills/agent-definitions/SKILL.md#what-a-declaration-is).
+A declaration is a TOML file that describes an agent pair: the domain, the tier, the skills, the references and the gate commands. The renderer writes both halves of the pair from it, for each harness. See [what a declaration is](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#what-a-declaration-is).
+
+## Delegation doc
+
+See [Delegation document](#delegation-document).
 
 ## Delegation document
 
@@ -116,7 +124,7 @@ The delta is the diff from the rejected commit to the tip of the branch after a 
 
 ## Denylist
 
-The denylist is a private list of terms that must not appear in the kit, for example the names of persons and companies. It stays outside the repository, and the neutrality check reads it from a path. See [the neutrality check](../skills/agent-definitions/SKILL.md#neutrality-check).
+The denylist is a private list of terms that must not appear in the kit, for example the names of persons and companies. It stays outside the repository, and the neutrality check reads it from a path. See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
 
 ## `economy`
 
@@ -166,6 +174,14 @@ Not: fixup, fix-up pass, scoped fix-up. Use `fixup` only in the command `delegat
 
 See [the fix-up round](reference/run.md#the-fix-up-round).
 
+## Fixup
+
+See [Fix-up](#fix-up).
+
+## Frontmatter hook
+
+See [Harness hook](#harness-hook).
+
 ## Gate
 
 A gate is a command that proves that a change is good in a repository, for example the test suite or the build. The engine runs each gate itself, so the evidence never comes from the agent that wrote the code. The verifier can run the gates of its repository, and no other build command.
@@ -173,6 +189,10 @@ A gate is a command that proves that a change is good in a repository, for examp
 Not: gate command. Use "gate command" only for the option `--gate-command` and the key `gateCommands`.
 
 See [the stacks of a workflow](reference/workflow.md#stacks).
+
+## Gate command
+
+See [Gate](#gate).
 
 ## Gateway
 
@@ -184,7 +204,7 @@ A generated section is the part of a reference page between the `generated:begin
 
 ## GET-only command
 
-A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [gate commands](../skills/agent-definitions/SKILL.md#gate-commands).
+A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [gate commands](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#gate-commands).
 
 ## Harness
 
@@ -214,9 +234,13 @@ Not: single-writer file. A hotspot finding is the record of a diff that touches 
 
 See [the hotspot guard](reference/run.md#the-hotspot-guard).
 
+## Implementer
+
+See [Specialist](#specialist).
+
 ## Invariant
 
-An invariant is one of the seven rules that hold in every mode, for example "the verifier is blind". No setting changes an invariant, so a cheaper mode never gives a weaker check. The [worktree invariant](#worktree-invariant) is a different check. See [the invariants of every mode](../skills/agent-delegation/SKILL.md#the-invariants-of-every-mode).
+An invariant is one of the seven rules that hold in every mode, for example "the verifier is blind". No setting changes an invariant, so a cheaper mode never gives a weaker check. The [worktree invariant](#worktree-invariant) is a different check. See [the invariants of every mode](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#the-invariants-of-every-mode).
 
 ## Journal
 
@@ -226,17 +250,33 @@ The journal is the append-only JSONL file of a run, with one line for each event
 
 A live smoke run is one run of an adapter against the real harness on a real machine. The reference page records the harness version and the date. It shows what a recorded stream cannot show: that the real harness gives that stream. See [the live smoke run](reference/claude-code-adapter.md#the-live-smoke-run).
 
+## Max turns
+
+See [Turn cap](#turn-cap).
+
 ## Mode
 
 The mode of a run is `assure` or `economy`. It sets when the verifier runs, the tier of the specialist, and the limits, and it never changes an invariant. The [verifier mode](#verifier-mode) is a different term. See [the mode trade-off](explanation/the-mode-trade-off.md).
 
 ## Neutrality check
 
-The neutrality check is a test that fails when a term of the denylist appears in the kit. The kit holds no personal or company value, so each repository keeps its own values in its own configuration. See [the neutrality check](../skills/agent-definitions/SKILL.md#neutrality-check).
+The neutrality check is a test that fails when a term of the denylist appears in the kit. The kit holds no personal or company value, so each repository keeps its own values in its own configuration. See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
+
+## Pair
+
+See [Agent pair](#agent-pair).
+
+## Pre-push hook
+
+See [Push guard](#push-guard).
+
+## Print mode
+
+See [Headless](#headless).
 
 ## Protocol
 
-The protocol is the set of rules for delegation in the `agent-delegation` skill: the roles, the brief template, blind verification, fix-ups and hotspots. The engine applies the same rules, and you can apply them by hand for one task. See [the agent-delegation skill](../skills/agent-delegation/SKILL.md).
+The protocol is the set of rules for delegation in the `agent-delegation` skill: the roles, the brief template, blind verification, fix-ups and hotspots. The engine applies the same rules, and you can apply them by hand for one task. See [the agent-delegation skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md).
 
 ## Push guard
 
@@ -256,7 +296,7 @@ REJECT is the verdict that a verifier gives when it finds at least one defect. T
 
 ## Renderer
 
-The renderer (`delegate render`) writes the agent files of each harness from a declaration. Nobody writes an agent file by hand, so the two halves of a pair stay in step. See [the rendering rules](../skills/agent-definitions/SKILL.md#rendering-rules).
+The renderer (`delegate render`) writes the agent files of each harness from a declaration. Nobody writes an agent file by hand, so the two halves of a pair stay in step. See [the rendering rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#rendering-rules).
 
 ## Report
 
@@ -269,6 +309,10 @@ See [the specialist report](reference/run.md#the-specialist-report).
 ## Resume
 
 A resume (`delegate run --resume`) goes on with a stopped run from its journal, and it never builds a finished step again. An adapter can also resume a harness session for a continuation, which is a different use of the word. See [the resume](reference/run.md#the-resume).
+
+## Reviewer
+
+See [Verifier](#verifier).
 
 ## Run
 
@@ -304,7 +348,11 @@ The specialist is the agent that builds one ticket, in its own worktree, inside 
 
 Not: implementer. Use "implementer" only for the agent of another tool.
 
-See [the roles](../skills/agent-delegation/SKILL.md#roles).
+See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
+
+## Specialist-verifier pair
+
+See [Agent pair](#agent-pair).
 
 ## Stack
 
@@ -314,9 +362,21 @@ A stack is one technology of a repository, for example a Python package or a web
 
 The state directory is the directory `delegate/` in the git directory of the repository. The engine writes the journals, the reports, the worktrees and the locks there, and the working tree stays clean. See [where the engine writes](reference/run.md#where-the-engine-writes).
 
+## STE
+
+See [ASD-STE100](#asd-ste100).
+
 ## Step
 
 A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in `assure` mode, the verifier. A failed step does not end the run. See [what a run does](reference/run.md#what-a-run-does).
+
+## Step cap
+
+See [Turn cap](#turn-cap).
+
+## Strength
+
+See [Tier](#tier).
 
 ## Temporary copy
 
@@ -352,7 +412,7 @@ A tier file is your own copy of the tier table, which you give with `--tiers`. I
 
 ## Tier table
 
-The tier table (`tiers.toml`) maps each tier to one model for each harness, and lists the models that the validator accepts. Each adapter reads its own column, so an adapter never chooses a model. See [the tier table](../skills/agent-definitions/SKILL.md#the-tier-table).
+The tier table (`tiers.toml`) maps each tier to one model for each harness, and lists the models that the validator accepts. Each adapter reads its own column, so an adapter never chooses a model. See [the tier table](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-tier-table).
 
 ## `to-spec`
 
@@ -370,6 +430,10 @@ Not: step cap, max turns. Use "step cap" only for the OpenCode `steps` setting.
 
 See [the limits of the guards](explanation/the-enforcement-model-and-its-limits.md#the-limits-of-the-guards).
 
+## Twin
+
+See [Verifier](#verifier).
+
 ## Validator
 
 The validator (`delegate validate`) checks rendered agent files against the schema of each harness, and writes a finding code for each problem. A harness skips some bad agent files with no error, so the validator makes the problem visible. See [`delegate validate`](reference/commands.md#delegate-validate).
@@ -384,7 +448,11 @@ The verifier is the agent that checks the work of a specialist and gives a verdi
 
 Not: twin, verifier twin, reviewer. Say "verifier". Use "twin" only where the text is about the skills that the verifier shares with its specialist.
 
-See [the roles](../skills/agent-delegation/SKILL.md#roles).
+See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
+
+## Verifier copy
+
+See [Temporary copy](#temporary-copy).
 
 ## Verifier guard
 
@@ -392,15 +460,27 @@ The verifier guard is the hook in each rendered verifier that permits a fixed li
 
 Not: command guard.
 
-See [the verifier's shell](../skills/agent-definitions/SKILL.md#the-verifiers-shell).
+See [the verifier's shell](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-verifiers-shell).
 
 ## Verifier mode
 
-The verifier mode is `full` or `fix-up`, and the shape of the brief sets it. A full verifier reads the whole diff, and a fix-up verifier checks only the findings and the delta. See [the verifier modes](../skills/agent-definitions/SKILL.md#verifier-modes).
+The verifier mode is `full` or `fix-up`, and the shape of the brief sets it. A full verifier reads the whole diff, and a fix-up verifier checks only the findings and the delta. See [the verifier modes](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#verifier-modes).
+
+## Verifier twin
+
+See [Verifier](#verifier).
 
 ## Workflow
 
 A workflow is the TOML file that describes one run: the base branch, the run branch, the mode, the adapter, the stacks and the tickets. The coordinator writes it, and `delegate run --dry-run` checks it before a build. See [the workflow file](reference/workflow.md).
+
+## Workflow engine
+
+See [Engine](#engine).
+
+## Working copy
+
+See [Worktree](#worktree).
 
 ## Worktree
 

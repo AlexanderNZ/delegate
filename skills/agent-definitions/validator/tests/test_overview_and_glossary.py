@@ -23,6 +23,7 @@ DOCS = ROOT / "docs"
 GLOSSARY = DOCS / "glossary.md"
 OVERVIEW = DOCS / "overview.md"
 README = ROOT / "README.md"
+REPO_BLOB = re.compile(r"https://github\.com/[^/]+/delegate/blob/main/")  # the full URL of a file of this repository
 
 # The sections of the overview, in the order of the ticket and the coordinator's adjustment.
 OVERVIEW_SECTIONS = [
@@ -74,10 +75,12 @@ def broken_links(page: Path) -> list[str]:
     """Each relative link of the page whose file or heading does not exist."""
     broken = []
     for target in LINK.findall(page.read_text()):
-        if target.startswith(("http://", "https://", "mailto:")):
+        # A link to a file outside docs/ is a full URL (the site build cannot follow a path out of docs/). The file is in this tree.
+        in_repo = REPO_BLOB.match(target)
+        if not in_repo and target.startswith(("http://", "https://", "mailto:")):
             continue
-        path, _, anchor = target.partition("#")
-        file = (page.parent / path).resolve() if path else page
+        path, _, anchor = (target[in_repo.end():] if in_repo else target).partition("#")
+        file = ((ROOT if in_repo else page.parent) / path).resolve() if path else page
         if not file.is_file():
             broken.append(target)
         elif anchor and anchor not in anchors(file.read_text()):
@@ -115,7 +118,29 @@ def test_the_first_sentence_of_each_glossary_entry_starts_with_its_term():
         first = body.strip().splitlines()[0].replace("`", "")
         return re.sub(r"^(?:A|An|The) ", "", first).casefold()
 
-    assert [heading for heading, body in entries() if not opening(body).startswith(term(heading))] == []
+    full = [(heading, body) for heading, body in entries() if not POINTER.fullmatch(body.strip())]
+    assert [heading for heading, body in full if not opening(body).startswith(term(heading))] == []
+
+
+# A pointer entry is the entry of a synonym: it says "See <term>." and links the entry of the preferred term.
+POINTER = re.compile(r"See \[([^\]]+)\]\(#([^)\s]+)\)\.")
+
+
+@outside_the_package
+def test_a_pointer_entry_names_a_term_that_has_a_full_entry():
+    pointers = {term(heading): POINTER.fullmatch(body.strip()) for heading, body in entries() if POINTER.fullmatch(body.strip())}
+    headings = {term(heading): slug(heading) for heading, body in entries() if not POINTER.fullmatch(body.strip())}
+
+    assert pointers, "the glossary holds no pointer entry for a synonym"
+    # The target is a full entry (not another pointer), and the link text is the heading of that entry.
+    wrong = [name for name, match in pointers.items() if term(match.group(1)) not in headings or headings[term(match.group(1))] != match.group(2)]
+    assert wrong == []
+
+
+@outside_the_package
+def test_the_synonyms_that_a_reader_is_likely_to_look_up_have_a_pointer_entry():
+    terms = {term(heading) for heading, _ in entries()}
+    assert {"twin", "verifier twin", "pair", "specialist-verifier pair", "reviewer", "implementer"} <= terms
 
 
 @outside_the_package
