@@ -11,7 +11,7 @@ from .pages import ROOT, outside_the_package
 
 PAGE = ROOT / "docs" / "future-ideas.md"
 ENTRY_PARTS = ["The idea.", "Why it matters.", "Open questions."]
-CURSOR_ISSUE = "https://github.com/AlexanderNZ/delegate/issues/18"
+CURSOR_ISSUE = "/delegate/issues/18"  # the Cursor issue; the owner name stays out of the kit
 
 
 def entries() -> dict[str, str]:
