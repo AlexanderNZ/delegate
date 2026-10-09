@@ -26,7 +26,8 @@ let
 in
 python3.pkgs.buildPythonApplication {
   pname = "agent-definitions";
-  version = "0.1.0";
+  # One source of the version: pyproject.toml. `scripts/release.py apply` edits only that file.
+  version = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project.version;
   pyproject = true;
 
   src = lib.cleanSource ./.;
