@@ -15,7 +15,7 @@ For a repository with one stack, see [how to bootstrap a single-stack repository
 
 The delegation document has one sub-heading for each stack under `Verification gates`. A sub-heading that names a path in backticks claims that path. The brief generator then gives a verifier the block of each stack that the change touches, and no other block.
 
-````markdown docs/agents/delegation.md
+````markdown title="docs/agents/delegation.md"
 # Delegation: the rules of this repository
 
 ## Verification gates
@@ -46,7 +46,7 @@ The [agent-definitions skill](https://github.com/AlexanderNZ/delegate/blob/main/
 
 Each stack has the skills that its specialist needs. Here each stack has one skill, and a real repository can have many.
 
-```markdown .claude/skills/backend-style/SKILL.md
+```markdown title=".claude/skills/backend-style/SKILL.md"
 ---
 name: backend-style
 description: The style rules of the backend. Use when you change code in backend/.
@@ -58,7 +58,7 @@ description: The style rules of the backend. Use when you change code in backend
 - A test calls the public function.
 ```
 
-```markdown .claude/skills/web-style/SKILL.md
+```markdown title=".claude/skills/web-style/SKILL.md"
 ---
 name: web-style
 description: The style rules of the web front end. Use when you change code in web/.
@@ -105,7 +105,7 @@ git commit -m "Add the agent pairs"
 
 A workflow has one `[stacks.<name>]` table for each stack. A ticket names the stack that builds it. The engine spawns the specialist and the verifier of that stack.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"

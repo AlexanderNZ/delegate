@@ -16,7 +16,7 @@ If you need to find a defect before the next ticket builds on it, use `assure` m
 
 Set `mode = "economy"`. Put the order of the chain in `blocked-by`. Here ticket `3` waits for ticket `2`, and ticket `2` waits for ticket `1`.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/chain"
 mode = "economy"

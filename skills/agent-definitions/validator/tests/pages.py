@@ -5,8 +5,9 @@ helpers let a test do the same, word for word, in a temporary git repository.
 The `delegate` commands run in this process through `delegate.main`, and any
 other command runs in bash.
 
-A block that holds a file has the path after the language, as in
-`` ```toml workflow.toml ``. A block with no path is a command or an output sample.
+A block that holds a file has the path as its title, as in
+`` ```toml title="workflow.toml" ``. The site renders this form. A block with
+no title is a command or an output sample.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ outside_the_package = pytest.mark.skipif(
 )
 
 # A fence has three backticks or more. A block that holds a fenced block uses a longer outer fence.
-FENCE = re.compile(r"^(`{3,})(\w+)(?: (\S+))?\n(.*?)^\1$", flags=re.MULTILINE | re.DOTALL)
+FENCE = re.compile(r'^(`{3,})(\w+)(?: title="([^"]+)")?\n(.*?)^\1$', flags=re.MULTILINE | re.DOTALL)
 
 
 @dataclass(frozen=True)

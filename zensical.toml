@@ -7,9 +7,10 @@ site_description = "A delegation kit: a coordinator, a specialist and a blind ve
 docs_dir = "docs"
 site_dir = "site"
 
-# The sections follow the Diataxis split. "Start here" (the overview) and
-# "Glossary" join when docs/overview.md and docs/glossary.md exist (#33).
+# The sections follow the Diataxis split. "Start here" (the overview) comes
+# first, and "Glossary" comes last.
 nav = [
+  { "Start here" = "overview.md" },
   { "Tutorial" = "tutorial.md" },
   { "How-to guides" = [
     { "Bootstrap a single-stack repository" = "how-to/bootstrap-a-single-stack-repository.md" },
@@ -37,6 +38,7 @@ nav = [
     { "The claude-code adapter" = "reference/claude-code-adapter.md" },
     { "The opencode adapter" = "reference/opencode-adapter.md" },
   ] },
+  { "Glossary" = "glossary.md" },
 ]
 
 [project.validation]
@@ -77,6 +79,6 @@ pymdownx.snippets.auto_append = ["includes/abbreviations.md"]
 [project.plugins.exclude]
 glob = ["agents/**"]
 
-# The site has no index page until the overview (#33) lands, so the root goes to the tutorial.
+# The site has no index page, so the root opens the overview.
 [project.plugins.redirects.redirect_maps]
-"index.md" = "tutorial.md"
+"index.md" = "overview.md"

@@ -53,6 +53,7 @@ The first command builds the site into `site/`, and it fails on a dead link or a
 - A link from a page in `docs/` to a file outside `docs/` must be a full URL, because the build cannot follow it.
 - A new page in `docs/` needs a line in the `nav` of `zensical.toml`. A test fails when a page is missing there.
 - The tooltips come from `docs/glossary.md`. `delegate docs` writes them to `includes/abbreviations.md`, and a test fails when that file is stale.
+- To name the file that a code block holds, write the name as a title after the language: `toml title="workflow.toml"`. A bare word after the language does not render on the site, and a test fails on it.
 
 ## Date every harness fact
 

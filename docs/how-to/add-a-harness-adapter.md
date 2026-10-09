@@ -49,7 +49,7 @@ Record one stream for each end state. Write the version of the harness and the d
 
 This example drives a harness `myharness`. The prompt goes on standard input. The stream has one JSON event on each line.
 
-```python myharness.py
+```python title="myharness.py"
 """The MyHarness adapter: drive `myharness run --json`."""
 
 from __future__ import annotations
@@ -104,13 +104,13 @@ A contract test turns a recorded stream into a result and checks the fields of t
 
 Keep the recorded streams in `tests/fixtures/`.
 
-```json tests/fixtures/finished.jsonl
+```json title="tests/fixtures/finished.jsonl"
 {"type": "session", "session": "ses-1"}
 {"type": "text", "text": "The work is done."}
 {"type": "result", "status": "done"}
 ```
 
-```json tests/fixtures/capped.jsonl
+```json title="tests/fixtures/capped.jsonl"
 {"type": "session", "session": "ses-2"}
 {"type": "text", "text": "The work is not"}
 {"type": "result", "status": "length"}
@@ -118,7 +118,7 @@ Keep the recorded streams in `tests/fixtures/`.
 
 The manifest holds the version of the harness and the date of the recording, so a reader knows when to measure again.
 
-```json tests/fixtures/manifest.json
+```json title="tests/fixtures/manifest.json"
 {
   "harness": "MyHarness",
   "harness_version": "1.2.3",
@@ -132,7 +132,7 @@ The manifest holds the version of the harness and the date of the recording, so 
 
 The test file below holds the cases that each adapter needs. Add a case for each end state and each error that your harness can give.
 
-```python tests/test_myharness_adapter.py
+```python title="tests/test_myharness_adapter.py"
 """The contract of the MyHarness adapter: it turns a recorded stream into a result."""
 
 from __future__ import annotations

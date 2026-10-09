@@ -13,7 +13,7 @@ Use this page when your company gateway serves models under its own names. A wor
 
 Copy `tiers.toml` from the package of the kit. Change the model of each tier in the column of each harness that you use. Keep the other tables.
 
-```toml my-tiers.toml
+```toml title="my-tiers.toml"
 [effort]
 levels = ["low", "medium", "high", "xhigh", "max"]
 
@@ -54,7 +54,7 @@ The table has one column for each harness, named by the harness. Each adapter re
 
 The workflow names tiers only. A model name in a workflow is an error.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"

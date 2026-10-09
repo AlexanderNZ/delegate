@@ -6,7 +6,7 @@ Use this page to follow a run while it works, and to go on with a run that stopp
 
 You have a workflow file and the agent pair for each stack. See [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md). This page uses this workflow with two tickets.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"

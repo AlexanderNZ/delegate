@@ -17,7 +17,7 @@ If your tickets are in a tracker, save the body of each ticket to a file with th
 
 A ticket file from `to-tickets` has the sections below. The section `Blocked by` lists the tickets that must be done first.
 
-```markdown tickets/1.md
+```markdown title="tickets/1.md"
 # Read the data set
 
 ## What to build
@@ -34,7 +34,7 @@ The export command reads the data set. A data set with three rows gives three re
 None.
 ```
 
-```markdown tickets/2.md
+```markdown title="tickets/2.md"
 # Write a header row
 
 ## What to build
@@ -56,7 +56,7 @@ Ticket text is about behaviour and holds no file path. The engine adds the file 
 
 Each `[[tickets]]` table names the file in `text-file`. The path is relative to the directory of the workflow file. Copy the `Blocked by` section of each ticket into `blocked-by`, as ticket ids.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/plan"
 mode = "assure"

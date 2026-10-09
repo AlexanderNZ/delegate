@@ -36,7 +36,7 @@ def section(heading: str) -> str:
 def bash_commands(heading: str) -> list[str]:
     """Every command of every bash block in the section."""
     body = section(heading)
-    found = [Block(lang, path or None, text) for _fence, lang, path, text in re.findall(r"^(`{3,})(\w+)(?: (\S+))?\n(.*?)^\1$", body, flags=re.MULTILINE | re.DOTALL)]
+    found = [Block(lang, path or None, text) for _fence, lang, path, text in re.findall(r'^(`{3,})(\w+)(?: title="([^"]+)")?\n(.*?)^\1$', body, flags=re.MULTILINE | re.DOTALL)]
     return [command for block in found if block.lang == "bash" for command in commands(block)]
 
 

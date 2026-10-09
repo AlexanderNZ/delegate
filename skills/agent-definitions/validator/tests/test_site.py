@@ -11,6 +11,7 @@ test: it needs the network.
 import re
 import subprocess
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ PIN = ROOT / ".zensical-version"
 DOCS = ROOT / "docs"
 WORKFLOW = ROOT / ".github" / "workflows" / "docs.yml"
 
-# The order of the sections in the navigation. The overview and the glossary come with #33.
+# The order of the sections in the navigation. The overview is first, and the glossary is last.
 SECTIONS: list[str] = ["Start here", "Tutorial", "How-to guides", "Explanation", "Reference", "Glossary"]
 
 
@@ -87,10 +88,30 @@ def test_the_ci_workflow_for_the_docs_reads_the_pin_file_when_it_exists():
 
 @outside_the_package
 def test_the_navigation_lists_the_sections_in_the_order_of_the_ticket():
-    titles = nav_titles(config()["nav"])
+    nav = config()["nav"]
 
-    assert titles == [title for title in SECTIONS if title in titles], "the sections are out of order"
-    assert {"Tutorial", "How-to guides", "Explanation", "Reference"} <= set(titles)
+    assert nav_titles(nav) == SECTIONS
+    assert nav_targets(nav[:1]) == ["overview.md"]
+    assert nav_targets(nav[-1:]) == ["glossary.md"]
+
+
+@outside_the_package
+def test_the_site_root_opens_the_overview():
+    assert config()["plugins"]["redirects"]["redirect_maps"] == {"index.md": "overview.md"}
+
+
+@outside_the_package
+def test_no_relative_link_of_a_page_leaves_docs():
+    # The strict build cannot follow a path out of docs/. CONTRIBUTING asks for a full URL.
+    link = re.compile(r"\]\(([^)\s#]+)")
+    leaving = []
+    for page in sorted(DOCS.rglob("*.md")):
+        if page.relative_to(DOCS).parts[0] == "agents":
+            continue
+        for target in link.findall(page.read_text()):
+            if not target.startswith(("http://", "https://", "mailto:")) and not (page.parent / target).resolve().is_relative_to(DOCS):
+                leaving.append(f"{page.relative_to(ROOT)}: {target}")
+    assert leaving == []
 
 
 @outside_the_package
@@ -134,6 +155,59 @@ def test_the_abbreviations_file_is_appended_to_every_page_from_a_directory_outsi
     assert {"abbr", "attr_list"} <= set(extensions)
     assert appended == ["includes/abbreviations.md"]
     assert (ROOT / appended[0]).is_file(), "the generated file must be committed"
+
+
+OPENING_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+ATTRIBUTE = r'(?:\{[^}]*\}|[\w.-]+="[^"]*"|[\w.-]+=\S+)'
+ATTRIBUTES = re.compile(rf"{ATTRIBUTE}(?:\s+{ATTRIBUTE})*")
+
+
+def bare_words_after_the_language(page: Path) -> list[str]:
+    """The opening fences of a page that put a bare word after the language, as `file:line: fence`.
+
+    Zensical (pymdownx.superfences) renders a fence such as ```toml title="workflow.toml".
+    A fence such as ```toml workflow.toml is not a code block in the built HTML: it becomes a paragraph.
+    After the language, only attributes (`name="value"`) and a brace group are valid.
+    """
+    found: list[str] = []
+    closing = ""
+    for number, line in enumerate(page.read_text().splitlines(), start=1):
+        if closing:
+            text = line.strip()
+            if text and set(text) == {closing[0]} and len(text) >= len(closing):
+                closing = ""
+            continue
+        opened = OPENING_FENCE.match(line)
+        if opened is None:
+            continue
+        closing = opened.group(1)
+        words = opened.group(2).strip().split(None, 1)
+        if len(words) > 1 and not ATTRIBUTES.fullmatch(words[1]):
+            found.append(f"{page}:{number}: {line.strip()}")
+    return found
+
+
+def test_the_fence_check_flags_a_bare_word_and_accepts_the_title_form(tmp_path):
+    page = tmp_path / "page.md"
+    page.write_text(
+        '```toml workflow.toml\na = 1\n```\n\n'
+        '```toml title="workflow.toml"\na = 1\n```\n\n'
+        '````markdown docs/agents/delegation.md\n```toml x\n```\n````\n\n'
+        '````markdown title="docs/agents/delegation.md"\n```bash\nls\n```\n````\n\n'
+        '```bash\nls\n```\n'
+    )
+
+    flagged = bare_words_after_the_language(page)
+
+    assert [line.split(": ", 1)[1] for line in flagged] == ["```toml workflow.toml", "````markdown docs/agents/delegation.md"]
+
+
+@outside_the_package
+def test_no_fence_in_docs_puts_a_bare_word_after_the_language():
+    # A fence such as ```toml workflow.toml does not render on the site; the title form does.
+    found = [problem for page in sorted(DOCS.rglob("*.md")) for problem in bare_words_after_the_language(page)]
+
+    assert found == []
 
 
 @outside_the_package

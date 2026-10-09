@@ -15,7 +15,7 @@ For a repository with more than one stack, see [how to bootstrap a monorepo](boo
 
 The document holds the gate commands and the hotspots of the repository. The verifier brief takes the gates from the first block under the heading `Verification gates`.
 
-````markdown docs/agents/delegation.md
+````markdown title="docs/agents/delegation.md"
 # Delegation: the rules of this repository
 
 ## Verification gates
@@ -36,7 +36,7 @@ Only the coordinator changes these paths:
 
 Each agent preloads the skills that you name. A skill is a Markdown file in `.claude/skills/<name>/SKILL.md`. The bootstrap command refuses a skill that does not exist.
 
-```markdown .claude/skills/house-style/SKILL.md
+```markdown title=".claude/skills/house-style/SKILL.md"
 ---
 name: house-style
 description: The style rules of this repository. Use when you write or change code here.
@@ -89,7 +89,7 @@ git commit -m "Add the agent pair"
 
 The workflow file names the agents that `--name python` made. The names are `python-specialist` and `python-verifier`.
 
-```toml workflow.toml
+```toml title="workflow.toml"
 base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"
