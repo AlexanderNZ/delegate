@@ -6,7 +6,7 @@ synopsis: 'adapter = "claude-code"'
 
 # Reference: the `claude-code` adapter
 
-The `claude-code` adapter drives Claude Code in headless mode. A workflow selects it with `adapter = "claude-code"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).
+The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [**headless**](../glossary.md#headless) [**mode**](../glossary.md#mode). A [**workflow**](../glossary.md#workflow) selects it with `adapter = "claude-code"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).
 
 ## The command
 
@@ -18,12 +18,12 @@ claude --print --output-format stream-json --verbose --model <model> --agent <ag
 
 | Part | Meaning |
 |---|---|
-| `--print` | Run without a terminal. The harness writes its output and exits. |
+| `--print` | Run without a terminal. The [**harness**](../glossary.md#harness) writes its output and exits. |
 | `--output-format stream-json` | The harness writes one JSON event on each line of standard output. |
 | `--verbose` | The harness needs it to write the events with `--print` and `--output-format stream-json`. |
-| `--model <model>` | The model from the `claude-code` column of the tier table. The adapter never chooses a model. A `--tiers` file changes it. |
-| `--agent <agent>` | The agent name from the stack: the `specialist` field, or the `verifier` field for the verifier. |
-| `--resume <session id>` | Only for a continuation. See [the resume](#the-resume). |
+| `--model <model>` | The model from the `claude-code` column of the [**tier table**](../glossary.md#tier-table). The adapter never chooses a model. A `--tiers` file changes it. |
+| `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
+| `--resume <session id>` | Only for a [**continuation**](../glossary.md#continuation). See [the resume](#the-resume). |
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
@@ -31,17 +31,17 @@ The adapter passes no permission option. The permission rules of the repository 
 
 ## How the adapter selects the agent
 
-The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.claude/agents/` directory of the working directory (or from the user agents), and the body of that file becomes the system prompt of the session. The adapter does not put the agent body in the prompt. The live smoke run below shows it: the reply of the agent follows a rule that only the agent body holds.
+The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.claude/agents/` directory of the working directory (or from the user agents), and the body of that file becomes the system prompt of the [**session**](../glossary.md#session). The adapter does not put the agent body in the prompt. The [**live smoke run**](../glossary.md#live-smoke-run) below shows it: the reply of the agent follows a rule that only the agent body holds.
 
 When the harness does not know the agent, it exits with status 1 and writes no event. See [the start failure](#the-start-failure).
 
 ## The event stream
 
-The adapter copies standard output to a file beside the report: `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure).
+The adapter copies standard output to a file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure).
 
 The adapter reads the last `result` event. The `session_id` field of that event is the session id of the result.
 
-| `result` event | End state |
+| `result` event | [**End state**](../glossary.md#end-state) |
 |---|---|
 | `subtype` is `error_max_turns` | `capped` |
 | `is_error` is true, or `subtype` starts with `error` | `failed` |
@@ -57,17 +57,17 @@ An API error (for example, a model that does not exist) gives `is_error` true wi
 
 ## The resume
 
-The adapter has `supports_resume` set to true. For a continuation, the engine sets `resume_session` in the request, and the adapter adds `--resume <session id>`. The session keeps its first context and its agent. The result has the same session id.
+The adapter has `supports_resume` set to true. For a continuation, the [**engine**](../glossary.md#engine) sets `resume_session` in the request, and the adapter adds `--resume <session id>`. The session keeps its first context and its agent. The result has the same session id.
 
 ## The start failure
 
-When the harness exits and writes no event, no end state can describe the run. An unknown agent, an unknown option, and a missing login do this. The adapter raises `AdapterError` with the exit status, the agent name, and the standard error text of the harness. The engine records the error as a crash and ends the run, because the same cause stops every later agent. See [a crash in a step](run.md#a-crash-in-a-step).
+When the harness exits and writes no event, no end state can describe the [**run**](../glossary.md#run). An unknown agent, an unknown option, and a missing login do this. The adapter raises `AdapterError` with the exit status, the agent name, and the standard error text of the harness. The engine records the error as a crash and ends the run, because the same cause stops every later agent. See [a crash in a step](run.md#a-crash-in-a-step).
 
 ## What the adapter does not set
 
-A headless session cannot ask for a permission. A tool use that the rules do not allow is denied, and the result event lists it in `permission_denials`. Measured on Claude Code 2.1.287 on 2026-10-08: a `Write` to a file was denied in a headless run with no allow rule, and it was still denied with a project rule `Write` in `.claude/settings.json`. The adapter therefore does not decide the permission posture. The adopter sets the allow rules of the repository, or the coordinator changes the adapter. A run that needs a tool without a rule ends with the agent reporting the denial, and the step fails on the report check.
+A headless session cannot ask for a permission. A tool use that the rules do not allow is denied, and the result event lists it in `permission_denials`. Measured on Claude Code 2.1.287 on 2026-10-08: a `Write` to a file was denied in a headless run with no allow rule, and it was still denied with a project rule `Write` in `.claude/settings.json`. The adapter therefore does not decide the permission posture. The adopter sets the allow rules of the repository, or the [**coordinator**](../glossary.md#coordinator) changes the adapter. A run that needs a tool without a rule ends with the agent reporting the denial, and the [**step**](../glossary.md#step) fails on the report check.
 
-The report path is in the state directory of the repository, outside the worktree. The agent must be able to write there.
+The report path is in the [**state directory**](../glossary.md#state-directory) of the repository, outside the [**worktree**](../glossary.md#worktree). The agent must be able to write there.
 
 ## The recorded streams
 
@@ -81,7 +81,7 @@ The directory `tests/fixtures/claude-code/` holds one recorded stream for each e
 
 Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC).
 
-The contract tests replay these streams through a stand-in `claude` command and check the result fields. A test also checks that each fixture names the version of the manifest.
+The [**contract tests**](../glossary.md#contract-test) replay these streams through a stand-in `claude` command and check the result fields. A test also checks that each fixture names the version of the manifest.
 
 ## The live smoke run
 

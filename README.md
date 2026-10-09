@@ -1,10 +1,10 @@
 # delegate
 
-Models differ the way people do. Two sessions of the same model plan, use tools, read context and write code differently, and one short remark in the conversation changes the code. So you end up managing each model like a person, in prose, and the review loop goes back and forth. We met this as we built our own web apps and projects.
+Models are different, the same way people are different. I wanted a team of models that works like a good team of people: one way of working, with the members differing only in skill. Instead, two sessions of the same model planned, used the tools and wrote code in different ways, and one short remark in the conversation changed the code. I managed each model in prose, and the review loop played football: reject, fix, reject, pass, re-check everything. Work got done very quickly. The quality was inconsistent, and the token bill was massive.
 
-`delegate` is a kit for delegating implementation work to coding agents, with independent evidence at each merge. It fixes everything except the ability of the model. Every agent gets the same team contract, whatever model runs it: a role, the context for that role, the tools it may use, a definition of done, and an independent check. The model you pick then changes one thing: how good the code is.
+`delegate` is the machine I built to fix that. It fixes everything except the ability of the model. Every agent gets the same team contract, whatever model runs it: a role, the context for that role, the tools it may use, a definition of done, and an independent check. The model I pick then changes one thing: how good the code is.
 
-The independent check does not trust the agent that wrote the code. The usual pattern does: one session runs many implementers, a reviewer reads one large diff at the end, and the reviewer takes the implementer's word that the tests pass. This kit does not take that word. The engine runs your gates itself. A blind verifier gets the ticket and the diff, never the implementer's report. Nothing reaches the run branch without an ACCEPT.
+The independent check doesn't trust the agent that wrote the code. The engine runs the gates itself. A blind verifier gets the ticket and the diff, never the specialist's report. Fix-up rounds have a cap, and a fix-up check reads only the new commits. Nothing reaches the run branch without an ACCEPT.
 
 The kit has three parts:
 
@@ -16,12 +16,12 @@ The skills and the engine name no person, company or tracker. Each repository ke
 
 ## Position
 
-This kit builds on two pieces of work. It was only possible because of them.
+This kit builds on two pieces of work. It was only possible because of them: without them I wouldn't have met these problems, and I wouldn't have solved them this way.
 
 - *The map:* [the levels of agentic engineering](https://www.bassimeledath.com/blog/levels-of-agentic-engineering) by Bassim Eledath. He describes eight levels, from tab completion to autonomous agent teams, and the rule that levels 3 to 5 must hold before more automation. This kit is one vertical slice through levels 2 to 7. It does not attempt level 8. The [overview](docs/overview.md) draws the slice.
 - *The input:* the planning skills of [mattpocock/skills](https://github.com/mattpocock/skills) by Matt Pocock. `grilling` and `wayfinder` settle the decisions, `to-spec` writes the spec, and `to-tickets` cuts it into tickets with blocking edges. This kit takes those tickets as its input, and it replaces only the build step.
 
-This kit does not compete with mattpocock/skills. Its build skill, `implement-spec`, optimises developer flow and throughput: one session, maximum parallelism, and a human reviewer as the trust point. This kit optimises independent evidence at each merge.
+The same project has a build skill, `implement-spec`. It optimises developer flow and throughput: one session, maximum parallelism, and a human reviewer as the trust point. This kit sits beside it on the same foundation, and optimises independent evidence at each merge.
 
 ## Install
 
@@ -52,7 +52,7 @@ The two skills are plain Markdown directories: `skills/agent-delegation/` and `s
 
 Start with the first two pages.
 
-- [Start here: the kit at a glance](docs/overview.md): the problem (models differ the way people do), the idea, the ladder that the kit slices through, the loop from a ticket to a merge (Brief, Build, Verify, Merge) with one ticket followed through it, the two dials (tier and mode), and what the kit is not.
+- [Start here: the kit at a glance](docs/overview.md): the problem (models differ the way people do), the idea (one team contract for every model), the ladder that the kit slices through, the team and its loop from a ticket to a merge (Brief, Build, Verify, Merge) with one ticket followed through it, the two dials (tier and mode), and what the kit is not.
 - [Glossary](docs/glossary.md): every term of these docs, in alphabetical order, with what it is, why it matters, and the page with the detail.
 - [Tutorial: from install to one verified ticket](docs/tutorial.md): bootstrap a sample repository, run one ticket in `assure` mode on Claude Code, and read the verdict and the journal. Its sample files are in [`examples/tutorial`](examples/tutorial).
 - [How to bootstrap a single-stack repository](docs/how-to/bootstrap-a-single-stack-repository.md): write the delegation document and a skill, run `delegate bootstrap`, check the pair, and name it in a workflow.
@@ -62,7 +62,7 @@ Start with the first two pages.
 - [How to point the tiers at a gateway](docs/how-to/point-the-tiers-at-a-gateway.md): write your own tier file, give it with `--tiers`, and see the engine ask the harness for your models.
 - [How to add a harness adapter](docs/how-to/add-a-harness-adapter.md): the parts of the adapter interface, an example adapter, and the contract-test pattern with recorded streams.
 - [How to use the kit after `to-spec` and `to-tickets`](docs/how-to/use-the-kit-after-to-spec-and-to-tickets.md): save the tickets to files, write a workflow that names them, and run the plan.
-- [Why the model should not matter](docs/explanation/why-the-model-should-not-matter.md): how the kit got its shape, from a model router to rules for each model to contracts for each role to the engine; what varies between models and how the kit fixes it; five lessons; and which model to verify with, as a recommendation and not a rule.
+- [Why the model should not matter](docs/explanation/why-the-model-should-not-matter.md): how the kit got its shape, from one agent in a terminal, to subagents and a model router, to rules for each model, to contracts for each role, to the engine; what varies between models and how the kit fixes it; five lessons; and which model to verify with, as a recommendation and not a rule.
 - [Why the verifier is blind, and why it runs the gates](docs/explanation/why-the-verifier-is-blind.md): the report is a claim, so the verifier gets the task and the diff; the engine runs the gates, and the verifier runs them in a copy that it may break.
 - [Why each specialist has its own verifier](docs/explanation/why-each-specialist-has-its-own-verifier.md): a verifier needs the skills of the specialist, so one declaration renders both halves of a pair, with a pair for each stack.
 - [The mode trade-off](docs/explanation/the-mode-trade-off.md): why there are two modes, what `assure` and `economy` each give up, and the rules that no mode changes.
@@ -76,7 +76,7 @@ Start with the first two pages.
 - [Reference: `delegate status` and `delegate watch`](docs/reference/status-and-watch.md): the state of each ticket of a run, the follow of its journal, the problem events, and the exit code of each reason.
 - [Reference: `render`, `validate`, `bootstrap` and `brief`](docs/reference/commands.md): the options of each command, the commands that the verifier guard permits, and the finding codes of the validator.
 - [Reference: `delegate docs`](docs/reference/docs.md): the command that writes the generated sections of these pages from the code. After a change to a flag, an exit code, a guard command or a finding code, run `delegate docs`; a test fails when a committed page differs from the code.
-- [Future ideas](docs/future-ideas.md): ideas to investigate, not promises and not a plan: a benchmark from your own tickets, more of the coordinator role in the engine, and a Cursor adapter.
+- [Future ideas](docs/future-ideas.md): ideas to investigate, not promises and not a plan: a benchmark from real tickets, more of the coordinator role in the engine, the next step up the ladder, and a Cursor adapter.
 - [The agent rules of this repository](docs/agents/delegation.md): the gates and the hotspots that bind every agent that works on the kit itself.
 
 ## Contributing

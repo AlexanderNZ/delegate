@@ -6,7 +6,7 @@ synopsis: 'adapter = "opencode"'
 
 # Reference: the `opencode` adapter
 
-The `opencode` adapter drives OpenCode in headless mode. A workflow selects it with `adapter = "opencode"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).
+The `opencode` [**adapter**](../glossary.md#adapter) drives OpenCode in [**headless**](../glossary.md#headless) [**mode**](../glossary.md#mode). A [**workflow**](../glossary.md#workflow) selects it with `adapter = "opencode"`. It follows the adapter interface in [the run reference](run.md#the-adapter-interface).
 
 ## The command
 
@@ -18,11 +18,11 @@ opencode run --format json --model <model> --agent <agent> --dir <directory> [--
 
 | Part | Meaning |
 |---|---|
-| `--format json` | The harness writes one JSON event on each line of standard output. |
-| `--model <model>` | The model from the `opencode` column of the tier table, in the form `<provider>/<model>`. The adapter never chooses a model. See [the model](#the-model). |
-| `--agent <agent>` | The agent name from the stack: the `specialist` field, or the `verifier` field for the verifier. |
+| `--format json` | The [**harness**](../glossary.md#harness) writes one JSON event on each line of standard output. |
+| `--model <model>` | The model from the `opencode` column of the [**tier table**](../glossary.md#tier-table), in the form `<provider>/<model>`. The adapter never chooses a model. See [the model](#the-model). |
+| `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
 | `--dir <directory>` | The working directory of the request. See [the working directory](#the-working-directory). |
-| `--session <session id>` | Only for a continuation. See [the resume](#the-resume). |
+| `--session <session id>` | Only for a [**continuation**](../glossary.md#continuation). See [the resume](#the-resume). |
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
@@ -32,13 +32,13 @@ The adapter passes no permission option. The permission rules of the repository 
 
 The adapter reads the `opencode` column of the tier table, so a `--tiers` file changes the model for this adapter. Two options change the column from the command line: `--opencode-model` and `--opencode-allow`. Put them after `run`. Both can be repeated. [The options of the run reference](run.md#options) list them.
 
-`--opencode-model` sets the model of one tier in the `opencode` column. A tier that the option does not name keeps its value. The column `claude-code` does not change. An unknown tier name exits 1. `--opencode-allow` extends the set of allowed `opencode` models; the default models stay allowed.
+`--opencode-model` sets the model of one [**tier**](../glossary.md#tier) in the `opencode` column. A tier that the option does not name keeps its value. The column `claude-code` does not change. An unknown tier name exits 1. `--opencode-allow` extends the set of allowed `opencode` models; the default models stay allowed.
 
-A model that `--opencode-model` names must be in the allowed set, or the command exits 1 and names the model. A run has no validation step for the rendered agents, so this check stops a model that no provider serves. The options are the same as the options of `render` and `validate`.
+A model that `--opencode-model` names must be in the allowed set, or the command exits 1 and names the model. A [**run**](../glossary.md#run) has no validation step for the rendered agents, so this check stops a model that no provider serves. The options are the same as the options of `render` and `validate`.
 
 ## How the adapter selects the agent
 
-The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.opencode/agents/` directory of the project (or from the user agents), and the body of that file becomes the system prompt of the session. The adapter does not put the agent body in the prompt. The live smoke run below shows it: the reply of the agent follows a rule that only the agent body holds.
+The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.opencode/agents/` directory of the project (or from the user agents), and the body of that file becomes the system prompt of the [**session**](../glossary.md#session). The adapter does not put the agent body in the prompt. The [**live smoke run**](../glossary.md#live-smoke-run) below shows it: the reply of the agent follows a rule that only the agent body holds.
 
 Two cases need care:
 
@@ -51,13 +51,13 @@ The harness takes its project directory from the `PWD` variable that the caller 
 
 ## The event stream
 
-The adapter copies standard output to a file beside the report: `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure) and for the agent that the harness does not find.
+The adapter copies standard output to a file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure) and for the agent that the harness does not find.
 
 The stream holds these events. The field `type` names the event.
 
 | Event | Meaning |
 |---|---|
-| `step_start` | A step of the agent starts. |
+| `step_start` | A [**step**](../glossary.md#step) of the agent starts. |
 | `text` | Text of the model. The field `part.text` holds it. |
 | `tool_use` | A tool call with its input and output. |
 | `step_finish` | A step ends. The field `part.reason` says why. |
@@ -65,7 +65,7 @@ The stream holds these events. The field `type` names the event.
 
 Every event has the field `sessionID`. The adapter takes the session id from the first event that has it.
 
-The end state comes from the events:
+The [**end state**](../glossary.md#end-state) comes from the events:
 
 | Stream | End state |
 |---|---|
@@ -87,7 +87,7 @@ The end state `capped` means that the model reached its output limit (`reason` `
 
 An agent file can set `steps`, the maximum number of steps. When the agent reaches it, the harness sends one more step that has no tools, and the model answers with text. That last step ends with `reason` `stop`, and the exit status is 0. Nothing in the stream or in the exit status marks the cap. Measured on OpenCode 1.15.10 on 2026-10-08, with `steps` set to 1: the stream has the fixture `step-cap.jsonl`, and the end state is `finished`.
 
-The engine then reads the report. A step that reached the cap before the agent wrote a valid report fails on the report check, and the engine starts no continuation. The adapter does not parse the text of the model to find the cap, because that text is not a contract of the harness. A repository that uses the adapter should not set `steps` on its agents.
+The [**engine**](../glossary.md#engine) then reads the report. A step that reached the cap before the agent wrote a valid report fails on the report check, and the engine starts no continuation. The adapter does not parse the text of the model to find the cap, because that text is not a contract of the harness. A repository that uses the adapter should not set `steps` on its agents.
 
 ## The resume
 
@@ -111,7 +111,7 @@ The directory `tests/fixtures/opencode/` holds one recorded stream for each case
 
 Version: OpenCode 1.15.10. Recorded: 2026-10-08 (UTC).
 
-The contract tests replay these streams through a stand-in `opencode` command and check the result fields. A test also checks that the manifest names the version and the date, and that each fixture has an entry.
+The [**contract tests**](../glossary.md#contract-test) replay these streams through a stand-in `opencode` command and check the result fields. A test also checks that the manifest names the version and the date, and that each fixture has an entry.
 
 ## The live smoke run
 
@@ -119,7 +119,7 @@ The contract tests replay these streams through a stand-in `opencode` command an
 |---|---|
 | Harness | OpenCode 1.15.10 |
 | Date | 2026-10-08 (UTC) |
-| Model | `<gateway>/qwen`: a model of a gateway provider in the user configuration |
+| Model | `<gateway>/qwen`: a model of a [**gateway**](../glossary.md#gateway) provider in the user configuration |
 | Agent | `smoke-agent`: a project agent file in `.opencode/agents/`. Its body says that a reply starts with the word `SMOKE-AGENT-ACTIVE`. |
 
 1. The adapter ran with the prompt "Reply with the single word PINEAPPLE on the second line." The result was `finished`, exit status 0. The reply was `SMOKE-AGENT-ACTIVE` and then `PINEAPPLE`. The first word comes only from the agent body, so `--agent` selected the agent.

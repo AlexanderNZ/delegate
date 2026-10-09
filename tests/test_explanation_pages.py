@@ -72,7 +72,7 @@ REASONS: dict[str, list[tuple[str, str]]] = {
     ],
     "why-the-model-should-not-matter.md": [
         ("the kit began as a model router", r"model router"),
-        ("the lineage names the maintainer's projects only in general terms", r"our own web apps and projects"),
+        ("the lineage names the maintainer's projects only in general terms", r"own web apps and projects"),
         ("the rules for each model were prose", r"rules for each model"),
         ("one declaration renders the specialist and its verifier", r"one \W*declaration\W.*its verifier"),
         ("a validator turns the rules into build failures", r"build failures?"),
@@ -125,7 +125,8 @@ def test_a_page_speaks_in_the_first_person_of_the_maintainer(page):
 @outside_the_package
 @pytest.mark.parametrize("page", PAGES)
 def test_a_page_gives_the_reasons_of_its_ticket(page):
-    text = prose(page).lower()
+    # A glossary link reads as its text: "[**run**](../glossary.md#run)" is the word "run".
+    text = re.sub(r"\[\*\*([^*\]]+)\*\*\]\([^)]*\)", r"\1", prose(page)).lower()
     missing = [reason for reason, pattern in REASONS[page] if not re.search(pattern, text)]
     assert missing == []
 
@@ -242,44 +243,6 @@ def test_each_prior_art_entry_links_its_primary_source_and_gives_the_date_it_was
 def test_the_prior_art_page_holds_one_entry_for_each_tool_of_the_ticket_and_no_other():
     named = [heading for heading in subentries("prior-art.md", "Alongside") if heading.strip() != "How to choose"]
     assert sorted(next(name for name in PRIOR_ART if name in heading) for heading in named) == sorted(PRIOR_ART)
-
-
-# The glossary terms that each changed page uses, as a pattern for each term. The first use in the prose is a link to the glossary.
-FIRST_USE = {
-    "prior-art.md": [
-        r"ladder", r"brief", r"skills?", r"gates?", r"engine", r"pre-push hook", r"worktrees?", r"grilling", r"wayfinder",
-        r"session", r"spec", r"tracer bullets?", r"tickets?", r"specialist", r"verifier", r"run branch", r"blind",
-        r"harness", r"journal", r"declaration", r"tier table", r"delegation document", r"chain", r"protocol", r"headless",
-        r"report",
-    ],
-    "why-each-specialist-has-its-own-verifier.md": [
-        r"specialist", r"verifier", r"stack", r"agent pair", r"skills?", r"tier", r"declaration", r"harness", r"validator",
-        r"gates?", r"engine", r"mode", r"report",
-    ],
-    "why-the-model-should-not-matter.md": [
-        r"protocol", r"coordinator", r"specialist", r"verifier", r"blind", r"skills?", r"headless", r"tier", r"brief",
-        r"declaration", r"harness", r"validator", r"fix-up", r"delta", r"tickets?", r"report", r"run", r"gates?", r"engine",
-        r"journal", r"adapter", r"grilling", r"wayfinder", r"to-spec", r"spec", r"to-tickets", r"ladder", r"file boundary",
-        r"context skill", r"delegation document", r"hotspot", r"push guard", r"verifier guard", r"verdict", r"pre-push`? hook",
-        r"workflow", r"session", r"temporary copy", r"red proof", r"tier table", r"mode", r"economy", r"assure", r"gateway",
-        r"tier file", r"reject",
-    ],
-}
-
-
-@outside_the_package
-@pytest.mark.parametrize("page", list(FIRST_USE))
-def test_a_glossary_term_links_the_glossary_at_its_first_use(page):
-    # The text without the title, the headings and the Markdown link targets (a target such as `/skills` or `#to-spec` is not a use).
-    text = "\n".join(line for line in (EXPLANATION / page).read_text().splitlines() if not line.startswith("#"))
-    text = re.sub(r"\]\([^)]*\)", "]", text)
-    unlinked = []
-    for term in FIRST_USE[page]:
-        use = re.search(r"(?<![\w/-])`?" + term + r"(?![\w-])", text, flags=re.IGNORECASE)
-        assert use, f"{page} does not use the term {term!r}"
-        if not text[: use.start()].endswith("[**"):
-            unlinked.append(term)
-    assert unlinked == []
 
 
 @outside_the_package

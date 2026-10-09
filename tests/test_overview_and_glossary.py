@@ -67,6 +67,13 @@ def term(text: str) -> str:
     return text.replace("`", "").strip().casefold()
 
 
+def singular(text: str) -> str:
+    """The term of a bold link text, which may be plural: "sessions" is the term "session"."""
+    known = {term(heading) for heading, _ in entries()}
+    word = term(text)
+    return next((form for form in (word, word.removesuffix("es"), word.removesuffix("s")) if form in known), word)
+
+
 def entries() -> list[tuple[str, str]]:
     """The entries of the glossary: the text of each level-two heading, and the body under it."""
     parts = re.split(r"^## (.+)$", prose(GLOSSARY.read_text()), flags=re.MULTILINE)
@@ -185,7 +192,7 @@ def test_every_term_in_bold_in_the_overview_has_a_glossary_entry():
     bold = BOLD.findall(prose(OVERVIEW.read_text()))
     assert bold, "the overview puts no term in bold, so this check would check nothing"
     glossary = {term(heading) for heading, _ in entries()}
-    assert sorted({b for b in bold if term(b) not in glossary}) == []
+    assert sorted({b for b in bold if singular(b) not in glossary}) == []
 
 
 @outside_the_package
@@ -194,13 +201,13 @@ def test_every_term_in_bold_in_the_overview_links_its_glossary_entry():
     anchor_of = {term(heading): slug(heading) for heading, _ in entries()}
     linked = BOLD_GLOSSARY_LINK.findall(text)
     unlinked = [b for b in BOLD.findall(text) if b not in {name for name, _ in linked}]
-    wrong_anchor = [(name, anchor) for name, anchor in linked if anchor_of.get(term(name)) != anchor]
+    wrong_anchor = [(name, anchor) for name, anchor in linked if anchor_of.get(singular(name)) != anchor]
     assert (unlinked, wrong_anchor) == ([], [])
 
 
 @outside_the_package
 def test_the_overview_puts_each_term_in_bold_once():
-    bold = [term(b) for b in BOLD.findall(prose(OVERVIEW.read_text()))]
+    bold = [singular(b) for b in BOLD.findall(prose(OVERVIEW.read_text()))]
     assert sorted({b for b in bold if bold.count(b) > 1}) == []
 
 

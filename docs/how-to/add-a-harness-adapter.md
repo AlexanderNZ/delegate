@@ -1,8 +1,8 @@
 # How to add a harness adapter
 
-Use this page when you want the engine to drive a harness that has no adapter yet. An adapter is a small Python object. It starts the headless command of a harness, and turns the event stream of the harness into a result that the engine understands.
+Use this page when you want the [**engine**](../glossary.md#engine) to drive a [**harness**](../glossary.md#harness) that has no [**adapter**](../glossary.md#adapter) yet. An adapter is a small Python object. It starts the [**headless**](../glossary.md#headless) command of a harness, and turns the [**event stream**](../glossary.md#event-stream) of the harness into a result that the engine understands.
 
-You do not read the engine for this. You need the interface below, one recorded stream for each end state, and the contract test of this page.
+You do not read the engine for this. You need the interface below, one recorded stream for each [**end state**](../glossary.md#end-state), and the [**contract test**](../glossary.md#contract-test) of this page.
 
 ## The interface
 
@@ -11,11 +11,11 @@ An adapter is one object behind one interface. It lives in `delegate/adapters.py
 The engine gives the adapter an `AdapterRequest`. It has these fields:
 
 - `agent`: the name of the agent to run.
-- `model`: the model, which the engine took from the tier column of the adapter. The adapter never chooses a model.
-- `prompt`: the brief for the agent.
-- `cwd`: the working directory, which is a worktree or a temporary copy.
+- `model`: the model, which the engine took from the [**tier**](../glossary.md#tier) column of the adapter. The adapter never chooses a model.
+- `prompt`: the [**brief**](../glossary.md#brief) for the agent.
+- `cwd`: the working directory, which is a [**worktree**](../glossary.md#worktree) or a [**temporary copy**](../glossary.md#temporary-copy).
 - `report_path`: where the agent writes its JSON report.
-- `resume_session`: the session id of an earlier run to resume, or `None`.
+- `resume_session`: the [**session**](../glossary.md#session) id of an earlier run to resume, or `None`.
 
 The adapter gives back an `AdapterResult`. It has these fields:
 
@@ -26,11 +26,11 @@ The adapter gives back an `AdapterResult`. It has these fields:
 
 The adapter class has two attributes and one method:
 
-- `tier_column`: the name of the column of the tier table that holds the models of this harness.
-- `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a continuation.
+- `tier_column`: the name of the column of the [**tier table**](../glossary.md#tier-table) that holds the models of this harness.
+- `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a [**continuation**](../glossary.md#continuation).
 - `run`: takes the request and returns the result.
 
-The module also gives you three more parts. `AdapterError` is for a harness that cannot run the agent at all. `stream_path` gives a file for the stream, beside the report. `read_events` reads a line-delimited JSON stream. `register` adds an adapter to the registry under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
+The module also gives you three more parts. `AdapterError` is for a harness that cannot run the agent at all. `stream_path` gives a file for the stream, beside the [**report**](../glossary.md#report). `read_events` reads a line-delimited JSON stream. `register` adds an adapter to the registry under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
 ## Steps
 
@@ -40,7 +40,7 @@ Run the headless command of the harness on a real machine. Write down these fact
 
 - The command, and the option for the model, for the agent, and for the session.
 - How the harness takes the prompt. Put it on standard input when you can, so it is not in the arguments.
-- The event that ends a run, and how it shows a normal end, an output limit, and an error.
+- The event that ends a [**run**](../glossary.md#run), and how it shows a normal end, an output limit, and an error.
 - Whether the harness selects a named agent. If it cannot, send the body of the agent file as part of the prompt.
 
 Record one stream for each end state. Write the version of the harness and the date in a manifest, because a harness changes.
@@ -249,12 +249,12 @@ The engine finds a built-in adapter by name. Make these changes in the package `
 
 1. Put the adapter module beside `claude_code.py` and `opencode.py`.
 2. Add a branch for the name in `adapters.get`.
-3. Add the name to `ADAPTERS` in `workflow.py`, so a workflow can name it.
+3. Add the name to `ADAPTERS` in `workflow.py`, so a [**workflow**](../glossary.md#workflow) can name it.
 4. Add a column that `tier_column` names to each tier in `tiers.toml`.
 
-Then check the model. A test runs `delegate run` with the stand-in command and a workflow that names the adapter. It reads the model from the call of the stand-in. The model must be the model of the tier column for the mode. See `tests/test_run_opencode.py` in the repository for the pattern.
+Then check the model. A test runs `delegate run` with the stand-in command and a workflow that names the adapter. It reads the model from the call of the stand-in. The model must be the model of the tier column for the [**mode**](../glossary.md#mode). See `tests/test_run_opencode.py` in the repository for the pattern.
 
-A user who cannot change the kit can still add a column in a tier file of their own. See [how to point the tiers at a gateway](point-the-tiers-at-a-gateway.md).
+A user who cannot change the kit can still add a column in a [**tier file**](../glossary.md#tier-file) of their own. See [how to point the tiers at a gateway](point-the-tiers-at-a-gateway.md).
 
 ### 5. Run the harness for real, and write the reference page
 

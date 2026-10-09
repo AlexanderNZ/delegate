@@ -6,11 +6,11 @@ synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--break-lo
 
 # Reference: `delegate run`
 
-`delegate run <workflow>` builds the tickets of a workflow. For each ticket, the engine makes a worktree, spawns the specialist of the stack through a harness adapter, checks the specialist report, runs the gates itself, and records each event in a journal. In `assure` mode, the engine then verifies the branch with a blind verifier, and moves the run branch to the branch only on ACCEPT. A REJECT starts a fix-up round, up to two rounds. In `economy` mode, the engine builds a chain of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
+`delegate run <workflow>` builds the [**tickets**](../glossary.md#ticket) of a [**workflow**](../glossary.md#workflow). For each ticket, the [**engine**](../glossary.md#engine) makes a [**worktree**](../glossary.md#worktree), spawns the [**specialist**](../glossary.md#specialist) of the [**stack**](../glossary.md#stack) through a [**harness**](../glossary.md#harness) [**adapter**](../glossary.md#adapter), checks the specialist report, runs the [**gates**](../glossary.md#gate) itself, and records each event in a [**journal**](../glossary.md#journal). In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode), the engine then verifies the branch with a [**blind**](../glossary.md#blind) [**verifier**](../glossary.md#verifier), and moves the [**run branch**](../glossary.md#run-branch) to the branch only on [**ACCEPT**](../glossary.md#accept). A [**REJECT**](../glossary.md#reject) starts a [**fix-up**](../glossary.md#fix-up) round, up to two rounds. In [**`economy`**](../glossary.md#economy) mode, the engine builds a [**chain**](../glossary.md#chain) of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
-A coordinator can stop a run and go on later with `--resume <run-id>`. See [the resume](#the-resume). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
+A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
 
-A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose blocker failed is skipped, and the independent tickets still run.
+A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
 To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md).
 
@@ -39,18 +39,18 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 3. The engine checks that `base-branch` is a branch of the repository and that no ticket branch exists. A problem exits 1 and creates nothing.
 4. The engine takes the lock.
 5. The engine creates the run branch at `base-branch`, and writes `run-start` to a new journal.
-6. For each ticket in dependency order, the engine does the step below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
+6. For each ticket in dependency order, the engine does the [**step**](../glossary.md#step) below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
 7. In `economy` mode, the engine verifies the chain. See [the chain verification](#the-chain-verification).
 8. The engine writes `run-end`, and releases the lock.
 
 A step has these parts:
 
-1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the push guard in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain).
+1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the [**push guard**](../glossary.md#push-guard) in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain).
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
-3. Read the report from the report path and check it against the schema.
+3. Read the [**report**](../glossary.md#report) from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, or the tip of the previous ticket in `economy` mode).
-5. Compare the changed paths with the hotspot patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
-6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a continuation. See [the continuation](#the-continuation).
+5. Compare the changed paths with the [**hotspot**](../glossary.md#hotspot) patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
+6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
 8. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
 
@@ -64,13 +64,13 @@ The engine sets `core.fsmonitor` to false in the configuration of each worktree 
 
 A specialist that ends `capped` or `failed`, or whose gates are red, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
 
-- A specialist ends `capped` or `failed` when the adapter result has the end state `capped` or `failed`, or an exit status other than 0. The engine does not read the report of that run.
+- A specialist ends `capped` or `failed` when the adapter result has the [**end state**](../glossary.md#end-state) `capped` or `failed`, or an exit status other than 0. The engine does not read the report of that run.
 - A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0.
 - A report that is missing, is not valid, or has a status other than `committed` fails the step. It does not start a continuation.
 - The continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. The specialist continues from these commits, and adds each change as a new commit.
-- If the adapter has `supports_resume` set to true, and the last result has a `session_id`, the engine resumes that session. It sets `resume_session` in the request to the `session_id` of the last result, so each continuation resumes the newest session. The session keeps the context of the first brief, so the prompt holds only the continuation brief. The journal records the mode `resume`.
+- If the adapter has `supports_resume` set to true, and the last result has a `session_id`, the engine resumes that [**session**](../glossary.md#session). It sets `resume_session` in the request to the `session_id` of the last result, so each continuation resumes the newest session. The session keeps the context of the first brief, so the prompt holds only the continuation brief. The journal records the mode `resume`.
 - Otherwise the engine starts a new agent, with `resume_session` set to `None`. A new agent has no context, so its prompt is the full specialist brief with the continuation section added. The journal records the mode `brief`. This is also the mode when the adapter supports resume but the harness gave no session id.
-- The tier and the model are those of the first specialist run.
+- The [**tier**](../glossary.md#tier) and the model are those of the first specialist run.
 - The engine journals `continuation` before each continuation, with the count, the trigger, the commits, and the reason.
 
 One count covers the three triggers. Each mode has a continuation limit:
@@ -90,7 +90,7 @@ The engine rebuilds the state of the run from its journal, and starts at the fir
 
 The engine treats each ticket by what the journal holds for it:
 
-| State in the journal | What the resume does |
+| State in the journal | What the [**resume**](../glossary.md#resume) does |
 |---|---|
 | `step-end` (built, or failed) | The step is complete. The engine does not build it again, and it gives the adapter no invocation. |
 | `skip` | The ticket stays skipped. |
@@ -130,18 +130,18 @@ The branch and the worktree of the ticket stay as the crash left them.
 
 ## The skip rule
 
-A ticket is skipped when at least one of its blockers is not built. A blocker is not built when its step failed or when it was skipped, so a skip passes down the chain. The engine makes no worktree and no branch for a skipped ticket. The journal records `skip` with the blockers and the reason, for example `blocked by a, which failed`. The command prints one line `delegate run: ticket <id>: skipped: <reason>` on stderr. A ticket with no unbuilt blocker still runs, also after a failed step of another ticket.
+A ticket is skipped when at least one of its blockers is not built. A blocker is not built when its step failed or when it was skipped, so a [**skip**](../glossary.md#skip) passes down the chain. The engine makes no worktree and no branch for a skipped ticket. The journal records `skip` with the blockers and the reason, for example `blocked by a, which failed`. The command prints one line `delegate run: ticket <id>: skipped: <reason>` on stderr. A ticket with no unbuilt blocker still runs, also after a failed step of another ticket.
 
 ## The guards
 
-The guards use git only, so they hold in every harness, also in a headless run that skips the hooks of the harness.
+The guards use git only, so they hold in every harness, also in a [**headless**](../glossary.md#headless) run that skips the hooks of the harness.
 
 ### The push guard
 
 The engine installs the push guard in each worktree that it makes, also in a worktree that a resume uses again.
 
 - The engine sets `extensions.worktreeConfig` in the repository, and sets `core.hooksPath` in the configuration of that one worktree. The main checkout and the other worktrees keep their own hooks.
-- The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the state directory. It holds a `pre-push` hook that prints `delegate: push refused` on stderr and exits 1, so every push from the worktree fails.
+- The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the [**state directory**](../glossary.md#state-directory). It holds a `pre-push` hook that prints `delegate: push refused` on stderr and exits 1, so every push from the worktree fails.
 - The directory also holds a wrapper for each other hook of the repository (or of the host, when the host sets `core.hooksPath`). The wrapper runs the original hook with the same arguments and the same input, so those hooks still run for the commits of the specialist.
 - The guard does not stop a push with the `--no-verify` option, because git skips every `pre-push` hook then. It also does not stop a push from a clone or from another directory. It holds against the plain push command of a specialist in the worktree.
 
@@ -157,12 +157,12 @@ After the specialist reports `committed` and the branch holds a commit, and befo
 
 ### The worktree invariant
 
-The verifier works in a temporary copy. It must not change the real worktree of the ticket, which is the worktree where the specialist built the branch. The engine checks this in every harness, also in one with no command guard.
+The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It must not change the real worktree of the ticket, which is the worktree where the specialist built the branch. The engine checks this in every harness, also in one with no command guard.
 
 - Before each verifier run, the engine takes a snapshot of the worktree of the ticket: the HEAD commit, and for each path that `git status` reports, the status code and a hash of the content of the file. A file that git ignores is not in the snapshot. The engine takes the snapshot again when the verifier ends.
-- A difference is an invariant violation. A verifier that commits, that adds or deletes a file, that edits a tracked file, or that rewrites a file which was already changed or untracked, makes the snapshots differ. The engine does this check for the first verifier of a ticket and for the verifier of each fix-up round.
+- A difference is an [**invariant**](../glossary.md#invariant) violation. A verifier that commits, that adds or deletes a file, that edits a tracked file, or that rewrites a file which was already changed or untracked, makes the snapshots differ. The engine does this check for the first verifier of a ticket and for the verifier of each fix-up round.
 - A violation halts the run. The engine writes `verify-result`, then `invariant-violation` with the worktree, the HEAD commit before and after, and one entry in `changes` for each path that differs. The engine writes `step-end` with the state `failed` and the reason `invariant violation: ...`. It writes `skip` for each ticket that it did not reach, with the reason `the run ended after ticket <id> halted the run`. It writes `run-end` with the result `failed`. The command prints one line `delegate run: ticket <id>: invariant violation: ...` on stderr, and exits 1.
-- The verdict does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A run that a violation halted cannot be resumed.
+- The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A run that a violation halted cannot be resumed.
 - A verifier that writes only in its temporary copy does not halt the run. The engine removes the copy after each verifier run, also when the run halts.
 - The check covers the worktree of the ticket. It does not cover the main checkout of the repository, which the coordinator can change at any time, and it does not cover a path outside the repository.
 
@@ -193,9 +193,9 @@ In `economy` mode, the tickets form a chain. Each ticket branch starts from the 
 In `economy` mode, the engine verifies once for each stack, after the last ticket of the chain. The engine does not verify a ticket by itself, and it does not move the run branch before the end.
 
 1. The chain holds the tickets that were built. The stacks are the stacks of these tickets, in the order of their first ticket.
-2. For each stack, the engine spawns one verifier. The verifier tier is `verifier`, as in `assure` mode, whatever the tier of the specialists is. The verifier works in a temporary copy of the chain tip. The brief generator makes the brief (`chain_brief`). It holds the text of each ticket of the stack and, for each of them, the diff of the commits that the ticket added (`git diff <base>...<tip>`). It holds no diff of a ticket of another stack. It also tells the verifier to start each finding with the id of its ticket in square brackets, for example `[b] The header row is missing.`
+2. For each stack, the engine spawns one verifier. The verifier tier is `verifier`, as in `assure` mode, whatever the tier of the specialists is. The verifier works in a temporary copy of the chain tip. The [**brief generator**](../glossary.md#brief-generator) makes the [**brief**](../glossary.md#brief) (`chain_brief`). It holds the text of each ticket of the stack and, for each of them, the diff of the commits that the ticket added (`git diff <base>...<tip>`). It holds no diff of a ticket of another stack. It also tells the verifier to start each [**finding**](../glossary.md#finding) with the id of its ticket in square brackets, for example `[b] The header row is missing.`
 3. On ACCEPT, the next stack is verified.
-4. On REJECT, the stack gets one fix-up round. The limit is 1 round in `economy` mode. The fix-up is a new commit on the chain tip. It runs in the worktree of the last ticket of the chain, with the specialist of the stack and the findings verbatim. The engine runs the gates of the stack. A fresh verifier then gets the scoped brief: the findings, and the delta from the rejected commit. The steps of [the fix-up round](#the-fix-up-round) apply.
+4. On REJECT, the stack gets one fix-up round. The limit is 1 round in `economy` mode. The fix-up is a new commit on the chain tip. It runs in the worktree of the last ticket of the chain, with the specialist of the stack and the findings verbatim. The engine runs the gates of the stack. A fresh verifier then gets the scoped brief: the findings, and the [**delta**](../glossary.md#delta) from the rejected commit. The steps of [the fix-up round](#the-fix-up-round) apply.
 5. A second REJECT fails the stack, and the run. The engine does not verify the stacks after it.
 6. When every stack is accepted, the engine moves the run branch to the chain tip by fast-forward, and writes `run-branch-advance`. The run branch moves only then.
 
@@ -229,14 +229,14 @@ In `assure` mode, the engine verifies each ticket branch that has green gates. I
 6. On ACCEPT, the engine moves the run branch to the commit that the verifier saw. It moves the branch only by fast-forward. The rebase puts the run branch under the ticket branch, so a fast-forward is possible. If the run branch holds a commit that the ticket branch does not hold, the step fails and the run branch does not change.
 7. On REJECT, the run branch does not change, and the engine starts a fix-up round. See [the fix-up round](#the-fix-up-round). After the last round, the step fails, the journal holds the findings, and the command prints them on stderr and exits 1.
 
-The engine keeps the verdict report and the event stream of the verifier in `runs/<run id>/verifier/<ticket id>/`.
+The engine keeps the verdict report and the [**event stream**](../glossary.md#event-stream) of the verifier in `runs/<run id>/verifier/<ticket id>/`.
 
 ## The fix-up round
 
 A REJECT starts a fix-up round. The limit is 2 rounds for each ticket in `assure` mode, and 1 round for each stack in `economy` mode. A round has these parts:
 
 1. The engine writes the findings of the rejected verdict to `runs/<run id>/findings/<ticket id>.fixup-<round>.md`, one finding on each line, with the prefix `- `.
-2. The engine sends the specialist a fix-up brief in the same worktree. The brief holds the ticket, the findings verbatim (`## Findings to fix`), the rejected commit (`## Rejected commit`), the file boundary, the gates, and the report path. The tier and the model are those of the first specialist run.
+2. The engine sends the specialist a fix-up brief in the same worktree. The brief holds the ticket, the findings verbatim (`## Findings to fix`), the rejected commit (`## Rejected commit`), the [**file boundary**](../glossary.md#file-boundary), the gates, and the report path. The tier and the model are those of the first specialist run.
 3. The engine reads the report of the fix-up specialist and checks it, as for the first run. A specialist that ends `failed` or `capped`, a missing or invalid report, and a status other than `committed` fail the step.
 4. The fix must be a new commit on top of the rejected commit. The engine asks the brief generator (`fixup_brief`) for the fix-up verifier brief. The generator refuses when the rejected commit is not an ancestor of the branch (the specialist amended or rewrote history), and when the branch tip is the rejected commit (the specialist added no commit). A refusal fails the step, and the journal records the reason in `fixup-refused`.
 5. The engine runs the gates of the stack itself. A red gate fails the step.
@@ -270,7 +270,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | Code | Meaning |
 |---|---|
 | 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
-| 1 | The workflow or the tier file is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
+| 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 
 ## Why a step fails
@@ -307,7 +307,7 @@ An adapter is a Python object. It registers by name with `delegate.adapters.regi
 
 The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
 
-The adapter has the attribute `tier_column`, which names the column of the tier table with its models. The engine resolves the model from that column. The specialist tier is `strong` in `assure` mode and `standard` in `economy` mode. The `specialist` entry of `tier-overrides` replaces it. The verifier tier is `verifier` in every mode. The `verifier` entry of `tier-overrides` replaces it, but it cannot name a weaker tier: the workflow is refused when it loads. See [the workflow reference](workflow.md#tier-overrides).
+The adapter has the attribute `tier_column`, which names the column of the [**tier table**](../glossary.md#tier-table) with its models. The engine resolves the model from that column. The specialist tier is `strong` in `assure` mode and `standard` in `economy` mode. The `specialist` entry of `tier-overrides` replaces it. The verifier tier is `verifier` in every mode. The `verifier` entry of `tier-overrides` replaces it, but it cannot name a weaker tier: the workflow is refused when it loads. See [the workflow reference](workflow.md#tier-overrides).
 
 The adapter has the method `run(request)`.
 

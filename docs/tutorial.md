@@ -4,7 +4,7 @@ heading_numbers: false
 
 # Tutorial: from install to one verified ticket
 
-In this tutorial you run `delegate` once, from start to end. You make a small sample repository. You bootstrap an agent pair for it. You build one ticket in `assure` mode on Claude Code. You read the verdict and the journal.
+In this tutorial you run `delegate` once, from start to end. You make a small sample repository. You [**bootstrap**](glossary.md#bootstrap) an [**agent pair**](glossary.md#agent-pair) for it. You build one [**ticket**](glossary.md#ticket) in [**`assure`**](glossary.md#assure) [**mode**](glossary.md#mode) on Claude Code. You read the [**verdict**](glossary.md#verdict) and the [**journal**](glossary.md#journal).
 
 The longest part is the wait for the agents.
 
@@ -17,7 +17,7 @@ You need these things:
 - `uv`, to install the kit.
 - Claude Code, installed and logged in. The command `claude` must work in your terminal.
 
-The tutorial uses real agents, so the run uses tokens of your Claude Code account.
+The tutorial uses real agents, so the [**run**](glossary.md#run) uses tokens of your Claude Code account.
 
 ## 1. Install the kit
 
@@ -48,10 +48,10 @@ The sample files are in `delegate-kit/examples/tutorial`. There are six files:
 | File | What it is |
 |---|---|
 | `words.py` and `test_words.py` | A small Python function and its test. |
-| `docs/agents/delegation.md` | The gate command and the hotspots of the project. |
-| `.claude/skills/sample-style/SKILL.md` | A skill with the style rules of the project. |
+| `docs/agents/delegation.md` | The [**gate**](glossary.md#gate) command and the [**hotspots**](glossary.md#hotspot) of the project. |
+| `.claude/skills/sample-style/SKILL.md` | A [**skill**](glossary.md#skill) with the style rules of the project. |
 | `ticket.md` | The ticket that you will build. |
-| `workflow.toml` | The workflow file. It names the ticket, the mode, and the gate. |
+| `workflow.toml` | The [**workflow**](glossary.md#workflow) file. It names the ticket, the mode, and the gate. |
 
 ## 3. Make the sample repository
 
@@ -70,7 +70,7 @@ The `git config` lines set a name for the commits. Use your own name if you pref
 
 ## 4. Bootstrap the agent pair
 
-The kit builds each ticket with a specialist agent and a verifier agent. The verifier is blind: it gets the ticket and the diff, and never the report of the specialist. The command `bootstrap` writes both agents for your repository.
+The kit builds each ticket with a [**specialist**](glossary.md#specialist) agent and a [**verifier**](glossary.md#verifier) agent. The verifier is blind: it gets the ticket and the diff, and never the [**report**](glossary.md#report) of the specialist. The command `bootstrap` writes both agents for your repository.
 
 ```bash
 delegate bootstrap --repo . --name python \
@@ -85,7 +85,7 @@ The option `--gate-command` is important. The verifier may run your gate command
 
 The command prints the files that it wrote:
 
-- `.claude/skills/python-context/SKILL.md` and `.claude/skills/python-context/agents.toml`. These are the context skill and the declaration.
+- `.claude/skills/python-context/SKILL.md` and `.claude/skills/python-context/agents.toml`. These are the [**context skill**](glossary.md#context-skill) and the [**declaration**](glossary.md#declaration).
 - `.claude/agents/python-specialist.md` and `.claude/agents/python-verifier.md`. These are the agent pair for Claude Code.
 - The same pair for OpenCode, in `.opencode/agents/`.
 
@@ -93,7 +93,7 @@ The workflow file names the agents `python-specialist` and `python-verifier`. Th
 
 ## 5. Commit the sample
 
-The engine builds each ticket in a new git worktree that starts from `main`. The worktree holds only what is committed. Commit the sample files and the agent files now.
+The [**engine**](glossary.md#engine) builds each ticket in a new git [**worktree**](glossary.md#worktree) that starts from `main`. The worktree holds only what is committed. Commit the sample files and the agent files now.
 
 ```bash
 git add -A
@@ -118,15 +118,15 @@ delegate run workflow.toml
 
 The engine now works on its own. It does these things in order:
 
-1. It makes the run branch `run/sample` and a worktree for ticket 1.
+1. It makes the [**run branch**](glossary.md#run-branch) `run/sample` and a worktree for ticket 1.
 2. It starts the specialist agent in the worktree. The specialist writes the code and the test, and commits them.
 3. It runs the gate `python3 -m unittest` itself. The engine does not trust the report of the specialist for this.
-4. It starts the verifier agent in a temporary copy of the branch. The verifier gets the ticket text and the diff. It runs the gate again and writes its verdict.
-5. If the verdict is ACCEPT, it moves the run branch to the commit that the verifier saw.
+4. It starts the verifier agent in a [**temporary copy**](glossary.md#temporary-copy) of the branch. The verifier gets the ticket text and the diff. It runs the gate again and writes its verdict.
+5. If the verdict is [**ACCEPT**](glossary.md#accept), it moves the run branch to the commit that the verifier saw.
 
 The command prints a line `run <run id>` and a line `journal <path>`. It exits 0 when the ticket is accepted.
 
-If the verdict is REJECT, the engine starts a fix-up round. The specialist adds a new commit, and a new verifier checks it. The limit is two rounds. The reference page for `delegate run` has the details.
+If the verdict is [**REJECT**](glossary.md#reject), the engine starts a [**fix-up**](glossary.md#fix-up) round. The specialist adds a new commit, and a new verifier checks it. The limit is two rounds. The reference page for `delegate run` has the details.
 
 ## 8. Read the result
 
@@ -159,7 +159,7 @@ The file holds these things:
 - The verdict.
 - The evidence for each acceptance criterion.
 - The output of the gate.
-- The findings.
+- The [**findings**](glossary.md#finding).
 - The `unverified` list. The verifier lists there what it could not check. Read this list with care.
 
 The journal records each event of the run, in order. Print it:
@@ -172,7 +172,7 @@ The command prints one line for each event. The line names the event, for exampl
 
 ## 10. Take the work
 
-The engine never merges to your base branch. The merge is your action. The run branch holds only accepted work, so a fast-forward is enough.
+The engine never merges to your [**base branch**](glossary.md#base-branch). The merge is your action. The run branch holds only accepted work, so a fast-forward is enough.
 
 ```bash
 git merge --ff-only run/sample
@@ -186,12 +186,12 @@ The log now shows the commits of the specialist on `main`.
 You ran the whole loop once:
 
 - `bootstrap` wrote an agent pair from one interview.
-- `run` built the ticket in a worktree, ran the gate outside the specialist, and verified the result with a blind verifier.
+- `run` built the ticket in a worktree, ran the gate outside the specialist, and verified the result with a [**blind**](glossary.md#blind) verifier.
 - `status` and `watch` showed the state and the journal.
 - You merged the branch yourself.
 
 ## Next steps
 
 - [The workflow file](reference/workflow.md) shows how to write a workflow with many tickets.
-- [The `delegate run` reference](reference/run.md) explains the fix-up round, the resume of a stopped run, and the guards.
-- [The reference for `delegate status` and `delegate watch`](reference/status-and-watch.md) lists the exit codes that a coordinator can act on.
+- [The `delegate run` reference](reference/run.md) explains the fix-up round, the [**resume**](glossary.md#resume) of a stopped run, and the guards.
+- [The reference for `delegate status` and `delegate watch`](reference/status-and-watch.md) lists the exit codes that a [**coordinator**](glossary.md#coordinator) can act on.

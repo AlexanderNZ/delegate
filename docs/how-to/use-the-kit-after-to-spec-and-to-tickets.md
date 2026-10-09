@@ -1,12 +1,12 @@
 # How to use the kit after `to-spec` and `to-tickets`
 
-Use this page when you plan work with the `to-spec` and `to-tickets` skills of [mattpocock/skills](https://github.com/mattpocock/skills), and you want the kit to build the tickets. Those skills write a spec and tickets with blocking edges. The kit takes them as its input, and replaces only the build step.
+Use this page when you plan work with the [**`to-spec`**](../glossary.md#to-spec) and [**`to-tickets`**](../glossary.md#to-tickets) skills of [mattpocock/skills](https://github.com/mattpocock/skills), and you want the kit to build the [**tickets**](../glossary.md#ticket). Those skills write a [**spec**](../glossary.md#spec) and tickets with blocking edges. The kit takes them as its input, and replaces only the build step.
 
-The engine never contacts an issue tracker. The agent that invokes the engine saves the tickets to files first. Then you write a workflow that names the files.
+The [**engine**](../glossary.md#engine) never contacts an issue tracker. The agent that invokes the engine saves the tickets to files first. Then you write a [**workflow**](../glossary.md#workflow) that names the files.
 
 ## Before you start
 
-- Make the agent pair for each stack. See [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md) or [how to bootstrap a monorepo](bootstrap-a-monorepo.md).
+- Make the [**agent pair**](../glossary.md#agent-pair) for each [**stack**](../glossary.md#stack). See [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md) or [how to bootstrap a monorepo](bootstrap-a-monorepo.md).
 - Plan the work with `to-spec` and `to-tickets`. Each ticket must say what to build as behaviour, and which tickets block it.
 
 ## Steps
@@ -50,7 +50,7 @@ The export command writes a header row. The header row names each column of the 
 - #1
 ```
 
-Ticket text is about behaviour and holds no file path. The engine adds the file boundary to the brief of the specialist.
+Ticket text is about behaviour and holds no file path. The engine adds the [**file boundary**](../glossary.md#file-boundary) to the [**brief**](../glossary.md#brief) of the [**specialist**](../glossary.md#specialist).
 
 ### 2. Write the workflow
 
@@ -81,15 +81,15 @@ stack = "python"
 blocked-by = ["1"]
 ```
 
-The ticket files are hotspots in this example, so a specialist cannot change them. See [the workflow reference](../reference/workflow.md#tickets) for the fields of a ticket.
+The ticket files are [**hotspots**](../glossary.md#hotspot) in this example, so a specialist cannot change them. See [the workflow reference](../reference/workflow.md#tickets) for the fields of a ticket.
 
 ### 3. Choose a mode
 
-Use `assure` to verify each ticket at once. Use `economy` for a long chain of small tickets. Set `mode` in the workflow. See [how to run an economy chain](run-an-economy-chain.md).
+Use [**`assure`**](../glossary.md#assure) to verify each ticket at once. Use [**`economy`**](../glossary.md#economy) for a long chain of small tickets. Set [**`mode`**](../glossary.md#mode) in the workflow. See [how to run an economy chain](run-an-economy-chain.md).
 
 ### 4. Commit, check, and run
 
-The engine builds in worktrees that start from your base branch, so commit the files first. Then check the plan, and run.
+The engine builds in [**worktrees**](../glossary.md#worktree) that start from your [**base branch**](../glossary.md#base-branch), so commit the files first. Then check the plan, and run.
 
 ```bash
 git add -A
@@ -98,11 +98,11 @@ delegate run workflow.toml --dry-run
 delegate run workflow.toml
 ```
 
-The dry run reports a ticket file that does not exist, a blocker that no ticket has, and a cycle. The plan puts ticket `1` before ticket `2`.
+The dry run reports a ticket file that does not exist, a [**blocker**](../glossary.md#blocker) that no ticket has, and a cycle. The plan puts ticket `1` before ticket `2`.
 
 ### 5. Read the result and merge
 
-Follow the run with `delegate status` and `delegate watch`. See [how to watch and resume a run](watch-and-resume-a-run.md). When the run ends, merge the run branch yourself.
+Follow the [**run**](../glossary.md#run) with `delegate status` and `delegate watch`. See [how to watch and resume a run](watch-and-resume-a-run.md). When the run ends, merge the [**run branch**](../glossary.md#run-branch) yourself.
 
 ```bash
 git merge --ff-only run/plan

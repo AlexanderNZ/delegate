@@ -1,8 +1,8 @@
 # How to bootstrap a monorepo
 
-Use this page when one repository holds more than one stack, for example a Python backend and a web front end. You make one agent pair for each stack. Each specialist then carries the skills of its own stack, and each verifier may run only the gate of its own stack.
+Use this page when one repository holds more than one [**stack**](../glossary.md#stack), for example a Python backend and a web front end. You make one [**agent pair**](../glossary.md#agent-pair) for each stack. Each [**specialist**](../glossary.md#specialist) then carries the [**skills**](../glossary.md#skill) of its own stack, and each [**verifier**](../glossary.md#verifier) may run only the [**gate**](../glossary.md#gate) of its own stack.
 
-For a repository with one stack, see [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md). This page uses the same steps. It differs in the delegation document, and in the number of `bootstrap` runs.
+For a repository with one stack, see [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md). This page uses the same steps. It differs in the [**delegation document**](../glossary.md#delegation-document), and in the number of [**`bootstrap`**](../glossary.md#bootstrap) runs.
 
 ## Before you start
 
@@ -13,7 +13,7 @@ For a repository with one stack, see [how to bootstrap a single-stack repository
 
 ### 1. Write one gate block for each stack
 
-The delegation document has one sub-heading for each stack under `Verification gates`. A sub-heading that names a path in backticks claims that path. The brief generator then gives a verifier the block of each stack that the change touches, and no other block.
+The delegation document has one sub-heading for each stack under `Verification gates`. A sub-heading that names a path in backticks claims that path. The [**brief generator**](../glossary.md#brief-generator) then gives a verifier the block of each stack that the change touches, and no other block.
 
 ````markdown title="docs/agents/delegation.md"
 # Delegation: the rules of this repository
@@ -72,7 +72,7 @@ description: The style rules of the web front end. Use when you change code in w
 
 ### 3. Bootstrap one pair for each stack
 
-Run `bootstrap` once for each stack. The option `--name` gives the stack its own agents and its own context skill, so the runs do not overwrite each other.
+Run `bootstrap` once for each stack. The option `--name` gives the stack its own agents and its own [**context skill**](../glossary.md#context-skill), so the [**runs**](../glossary.md#run) do not overwrite each other.
 
 ```bash
 delegate bootstrap --repo . --name backend \
@@ -103,7 +103,7 @@ git commit -m "Add the agent pairs"
 
 ### 5. Name each pair in a workflow
 
-A workflow has one `[stacks.<name>]` table for each stack. A ticket names the stack that builds it. The engine spawns the specialist and the verifier of that stack.
+A [**workflow**](../glossary.md#workflow) has one `[stacks.<name>]` table for each stack. A [**ticket**](../glossary.md#ticket) names the stack that builds it. The [**engine**](../glossary.md#engine) spawns the specialist and the verifier of that stack.
 
 ```toml title="workflow.toml"
 base-branch = "main"

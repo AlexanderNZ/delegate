@@ -39,8 +39,8 @@ SECTIONS = [
     "Which model verifies: a recommendation, not a rule",
 ]
 
-# The four steps of the lineage, in order. Each is the start of a level-three heading of the first section.
-STEPS = ["First, a model router", "Then, rules for each model", "Then, contracts for each role", "Then, the engine"]
+# The five steps of the lineage, in order. Each is the start of a level-three heading of the first section.
+STEPS = ["First, me at a terminal", "Then, subagents and a model router", "Then, rules for each model", "Then, contracts for each role", "Then, the engine"]
 
 # The things that vary between models: the first column of the thesis table, in order.
 VARIES = ["Context", "Planning and scope", "Tool use", 'The claim of "done"', "The code"]
@@ -102,6 +102,12 @@ def slug(heading: str) -> str:
     return re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
 
 
+def singular(text: str, anchors: dict[str, str]) -> str:
+    """The term of a bold link text, which may be plural: "sessions" is the term "session"."""
+    word = text.replace("`", "").casefold()
+    return next((form for form in (word, word.removesuffix("es"), word.removesuffix("s")) if form in anchors), word)
+
+
 def glossary_anchors() -> dict[str, str]:
     """Each term of the glossary, without backticks or case, mapped to the anchor of its entry."""
     headings = re.findall(r"^## (.+)$", FENCED.sub("", GLOSSARY.read_text()), flags=re.MULTILINE)
@@ -114,7 +120,7 @@ def test_the_page_gives_its_sections_in_the_order_of_the_ticket():
 
 
 @outside_the_package
-def test_the_lineage_tells_the_four_steps_in_order():
+def test_the_lineage_tells_the_five_steps_in_order():
     headings = re.findall(r"^### (.+)$", sections()[SECTIONS[0]], flags=re.MULTILINE)
     started = [next((heading for heading in headings if heading.startswith(step)), None) for step in STEPS]
 
@@ -180,8 +186,8 @@ def test_every_term_in_bold_links_its_glossary_entry_once():
 
     assert len(bold) >= 10, "the page links the glossary terms at their first use"
     assert [term for term in bold if term not in {name for name, _ in linked}] == []
-    assert [(name, anchor) for name, anchor in linked if anchors.get(name.replace("`", "").casefold()) != anchor] == []
-    terms = [term.replace("`", "").casefold() for term in bold]
+    assert [(name, anchor) for name, anchor in linked if anchors.get(singular(name, anchors)) != anchor] == []
+    terms = [singular(term, anchors) for term in bold]
     assert sorted({term for term in terms if terms.count(term) > 1}) == []
 
 

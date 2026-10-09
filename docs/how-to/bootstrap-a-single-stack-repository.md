@@ -1,6 +1,6 @@
 # How to bootstrap a single-stack repository
 
-Use this page when your repository has one stack, for example one Python package. You get one agent pair: a specialist and its verifier. The pair is for Claude Code and for OpenCode.
+Use this page when your repository has one [**stack**](../glossary.md#stack), for example one Python package. You get one [**agent pair**](../glossary.md#agent-pair): a [**specialist**](../glossary.md#specialist) and its [**verifier**](../glossary.md#verifier). The pair is for Claude Code and for OpenCode.
 
 For a repository with more than one stack, see [how to bootstrap a monorepo](bootstrap-a-monorepo.md).
 
@@ -13,7 +13,7 @@ For a repository with more than one stack, see [how to bootstrap a monorepo](boo
 
 ### 1. Write the delegation document
 
-The document holds the gate commands and the hotspots of the repository. The verifier brief takes the gates from the first block under the heading `Verification gates`.
+The document holds the [**gate**](../glossary.md#gate) commands and the [**hotspots**](../glossary.md#hotspot) of the repository. The verifier brief takes the gates from the first block under the heading `Verification gates`.
 
 ````markdown title="docs/agents/delegation.md"
 # Delegation: the rules of this repository
@@ -34,7 +34,7 @@ Only the coordinator changes these paths:
 
 ### 2. Write the skill with your style rules
 
-Each agent preloads the skills that you name. A skill is a Markdown file in `.claude/skills/<name>/SKILL.md`. The bootstrap command refuses a skill that does not exist.
+Each agent preloads the [**skills**](../glossary.md#skill) that you name. A skill is a Markdown file in `.claude/skills/<name>/SKILL.md`. The [**bootstrap**](../glossary.md#bootstrap) command refuses a skill that does not exist.
 
 ```markdown title=".claude/skills/house-style/SKILL.md"
 ---
@@ -63,7 +63,7 @@ The option `--gate-command` is important. The verifier may run your gate command
 
 The command writes these files:
 
-- The context skill and the declaration, in `.claude/skills/python-context/`.
+- The [**context skill**](../glossary.md#context-skill) and the [**declaration**](../glossary.md#declaration), in `.claude/skills/python-context/`.
 - The agents `python-specialist` and `python-verifier`, in `.claude/agents/` and in `.opencode/agents/`.
 
 Run the command a second time with the same arguments. It changes no byte. See [the bootstrap reference](../reference/commands.md#delegate-bootstrap) for every option, and for the output language and the tracked-file build.
@@ -78,7 +78,7 @@ The command prints `ok` and exits 0 when the files are valid. See [the finding c
 
 ### 5. Commit the files
 
-The engine builds each ticket in a git worktree that starts from your base branch. The worktree holds only what you committed.
+The [**engine**](../glossary.md#engine) builds each [**ticket**](../glossary.md#ticket) in a git [**worktree**](../glossary.md#worktree) that starts from your [**base branch**](../glossary.md#base-branch). The worktree holds only what you committed.
 
 ```bash
 git add -A
@@ -87,7 +87,7 @@ git commit -m "Add the agent pair"
 
 ### 6. Name the pair in a workflow
 
-The workflow file names the agents that `--name python` made. The names are `python-specialist` and `python-verifier`.
+The [**workflow**](../glossary.md#workflow) file names the agents that `--name python` made. The names are `python-specialist` and `python-verifier`.
 
 ```toml title="workflow.toml"
 base-branch = "main"

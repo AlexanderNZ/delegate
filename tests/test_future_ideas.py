@@ -29,8 +29,8 @@ def test_the_page_says_at_the_top_that_its_entries_are_ideas_and_not_promises():
 
 
 @outside_the_package
-def test_the_page_has_the_three_entries_of_the_ticket():
-    assert list(entries()) == ["A benchmark from your own tickets", "Fixing the coordinator role", "The Cursor adapter"]
+def test_the_page_has_its_four_entries():
+    assert list(entries()) == ["A benchmark from real tickets", "Fixing the coordinator role", "Further up the ladder", "The Cursor adapter"]
 
 
 @outside_the_package

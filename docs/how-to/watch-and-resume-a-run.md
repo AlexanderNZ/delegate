@@ -1,10 +1,10 @@
 # How to watch and resume a run
 
-Use this page to follow a run while it works, and to go on with a run that stopped. The state of a run is in its journal. A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run) while it works, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
-You have a workflow file and the agent pair for each stack. See [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md). This page uses this workflow with two tickets.
+You have a [**workflow**](../glossary.md#workflow) file and the [**agent pair**](../glossary.md#agent-pair) for each [**stack**](../glossary.md#stack). See [how to bootstrap a single-stack repository](bootstrap-a-single-stack-repository.md). This page uses this workflow with two [**tickets**](../glossary.md#ticket).
 
 ```toml title="workflow.toml"
 base-branch = "main"
@@ -52,13 +52,13 @@ delegate status
 delegate watch --stall-minutes 30 --max-minutes 50
 ```
 
-`status` prints one line for each ticket. It shows the state, the verdict, and the branch. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
+`status` prints one line for each ticket. It shows the state, the [**verdict**](../glossary.md#verdict), and the branch. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
 
-`watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a harness time limit. Set the stall time to more than the longest time of one agent run.
+`watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. Set the stall time to more than the longest time of one agent run.
 
 ### 3. Act on the exit code
 
-The exit code of `watch` tells you why it stopped: the run succeeded, the run failed, a step has a problem, or a limit is reached. See [the exit codes of `watch`](../reference/status-and-watch.md#exit-codes) for each code.
+The exit code of `watch` tells you why it stopped: the run succeeded, the run failed, a [**step**](../glossary.md#step) has a problem, or a limit is reached. See [the exit codes of `watch`](../reference/status-and-watch.md#exit-codes) for each code.
 
 You can run `watch` as a background task in your harness. The harness then alerts you when the command exits.
 
@@ -76,17 +76,17 @@ A run stops when you press Ctrl-C, or when its process is killed. Such a run has
 
 ### 1. Resume after Ctrl-C
 
-Give the run id. The workflow file is the one that the run started from. The engine rebuilds the state from the journal and starts at the first step that is not complete. It never builds a finished step again.
+Give the run id. The workflow file is the one that the run started from. The [**engine**](../glossary.md#engine) rebuilds the state from the journal and starts at the first step that is not complete. It never builds a finished step again.
 
 ```bash
 delegate run --resume <run-id>
 ```
 
-A ticket with a recorded commit is not built again. A step that was open continues in its own worktree. See [the resume reference](../reference/run.md#the-resume) for each case.
+A ticket with a recorded commit is not built again. A step that was open continues in its own [**worktree**](../glossary.md#worktree). See [the resume reference](../reference/run.md#the-resume) for each case.
 
 ### 2. Resume after a kill
 
-A process that is killed cannot release the lock of its run branch. The resume then refuses, and the message tells you to pass `--break-lock`. First check that no other run uses the run branch. Then remove the lock and resume.
+A process that is killed cannot release the lock of its [**run branch**](../glossary.md#run-branch). The [**resume**](../glossary.md#resume) then refuses, and the message tells you to pass `--break-lock`. First check that no other run uses the run branch. Then remove the lock and resume.
 
 ```bash
 delegate run --resume <run-id> --break-lock
@@ -94,4 +94,4 @@ delegate run --resume <run-id> --break-lock
 
 The option does not remove the lock of a process that still exists. See [the run lock](../reference/run.md#the-run-lock).
 
-A run that the invariant check halted, or that has a `run-end`, cannot be resumed.
+A run that the [**invariant**](../glossary.md#invariant) check halted, or that has a `run-end`, cannot be resumed.
