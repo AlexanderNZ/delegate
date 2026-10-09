@@ -14,7 +14,7 @@ Run it from the root of the repository, or give the root with `--root`. After a 
 | Option | Meaning |
 |---|---|
 | `--root <root>` | The repository root, which holds docs/ and skills/; default is the current directory. |
-| `--check` | Write nothing; exit 1 and name each section that differs from the code. |
+| `--check` | Write nothing; exit 1 and name each section and file that differs from the code. |
 
 <!-- generated:end docs-options -->
 
@@ -34,9 +34,20 @@ A generated section sits between two markers in the page:
 
 Do not edit the text between the markers. To change a flag description, change the `help` text of the parser. To change a page, change the prose outside the markers.
 
+## The abbreviations file
+
+`delegate docs` also writes `includes/abbreviations.md` from `docs/glossary.md`. The docs site adds that file to every page, so each term of the glossary shows its definition as a tooltip.
+
+- Each `##` heading of the glossary is a term. The first sentence of the first paragraph under it is the definition, as plain text. A link keeps its label, and an inline-code mark is removed.
+- The file holds one line `*[term]: definition` for each term, in the order of the glossary. With no glossary, the file holds only its header.
+- An entry with no text is an error. A term that appears twice is an error. The command names the term on stderr, exits 2, and writes nothing.
+- With `--check`, a missing file or a file that differs from the glossary makes the command exit 1. It names `includes/abbreviations.md` on stderr.
+
+The file is outside `docs/`, so the site does not show it as a page.
+
 ## The test
 
-The test suite holds one drift test for each generated section. The test fails when the section in the committed page differs from the text that the code builds, and its message tells the reader to run `delegate docs`. A change to a flag with no regeneration therefore fails the suite.
+The test suite holds one drift test for each generated section, and one for the abbreviations file. The test fails when the section in the committed page differs from the text that the code builds, and its message tells the reader to run `delegate docs`. A change to a flag with no regeneration therefore fails the suite.
 
 ## The generated sections
 
