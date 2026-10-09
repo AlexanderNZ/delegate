@@ -11,6 +11,8 @@ import io
 import json
 import re
 import shutil
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -165,6 +167,19 @@ def test_the_prose_keeps_each_sentence_to_25_words_or_fewer():
     text = re.sub(r"`[^`]*`", "CODE", re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", " ".join(re.sub(r"^\s*(?:[-*]|\d+\.)\s+(?:\[ \]\s+)?", "", line) for line in lines)))  # an inline code span counts as one word
     sentences = re.split(r"(?<=[.:?!])\s+", text)
     assert [s for s in sentences if len(s.split()) > 25] == []
+
+
+@outside_the_package
+def test_cut_a_release_names_the_dispatched_workflow_the_bump_choices_and_the_subcommands_of_the_script_that_exists():
+    text = section("Cut a release")
+    help_text = subprocess.run([sys.executable, str(ROOT / "scripts" / "release.py"), "--help"], capture_output=True, text=True, check=True).stdout
+
+    assert "Actions" in text and "Release" in text and "`bump`" in text and "main" in text
+    for choice in ("patch", "minor", "major"):
+        assert f"`{choice}`" in text, choice
+    for subcommand in ("next-version", "notes", "apply"):
+        assert f"`{subcommand}`" in text and subcommand in help_text, subcommand
+    assert "`scripts/release.py`" in text
 
 
 @outside_the_package

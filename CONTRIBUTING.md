@@ -62,3 +62,28 @@ Read [how to add a harness adapter](docs/how-to/add-a-harness-adapter.md) first.
 - Run the whole suite, as the [setup](#set-up) shows. Run `delegate docs --check` too.
 - List the change in `CHANGELOG.md`, under the `Unreleased` heading, in one line.
 - Write the commit subject as a statement of what the change does.
+
+## Cut a release
+
+A maintainer cuts a release from GitHub. No local command is needed.
+
+1. Open the **Actions** tab of the repository, and select the **Release** workflow.
+2. Select **Run workflow**, and keep the `main` branch. The workflow runs on `main` only.
+3. Choose the `bump` input. Choose `patch` for a fix, `minor` for a new feature, and `major` for a change that breaks a user.
+4. Start the run.
+
+The workflow runs the test suite first. When a test fails, the workflow makes no commit, no tag and no release. Each step after the suite is a command of `scripts/release.py`:
+
+- `next-version` raises the newest tag of the form `vX.Y.Z` by the bump. The first release keeps the version in `pyproject.toml`.
+- `apply` sets the version in `pyproject.toml`. It also moves the text under `Unreleased` in `CHANGELOG.md` into a dated entry. When that text is empty, the entry holds the release notes. The `Unreleased` heading stays.
+- `notes` writes the release notes from the commits since the previous tag. It leaves out merge commits. It groups the rest by the prefix of the subject.
+
+When `apply` changes a file, the workflow commits `release: vX.Y.Z`. Then it pushes, tags the commit `vX.Y.Z`, and creates the GitHub release with the notes.
+
+To see the next version before you start the run, run this command from the root of the repository:
+
+```bash
+python scripts/release.py next-version --bump minor
+```
+
+Write each commit subject with a prefix such as `feat:` or `fix:`. A commit without a known prefix goes under "Other changes" in the notes.
