@@ -11,6 +11,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - The overview and the README open with the problem (models differ the way people do), credit the work that the kit builds on (Bassim Eledath's ladder and Matt Pocock's planning skills), and draw the kit as one slice through the ladder.
 - An explanation page, "Why the model should not matter": the lineage of the kit, the thesis as a table, five lessons, and a recommendation (not a rule) for which model verifies.
 - The prior art page has a "Built on" part (the ladder of Bassim Eledath and the planning skills of Matt Pocock, with what each gave) before an "Alongside" part. The page "Why each specialist has a verifier twin" is now "Why each specialist has its own verifier", and its old address redirects.
+- A "Future ideas" page: ideas to investigate, not promises, each with the idea, why it matters, and the open questions.
 
 ## [0.1.0] - 2026-10-09
 

@@ -24,7 +24,7 @@ DOCS = ROOT / "docs"
 WORKFLOW = ROOT / ".github" / "workflows" / "docs.yml"
 
 # The order of the sections in the navigation. The overview is first, and the glossary is last.
-SECTIONS: list[str] = ["Start here", "Tutorial", "How-to guides", "Explanation", "Reference", "Glossary"]
+SECTIONS: list[str] = ["Start here", "Tutorial", "How-to guides", "Explanation", "Reference", "Future ideas", "Glossary"]
 
 
 def config() -> dict:
