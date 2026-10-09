@@ -48,5 +48,5 @@ On 2026-10-08 the decision was extended in two parts:
 ## Evidence
 
 - 2026-09-26: the four reports above.
-- 2026-09-26: the change and a fix-up, each with a blind verifier ACCEPT. The fix-up added write probes: `nixos-rebuild switch`, `direnv allow`, `git add`, `git reset`, `git stash`, and `sudo`. The tests are in [`tests/test_gate_commands.py`](../../../../tests/test_gate_commands.py).
-- 2026-10-08: the neutral global list and `getOnlyCommands`. Each verifier of the consumer that made the change permits the same set of commands as before. A test compares the sets with a literal of the old list: [`tests/test_neutral_guard.py`](../../../../tests/test_neutral_guard.py).
+- 2026-09-26: the change and a fix-up, each with a blind verifier ACCEPT. The fix-up added write probes: `nixos-rebuild switch`, `direnv allow`, `git add`, `git reset`, `git stash`, and `sudo`. The tests are in [`tests/test_gate_commands.py`](../../tests/test_gate_commands.py).
+- 2026-10-08: the neutral global list and `getOnlyCommands`. Each verifier of the consumer that made the change permits the same set of commands as before. A test compares the sets with a literal of the old list: [`tests/test_neutral_guard.py`](../../tests/test_neutral_guard.py).

@@ -97,8 +97,10 @@ pymdownx.superfences.custom_fences = [
 # The glossary tooltips: `delegate docs` writes this file, outside docs/, from docs/glossary.md.
 pymdownx.snippets.auto_append = ["includes/abbreviations.md"]
 
+# docs/agents/ holds the rules for agents. docs/adr/ holds the ADRs, which link to the tests and the source
+# with paths that leave docs/. The page "The decision records" is the index of the ADRs on the site.
 [project.plugins.exclude]
-glob = ["agents/**"]
+glob = ["agents/**", "adr/**"]
 
 # The site has no index page, so the root opens the overview.
 [project.plugins.redirects.redirect_maps]

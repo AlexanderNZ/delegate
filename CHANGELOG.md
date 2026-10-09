@@ -16,6 +16,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 ### Changed
 
 - The package, its tests and `pyproject.toml` are now in the repository root, with the code in `src/`. The install command is `uv tool install git+https://github.com/AlexanderNZ/delegate`, with no `#subdirectory=` part. The three commands behave as before.
+- The ADRs are now in `docs/adr/`, and not inside the `agent-definitions` skill. A test fails on a link to an ADR that does not exist.
 
 ## [0.1.0] - 2026-10-09
 

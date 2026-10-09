@@ -44,9 +44,15 @@ def nav_titles(items: list) -> list[str]:
     return [title for item in items for title in item]
 
 
+# The directories of docs/ that are not pages of the site. docs/agents/ holds the rules for agents. docs/adr/ holds the
+# ADRs: they link to the tests and the source with paths that leave docs/, which the strict build cannot follow, and
+# the page "The decision records" is their entry point on the site.
+NOT_SITE = ("agents", "adr")
+
+
 def pages() -> set[str]:
-    """Every page under docs/ that is user documentation: all of them except docs/agents/."""
-    return {str(path.relative_to(DOCS)) for path in DOCS.rglob("*.md") if path.relative_to(DOCS).parts[0] != "agents"}
+    """Every page under docs/ that is user documentation: all of them except docs/agents/ and docs/adr/."""
+    return {str(path.relative_to(DOCS)) for path in DOCS.rglob("*.md") if path.relative_to(DOCS).parts[0] not in NOT_SITE}
 
 
 @outside_the_package
@@ -139,7 +145,7 @@ def test_no_relative_link_of_a_page_leaves_docs():
     link = re.compile(r"\]\(([^)\s#]+)")
     leaving = []
     for page in sorted(DOCS.rglob("*.md")):
-        if page.relative_to(DOCS).parts[0] == "agents":
+        if page.relative_to(DOCS).parts[0] in NOT_SITE:
             continue
         for target in link.findall(page.read_text()):
             if not target.startswith(("http://", "https://", "mailto:")) and not (page.parent / target).resolve().is_relative_to(DOCS):
@@ -157,12 +163,12 @@ def test_every_page_of_the_navigation_exists_and_every_user_page_is_in_the_navig
 
 
 @outside_the_package
-def test_docs_agents_is_excluded_from_the_site_and_the_site_directory_is_the_one_that_gitignore_names():
+def test_docs_agents_and_docs_adr_are_excluded_from_the_site_and_the_site_directory_is_the_one_that_gitignore_names():
     project = config()
 
     assert project["docs_dir"] == "docs"
     assert project["site_dir"] == "site"
-    assert "agents/**" in project["plugins"]["exclude"]["glob"]
+    assert sorted(project["plugins"]["exclude"]["glob"]) == sorted(f"{name}/**" for name in NOT_SITE)
     assert "site/" in (ROOT / ".gitignore").read_text().splitlines()
 
 

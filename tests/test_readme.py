@@ -18,7 +18,13 @@ outside_the_package = pytest.mark.skipif(
     not README.is_file(), reason="the docs are outside the package source, as in a Nix build"
 )
 
-DOCS_PAGES = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "docs").glob("**/*.md")) if (ROOT / "docs").is_dir() else []
+# docs/adr/ is left out: the README links the page that indexes the ADRs, and a test of the explanation pages fails
+# when that page misses an ADR.
+DOCS_PAGES = (
+    sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "docs").glob("**/*.md") if p.relative_to(ROOT / "docs").parts[0] != "adr")
+    if (ROOT / "docs").is_dir()
+    else []
+)
 
 
 def readme_links() -> set[str]:

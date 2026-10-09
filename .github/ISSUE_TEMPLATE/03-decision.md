@@ -21,4 +21,4 @@ labels: 'ready-for-human'
 
 ## Constraints
 
-<!-- Write what bounds the decision: the clauses of spec #1, and the ADRs in `skills/agent-definitions/docs/adr/`. Delete this section if nothing bounds it. -->
+<!-- Write what bounds the decision: the clauses of spec #1, and the ADRs in `docs/adr/`. Delete this section if nothing bounds it. -->
