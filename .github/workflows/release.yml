@@ -1,0 +1,96 @@
+name: Release
+
+# Run by hand from the Actions tab. It releases the next Semantic Versioning
+# version from main: the first release takes the version in pyproject.toml,
+# and each later release raises the newest vX.Y.Z tag by the chosen part.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "The part of the version to raise (the first release ignores it)"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: write
+
+# Two releases at once would race for the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      BUMP: ${{ inputs.bump }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the package and pytest
+        run: pip install ./skills/agent-definitions/validator pytest
+
+      # The same denylist step as ci.yml, so the neutrality test runs before a release.
+      - name: Write the neutrality denylist
+        env:
+          NEUTRALITY_DENYLIST: ${{ secrets.NEUTRALITY_DENYLIST }}
+        run: |
+          if [ -n "$NEUTRALITY_DENYLIST" ]; then
+            path="$RUNNER_TEMP/neutrality-denylist.txt"
+            printf '%s\n' "$NEUTRALITY_DENYLIST" > "$path"
+            echo "AGENT_DEFINITIONS_DENYLIST=$path" >> "$GITHUB_ENV"
+          else
+            echo "::notice::NEUTRALITY_DENYLIST is empty, so the neutrality test skips."
+          fi
+
+      # A red suite stops the job here: no commit, no tag, no release.
+      - name: Run the test suite
+        working-directory: skills/agent-definitions/validator
+        run: python -m pytest -rs
+
+      - name: Work out the version
+        run: |
+          version="$(python scripts/release.py next-version --bump "$BUMP")"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::the tag v$version exists already"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "Releasing v$version"
+
+      # The notes come before the release commit, so that commit is not in its own notes.
+      - name: Write the release notes
+        run: python scripts/release.py notes --version "$VERSION" > "$RUNNER_TEMP/notes.md"
+
+      - name: Set the version and the CHANGELOG entry
+        run: python scripts/release.py apply --version "$VERSION" --date "$(date -u +%F)"
+
+      - name: Commit the release
+        run: |
+          if git diff --quiet; then
+            echo "pyproject.toml and CHANGELOG.md already hold v$VERSION; no commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release: v$VERSION"
+          git push origin HEAD:main
+
+      - name: Tag and create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
