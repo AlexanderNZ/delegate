@@ -4,7 +4,7 @@ This document holds the values that the `agent-delegation` skill asks each repos
 
 ## Domain and stacks
 
-The repository holds a harness-neutral delegation kit. It has one stack: a Python 3.11+ package (`src/agent_definitions/`) with a pytest suite in `tests/`, two skills as plain Markdown directories, and a Nix flake that is optional.
+The repository holds a harness-neutral delegation kit. It has one stack: a Python 3.11+ package (`src/delegate/`) with a pytest suite in `tests/`, two skills as plain Markdown directories, and a Nix flake that is optional.
 
 ## Verification gates
 
