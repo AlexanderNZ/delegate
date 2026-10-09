@@ -4,7 +4,7 @@ This page tells you how to set up the repository, how to write a change, and how
 
 ## Set up
 
-You need Python 3.11 or later and git. The tests of the guards run the rendered hooks, and the hooks read their input with `python3`. Nix is optional. The repository has a flake for people who use Nix, and you can ignore it.
+You need Python 3.11 or later and git. The tests of the guards run the rendered hooks, and the hooks read their input with `python3`. Nix is optional. The repository has a flake for people who use Nix, and you can ignore it. If you use Nix with direnv, run `direnv allow` once, and the development shell loads in this directory.
 
 Run these commands from the root of the repository, in a clean Python environment:
 

@@ -34,18 +34,45 @@
         agent-definitions = self.packages.${pkgs.stdenv.hostPlatform.system}.agent-definitions;
       });
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          packages = [
-            (pkgs.python313.withPackages (ps: [
-              ps.pytest
-              ps.pyyaml
-            ]))
-            pkgs.git
-            pkgs.bash
-          ];
-        };
-      });
+      # The shell runs the working copy, so an edit is live with no rebuild.
+      # The three commands are thin wrappers. The shellHook puts the validator
+      # directory of the working copy on PYTHONPATH.
+      devShells = forAllSystems (
+        pkgs:
+        let
+          python = pkgs.python313.withPackages (ps: [
+            ps.pytest
+            ps.pyyaml
+          ]);
+          wrapper =
+            name: module:
+            pkgs.writeShellScriptBin name ''
+              exec ${python}/bin/python -m ${module} "$@"
+            '';
+        in
+        {
+          default = pkgs.mkShell {
+            packages = [
+              python
+              pkgs.git
+              pkgs.bash
+              pkgs.uv
+              (wrapper "delegate" "agent_definitions.delegate")
+              (wrapper "agent-definitions" "agent_definitions.cli")
+              (wrapper "verifier-brief" "agent_definitions.brief")
+            ];
+            # The root comes from git, so the shell works in a subdirectory.
+            shellHook = ''
+              if delegate_root=$(git rev-parse --show-toplevel); then
+                export PYTHONPATH="$delegate_root/skills/agent-definitions/validator''${PYTHONPATH:+:$PYTHONPATH}"
+              else
+                echo "delegate dev shell: not in a git working copy, PYTHONPATH is not set" >&2
+              fi
+              unset delegate_root
+            '';
+          };
+        }
+      );
 
       # The two skills as plain directories, for a consumer that installs them.
       lib.skills = {
