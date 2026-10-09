@@ -47,6 +47,8 @@ The engine does not trust the report for the gates. A gate that is red is record
 
 The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step.
 
+The engine sets `core.fsmonitor` to false in the configuration of each worktree and each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
+
 ## The continuation
 
 A specialist that ends `capped` or `failed`, or whose gates are red, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
