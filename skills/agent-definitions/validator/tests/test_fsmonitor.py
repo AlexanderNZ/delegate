@@ -10,7 +10,6 @@ for the worktrees and the copies that the engine makes.
 import os
 import shutil
 import socket
-import struct
 import subprocess
 import sys
 import tempfile
@@ -49,8 +48,12 @@ def daemon_pid(path: Path) -> int | None:
     """The process id of the fsmonitor daemon that serves the repository at `path`, or None when none serves it.
 
     The daemon listens on a socket in the git directory. The kernel tells the
-    process id of the peer that listens on a socket.
+    process id of the peer that listens on a socket. Only macOS has that call
+    (`LOCAL_PEERPID`), and only macOS and Windows have a daemon, so any other
+    platform is an error.
     """
+    if sys.platform != "darwin":
+        raise RuntimeError(f"daemon_pid reads LOCAL_PEERPID, which {sys.platform!r} does not have")
     ipc = path / ".git" / "fsmonitor--daemon.ipc"
     if not ipc.exists():
         return None
@@ -59,9 +62,19 @@ def daemon_pid(path: Path) -> int | None:
             client.connect(str(ipc))
         except ConnectionRefusedError:
             return None
-        if sys.platform == "darwin":
-            return client.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID
-        return struct.unpack("3i", client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[0]
+        return client.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID
+
+
+def git_has_a_daemon_backend() -> bool:
+    """Whether this git can run `git fsmonitor--daemon`.
+
+    git builds the daemon for macOS and Windows only. Elsewhere the command dies
+    with "not supported on this platform", so the probe asks git in a new repository.
+    """
+    with tempfile.TemporaryDirectory() as probe:
+        subprocess.run(["git", "init", "--quiet", probe], check=True, capture_output=True)
+        result = git_status(Path(probe), "fsmonitor--daemon", "status")
+    return "not supported on this platform" not in result.stderr
 
 
 def alive(pid: int) -> bool:
@@ -162,12 +175,15 @@ def test_a_run_leaves_the_configuration_of_the_user_and_of_the_repository_as_it_
 def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_removes_the_copy(
     tmp_path, capsys, registered, monkeypatch
 ):
+    if not git_has_a_daemon_backend():
+        pytest.skip("this git has no fsmonitor daemon backend on this platform, so no daemon can leak")
     repo = make_repo(tmp_path)
     # The socket of the daemon has a path limit of about 100 characters. The temporary directory of a Nix shell is longer.
     short = Path(tempfile.mkdtemp(prefix="fs", dir="/tmp"))
     monkeypatch.setattr(tempfile, "tempdir", str(short))
     started: list[int] = []
-    alive_at_removal: list[bool] = []
+    copies: list[Path] = []
+    listening_at_removal: list[bool] = []
 
     def start_a_daemon_in_the_copy(request):
         # The verifier starts a daemon by hand: the setting of the copy does not stop an explicit start.
@@ -175,6 +191,7 @@ def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_re
         pid = daemon_pid(request.cwd)
         assert pid is not None
         started.append(pid)
+        copies.append(request.cwd)
 
     registered.during_verifier = start_a_daemon_in_the_copy
     remove_tree = shutil.rmtree
@@ -182,8 +199,10 @@ def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_re
     def watch_removal(path, *args, **kwargs):
         # The filesystem is the boundary. A daemon that quits by itself once its directory is gone
         # is a race, so the test reads the daemon at the moment the engine removes the directory.
-        if started:
-            alive_at_removal.append(any(alive(pid) for pid in started))
+        # `git fsmonitor--daemon stop` returns once the socket stops listening, while the process may
+        # still be exiting, so the test asks whether the socket takes a connection, not whether the process lives.
+        if copies:
+            listening_at_removal.append(any(daemon_pid(copy) is not None for copy in copies))
         remove_tree(path, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "rmtree", watch_removal)
@@ -193,7 +212,7 @@ def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_re
         assert (code, err) == (0, "")
         (call,) = registered.verifier_calls
         assert not call.cwd.exists()
-        assert alive_at_removal == [False]
+        assert listening_at_removal == [False]
     finally:
         for pid in started:
             if alive(pid):
