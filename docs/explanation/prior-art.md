@@ -30,7 +30,7 @@ Four of its skills plan the work before an agent builds it. The kit starts where
 - [**`to-spec`**](../glossary.md#to-spec) writes the [**spec**](../glossary.md#spec) from what the conversation has already settled.
 - [**`to-tickets`**](../glossary.md#to-tickets) cuts the spec into vertical slices, [**tracer bullets**](../glossary.md#tracer-bullet). Each slice names the [**tickets**](../glossary.md#ticket) that block it, and each one is sized to fit one fresh context window.
 
-The last one matters most for the kit. A ticket that fits one context window is a ticket that one [**specialist**](../glossary.md#specialist) can build in one session, and that one [**verifier**](../glossary.md#verifier) can read as one diff. The blockers set the order of a chain.
+The last one matters most for the kit. A ticket that fits one context window is a ticket that one [**specialist**](../glossary.md#specialist) can build in one session, and that one [**verifier**](../glossary.md#verifier) can read as one diff. The blockers set the order of a [**chain**](../glossary.md#chain).
 
 I say it plainly: the kit takes the output of these skills as its input. I wrote no planning step, because the planning was already done, and done well. To use the two together, see [how to use the kit after `to-spec` and `to-tickets`](../how-to/use-the-kit-after-to-spec-and-to-tickets.md). The same author has a build skill, `implement-spec`, and it is an entry below.
 
@@ -42,7 +42,7 @@ Four projects sit beside the kit. I read each one, and I took something from som
 
 [superpowers](https://github.com/obra/superpowers) is a skills framework and a development methodology for coding agents. Read 2026-10-09.
 
-Its `subagent-driven-development` skill is the closest match to the protocol of this kit. A fresh implementer subagent builds each task. A task reviewer checks spec compliance and code quality after each task, and a broad review runs at the end. A task gets up to five fix rounds. The skill also covers brainstorming, planning and test-driven development, which this kit does not.
+Its `subagent-driven-development` skill is the closest match to the [**protocol**](../glossary.md#protocol) of this kit. A fresh implementer subagent builds each task. A task reviewer checks spec compliance and code quality after each task, and a broad review runs at the end. A task gets up to five fix rounds. The skill also covers brainstorming, planning and test-driven development, which this kit does not.
 
 The difference is where the rules live. In superpowers, a model session follows a skill, so the session carries the process. In this kit, the rules that matter most are in an engine outside the session: it runs the gates, builds the verifier brief, and moves the [**run branch**](../glossary.md#run-branch). I chose this because a model that coordinates can forget a rule or be talked out of it.
 
@@ -62,7 +62,7 @@ Choose `implement-spec` when you want the most parallel work and you will read t
 
 [Sandcastle](https://github.com/mattpocock/sandcastle) is a TypeScript library that runs coding agents in isolated sandboxes. Read 2026-10-09.
 
-It runs agents in containers or microVMs, with providers for Docker, Podman and Vercel. It has several agent types, structured output, and session resume. I took one thing from it: the shape of the headless command for each [**harness**](../glossary.md#harness). The source is `src/AgentProvider.ts`, and Sandcastle is MIT licensed. I measured each command on a real machine before I used it. See [the `claude-code` adapter reference](../reference/claude-code-adapter.md).
+It runs agents in containers or microVMs, with providers for Docker, Podman and Vercel. It has several agent types, structured output, and session resume. I took one thing from it: the shape of the [**headless**](../glossary.md#headless) command for each [**harness**](../glossary.md#harness). The source is `src/AgentProvider.ts`, and Sandcastle is MIT licensed. I measured each command on a real machine before I used it. See [the `claude-code` adapter reference](../reference/claude-code-adapter.md).
 
 The differences are runtime and isolation. Sandcastle needs Node and a sandbox provider. This kit needs Python, git and the harness, and it isolates work with git worktrees and guards, not with containers. A container is stronger isolation than a worktree. I put a container sandbox out of scope until a policy needs it.
 
@@ -78,4 +78,4 @@ So the two do different jobs. Its agents are building blocks, and this kit is a 
 
 ### How to choose
 
-If you want a methodology for one session, use superpowers. If you want throughput and you review the end result, use `implement-spec`. If you need containers, use Sandcastle. If you need a catalogue of agents, use wshobson/agents. If you want evidence at each merge, from gates that the agent did not run and a verifier that did not see the report, use this kit. Several of these combine well. The kit stands on the ladder of Eledath and on the planning skills of mattpocock/skills, as the first part of this page says, and I read the others for what they teach.
+If you want a methodology for one session, use superpowers. If you want throughput and you review the end result, use `implement-spec`. If you need containers, use Sandcastle. If you need a catalogue of agents, use wshobson/agents. If you want evidence at each merge, from gates that the agent did not run and a verifier that did not see the [**report**](../glossary.md#report), use this kit. Several of these combine well. The kit stands on the ladder of Eledath and on the planning skills of mattpocock/skills, as the first part of this page says, and I read the others for what they teach.

@@ -12,9 +12,9 @@ So the verifier holds the same skills as the specialist. It also holds the same 
 
 The two halves of a pair are not copies. They differ in three ways, and each way is about trust.
 
-- The verifier has a read-only tool set. It may read the code and run the gates. It may write only in a temporary location. The specialist writes the code, and the verifier does not.
-- The verifier runs on the `verifier` [**tier**](../glossary.md#tier). The engine never puts it lower, in any mode. See [the mode trade-off](the-mode-trade-off.md).
-- The verifier gets no report from the specialist. See [why the verifier is blind](why-the-verifier-is-blind.md).
+- The verifier has a read-only tool set. It may read the code and run the [**gates**](../glossary.md#gate). It may write only in a temporary location. The specialist writes the code, and the verifier does not.
+- The verifier runs on the `verifier` [**tier**](../glossary.md#tier). The [**engine**](../glossary.md#engine) never puts it lower, in any [**mode**](../glossary.md#mode). See [the mode trade-off](the-mode-trade-off.md).
+- The verifier gets no [**report**](../glossary.md#report) from the specialist. See [why the verifier is blind](why-the-verifier-is-blind.md).
 
 The specialist and the verifier must not share a context or a bias. They share knowledge, which is the skills. They do not share work.
 

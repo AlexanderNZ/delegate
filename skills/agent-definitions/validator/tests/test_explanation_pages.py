@@ -249,10 +249,12 @@ FIRST_USE = {
     "prior-art.md": [
         r"ladder", r"brief", r"skills?", r"gates?", r"engine", r"pre-push hook", r"worktrees?", r"grilling", r"wayfinder",
         r"session", r"spec", r"tracer bullets?", r"tickets?", r"specialist", r"verifier", r"run branch", r"blind",
-        r"harness", r"journal", r"declaration", r"tier table", r"delegation document",
+        r"harness", r"journal", r"declaration", r"tier table", r"delegation document", r"chain", r"protocol", r"headless",
+        r"report",
     ],
     "why-each-specialist-has-its-own-verifier.md": [
         r"specialist", r"verifier", r"stack", r"agent pair", r"skills?", r"tier", r"declaration", r"harness", r"validator",
+        r"gates?", r"engine", r"mode", r"report",
     ],
 }
 
