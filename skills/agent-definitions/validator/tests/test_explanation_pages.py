@@ -23,6 +23,7 @@ PAGES = [
     "prior-art.md",
     "the-enforcement-model-and-its-limits.md",
     "decision-records.md",
+    "why-the-model-should-not-matter.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -67,6 +68,18 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("the page says when to choose this kit and when to choose another tool", r"choose"),
         ("the page says the kit takes the planning output of mattpocock/skills as input", r"to-tickets"),
     ],
+    "why-the-model-should-not-matter.md": [
+        ("the kit began as a model router", r"model router"),
+        ("the lineage names the maintainer's projects only in general terms", r"our own web apps and projects"),
+        ("the rules for each model were prose", r"rules for each model"),
+        ("one declaration renders the specialist and its verifier twin", r"one \W*declaration\W.*verifier twin"),
+        ("a validator turns the rules into build failures", r"build failures?"),
+        ("the engine runs the gates itself", r"engine runs the gates itself"),
+        ("constraints beat instructions", r"constraints beat instructions"),
+        ("the inputs of a run are files", r"inputs of a run are files"),
+        ("the coordinator role is not yet fixed", r"not yet fixed"),
+        ("the verifier recommendation is not enforced", r"not enforced"),
+    ],
 }
 
 
@@ -95,7 +108,8 @@ def test_every_relative_link_reaches_a_file_and_a_heading(page):
         file = (EXPLANATION / path).resolve() if path else EXPLANATION / page
         if not file.is_file():
             broken.append(target)
-        elif anchor and anchor not in anchors(file.read_text()):
+        # Only a Markdown page has headings. The fragment of an image (`#gh-dark-mode-only`) selects a colour scheme.
+        elif anchor and file.suffix == ".md" and anchor not in anchors(file.read_text()):
             broken.append(target)
     assert broken == []
 
@@ -231,6 +245,6 @@ def test_the_adr_index_lists_every_adr_of_the_repository_with_its_title_and_no_o
 
 
 @outside_the_package
-def test_the_explanation_directory_holds_the_six_pages_of_the_ticket_and_no_other():
+def test_the_explanation_directory_holds_the_seven_pages_of_the_tickets_and_no_other():
     assert sorted(path.name for path in EXPLANATION.glob("*.md")) == sorted(PAGES)
-    assert len(PAGES) == 6
+    assert len(PAGES) == 7

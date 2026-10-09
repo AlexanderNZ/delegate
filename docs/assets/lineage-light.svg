@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540" role="img" aria-labelledby="lineage-title lineage-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="lineage-title">Each lesson moved a rule out of prose and into structure</title>
+  <desc id="lineage-desc">Six rules of the kit are the rows, and the four steps of the lineage are the columns: a model router, rules for each model, contracts for each role, and the engine. A hollow mark means that the rule was prose at that step. A filled mark means that code or a check held it. No mark means that the rule did not exist yet. Five rules end in structure. The rule that the coordinator does not implement is prose at every step. The page gives the same information as a table.</desc>
+  <style>
+    .bg { fill: #fcfcfb; }
+    .text { fill: #0b0b0b; }
+    .secondary { fill: #52514e; }
+    .muted { fill: #898781; }
+    .axis { stroke: #c3c2b7; }
+    .track { stroke: #e1e0d9; }
+    .prose { fill: #fcfcfb; stroke: #52514e; }
+    .structure { fill: #2a78d6; stroke: #2a78d6; }
+  </style>
+  <rect class="bg" x="0" y="0" width="960" height="540"/>
+
+  <text class="text" x="40" y="44" font-size="21">Each lesson moved a rule out of prose and into structure</text>
+  <text class="secondary" x="40" y="70" font-size="14">Six rules of the kit, and where each one lived at each step of the lineage.</text>
+
+  <g font-size="13">
+    <circle class="prose" cx="48" cy="100" r="7" stroke-width="2"/>
+    <text class="secondary" x="62" y="105">Prose: a model reads it, and can ignore it</text>
+    <circle class="structure" cx="368" cy="100" r="7" stroke-width="2"/>
+    <text class="secondary" x="382" y="105">Structure: code or a check holds it, whatever the model</text>
+  </g>
+
+  <g class="secondary" font-size="13" text-anchor="middle">
+    <text><tspan x="500" y="152">1. Model</tspan><tspan x="500" y="170">router</tspan></text>
+    <text><tspan x="620" y="152">2. Rules for</tspan><tspan x="620" y="170">each model</tspan></text>
+    <text><tspan x="740" y="152">3. Contracts</tspan><tspan x="740" y="170">for each role</tspan></text>
+    <text><tspan x="860" y="152">4. The</tspan><tspan x="860" y="170">engine</tspan></text>
+  </g>
+  <line class="axis" x1="40" y1="188" x2="920" y2="188" stroke-width="1"/>
+
+  <g data-rule="The specialist does not push">
+    <text class="text" x="40" y="225" font-size="15">The specialist does not push</text>
+    <line class="track" x1="500" y1="220" x2="860" y2="220" stroke-width="2"/>
+    <circle class="prose" data-stage="1" cx="500" cy="220" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="2" cx="620" cy="220" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="3" cx="740" cy="220" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="4" cx="860" cy="220" r="7" stroke-width="2"/>
+  </g>
+
+  <g data-rule="The verifier is blind">
+    <text class="text" x="40" y="275" font-size="15">The verifier is blind</text>
+    <line class="track" x1="500" y1="270" x2="860" y2="270" stroke-width="2"/>
+    <circle class="prose" data-stage="1" cx="500" cy="270" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="2" cx="620" cy="270" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="3" cx="740" cy="270" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="4" cx="860" cy="270" r="7" stroke-width="2"/>
+  </g>
+
+  <g data-rule="The verifier holds the skills of the specialist">
+    <text class="text" x="40" y="325" font-size="15">The verifier holds the skills of the specialist</text>
+    <line class="track" x1="620" y1="320" x2="860" y2="320" stroke-width="2"/>
+    <circle class="prose" data-stage="2" cx="620" cy="320" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="3" cx="740" cy="320" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="4" cx="860" cy="320" r="7" stroke-width="2"/>
+  </g>
+
+  <g data-rule="A fix-up is a new commit">
+    <text class="text" x="40" y="375" font-size="15">A fix-up is a new commit</text>
+    <line class="track" x1="740" y1="370" x2="860" y2="370" stroke-width="2"/>
+    <circle class="structure" data-stage="3" cx="740" cy="370" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="4" cx="860" cy="370" r="7" stroke-width="2"/>
+  </g>
+
+  <g data-rule="The gates run outside the specialist">
+    <text class="text" x="40" y="425" font-size="15">The gates run outside the specialist</text>
+    <line class="track" x1="500" y1="420" x2="860" y2="420" stroke-width="2"/>
+    <circle class="prose" data-stage="1" cx="500" cy="420" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="2" cx="620" cy="420" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="3" cx="740" cy="420" r="7" stroke-width="2"/>
+    <circle class="structure" data-stage="4" cx="860" cy="420" r="7" stroke-width="2"/>
+  </g>
+
+  <g data-rule="The coordinator does not implement">
+    <text class="text" x="40" y="475" font-size="15">The coordinator does not implement</text>
+    <line class="track" x1="500" y1="470" x2="860" y2="470" stroke-width="2"/>
+    <circle class="prose" data-stage="1" cx="500" cy="470" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="2" cx="620" cy="470" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="3" cx="740" cy="470" r="7" stroke-width="2"/>
+    <circle class="prose" data-stage="4" cx="860" cy="470" r="7" stroke-width="2"/>
+  </g>
+
+  <text class="muted" x="920" y="508" font-size="13" font-style="italic" text-anchor="end">Still prose at every step: the part that is not yet fixed</text>
+</svg>

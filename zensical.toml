@@ -29,6 +29,7 @@ nav = [
     { "Use the kit after to-spec and to-tickets" = "how-to/use-the-kit-after-to-spec-and-to-tickets.md" },
   ] },
   { "Explanation" = [
+    { "Why the model should not matter" = "explanation/why-the-model-should-not-matter.md" },
     { "Why the verifier is blind" = "explanation/why-the-verifier-is-blind.md" },
     { "Why each specialist has a verifier twin" = "explanation/why-each-specialist-has-a-twin.md" },
     { "The mode trade-off" = "explanation/the-mode-trade-off.md" },
