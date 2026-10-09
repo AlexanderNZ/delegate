@@ -302,3 +302,78 @@ def test_a_second_apply_of_the_same_version_changes_nothing_and_says_so_even_aft
     assert "nothing to change" in done.stdout
     assert {name: (repo / name).read_bytes() for name in before} == before
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_apply_adds_only_the_changelog_entry_when_pyproject_already_holds_the_version(tmp_path):
+    repo = make_repo(tmp_path, version="0.2.0", unreleased=FILLED)
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert "## [0.2.0] - 2026-03-04\n\n### Added" in (repo / "CHANGELOG.md").read_text()
+    assert git(repo, "status", "--porcelain") == " M CHANGELOG.md\n"
+
+
+def test_apply_sets_only_the_version_when_the_changelog_already_holds_the_entry(tmp_path):
+    repo = make_repo(tmp_path, unreleased="\n## [0.2.0] - 2026-03-04\n\nDone by hand.\n")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-05")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert (repo / "pyproject.toml").read_text() == PYPROJECT.format(version="0.2.0")
+    assert git(repo, "status", "--porcelain") == " M pyproject.toml\n"
+
+
+def test_apply_adds_the_entry_when_the_unreleased_section_ends_the_file(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n\n- A thing.\n")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert (repo / "CHANGELOG.md").read_text() == "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-03-04\n\n- A thing.\n"
+
+
+def test_apply_fails_when_the_changelog_has_no_unreleased_heading_and_writes_no_file(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / "CHANGELOG.md").write_text("# Changelog\n\n## [0.1.0] - 2026-01-01\n\nThe first release.\n")
+    git(repo, "commit", "-q", "-am", "docs: drop the heading")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert "## [Unreleased]" in done.stderr and "CHANGELOG.md" in done.stderr
+    assert git(repo, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("missing", ["CHANGELOG.md", "pyproject.toml"])
+def test_apply_fails_when_a_file_is_missing_and_the_message_names_the_file(tmp_path, missing):
+    repo = make_repo(tmp_path)
+    (repo / missing).unlink()
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert missing in done.stderr
+
+
+@pytest.mark.parametrize("date", ["2026-02-30", "04/05/2026", "2026-3-4", "20260304", "tomorrow"])
+def test_apply_fails_for_a_date_that_is_not_a_real_date_in_the_form_year_month_day(tmp_path, date):
+    repo = make_repo(tmp_path, unreleased=FILLED)
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", date)
+
+    assert done.returncode == 2 and done.stdout == ""
+    assert repr(date) in done.stderr
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_apply_writes_no_file_when_the_notes_for_an_empty_unreleased_body_cannot_be_made(tmp_path):
+    repo = make_repo(tmp_path)
+    git(repo, "tag", "v0.1.0")
+
+    done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
+
+    assert done.returncode == 1 and done.stdout == ""
+    assert "v0.1.0" in done.stderr
+    assert git(repo, "status", "--porcelain") == ""
