@@ -49,8 +49,8 @@ def daemon_pid(path: Path) -> int | None:
 
     The daemon listens on a socket in the git directory. The kernel tells the
     process id of the peer that listens on a socket. Only macOS has that call
-    (`LOCAL_PEERPID`), and only macOS and Windows have a daemon, so any other
-    platform is an error.
+    (`LOCAL_PEERPID`), so any other platform is an error. The probe skips the
+    test on those platforms before this function runs.
     """
     if sys.platform != "darwin":
         raise RuntimeError(f"daemon_pid reads LOCAL_PEERPID, which {sys.platform!r} does not have")
@@ -71,15 +71,19 @@ NO_DAEMON_REASON: str = (
 
 
 def why_no_daemon_can_start() -> str | None:
-    """None when a daemon can start here, or the reason to skip when it cannot.
+    """None when a daemon can start here and the test can observe it, or the reason to skip.
 
-    A git backend is not enough: git builds the daemon for macOS and Windows only
-    (elsewhere the command dies with "not supported on this platform"), and a
-    build sandbox that has a backend can still refuse to run the daemon. So the
-    probe starts a daemon in a short temporary repository, checks that it
-    listens, and stops it. The path is short because of the socket path limit.
-    The probe sets LC_ALL=C because git translates its messages.
+    The test reads the daemon's process id with `LOCAL_PEERPID`, which only
+    macOS has, so every other platform skips. On some Linux builds git does run
+    a daemon, but this test cannot observe it there. A git backend is not
+    enough either: a build sandbox that has a backend can still refuse to run
+    the daemon. So the probe starts a daemon in a short temporary repository,
+    checks that it listens, and stops it. The path is short because of the
+    socket path limit. The probe sets LC_ALL=C because git translates its
+    messages.
     """
+    if sys.platform != "darwin":
+        return f"the test reads the daemon's process id with LOCAL_PEERPID, which {sys.platform!r} does not have"
     env = {**os.environ, "LC_ALL": "C"}
     probe = Path(tempfile.mkdtemp(prefix="fp", dir="/tmp"))
     try:
