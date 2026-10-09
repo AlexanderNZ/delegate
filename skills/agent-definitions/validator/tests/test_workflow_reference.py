@@ -12,7 +12,9 @@ import pytest
 from agent_definitions import delegate
 from agent_definitions.workflow import ADAPTERS, MODES, ROLES, STACK_FIELDS, TICKET_FIELDS, TOP_LEVEL_FIELDS
 
-ROOT = Path(__file__).resolve().parents[4]
+from .pages import repository_root
+
+ROOT = repository_root(Path(__file__))
 REFERENCE = ROOT / "docs" / "reference" / "workflow.md"
 
 outside_the_package = pytest.mark.skipif(

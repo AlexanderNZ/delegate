@@ -14,8 +14,9 @@ from agent_definitions.reports import (
 )
 
 from .support import ScriptedAdapter, make_repo, read_journal
+from .pages import repository_root
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = repository_root(Path(__file__))
 REFERENCE = ROOT / "docs" / "reference" / "run.md"
 
 outside_the_package = pytest.mark.skipif(

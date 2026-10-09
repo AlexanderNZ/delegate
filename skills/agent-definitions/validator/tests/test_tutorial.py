@@ -14,8 +14,9 @@ import pytest
 from agent_definitions import adapters, delegate
 
 from .support import ScriptedAdapter
+from .pages import repository_root
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = repository_root(Path(__file__))
 README = ROOT / "README.md"  # its presence marks a source tree with the docs
 TUTORIAL = ROOT / "docs" / "tutorial.md"
 SAMPLE = ROOT / "examples" / "tutorial"

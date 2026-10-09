@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from .opencode_fake import FIXTURES
+from .pages import repository_root
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = repository_root(Path(__file__))
 REFERENCE = ROOT / "docs" / "reference" / "opencode-adapter.md"
 
 outside_the_package = pytest.mark.skipif(

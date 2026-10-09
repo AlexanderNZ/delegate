@@ -26,7 +26,15 @@ import pytest
 
 from agent_definitions import delegate
 
-ROOT = Path(__file__).resolve().parents[4]
+def repository_root(test_file: Path) -> Path:
+    """Four levels up from a test file. A Linux Nix build copies only the package
+    to /build/source, so the path can be shorter: then the root is the top of
+    the path, which holds no README."""
+    parents = test_file.resolve().parents
+    return parents[4] if len(parents) > 4 else parents[-1]
+
+
+ROOT = repository_root(Path(__file__))
 README = ROOT / "README.md"  # its presence marks a source tree with the docs
 HOW_TO = ROOT / "docs" / "how-to"
 

@@ -385,7 +385,9 @@ def test_apply_fails_for_a_date_that_is_not_a_real_date_in_the_form_year_month_d
 def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_after_apply_on_a_copy_of_the_real_files(tmp_path, monkeypatch, unreleased):
     repo = make_repo(tmp_path)
     changelog = (repo / "CHANGELOG.md")
-    changelog.write_text(test_changelog.CHANGELOG.read_text().replace("## [Unreleased]\n\n", f"## [Unreleased]\n\n{unreleased}", 1))
+    # The real Unreleased body changes with each merge, so the case sets it.
+    head, rest = test_changelog.CHANGELOG.read_text().split("## [Unreleased]\n\n", 1)
+    changelog.write_text(f"{head}## [Unreleased]\n\n{unreleased}{rest[rest.index('## ['):]}")
     (repo / "pyproject.toml").write_text(test_changelog.PYPROJECT.read_text())
     git(repo, "add", "-A")
     commit(repo, "docs: the real files")

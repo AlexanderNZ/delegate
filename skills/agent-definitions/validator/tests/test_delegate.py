@@ -18,6 +18,7 @@ import pytest
 
 from agent_definitions import brief, cli, delegate
 from tests.conftest import EXAMPLE
+from tests.pages import repository_root
 
 DOMAIN = "acme-api is a Spring Boot service: controllers, JPA repositories, and Flyway migrations."
 
@@ -264,7 +265,7 @@ def test_a_tiers_option_before_brief_is_a_usage_error(capsys):
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-README = Path(__file__).resolve().parents[4] / "README.md"
+README = repository_root(Path(__file__)) / "README.md"
 COMMANDS = ("delegate", "agent-definitions", "verifier-brief")
 
 

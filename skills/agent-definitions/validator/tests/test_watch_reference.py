@@ -12,7 +12,9 @@ import pytest
 
 from agent_definitions import watch
 
-ROOT = Path(__file__).resolve().parents[4]
+from .pages import repository_root
+
+ROOT = repository_root(Path(__file__))
 
 outside_the_package = pytest.mark.skipif(
     not (ROOT / "README.md").is_file(), reason="the docs are outside the package source, as in a Nix build"

@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[4]
+from .pages import repository_root
+
+ROOT = repository_root(Path(__file__))
 README = ROOT / "README.md"
 
 outside_the_package = pytest.mark.skipif(
