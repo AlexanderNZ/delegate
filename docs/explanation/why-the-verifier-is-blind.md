@@ -8,7 +8,7 @@ When a specialist finishes, it writes a report. The report says what the special
 
 Many review setups give the report to the reviewer. The reviewer then read the diff with the story already in mind. A good reviewer still finds some defects. But the story sets where the reviewer looks. If the report says "I fixed the empty-list case", the reviewer checks the empty-list case. The case that the specialist did not think of gets no attention, because the report never named it.
 
-I call this anchoring. A fresh reviewer needs a fresh question: does this diff do what the ticket asks? The verifier cannot answer that question well when it has read an answer already. So the engine builds the verifier brief from the ticket and the three-dot diff, and from nothing that the specialist wrote. The [agent-delegation skill](../../skills/agent-delegation/SKILL.md#the-invariants-of-every-mode) lists this as the first invariant of every mode, and no setting turns it off.
+I call this anchoring. A fresh reviewer needs a fresh question: does this diff do what the ticket asks? The verifier cannot answer that question well when it has read an answer already. So the engine builds the verifier brief from the ticket and the three-dot diff, and from nothing that the specialist wrote. The [agent-delegation skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#the-invariants-of-every-mode) lists this as the first invariant of every mode, and no setting turns it off.
 
 Blindness costs something. The verifier does not know the intent behind a strange line, so it may flag a line that is correct. I accept that. A false finding costs one fix-up round. A defect that nobody looked for costs more, and it costs it later.
 

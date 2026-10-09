@@ -6,11 +6,11 @@ The ADRs are in `skills/agent-definitions/docs/adr/`. They sit beside the skill 
 
 ## The index
 
-- [ADR 0001: Effort follows the model](../../skills/agent-definitions/docs/adr/0001-effort-follows-the-model.md): a rendered Claude Code agent has no `effort` key unless the declaration sets one, because the effort comes with the model.
-- [ADR 0002: The OpenCode push guard stays narrow](../../skills/agent-definitions/docs/adr/0002-narrow-opencode-push-pattern.md): the OpenCode specialist keeps two push denies, and the renderer does not widen them to a pattern that would also match other commands.
-- [ADR 0003: The caller can override the OpenCode model column](../../skills/agent-definitions/docs/adr/0003-opencode-model-override.md): `render` and `validate` take flags that change the OpenCode column of the tier table, and `bootstrap` takes none.
-- [ADR 0004: Gate commands are per repository](../../skills/agent-definitions/docs/adr/0004-gate-commands-per-repository.md): the global verifier guard list does not grow. A repository names its own gates, and they are the only extra commands its verifier may run.
-- [ADR 0005: The Claude Code guards read the hook input with python3](../../skills/agent-definitions/docs/adr/0005-guards-read-the-hook-input-with-python3.md): both guards read the command with `python3`, so they need no `jq` and they fail closed.
+- [ADR 0001: Effort follows the model](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/docs/adr/0001-effort-follows-the-model.md): a rendered Claude Code agent has no `effort` key unless the declaration sets one, because the effort comes with the model.
+- [ADR 0002: The OpenCode push guard stays narrow](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/docs/adr/0002-narrow-opencode-push-pattern.md): the OpenCode specialist keeps two push denies, and the renderer does not widen them to a pattern that would also match other commands.
+- [ADR 0003: The caller can override the OpenCode model column](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/docs/adr/0003-opencode-model-override.md): `render` and `validate` take flags that change the OpenCode column of the tier table, and `bootstrap` takes none.
+- [ADR 0004: Gate commands are per repository](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/docs/adr/0004-gate-commands-per-repository.md): the global verifier guard list does not grow. A repository names its own gates, and they are the only extra commands its verifier may run.
+- [ADR 0005: The Claude Code guards read the hook input with python3](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/docs/adr/0005-guards-read-the-hook-input-with-python3.md): both guards read the command with `python3`, so they need no `jq` and they fail closed.
 
 ## How to read an ADR
 

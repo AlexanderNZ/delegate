@@ -1,0 +1,82 @@
+# The configuration of the docs site. Build it with the command in CONTRIBUTING.md.
+# The version of Zensical is in `.zensical-version`, and nowhere else.
+
+[project]
+site_name = "delegate"
+site_description = "A delegation kit: a coordinator, a specialist and a blind verifier, with a workflow engine that builds tickets through a coding-agent harness."
+docs_dir = "docs"
+site_dir = "site"
+
+# The sections follow the Diataxis split. "Start here" (the overview) and
+# "Glossary" join when docs/overview.md and docs/glossary.md exist (#33).
+nav = [
+  { "Tutorial" = "tutorial.md" },
+  { "How-to guides" = [
+    { "Bootstrap a single-stack repository" = "how-to/bootstrap-a-single-stack-repository.md" },
+    { "Bootstrap a monorepo" = "how-to/bootstrap-a-monorepo.md" },
+    { "Run an economy chain" = "how-to/run-an-economy-chain.md" },
+    { "Watch and resume a run" = "how-to/watch-and-resume-a-run.md" },
+    { "Point the tiers at a gateway" = "how-to/point-the-tiers-at-a-gateway.md" },
+    { "Add a harness adapter" = "how-to/add-a-harness-adapter.md" },
+    { "Use the kit after to-spec and to-tickets" = "how-to/use-the-kit-after-to-spec-and-to-tickets.md" },
+  ] },
+  { "Explanation" = [
+    { "Why the verifier is blind" = "explanation/why-the-verifier-is-blind.md" },
+    { "Why each specialist has a verifier twin" = "explanation/why-each-specialist-has-a-twin.md" },
+    { "The mode trade-off" = "explanation/the-mode-trade-off.md" },
+    { "Prior art" = "explanation/prior-art.md" },
+    { "The enforcement model and its limits" = "explanation/the-enforcement-model-and-its-limits.md" },
+    { "The decision records" = "explanation/decision-records.md" },
+  ] },
+  { "Reference" = [
+    { "The workflow file" = "reference/workflow.md" },
+    { "delegate run" = "reference/run.md" },
+    { "delegate status and delegate watch" = "reference/status-and-watch.md" },
+    { "The commands" = "reference/commands.md" },
+    { "delegate docs" = "reference/docs.md" },
+    { "The claude-code adapter" = "reference/claude-code-adapter.md" },
+    { "The opencode adapter" = "reference/opencode-adapter.md" },
+  ] },
+]
+
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "content.tooltips",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+abbr = {}
+attr_list = {}
+toc.permalink = true
+pymdownx.highlight.anchor_linenums = true
+pymdownx.superfences = {}
+# The glossary tooltips: `delegate docs` writes this file, outside docs/, from docs/glossary.md.
+pymdownx.snippets.auto_append = ["includes/abbreviations.md"]
+
+[project.plugins.exclude]
+glob = ["agents/**"]
+
+# The site has no index page until the overview (#33) lands, so the root goes to the tutorial.
+[project.plugins.redirects.redirect_maps]
+"index.md" = "tutorial.md"

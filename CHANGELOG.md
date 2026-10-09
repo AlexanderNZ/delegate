@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- A docs site, built from `docs/` with Zensical (pinned in `.zensical-version`). `delegate docs` also writes `includes/abbreviations.md` from the glossary, for the term tooltips of the site.
+
 ## [0.1.0] - 2026-10-09
 
 The first release.

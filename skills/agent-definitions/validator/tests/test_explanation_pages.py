@@ -206,7 +206,7 @@ def test_the_enforcement_page_lists_every_limit_of_the_skill_in_the_order_of_the
 @outside_the_package
 def test_the_enforcement_page_links_the_limits_of_the_skill_for_the_full_text():
     text = (EXPLANATION / "the-enforcement-model-and-its-limits.md").read_text()
-    assert "(../../skills/agent-definitions/SKILL.md#limits)" in text
+    assert "/blob/main/skills/agent-definitions/SKILL.md#limits)" in text
 
 
 def adr_files() -> list:
@@ -219,7 +219,8 @@ def test_the_adr_index_lists_every_adr_of_the_repository_with_its_title_and_no_o
     adrs = adr_files()
     assert adrs, "the repository holds ADRs, so this test would check nothing"
     text = (EXPLANATION / "decision-records.md").read_text()
-    listed = {(EXPLANATION / target).resolve(): label for label, target in re.findall(r"\[([^\]]+)\]\(([^)\s#]+/adr/[^)\s]+\.md)\)", text)}
+    # A page of the docs site links a file outside docs/ with a full URL that holds /blob/main/<path>.
+    listed = {(ROOT / target.split("/blob/main/")[-1]).resolve(): label for label, target in re.findall(r"\[([^\]]+)\]\(([^)\s#]+/adr/[^)\s]+\.md)\)", text)}
     assert sorted(listed) == [path.resolve() for path in adrs]
     wrong_title = [
         path.name

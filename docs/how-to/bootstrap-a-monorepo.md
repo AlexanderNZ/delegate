@@ -40,7 +40,7 @@ Only the coordinator changes these paths:
 - `workflow.toml`
 ````
 
-The [agent-definitions skill](../../skills/agent-definitions/SKILL.md) holds the rules of the gate selection.
+The [agent-definitions skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md) holds the rules of the gate selection.
 
 ### 2. Write one skill for each stack
 

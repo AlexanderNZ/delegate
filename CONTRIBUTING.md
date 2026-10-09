@@ -36,6 +36,24 @@ delegate docs
 
 A test fails when a committed section differs from the code. See [the reference for `delegate docs`](docs/reference/docs.md).
 
+## Build and preview the docs
+
+The pages in `docs/` also make a static site with [Zensical](https://zensical.org). The site has navigation, search and a tooltip for each term of the glossary. The site is not part of the package, and you do not need it to send a change.
+
+You need [uv](https://docs.astral.sh/uv/). The file `.zensical-version` holds the one version of Zensical that the site uses. Run these commands from the root of the repository:
+
+```bash
+uvx "zensical==$(cat .zensical-version)" build --strict
+uvx "zensical==$(cat .zensical-version)" serve
+```
+
+The first command builds the site into `site/`, and it fails on a dead link or a dead anchor. The second command builds the site and shows it on `localhost:8000` while you edit a page.
+
+- To change the version, change `.zensical-version`. The version is in no other file.
+- A link from a page in `docs/` to a file outside `docs/` must be a full URL, because the build cannot follow it.
+- A new page in `docs/` needs a line in the `nav` of `zensical.toml`. A test fails when a page is missing there.
+- The tooltips come from `docs/glossary.md`. `delegate docs` writes them to `includes/abbreviations.md`, and a test fails when that file is stale.
+
 ## Date every harness fact
 
 A harness changes from one release to the next. So each fact about a harness carries the version of the harness and the date that you measured it. A fact is a command, an option, an event of a stream, or an end state.

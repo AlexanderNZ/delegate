@@ -22,7 +22,7 @@ I did not invent a number for the saving, because it depends on your chain, your
 
 Both modes keep the seven invariants. The verifier is blind. The engine runs the gates outside the specialist. Nothing reaches the run branch without an ACCEPT. The specialist never pushes. Each hotspot has one writer. A fix-up is a new commit. And the verifier tier never goes down.
 
-The last rule matters most to me. A cheaper mode saves money on the specialist and on the number of verifier runs. It never means a weaker verifier. If the cheap mode used a cheap verifier, I would be paying less to know less, and the saving would be false. The [agent-delegation skill](../../skills/agent-delegation/SKILL.md#the-invariants-of-every-mode) holds the full list. For the reasons behind the first two rules, see [why the verifier is blind](why-the-verifier-is-blind.md).
+The last rule matters most to me. A cheaper mode saves money on the specialist and on the number of verifier runs. It never means a weaker verifier. If the cheap mode used a cheap verifier, I would be paying less to know less, and the saving would be false. The [agent-delegation skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#the-invariants-of-every-mode) holds the full list. For the reasons behind the first two rules, see [why the verifier is blind](why-the-verifier-is-blind.md).
 
 Verification at the end of a chain is legal practice in `economy` mode. It is not an exception to the protocol. The rule to verify each branch at once is the `assure` rule, and `economy` does not break it, because `economy` does not claim it.
 
