@@ -16,6 +16,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .domain import VERDICTS
+
 # The values of the `status` field of a specialist report.
 SPECIALIST_STATUSES: tuple[str, ...] = ("committed", "blocked", "partial")
 
@@ -39,7 +41,7 @@ SPECIALIST_OPTIONAL: dict[str, str] = {
 
 
 # The values of the `verdict` field of a verifier report.
-VERIFIER_VERDICTS: tuple[str, ...] = ("ACCEPT", "REJECT")
+VERIFIER_VERDICTS: tuple[str, ...] = VERDICTS
 
 # The required fields of a verifier report, with the type of each.
 VERIFIER_REQUIRED: dict[str, str] = {

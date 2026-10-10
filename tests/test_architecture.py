@@ -19,6 +19,11 @@ The rule, in words:
   command. A call to `subprocess` that names git breaks the rule. A call to
   `subprocess` for something else, such as a gate command, does not.
 
+* The domain module of the run context, `run/domain.py`, holds the rules of a run
+  as functions of plain values. It imports nothing but `__future__`,
+  `collections.abc` and `typing`: no module of the package, no git, no harness,
+  no file system, no subprocess. `DOMAIN_ALLOWED` lists the modules it may import.
+
 The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
 standard library. It runs no code of the package and needs no other tool.
@@ -50,8 +55,14 @@ GIT_FREE_LAYERS = {"run"}
 
 # The modules of the run context, by their path under the package.
 RUN_MODULES = (
-    "engine", "workflow", "journal", "lock", "reports", "brief", "guards", "runs", "status", "watch",
+    "engine", "workflow", "journal", "lock", "reports", "brief", "guards", "runs", "status", "watch", "domain",
 )
+
+# The domain module of the run context: the rules of a run, as functions of plain values.
+DOMAIN_MODULE = "run/domain.py"
+
+# The only modules that the domain module imports. They hold no I/O. It imports nothing from the package.
+DOMAIN_ALLOWED = {"__future__", "collections.abc", "typing"}
 
 
 def layer_of(parts: tuple[str, ...]) -> str | None:
@@ -256,6 +267,78 @@ def test_the_run_context_holds_its_modules():
     present = {path.stem for path in (PACKAGE / "run").glob("*.py")}
 
     assert set(RUN_MODULES) <= present
+
+
+def pure_imports(package_dir: Path) -> list[str]:
+    """Every import in the domain module of the run context that is not on `DOMAIN_ALLOWED`, as `file:line: domain imports <module>`.
+
+    A relative import, and an import of `delegate`, are never allowed: the domain
+    module imports nothing from the package, not even a module of its own context.
+    """
+    path = package_dir / DOMAIN_MODULE
+    if not path.exists():
+        return [f"{package_dir.name}/{DOMAIN_MODULE}: the domain module is missing"]
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = ["." * node.level + (node.module or "")]
+        else:
+            continue
+        for imported in names:
+            if imported not in DOMAIN_ALLOWED:
+                found.append(f"{package_dir.name}/{DOMAIN_MODULE}:{node.lineno}: domain imports {imported}")
+    return sorted(set(found))
+
+
+def test_the_domain_module_of_the_run_context_imports_nothing_that_does_io():
+    assert pure_imports(PACKAGE) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess\n",
+        "import os\n",
+        "import shutil\n",
+        "import json\n",
+        "import tempfile\n",
+        "from pathlib import Path\n",
+        "from subprocess import run\n",
+        "from delegate.ports import vcs\n",
+        "from delegate.ports.harness import Adapter\n",
+        "from delegate.adapters import git\n",
+        "from ..ports import vcs\n",
+        "from ..adapters.git import GitVersionControl\n",
+        "from .engine import run_workflow\n",
+        "from . import journal\n",
+        "def late():\n    import subprocess\n",
+    ],
+)
+def test_a_planted_import_in_the_domain_module_fails_the_rule(tmp_path, source):
+    copy = planted_copy(tmp_path, DOMAIN_MODULE, source)
+
+    found = pure_imports(copy)
+
+    assert len(found) == 1
+    assert found[0].startswith(f"delegate/{DOMAIN_MODULE}:")
+    assert " domain imports " in found[0]
+
+
+def test_the_standard_library_modules_of_pure_values_pass_the_domain_rule(tmp_path):
+    source = "from __future__ import annotations\nfrom collections.abc import Sequence\nimport typing\n"
+    copy = planted_copy(tmp_path, DOMAIN_MODULE, source)
+
+    assert pure_imports(copy) == []
+
+
+def test_a_package_without_the_domain_module_fails_the_rule(tmp_path):
+    copy = planted_copy(tmp_path, "run/other.py", "")
+    (copy / DOMAIN_MODULE).unlink(missing_ok=True)
+
+    assert pure_imports(copy) == [f"delegate/{DOMAIN_MODULE}: the domain module is missing"]
 
 
 def test_the_run_modules_are_not_flat_modules_of_the_package_any_more():

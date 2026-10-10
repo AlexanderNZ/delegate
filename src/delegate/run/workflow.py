@@ -12,9 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..tiers import Tiers
-
-# The two modes of a run.
-MODES: tuple[str, ...] = ("assure", "economy")
+from . import domain
+from .domain import MODES  # noqa: F401 - the modes of a run live in `domain`
 
 # The built-in harness adapters. A workflow can name these, and any adapter
 # that the caller of `load_workflow` reports as registered (a test registers a scripted one).
@@ -317,14 +316,5 @@ def plan_order(workflow: Workflow) -> list[Ticket]:
     Among tickets that are ready at the same time, the order of the file wins.
     Raise ValueError on a cycle; `load_workflow` already refuses one.
     """
-    done: list[Ticket] = []
-    done_ids: set[str] = set()
-    pending = list(workflow.tickets)
-    while pending:
-        ready = next((t for t in pending if set(t.blocked_by) <= done_ids), None)
-        if ready is None:
-            raise ValueError(f"tickets {[t.id for t in pending]} wait on each other")
-        pending.remove(ready)
-        done.append(ready)
-        done_ids.add(ready.id)
-    return done
+    by_id = {ticket.id: ticket for ticket in workflow.tickets}
+    return [by_id[ticket_id] for ticket_id in domain.dependency_order([(t.id, t.blocked_by) for t in workflow.tickets])]

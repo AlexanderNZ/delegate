@@ -29,7 +29,7 @@ The modules of `src/delegate/` fall into five groups. Each group does one job.
 | Group | Modules | Job |
 | --- | --- | --- |
 | Definitions | `declaration.py`, `render.py`, `validate.py`, `bootstrap.py`, `templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
-| Run | `run/workflow.py`, `run/engine.py`, `run/guards.py`, `run/journal.py`, `run/lock.py`, `run/reports.py`, `run/runs.py`, `run/brief.py`, `run/status.py`, `run/watch.py` | Check a [**workflow**](../glossary.md#workflow), build its [**tickets**](../glossary.md#ticket), hold the guards, write the [**journal**](../glossary.md#journal), build the [**verifier**](../glossary.md#verifier) [**brief**](../glossary.md#brief) from the ticket, the diff and the [**gates**](../glossary.md#gate) and never from the [**report**](../glossary.md#report), and report the state of a [**run**](../glossary.md#run). |
+| Run | `run/domain.py`, `run/workflow.py`, `run/engine.py`, `run/guards.py`, `run/journal.py`, `run/lock.py`, `run/reports.py`, `run/runs.py`, `run/brief.py`, `run/status.py`, `run/watch.py` | Hold the rules of a [**run**](../glossary.md#run), check a [**workflow**](../glossary.md#workflow), build its [**tickets**](../glossary.md#ticket), hold the guards, write the [**journal**](../glossary.md#journal), build the [**verifier**](../glossary.md#verifier) [**brief**](../glossary.md#brief) from the ticket, the diff and the [**gates**](../glossary.md#gate) and never from the [**report**](../glossary.md#report), and report the state of a [**run**](../glossary.md#run). |
 | [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py`, `adapters/git.py` | Implement the ports. Each harness adapter drives one harness through its [**headless**](../glossary.md#headless) command line. The git backend implements the version-control port. The package also holds the registry of harness adapters by name. |
 | Ports | `ports/harness.py`, `ports/vcs.py` | The interfaces that the [**engine**](../glossary.md#engine) drives. The harness port runs one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. The version-control port keeps the work of a run: the branches, the commits, the [**worktrees**](../glossary.md#worktree), the rebase, and the [**verifier copy**](../glossary.md#verifier-copy). |
 | Commands and checks | `delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py`, `watch.py`, `reference.py`, `neutrality.py`, `tiers.py`, `tiers.toml` | The command-line entry points, the generator of the reference sections, the [**neutrality check**](../glossary.md#neutrality-check), and the [**tier table**](../glossary.md#tier-table). `brief.py`, `status.py` and `watch.py` are thin: each one makes the git backend and calls the module of the same name in `run/`. `run_command.py` is the driver of `delegate run`. |
@@ -47,17 +47,33 @@ flowchart LR
   adapters --> run
 ```
 
-Five rules follow, and `tests/test_architecture.py` holds them:
+Six rules follow, and `tests/test_architecture.py` holds them:
 
 - `run` never imports `adapters` or `cli`.
 - `definitions` never imports `adapters` or `cli`.
 - `ports` never imports `adapters` or `cli`.
 - `adapters` never imports `cli`.
+- The domain module `run/domain.py` imports no module of the package and no module that does I/O. It imports `__future__`, `collections.abc` and `typing` only, so it has no git, no harness, no file system and no subprocess. The test reads the imports of the module and fails on any other. A test plants an import in a [**temporary copy**](../glossary.md#temporary-copy) of the package and checks that the rule fails.
 - The files of `run/` run no git command. The guards and the [**brief generator**](../glossary.md#brief-generator) read the repository through the version-control port, as the engine does. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
 
 A layer is a subpackage of `src/delegate/`. Today `run/`, `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
 The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter. The commands `verifier-brief`, `delegate status` and `delegate watch` make the git backend in the same way, and pass it to the module of the same name in `run/`.
+
+## The domain module
+
+`run/domain.py` holds the rules of a run as functions of plain values: strings, numbers and lists. The [**engine**](../glossary.md#engine) reads and writes the world, and asks the module what the rules say.
+
+| Rule | Functions |
+| --- | --- |
+| The [**modes**](../glossary.md#mode), and the [**tier**](../glossary.md#tier) of each role in a mode | `MODES`, `role_tier` |
+| The limits of a mode: the fix-up rounds and the [**continuations**](../glossary.md#continuation) | `fixup_round_limit`, `continuation_limit`, `may_continue` |
+| The dependency order of the tickets | `dependency_order` |
+| The [**skip**](../glossary.md#skip) rule: a ticket with a [**blocker**](../glossary.md#blocker) that is not built is skipped | `skip_reason`, `unbuilt_blockers`, `unreached_reason` |
+| The start of a ticket in a [**chain**](../glossary.md#chain), and where its own work begins | `chain_predecessor`, `work_starts_at` |
+| The handling of a [**verdict**](../glossary.md#verdict): the rounds, and the reason a [**step**](../glossary.md#step) fails | `is_accepted`, `verification_rounds`, `rounds_used_up_reason`, `rejection_reason`, `chain_rejection_reason`, `unverified_chain_reason`, `unfinished_reason` |
+
+`tests/test_run_domain.py` calls these functions with plain values. It needs no repository and no harness.
 
 ## The version-control port
 

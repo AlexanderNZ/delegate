@@ -50,6 +50,10 @@ only closes it. Any other open step restarts in its own worktree, which the
 engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again.
 
+The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
+start of a ticket in a chain, and the handling of a verdict. The engine reads
+and writes the world, and asks that module what the rules say.
+
 Standard library only. The engine runs no git command: the version-control port
 keeps the work of a run, and it runs gate commands through `subprocess`.
 """
@@ -70,6 +74,7 @@ from ..ports import harness
 from ..ports.harness import Adapter, AdapterRequest
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..tiers import Tiers
+from . import domain
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,
     verifier_run_brief, verifier_run_sections,
@@ -81,27 +86,11 @@ from .guards import (
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
+from .domain import CONTINUATION_LIMIT, FIXUP_ROUND_LIMIT, SPECIALIST_TIER, VERIFIER_TIER  # noqa: F401 - the rules of a run live in `domain`
 from .workflow import Stack, Ticket, Workflow, plan_order
-
-# The tier of the specialist role in each mode, before a workflow override.
-SPECIALIST_TIER: dict[str, str] = {"assure": "strong", "economy": "standard"}
-
-# The tier of the verifier role, before a workflow override. It is the same in every mode.
-VERIFIER_TIER: str = "verifier"
 
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
-
-# A REJECT starts at most this many fix-up rounds. Each round is one fix-up
-# commit and one fresh verifier. The limit depends on the mode: `assure` verifies
-# each ticket, and `economy` verifies each stack once, at the end of the chain.
-FIXUP_ROUND_LIMIT: dict[str, int] = {"assure": 2, "economy": 1}
-
-# The specialist of a ticket continues in the same worktree at most this many
-# times after it ends capped or failed, or after the gates are red. One count
-# covers all three causes. The limit depends on the mode: `assure` pays for
-# more assurance, `economy` for fewer tokens.
-CONTINUATION_LIMIT: dict[str, int] = {"assure": 2, "economy": 1}
 
 BUILT: str = "built"
 FAILED: str = "failed"
@@ -151,8 +140,7 @@ def _new_run_id() -> str:
 
 def _role_model(workflow: Workflow, tiers: Tiers, column: str, role: str) -> tuple[str, str]:
     """The tier of a role and its model from the adapter's own tier column."""
-    default = VERIFIER_TIER if role == "verifier" else SPECIALIST_TIER[workflow.mode]
-    tier = workflow.tier_overrides.get(role, default)
+    tier = domain.role_tier(workflow.mode, role, workflow.tier_overrides)
     try:
         return tier, tiers.model_for(tier, column)
     except KeyError:
@@ -365,13 +353,10 @@ def _execute(
     for position, ticket in enumerate(order):
         if ticket.id in complete:
             continue
-        blockers = [blocker for blocker in ticket.blocked_by if blocker not in built]
-        if blockers:
-            reason = "blocked by " + "; ".join(
-                f"{blocker}, which {'failed' if blocker in failed else 'was skipped'}" for blocker in blockers
-            )
-            skipped[ticket.id] = reason
-            journal.append("skip", ticket=ticket.id, blockers=blockers, reason=reason)
+        skip = domain.skip_reason(ticket.blocked_by, built, failed)
+        if skip:
+            skipped[ticket.id] = skip
+            journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
@@ -389,7 +374,7 @@ def _execute(
             failed.append(ticket.id)
             failures[ticket.id] = reason
             for unreached in order[position + 1 :]:
-                skipped[unreached.id] = f"the run ended after ticket {ticket.id} {'halted the run' if halted else 'crashed'}"
+                skipped[unreached.id] = domain.unreached_reason(ticket.id, halted)
                 journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
             break
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
@@ -409,18 +394,11 @@ def _execute(
 
 
 def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str:
-    """The branch that the next ticket starts from.
-
-    In `assure` mode every ticket starts from the base branch. In `economy`
-    mode the tickets form a chain: a ticket starts from the branch of the last
-    ticket before it, in the order of the plan, that was built. A ticket that
-    failed or was skipped is not part of the chain.
-    """
-    if workflow.mode == "economy":
-        previous = [ticket for ticket in order if ticket.id in built]
-        if previous:
-            return _ticket_branch(workflow, previous[-1])
-    return workflow.base_branch
+    """The branch that the next ticket starts from: the branch of its predecessor in a chain (see `domain.chain_predecessor`), or the base branch."""
+    predecessor = domain.chain_predecessor(workflow.mode, [ticket.id for ticket in order], built)
+    if predecessor is None:
+        return workflow.base_branch
+    return _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
 
 
 def _specialist_done(prior: list[dict[str, object]]) -> bool:
@@ -498,7 +476,7 @@ def _build_ticket(
         verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")
     # The commits of a ticket are the commits beyond the point where its branch started. In a chain that
     # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
-    since = base_commit if workflow.mode == "economy" else workflow.base_branch
+    since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit)
     reason = _build_with_continuations(
         workflow, ticket, adapter, vcs, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
@@ -534,7 +512,7 @@ def _build_with_continuations(
     the step fails, and the journal records the count.
     """
     stack = workflow.stacks[ticket.stack]
-    limit = CONTINUATION_LIMIT[workflow.mode]
+    limit = domain.continuation_limit(workflow.mode)
     prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
@@ -570,9 +548,9 @@ def _build_with_continuations(
                 "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
                 status=report.status, blocked_reason=report.blocked_reason,
             )
-            if report.status != "committed":
-                detail = f": {report.blocked_reason}" if report.blocked_reason else ""
-                return f"the specialist reported status {report.status!r}{detail}"
+            unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the specialist")
+            if unfinished:
+                return unfinished
             if not _commit_lines(vcs, repo, since, branch):
                 return f"branch {branch} holds no commit beyond {since}, though the report says committed"
             stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
@@ -585,7 +563,7 @@ def _build_with_continuations(
             trigger = "gates-red"
             reason = "gates red: " + "; ".join(gate for gate, _ in red)
             gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
-        if continuations == limit:
+        if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
         continuations += 1
@@ -723,23 +701,23 @@ def _accepted_commit(step: _Step, first_round: int = 0) -> str:
     holds. The first pass of the resume is a full verification at that round
     number, and the limit counts across the stop.
     """
-    limit = FIXUP_ROUND_LIMIT[step.workflow.mode]
-    if first_round > limit:
-        raise _StepFailed(f"the {first_round} verifier runs of the stopped run use up the {limit} fix-up rounds")
+    mode = step.workflow.mode
+    used_up = domain.rounds_used_up_reason(mode, first_round)
+    if used_up:
+        raise _StepFailed(used_up)
     rejected = ""
     report: VerifierReport | None = None
-    for round_number in range(first_round, limit + 1):
+    for round_number in domain.verification_rounds(mode, first_round):
         fixup_body = None
         if report is not None:
             fixup_body = _fixup_round(step, round_number, rejected, report.findings)
         verified = _tip(step.vcs, step.repo, step.branch)
         report = _verify_round(step, round_number, fixup_body)
-        if report.verdict == "ACCEPT":
+        if domain.is_accepted(report.verdict):
             return verified
         rejected = verified
     assert report is not None
-    rounds = f"{limit} fix-up round{'' if limit == 1 else 's'}"
-    raise _Rejected(f"the verifier rejected the branch after {rounds}: " + "; ".join(report.findings), report.findings)
+    raise _Rejected(domain.rejection_reason(mode, report.findings), report.findings)
 
 
 def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> str:
@@ -783,9 +761,9 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         "fixup-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None,
         status=report.status, blocked_reason=report.blocked_reason,
     )
-    if report.status != "committed":
-        detail = f": {report.blocked_reason}" if report.blocked_reason else ""
-        raise _StepFailed(f"the fix-up specialist reported status {report.status!r}{detail}")
+    unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the fix-up specialist")
+    if unfinished:
+        raise _StepFailed(unfinished)
     stop = _hotspot_stop(
         step.vcs, step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
     )
@@ -990,7 +968,7 @@ class _ChainRun:
                 self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
             )
             last = step
-            if verdicts and verdicts[-1] == "ACCEPT":
+            if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
             first_round = sum(1 for e in events if e["event"] == "verify-start" and e.get("stack") == name)
             try:
@@ -1009,18 +987,15 @@ class _ChainRun:
         unmapped: list[str] = []
         if isinstance(failed, _Rejected):
             mapped, unmapped = map_findings(failed.findings, [ticket.id for ticket in tickets])
-        limit = FIXUP_ROUND_LIMIT[self.workflow.mode]
-        rounds = f"{limit} fix-up round{'' if limit == 1 else 's'}"
         reasons = {
-            ticket_id: f"the verifier rejected the chain after {rounds}: " + "; ".join(findings)
-            for ticket_id, findings in mapped.items()
+            ticket_id: domain.chain_rejection_reason(self.workflow.mode, findings) for ticket_id, findings in mapped.items()
         }
         if not reasons:
             reasons = {ticket.id: str(failed) for ticket in tickets}
         stack = tickets[0].stack
         for ticket in self.chain:
             if ticket.stack in unverified:
-                reasons[ticket.id] = f"not verified: the chain ended when the verification of the stack {stack!r} failed"
+                reasons[ticket.id] = domain.unverified_chain_reason(stack)
         self._fail(reasons)
         return unmapped
 
