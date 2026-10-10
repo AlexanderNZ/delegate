@@ -35,7 +35,7 @@ This puts [three commands](docs/reference/commands.md) on the PATH: `delegate`, 
 | `docs/` | The docs site, the decision records in `docs/adr/`, and the agent rules of this repository in `docs/agents/`. |
 | `flake.nix`, `package.nix` | The optional Nix flake. |
 
-The package has one dependency rule: the domain never imports the adapters or the command line, and `tests/test_architecture.py` holds it. [The layout of the repository](docs/reference/layout.md) gives each part, the groups of modules, and the rule in full.
+The package has one dependency rule: the domain never imports the adapters or the command line, and `tests/test_architecture.py` holds it. [The layout of the repository](docs/reference/layout.md) gives each part, the groups of modules, and the rule in full. [Why the code has this shape](docs/explanation/why-the-code-has-this-shape.md) gives the reasons for the two contexts, the ports and the rule.
 
 ## Development
 

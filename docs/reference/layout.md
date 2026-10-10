@@ -45,12 +45,13 @@ flowchart LR
   cli[Command line] --> run[Run]
   cli --> definitions[Definitions]
   cli --> adapters
+  cli --> docs
+  cli --> shared
   docs[Docs tooling] --> run
   docs --> definitions
   docs --> cli
   adapters[Adapters] --> ports[Ports]
   run --> ports
-  adapters --> run
   run --> shared[Shared tier table]
   definitions --> shared
 ```

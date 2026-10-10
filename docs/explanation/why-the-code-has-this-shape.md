@@ -74,7 +74,7 @@ flowchart LR
 
 An arrow is an import that the package has today. The test forbids some imports, and it does not require an arrow.
 
-`tests/test_architecture.py` holds these rules, and nothing more:
+`tests/test_architecture.py` holds these rules about imports and structure. It also checks that the main modules and files are present:
 
 - `run` never imports `adapters`, `cli`, `docs` or `definitions`.
 - `definitions` never imports `adapters`, `cli`, `docs` or `run`.

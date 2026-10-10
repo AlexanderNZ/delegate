@@ -410,6 +410,24 @@ def test_contributing_links_the_shape_page_in_its_code_map():
 
 
 @outside_the_package
+def test_readme_links_the_shape_page_in_its_map():
+    text = (ROOT / "README.md").read_text()
+    assert f"docs/explanation/{SHAPE}" in text
+
+
+@outside_the_package
+def test_overview_lists_the_shape_page_among_the_explanation_pages():
+    text = (ROOT / "docs" / "overview.md").read_text()
+    assert f"(explanation/{SHAPE})" in text
+
+
+@outside_the_package
+def test_the_layout_diagram_has_no_arrow_from_adapters_to_run():
+    text = (ROOT / "docs" / "reference" / "layout.md").read_text()
+    assert "adapters --> run\n" not in text
+
+
+@outside_the_package
 def test_the_glossary_holds_the_terms_of_the_shape_page():
     glossary = (ROOT / "docs" / "glossary.md").read_text()
     headings = re.findall(r"^## (.+)$", glossary, flags=re.MULTILINE)
