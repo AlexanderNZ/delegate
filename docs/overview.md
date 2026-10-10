@@ -66,7 +66,7 @@ The same picture as a table:
 | 5 | MCP and Skills | An [**agent pair**](glossary.md#agent-pair) for each [**stack**](glossary.md#stack), rendered from one [**declaration**](glossary.md#declaration) with every skill of the stack. |
 | 6 | Harness Engineering & Automated Feedback Loops | The [**engine**](glossary.md#engine) runs the gates itself and stops a diff that touches a [**hotspot**](glossary.md#hotspot). A [**push guard**](glossary.md#push-guard) in git holds in every harness. |
 | 7 | Background Agents | Headless agents in [**worktrees**](glossary.md#worktree), a [**blind**](glossary.md#blind) verifier, and a [**journal**](glossary.md#journal) that a stopped [**run**](glossary.md#run) resumes from. |
-| 8 | Autonomous Agent Teams | Not attempted. The agents never talk to each other: the engine dispatches, and the merge stays yours. |
+| 8 | Autonomous Agent Teams | Not attempted. The agents never talk to each other: the engine dispatches, and the merge stays mine. |
 
 Read the rows from the top, and Eledath's rule shows. The engine at levels 6 and 7 automates only what levels 3 to 5 make explicit: the brief, the written rules, and the skills of each stack. Take those away and the engine just runs the mess faster.
 

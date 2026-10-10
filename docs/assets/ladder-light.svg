@@ -86,5 +86,5 @@
     <text x="605"><tspan x="605" y="452">The engine runs the gates itself,</tspan><tspan x="605" y="471">and git guards every worktree</tspan></text>
     <text x="605"><tspan x="605" y="514">Headless agents in worktrees,</tspan><tspan x="605" y="533">a blind verifier, a journal</tspan></text>
   </g>
-  <text class="muted" font-size="15" font-style="italic"><tspan x="605" y="576">Not attempted: the engine dispatches,</tspan><tspan x="605" y="595">and the merge stays yours</tspan></text>
+  <text class="muted" font-size="15" font-style="italic"><tspan x="605" y="576">Not attempted: the engine dispatches,</tspan><tspan x="605" y="595">and the merge stays mine</tspan></text>
 </svg>
