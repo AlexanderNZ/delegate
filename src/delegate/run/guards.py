@@ -79,11 +79,13 @@ class HotspotMatch:
 
 @contextmanager
 def _vcs_errors() -> Iterator[None]:
-    """Turn a failure of the version-control port into a GuardError with the same message."""
+    """Turn a failure of the version-control port into a GuardError that names the directory where the command ran."""
     try:
         yield
     except VcsError as error:
-        raise GuardError(str(error)) from None
+        if error.operation is None or error.directory is None:
+            raise GuardError(str(error)) from None
+        raise GuardError(f"{error.operation} failed in {error.directory}: {error.cause}") from None
 
 
 def install_push_guard(vcs: VersionControl, repo: Path, worktree: Path, hooks_dir: Path) -> None:

@@ -33,7 +33,8 @@ def _git_raw(directory: Path, *args: str) -> str:
     """Run git in `directory` and return its output as it is. Raise VcsError when git fails."""
     result = _run(directory, *args)
     if result.returncode != 0:
-        raise VcsError(f"git {' '.join(args)} failed: {result.stderr.strip() or result.returncode}")
+        operation, cause = f"git {' '.join(args)}", result.stderr.strip() or str(result.returncode)
+        raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=directory, cause=cause)
     return result.stdout
 
 
@@ -149,9 +150,8 @@ class GitVersionControl:
             return True
         if result.returncode == 1:
             return False
-        raise VcsError(
-            f"git merge-base --is-ancestor {ancestor} {descendant} failed: {result.stderr.strip() or result.returncode}"
-        )
+        operation, cause = f"git merge-base --is-ancestor {ancestor} {descendant}", result.stderr.strip() or str(result.returncode)
+        raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=repo, cause=cause)
 
     def fast_forward_branch(self, repo: Path, branch: str, to_commit: str) -> bool:
         tip = self.branch_tip(repo, branch)

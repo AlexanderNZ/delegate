@@ -185,3 +185,16 @@ def test_the_copy_is_removed_also_when_the_run_halts_on_a_violation(tmp_path, ca
     evidence = [e for e in read_journal(out) if e["event"] == "verify-result"]
     assert len(evidence) == 1  # the result of the verifier is journalled before the halt
 
+
+
+def test_a_git_failure_of_the_guard_names_the_worktree_where_git_ran(tmp_path, capsys, registered):
+    repo = make_repo(tmp_path)
+    adapter = registered(ScriptedAdapter())
+    adapter.during_verifier = lambda request: (real_worktree(repo) / ".git").unlink()
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    reason = next(e for e in read_journal(out) if e["event"] == "step-end")["reason"]
+    assert reason.startswith("crashed: GuardError: git status")
+    assert f" failed in {real_worktree(repo)}: fatal:" in reason

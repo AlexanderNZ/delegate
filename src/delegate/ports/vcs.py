@@ -27,7 +27,20 @@ REBASE_STATUSES: tuple[str, ...] = (REBASED, CONFLICT, FAILED)
 
 
 class VcsError(RuntimeError):
-    """An operation of the port failed. The message names the operation and the cause."""
+    """An operation of the port failed. The message names the operation and the cause.
+
+    A backend that runs a command also gives the parts of the message: the command
+    (`operation`), the directory where it ran (`directory`) and the reason (`cause`).
+    A caller that must name the directory in its own message reads them.
+    """
+
+    def __init__(
+        self, message: str, *, operation: str | None = None, directory: Path | None = None, cause: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.directory = directory
+        self.cause = cause
 
 
 @dataclass(frozen=True)
