@@ -36,6 +36,7 @@ nav = [
     { "Prior art" = "explanation/prior-art.md" },
     { "The enforcement model and its limits" = "explanation/the-enforcement-model-and-its-limits.md" },
     { "Why the code has this shape" = "explanation/why-the-code-has-this-shape.md" },
+    { "The concepts behind the words" = "explanation/the-concepts-behind-the-words.md" },
     { "The decision records" = "explanation/decision-records.md" },
   ] },
   { "Reference" = [

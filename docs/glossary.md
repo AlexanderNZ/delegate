@@ -24,7 +24,7 @@ See [why each specialist has its own verifier](explanation/why-each-specialist-h
 
 ## Allowlist
 
-The allowlist is the file in the kit that names each permitted exception to the neutrality check. Each entry is a permanent exception with a reason, so the list stays short and visible. It is not the list of commands of the [verifier guard](#verifier-guard). See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
+The allowlist is the file in the kit that names each permitted exception to the neutrality check. Each entry is a permanent exception with a reason, so the list stays short and visible. It is not the list of commands of the [verifier guard](#verifier-guard). See [the neutrality check](explanation/the-concepts-behind-the-words.md#the-neutrality-check) and [the format of the lists](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
 
 ## Anchoring
 
@@ -36,7 +36,7 @@ ASD-STE100 Simplified Technical English is a standard of controlled English: sho
 
 Not: STE. Use "STE" only for the option value `ste`.
 
-See [the output language](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#output-language-asd-ste100-simplified-technical-english).
+See [why the kit uses it](explanation/the-concepts-behind-the-words.md#asd-ste100) and [the output language](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#output-language-asd-ste100-simplified-technical-english).
 
 ## `assure`
 
@@ -60,7 +60,7 @@ See [the tickets of a workflow](reference/workflow.md#tickets).
 
 ## Bootstrap
 
-Bootstrap is the command `delegate bootstrap`, which writes the context skill, the declaration and the agent pair of a repository from one set of arguments. The docs and the agents come from the same answers, so they cannot drift apart. See [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
+Bootstrap is the command `delegate bootstrap`, which writes the context skill, the declaration and the agent pair of a repository from one set of arguments. The docs and the agents come from the same answers, so they cannot drift apart. See [the `bootstrap` command](reference/commands.md#delegate-bootstrap) and [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
 
 ## Brief
 
@@ -92,7 +92,7 @@ A context skill is the skill that `delegate bootstrap` writes for a repository. 
 
 Not: repo-context skill.
 
-See [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
+See [the `bootstrap` command](reference/commands.md#delegate-bootstrap) and [the bootstrap rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#bootstrap).
 
 ## Continuation
 
@@ -104,11 +104,11 @@ A contract test replays a recorded event stream through a stand-in harness comma
 
 ## Coordinator
 
-The coordinator is the person who directs the work, from a terminal or from an interactive harness session. The coordinator owns each action that the engine never does: the merge, the push, and the close of a ticket. See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
+The coordinator is the person who directs the work, from a terminal or from an interactive harness session. The coordinator owns each action that the engine never does: the merge, the push, and the close of a ticket. See [the team](overview.md#the-team) and [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
 
 ## Declaration
 
-A declaration is a TOML file that describes an agent pair: the domain, the tier, the skills, the references and the gate commands. The renderer writes both halves of the pair from it, for each harness. See [what a declaration is](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#what-a-declaration-is).
+A declaration is a TOML file that describes an agent pair: the domain, the tier, the skills, the references and the gate commands. The renderer writes both halves of the pair from it, for each harness. See [why one declaration renders the pair](explanation/why-each-specialist-has-its-own-verifier.md#one-declaration-so-the-pair-cannot-drift) and [what a declaration is](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#what-a-declaration-is).
 
 ## Delegation doc
 
@@ -128,7 +128,7 @@ The delta is the diff from the rejected commit to the tip of the branch after a 
 
 ## Denylist
 
-The denylist is a private list of terms that must not appear in the kit, for example the names of persons and companies. It stays outside the repository, and the neutrality check reads it from a path. See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
+The denylist is a private list of terms that must not appear in the kit, for example the names of persons and companies. It stays outside the repository, and the neutrality check reads it from a path. See [the neutrality check](explanation/the-concepts-behind-the-words.md#the-neutrality-check) and [the format of the lists](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
 
 ## `economy`
 
@@ -152,7 +152,7 @@ The event stream is the line-delimited JSON that a harness writes in a headless 
 
 Not: stream, fixture. Say "recorded stream" for a stream that a test replays.
 
-See [the event stream of the `claude-code` adapter](reference/claude-code-adapter.md#the-event-stream).
+See [what an event stream is](explanation/the-concepts-behind-the-words.md#event-stream) and [the event stream of the `claude-code` adapter](reference/claude-code-adapter.md#the-event-stream).
 
 ## Fail closed
 
@@ -200,7 +200,7 @@ See [Gate](#gate).
 
 ## Gateway
 
-A gateway is a service that serves models under its own names, for example the LLM gateway of a company. A tier file points each tier at a model of the gateway, so no workflow changes. See [how to point the tiers at a gateway](how-to/point-the-tiers-at-a-gateway.md).
+A gateway is a service that serves models under its own names, for example the LLM gateway of a company. A tier file points each tier at a model of the gateway, so no workflow changes. See [what a gateway is](explanation/the-concepts-behind-the-words.md#gateway) and [how to point the tiers at a gateway](how-to/point-the-tiers-at-a-gateway.md).
 
 ## Generated section
 
@@ -208,7 +208,7 @@ A generated section is the part of a reference page between the `generated:begin
 
 ## GET-only command
 
-A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [gate commands](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#gate-commands).
+A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [the options of `bootstrap`](reference/commands.md#delegate-bootstrap) and [gate commands](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#gate-commands).
 
 ## Git backend
 
@@ -220,7 +220,7 @@ The git backend is the code that implements the version-control port with real g
 
 ## Harness
 
-A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the `agent` CLI of Cursor. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [the adapters](reference/workflow.md#adapters).
+A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the `agent` CLI of Cursor. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [what a harness is](explanation/the-concepts-behind-the-words.md#harness) and [the adapters](reference/workflow.md#adapters).
 
 ## Harness hook
 
@@ -252,7 +252,7 @@ See [Specialist](#specialist).
 
 ## Invariant
 
-An invariant is one of the seven rules that hold in every mode, for example "the verifier is blind". No setting changes an invariant, so a cheaper mode never gives a weaker check. The [worktree invariant](#worktree-invariant) is a different check. See [the invariants of every mode](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#the-invariants-of-every-mode).
+An invariant is one of the seven rules that hold in every mode, for example "the verifier is blind". No setting changes an invariant, so a cheaper mode never gives a weaker check. The [worktree invariant](#worktree-invariant) is a different check. See [what no mode gives up](explanation/the-mode-trade-off.md#what-no-mode-gives-up) and [the invariants of every mode](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#the-invariants-of-every-mode).
 
 ## Journal
 
@@ -284,7 +284,7 @@ The mode of a run is `assure` or `economy`. It sets when the verifier runs, the 
 
 ## Neutrality check
 
-The neutrality check is a test that fails when a term of the denylist appears in the kit. The kit holds no personal or company value, so each repository keeps its own values in its own configuration. See [the neutrality check](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
+The neutrality check is a test that fails when a term of the denylist appears in the kit. The kit holds no personal or company value, so each repository keeps its own values in its own configuration. See [the neutrality check](explanation/the-concepts-behind-the-words.md#the-neutrality-check) and [the format of the lists](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#neutrality-check).
 
 ## Pair
 
@@ -308,7 +308,7 @@ See [Headless](#headless).
 
 ## Protocol
 
-The protocol is the set of rules for delegation in the `agent-delegation` skill: the roles, the brief template, blind verification, fix-ups and hotspots. The engine applies the same rules, and you can apply them by hand for one task. See [the agent-delegation skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md).
+The protocol is the set of rules for delegation in the `agent-delegation` skill: the roles, the brief template, blind verification, fix-ups and hotspots. The engine applies the same rules, and you can apply them by hand for one task. See [the parts of the kit](overview.md#the-parts-of-the-kit) and [the agent-delegation skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md).
 
 ## Push guard
 
@@ -328,7 +328,7 @@ REJECT is the verdict that a verifier gives when it finds at least one defect. T
 
 ## Renderer
 
-The renderer (`delegate render`) writes the agent files of each harness from a declaration. Nobody writes an agent file by hand, so the two halves of a pair stay in step. See [the rendering rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#rendering-rules).
+The renderer (`delegate render`) writes the agent files of each harness from a declaration. Nobody writes an agent file by hand, so the two halves of a pair stay in step. See [the `render` command](reference/commands.md#delegate-render) and [the rendering rules](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#rendering-rules).
 
 ## Report
 
@@ -360,11 +360,11 @@ The run lock is a file that stops a second run on one run branch. Two runs canno
 
 ## Session
 
-A session is one conversation of a harness with an agent, with a session id. The adapter resumes the session for a continuation when the harness supports it, so the agent keeps its context. See [the continuation](reference/run.md#the-continuation).
+A session is one conversation of a harness with an agent, with a session id. The adapter resumes the session for a continuation when the harness supports it, so the agent keeps its context. See [what a session is](explanation/the-concepts-behind-the-words.md#session) and [the continuation](reference/run.md#the-continuation).
 
 ## Skill
 
-A skill is a directory with a `SKILL.md` file of instructions that an agent loads. The kit ships two skills, and each agent pair carries every skill of its stack. See [how to write a skill](how-to/bootstrap-a-single-stack-repository.md#2-write-the-skill-with-your-style-rules).
+A skill is a directory with a `SKILL.md` file of instructions that an agent loads. The kit ships two skills, and each agent pair carries every skill of its stack. See [what a skill is](explanation/the-concepts-behind-the-words.md#skill) and [how to write a skill](how-to/bootstrap-a-single-stack-repository.md#2-write-the-skill-with-your-style-rules).
 
 ## Skip
 
@@ -372,7 +372,7 @@ A skip is the state of a ticket whose blocker is not built. The engine makes no 
 
 ## Spec
 
-A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come. The kit takes a spec and its tickets as input, and it replaces only the build step. See [how to use the kit after `to-spec` and `to-tickets`](how-to/use-the-kit-after-to-spec-and-to-tickets.md).
+A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come. The kit takes a spec and its tickets as input, and it replaces only the build step. See [what a spec is](explanation/the-concepts-behind-the-words.md#spec) and [how to use the kit after `to-spec` and `to-tickets`](how-to/use-the-kit-after-to-spec-and-to-tickets.md).
 
 ## Specialist
 
@@ -380,7 +380,7 @@ The specialist is the agent that builds one ticket, in its own worktree, inside 
 
 Not: implementer. Use "implementer" only for the agent of another tool.
 
-See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
+See [the team](overview.md#the-team) and [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
 
 ## Specialist-verifier pair
 
@@ -400,7 +400,7 @@ See [ASD-STE100](#asd-ste100).
 
 ## Step
 
-A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in `assure` mode, the verifier. A failed step does not end the run. See [what a run does](reference/run.md#what-a-run-does).
+A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in `assure` mode, the verifier. A failed step does not end the run. See [what a step is](explanation/the-concepts-behind-the-words.md#step) and [what a run does](reference/run.md#what-a-run-does).
 
 ## Step cap
 
@@ -424,7 +424,7 @@ See [the verifier step](reference/run.md#the-verifier-step).
 
 ## Three-dot diff
 
-A three-dot diff (`git diff <base>...<branch>`) shows the changes of a branch since the point where it left the base. The verifier then sees only the work of the ticket. See [the verifier step](reference/run.md#the-verifier-step).
+A three-dot diff (`git diff <base>...<branch>`) shows the changes of a branch since the point where it left the base. The verifier then sees only the work of the ticket. See [what a three-dot diff is](explanation/the-concepts-behind-the-words.md#three-dot-diff) and [the verifier step](reference/run.md#the-verifier-step).
 
 ## Ticket
 
@@ -448,7 +448,7 @@ A tier file is your own copy of the tier table, which you give with `--tiers`. I
 
 ## Tier table
 
-The tier table (`tiers.toml`) maps each tier to one model for each harness, and lists the models that the validator accepts. Each adapter reads its own column, so an adapter never chooses a model. See [the tier table](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-tier-table).
+The tier table (`tiers.toml`) maps each tier to one model for each harness, and lists the models that the validator accepts. Each adapter reads its own column, so an adapter never chooses a model. See [how to write a tier file](how-to/point-the-tiers-at-a-gateway.md#1-write-the-tier-file) and [the tier table](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-tier-table).
 
 ## `to-spec`
 
@@ -492,7 +492,7 @@ The verifier is the agent that checks the work of a specialist and gives a verdi
 
 Not: twin, verifier twin, reviewer. Say "verifier". Use "twin" only where the text is about the skills that the verifier shares with its specialist.
 
-See [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
+See [the team](overview.md#the-team) and [the roles](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles).
 
 ## Verifier copy
 
@@ -504,11 +504,11 @@ The verifier guard is the hook in each rendered verifier that permits a fixed li
 
 Not: command guard.
 
-See [the verifier's shell](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-verifiers-shell).
+See [the verifier guard](reference/commands.md#the-verifier-guard) and [the verifier's shell](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#the-verifiers-shell).
 
 ## Verifier mode
 
-The verifier mode is `full` or `fix-up`, and the shape of the brief sets it. A full verifier reads the whole diff, and a fix-up verifier checks only the findings and the delta. See [the verifier modes](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#verifier-modes).
+The verifier mode is `full` or `fix-up`, and the shape of the brief sets it. A full verifier reads the whole diff, and a fix-up verifier checks only the findings and the delta. See [the `brief` command](reference/commands.md#delegate-brief) and [the verifier modes](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#verifier-modes).
 
 ## Verifier twin
 

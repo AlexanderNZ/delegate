@@ -147,6 +147,32 @@ def test_a_pointer_entry_names_a_term_that_has_a_full_entry():
     assert wrong == []
 
 
+def docs_pages_linked(body: str) -> list[str]:
+    """The links of an entry that reach a page of the docs. A link to a skill on GitHub, to the glossary itself, or to a page that does not exist is not one."""
+    pages = []
+    for target in LINK.findall(body):
+        path = target.partition("#")[0]
+        file = (GLOSSARY.parent / path).resolve()
+        if path.endswith(".md") and file != GLOSSARY.resolve() and file.is_file():
+            pages.append(target)
+    return pages
+
+
+@outside_the_package
+def test_every_full_glossary_entry_links_a_docs_page_that_explains_the_term():
+    full = [(heading, body) for heading, body in entries() if not POINTER.fullmatch(body.strip())]
+    assert full, "the glossary holds no full entry, so this check would check nothing"
+    assert [heading for heading, body in full if not docs_pages_linked(body)] == []
+
+
+@outside_the_package
+def test_a_link_to_a_skill_or_to_the_glossary_itself_is_not_a_docs_page():
+    skill = "https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-delegation/SKILL.md#roles"
+    assert docs_pages_linked(f"See [the roles]({skill}) and [Verifier](#verifier) and [the glossary](glossary.md#run).") == []
+    assert docs_pages_linked("See [what a run does](reference/run.md#what-a-run-does).") == ["reference/run.md#what-a-run-does"]
+    assert docs_pages_linked("See [a page that is gone](reference/no-such-page.md).") == []
+
+
 @outside_the_package
 def test_the_synonyms_that_a_reader_is_likely_to_look_up_have_a_pointer_entry():
     terms = {term(heading) for heading, _ in entries()}

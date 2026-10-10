@@ -26,6 +26,7 @@ PAGES = [
     "decision-records.md",
     "why-the-model-should-not-matter.md",
     "why-the-code-has-this-shape.md",
+    "the-concepts-behind-the-words.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -98,6 +99,18 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("a test holds the rule", r"tests/test_architecture\.py"),
         ("the run context starts no process", r"starts no process"),
         ("the page sends the reader to the layout reference for the detail", r"layout"),
+    ],
+    "the-concepts-behind-the-words.md": [
+        ("a harness is the program that runs a coding agent, and an adapter holds what is particular to one", r"(?s)program that runs a coding agent.*adapter holds"),
+        ("a skill is a directory with a SKILL.md file", r"(?s)directory with a `skill\.md` file"),
+        ("a session lets the engine go back into the same conversation for a continuation", r"(?s)session id.*continuation"),
+        ("a gateway serves models under its own names, so a tier file changes no workflow", r"(?s)own names.*changes no workflow"),
+        ("a spec is the plan from which the tickets come", r"plan of a piece of work"),
+        ("a step is the work of the engine for one ticket and the unit of failure", r"unit of failure"),
+        ("a three-dot diff shows the changes since the merge base", r"merge base"),
+        ("an event stream is line-delimited json that the adapter reads for the end state", r"(?s)line-delimited json.*end state"),
+        ("the neutrality check reads a private denylist and an allowlist names the exceptions", r"(?s)private.*allowlist"),
+        ("ASD-STE100 is controlled english for the text that agents write", r"(?s)controlled english.*text that agents write"),
     ],
 }
 
@@ -351,9 +364,9 @@ def test_the_adr_index_lists_every_adr_of_the_repository_with_its_title_and_no_o
 
 
 @outside_the_package
-def test_the_explanation_directory_holds_the_eight_pages_of_the_tickets_and_no_other():
+def test_the_explanation_directory_holds_the_pages_of_the_tickets_and_no_other():
     assert sorted(path.name for path in EXPLANATION.glob("*.md")) == sorted(PAGES)
-    assert len(PAGES) == 8
+    assert len(PAGES) == 9
 
 
 SHAPE = "why-the-code-has-this-shape.md"
