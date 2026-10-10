@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import EngineError, state_directory
-from .ports.vcs import VersionControl
+from ..ports.vcs import VersionControl
 
 JOURNAL_NAME: str = "journal.jsonl"
 

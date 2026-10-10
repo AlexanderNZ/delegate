@@ -16,7 +16,7 @@ verifier-brief = "delegate.brief:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["delegate", "delegate.adapters", "delegate.definitions", "delegate.ports"]
+packages = ["delegate", "delegate.adapters", "delegate.definitions", "delegate.ports", "delegate.run"]
 
 [tool.setuptools.package-data]
 delegate = ["tiers.toml", "templates/*.md"]

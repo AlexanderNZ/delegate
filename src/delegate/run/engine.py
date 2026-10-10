@@ -66,6 +66,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..ports import harness
+from ..ports.harness import Adapter, AdapterRequest
+from ..ports.vcs import REBASED, VcsError, VersionControl
+from ..tiers import Tiers
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,
     verifier_run_brief, verifier_run_sections,
@@ -76,11 +80,7 @@ from .guards import (
 )
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .ports import harness
-from .ports.harness import Adapter, AdapterRequest
-from .ports.vcs import REBASED, VcsError, VersionControl
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
-from .tiers import Tiers
 from .workflow import Stack, Ticket, Workflow, plan_order
 
 # The tier of the specialist role in each mode, before a workflow override.
@@ -447,7 +447,7 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
     with _vcs_errors():
         vcs.ensure_worktree(repo, worktree, branch, base)
     try:
-        install_push_guard(repo, worktree, hooks_dir)
+        install_push_guard(vcs, repo, worktree, hooks_dir)
     except GuardError as error:
         raise EngineError(str(error)) from None
 
@@ -575,7 +575,7 @@ def _build_with_continuations(
                 return f"the specialist reported status {report.status!r}{detail}"
             if not _commit_lines(vcs, repo, since, branch):
                 return f"branch {branch} holds no commit beyond {since}, though the report says committed"
-            stop = _hotspot_stop(journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
+            stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
             if stop:
                 return stop
             outcomes = [(gate, *_run_gate_with_output(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
@@ -603,7 +603,7 @@ def _build_with_continuations(
 
 
 def _hotspot_stop(
-    journal: Journal, ticket: str, stack: Stack, worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
+    vcs: VersionControl, journal: Journal, ticket: str, stack: Stack, worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
 ) -> str | None:
     """Compare the paths that the specialist changed since `since` with the hotspot patterns of the stack.
 
@@ -611,7 +611,7 @@ def _hotspot_stop(
     recorded as `hotspot-finding`. The caller stops the step before any gate
     and any verifier runs.
     """
-    matches = hotspot_matches(changed_paths(worktree, since, merge_base=merge_base), stack.hotspots)
+    matches = hotspot_matches(changed_paths(vcs, worktree, since, merge_base=merge_base), stack.hotspots)
     if not matches:
         return None
     journal.append(
@@ -787,12 +787,12 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         detail = f": {report.blocked_reason}" if report.blocked_reason else ""
         raise _StepFailed(f"the fix-up specialist reported status {report.status!r}{detail}")
     stop = _hotspot_stop(
-        step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
+        step.vcs, step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
     )
     if stop:
         raise _StepFailed(stop)
     try:
-        brief = fixup_brief(step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
+        brief = fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
@@ -828,11 +828,11 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
                 step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
-                first_pass = chain_brief(copy, step.segments, step.stack.gates) if fixup_body is None else fixup_body + finding_labels_section()
+                first_pass = chain_brief(step.vcs, copy, step.segments, step.stack.gates) if fixup_body is None else fixup_body + finding_labels_section()
                 prompt = first_pass + verifier_run_sections(copy, report_path, mode)
             elif fixup_body is None:
                 prompt = verifier_run_brief(
-                    copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path
+                    step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path
                 )
             else:
                 prompt = fixup_body + verifier_run_sections(copy, report_path, mode)
@@ -842,12 +842,12 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
             commit=verified, copy=str(copy), **step.chain_fields,
         )
-        before = snapshot_worktree(step.worktree)
+        before = snapshot_worktree(step.vcs, step.worktree)
         result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path))
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:
-            check_worktree_unchanged(before)
+            check_worktree_unchanged(step.vcs, before)
         except InvariantViolation as found:
             violation = found
         # The copy goes; the verdict report and the event stream stay as evidence of the run.

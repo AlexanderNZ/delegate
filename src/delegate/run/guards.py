@@ -1,10 +1,11 @@
 """Guards that hold in every harness: no push from a worktree, no change to a hotspot path, and no change by a verifier.
 
-The guards use git only, so they hold when a harness has no hook or permission
-system of its own, or when a headless run skips it.
+The guards use version control only, through the version-control port, so they
+hold when a harness has no hook or permission system of its own, or when a
+headless run skips it.
 
-The push guard sets `core.hooksPath` for one worktree, through worktree-scoped
-git configuration. The directory that it names holds a `pre-push` hook that
+The push guard sets the hooks directory of one worktree, and of no other checkout.
+The directory that it names holds a `pre-push` hook that
 refuses every push, and a wrapper for each other hook of the repository, so
 those hooks still run in the worktree. It does not stop a push with the
 `--no-verify` option, which skips every `pre-push` hook.
@@ -17,10 +18,10 @@ a directory also matches every path below it.
 
 The worktree invariant compares a snapshot of a worktree before and after a
 verifier run. A snapshot holds the HEAD commit and, for each path that
-`git status` reports, the status code and a hash of the content of the file. So a
+the worktree has changed, the status code and a hash of the content of the file. So a
 verifier that commits, that adds or deletes a file, or that rewrites a file that
-was already changed or untracked, makes the snapshots differ. A file that git
-ignores is not in the snapshot.
+was already changed or untracked, makes the snapshots differ. A file that the
+repository ignores is not in the snapshot.
 """
 
 from __future__ import annotations
@@ -30,10 +31,12 @@ import hashlib
 import os
 import shlex
 import shutil
-import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..ports.vcs import VcsError, VersionControl
 
 PRE_PUSH_HOOK: str = """\
 #!/bin/sh
@@ -59,7 +62,7 @@ class InvariantViolation(Exception):
 
 @dataclass(frozen=True)
 class WorktreeSnapshot:
-    """The HEAD commit of a worktree and the state of each path that `git status` reports."""
+    """The HEAD commit of a worktree and the state of each path that the worktree has changed."""
 
     worktree: Path
     head: str
@@ -74,21 +77,24 @@ class HotspotMatch:
     pattern: str
 
 
-def _git(directory: Path, *args: str) -> str:
-    r = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise GuardError(f"git {' '.join(args)} failed in {directory}: {r.stderr.strip() or r.returncode}")
-    return r.stdout.strip()
+@contextmanager
+def _vcs_errors() -> Iterator[None]:
+    """Turn a failure of the version-control port into a GuardError with the same message."""
+    try:
+        yield
+    except VcsError as error:
+        raise GuardError(str(error)) from None
 
 
-def install_push_guard(repo: Path, worktree: Path, hooks_dir: Path) -> None:
+def install_push_guard(vcs: VersionControl, repo: Path, worktree: Path, hooks_dir: Path) -> None:
     """Make every push from `worktree` fail, and leave the main checkout and the other worktrees alone.
 
     `hooks_dir` is a directory that the engine owns, one for each worktree. It
     is made again on each call, so a second call (a resume) gives the same state.
     """
     # The hooks that the worktree used before: the repository's own, or the host's.
-    inherited = Path(_git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
+    with _vcs_errors():
+        inherited = vcs.hooks_directory(worktree)
     if hooks_dir.exists():
         shutil.rmtree(hooks_dir)
     hooks_dir.mkdir(parents=True)
@@ -101,8 +107,8 @@ def install_push_guard(repo: Path, worktree: Path, hooks_dir: Path) -> None:
     pre_push = hooks_dir / "pre-push"
     pre_push.write_text(PRE_PUSH_HOOK)
     pre_push.chmod(0o755)
-    _git(repo, "config", "extensions.worktreeConfig", "true")
-    _git(worktree, "config", "--worktree", "core.hooksPath", str(hooks_dir))
+    with _vcs_errors():
+        vcs.use_hooks_directory(repo, worktree, hooks_dir)
 
 
 def _matches(path: str, pattern: str) -> bool:
@@ -112,15 +118,14 @@ def _matches(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(path, pattern) or path.startswith(directory + "/")
 
 
-def changed_paths(worktree: Path, since: str, *, merge_base: bool) -> list[str]:
+def changed_paths(vcs: VersionControl, worktree: Path, since: str, *, merge_base: bool) -> list[str]:
     """The paths that differ between `since` and the HEAD of the worktree, a rename counted as its old and its new path.
 
     With `merge_base` the comparison starts at the merge base of `since` and
-    HEAD, so a `since` that moved on does not count. Raise GuardError when git fails.
+    HEAD, so a `since` that moved on does not count. Raise GuardError when the version-control port fails.
     """
-    spec = f"{since}...HEAD" if merge_base else f"{since}..HEAD"
-    out = _git(worktree, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", spec)
-    return out.splitlines()
+    with _vcs_errors():
+        return vcs.changed_paths(worktree, since, from_merge_base=merge_base)
 
 
 def hotspot_matches(paths: Sequence[str], patterns: Sequence[str]) -> list[HotspotMatch]:
@@ -133,23 +138,16 @@ def hotspot_matches(paths: Sequence[str], patterns: Sequence[str]) -> list[Hotsp
     return found
 
 
-def snapshot_worktree(worktree: Path) -> WorktreeSnapshot:
-    """Record the HEAD and the status of `worktree`. Raise GuardError when git fails."""
-    head = _git(worktree, "rev-parse", "HEAD")
-    # The status code starts with a space for a change that is not staged, so the output must not be stripped.
-    r = subprocess.run(
-        ["git", "-C", str(worktree), "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        raise GuardError(f"git status failed in {worktree}: {r.stderr.strip() or r.returncode}")
-    status = r.stdout
+def snapshot_worktree(vcs: VersionControl, worktree: Path) -> WorktreeSnapshot:
+    """Record the HEAD and the changed paths of `worktree`. Raise GuardError when the version-control port fails."""
+    with _vcs_errors():
+        head = vcs.head_commit(worktree)
+        changes = vcs.uncommitted_changes(worktree)
     paths: dict[str, str] = {}
-    for entry in filter(None, status.split("\0")):
-        code, name = entry[:2], entry[3:]
-        file = worktree / name
+    for change in changes:
+        file = worktree / change.path
         content = hashlib.sha1(file.read_bytes()).hexdigest() if file.is_file() else "none"
-        paths[name] = f"{code} {content}"
+        paths[change.path] = f"{change.code} {content}"
     return WorktreeSnapshot(worktree, head, paths)
 
 
@@ -161,9 +159,9 @@ def _change(name: str, before: str | None, after: str | None) -> str:
     return f"{name}: status {code_before} -> {code_after}"
 
 
-def check_worktree_unchanged(before: WorktreeSnapshot) -> None:
+def check_worktree_unchanged(vcs: VersionControl, before: WorktreeSnapshot) -> None:
     """Raise InvariantViolation, which names each change, when the worktree differs from the snapshot `before`."""
-    after = snapshot_worktree(before.worktree)
+    after = snapshot_worktree(vcs, before.worktree)
     changes = [
         _change(name, before.paths.get(name), after.paths.get(name))
         for name in sorted({*before.paths, *after.paths})
@@ -173,8 +171,9 @@ def check_worktree_unchanged(before: WorktreeSnapshot) -> None:
         return
     parts = list(changes)
     if after.head != before.head:
-        moved = _git(before.worktree, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", before.head, after.head)
-        changes = [f"{path}: changed between the two HEAD commits" for path in moved.splitlines()] + changes
+        with _vcs_errors():
+            moved = vcs.changed_paths(before.worktree, before.head, after.head)
+        changes = [f"{path}: changed between the two HEAD commits" for path in moved] + changes
         parts = [f"HEAD moved from {before.head} to {after.head}", *changes]
     raise InvariantViolation(
         f"the verifier changed the real worktree {before.worktree}: " + "; ".join(parts),

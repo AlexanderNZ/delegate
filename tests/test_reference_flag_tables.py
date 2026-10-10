@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from delegate import run
+from delegate import run_command
 
 from .pages import ROOT, outside_the_package
 
@@ -27,7 +27,7 @@ def outside_generated_sections(text: str) -> str:
 
 def flags_of_run() -> set[str]:
     """Every long option string of the parser of `delegate run`, as the parser lists it."""
-    return {option for action in run.build_parser()._actions for option in action.option_strings if option.startswith("--")}  # noqa: SLF001
+    return {option for action in run_command.build_parser()._actions for option in action.option_strings if option.startswith("--")}  # noqa: SLF001
 
 
 @outside_the_package

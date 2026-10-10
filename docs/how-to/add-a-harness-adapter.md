@@ -248,7 +248,7 @@ The command-line driver finds a built-in adapter by name and hands it to the eng
 
 1. Put the adapter module in `delegate/adapters/`, beside `claude_code.py` and `opencode.py`.
 2. Add a branch for the name in `get` in `delegate/adapters/__init__.py`.
-3. Add the name to `ADAPTERS` in `workflow.py`, so a [**workflow**](../glossary.md#workflow) can name it.
+3. Add the name to `ADAPTERS` in `run/workflow.py`, so a [**workflow**](../glossary.md#workflow) can name it.
 4. Add a column that `tier_column` names to each tier in `tiers.toml`.
 
 Then check the model. A test runs `delegate run` with the stand-in command and a workflow that names the adapter. It reads the model from the call of the stand-in. The model must be the model of the tier column for the [**mode**](../glossary.md#mode). See `tests/test_run_opencode.py` in the repository for the pattern.

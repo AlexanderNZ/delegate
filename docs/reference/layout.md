@@ -24,16 +24,15 @@ The repository holds three things: two skills that an agent reads, one Python pa
 
 ## The package
 
-The modules of `src/delegate/` fall into six groups. Each group does one job.
+The modules of `src/delegate/` fall into five groups. Each group does one job.
 
 | Group | Modules | Job |
 | --- | --- | --- |
 | Definitions | `declaration.py`, `render.py`, `validate.py`, `bootstrap.py`, `templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
-| Briefs | `brief.py` | Build a [**verifier**](../glossary.md#verifier) brief from the [**ticket**](../glossary.md#ticket), the diff and the [**gates**](../glossary.md#gate), and never from the [**report**](../glossary.md#report). |
-| Run | `run.py`, `workflow.py`, `engine.py`, `guards.py`, `journal.py`, `lock.py`, `reports.py`, `runs.py`, `tiers.py`, `tiers.toml`, `status.py`, `watch.py` | Check a [**workflow**](../glossary.md#workflow), build its tickets, hold the guards, write the [**journal**](../glossary.md#journal), and report the state of a [**run**](../glossary.md#run). |
+| Run | `run/workflow.py`, `run/engine.py`, `run/guards.py`, `run/journal.py`, `run/lock.py`, `run/reports.py`, `run/runs.py`, `run/brief.py`, `run/status.py`, `run/watch.py` | Check a [**workflow**](../glossary.md#workflow), build its [**tickets**](../glossary.md#ticket), hold the guards, write the [**journal**](../glossary.md#journal), build the [**verifier**](../glossary.md#verifier) [**brief**](../glossary.md#brief) from the ticket, the diff and the [**gates**](../glossary.md#gate) and never from the [**report**](../glossary.md#report), and report the state of a [**run**](../glossary.md#run). |
 | [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py`, `adapters/git.py` | Implement the ports. Each harness adapter drives one harness through its [**headless**](../glossary.md#headless) command line. The git backend implements the version-control port. The package also holds the registry of harness adapters by name. |
 | Ports | `ports/harness.py`, `ports/vcs.py` | The interfaces that the [**engine**](../glossary.md#engine) drives. The harness port runs one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. The version-control port keeps the work of a run: the branches, the commits, the [**worktrees**](../glossary.md#worktree), the rebase, and the [**verifier copy**](../glossary.md#verifier-copy). |
-| Commands and checks | `delegate.py`, `cli.py`, `reference.py`, `neutrality.py` | The command-line entry points, the generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). |
+| Commands and checks | `delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py`, `watch.py`, `reference.py`, `neutrality.py`, `tiers.py`, `tiers.toml` | The command-line entry points, the generator of the reference sections, the [**neutrality check**](../glossary.md#neutrality-check), and the [**tier table**](../glossary.md#tier-table). `brief.py`, `status.py` and `watch.py` are thin: each one makes the git backend and calls the module of the same name in `run/`. `run_command.py` is the driver of `delegate run`. |
 
 ## The dependency rule
 
@@ -48,22 +47,21 @@ flowchart LR
   adapters --> run
 ```
 
-Six rules follow, and `tests/test_architecture.py` holds them:
+Five rules follow, and `tests/test_architecture.py` holds them:
 
 - `run` never imports `adapters` or `cli`.
 - `definitions` never imports `adapters` or `cli`.
 - `ports` never imports `adapters` or `cli`.
 - `adapters` never imports `cli`.
-- `engine.py` and `workflow.py` never import `adapters`. They are flat modules of the Run context until a later step moves them. The engine knows the harness port and the version-control port only.
-- `engine.py` and `workflow.py` run no git command. The rule covers every file of `run/` too, when the Run context moves into that subpackage. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
+- The files of `run/` run no git command. The guards and the [**brief generator**](../glossary.md#brief-generator) read the repository through the version-control port, as the engine does. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
 
-A layer is a subpackage of `src/delegate/`. Today `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test names the two flat modules of the Run context that it checks already, `engine.py` and `workflow.py`. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
+A layer is a subpackage of `src/delegate/`. Today `run/`, `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
-The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter.
+The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter. The commands `verifier-brief`, `delegate status` and `delegate watch` make the git backend in the same way, and pass it to the module of the same name in `run/`.
 
 ## The version-control port
 
-Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The engine keeps the work of a run through the port: it makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), keeps the file watcher off in them, rebases a ticket branch onto the run branch, reads the commit ranges, makes the [**verifier copy**](../glossary.md#verifier-copy), and moves the run branch. The engine runs no git command itself, and a test checks that.
+Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The run context keeps the work of a run through the port. The engine makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), keeps the file watcher off in them, rebases a ticket branch onto the run branch, reads the commit ranges, makes the [**verifier copy**](../glossary.md#verifier-copy), and moves the run branch. The run context runs no git command itself, and a test checks that.
 
 The port speaks the language of the domain. It names no git command and no flag, and a test checks that. Each operation has a test in `tests/test_vcs_git.py`, which runs the git backend on a real temporary repository and calls the port only.
 
@@ -74,6 +72,8 @@ The port speaks the language of the domain. It names no git command and no flag,
 | `commit_of`, `head_commit`, `commits_since` | Name a commit, and list the commits that a branch holds beyond another. |
 | `ensure_worktree`, `remove_worktree` | Make the [**worktree**](../glossary.md#worktree) of a ticket, or reuse one that a killed run left, and remove it. |
 | `rebase_onto` | Put the commits of a ticket branch on top of the run branch. A conflict or a refusal gives a result, and the worktree keeps the state from before. |
+| `changed_paths`, `diff_text`, `uncommitted_changes` | List the paths that differ between two commits, read the text of those changes for the [**brief**](../glossary.md#brief), and list the paths that a worktree changed and did not commit. The [**hotspot**](../glossary.md#hotspot) guard and the worktree check of a verifier use them. |
+| `hooks_directory`, `use_hooks_directory` | Find the hooks that run for a worktree, and set a hooks directory for that worktree alone. The [**push guard**](../glossary.md#push-guard) uses them. |
 | `is_ancestor`, `fast_forward_branch` | Ask whether a commit holds another, and move the run branch to a verified commit by fast-forward only. |
 | `make_verifier_copy`, `stop_file_watcher` | Make the [**verifier copy**](../glossary.md#verifier-copy), and stop the background watcher of the file system before a directory goes. |
 

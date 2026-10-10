@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .tiers import Tiers
+from ..tiers import Tiers
 
 # The two modes of a run.
 MODES: tuple[str, ...] = ("assure", "economy")

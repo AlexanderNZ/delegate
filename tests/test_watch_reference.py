@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate import watch
+from delegate.run import watch
 
 from .pages import repository_root
 

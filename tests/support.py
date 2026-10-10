@@ -352,7 +352,7 @@ def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]
     It uses the journal class of the engine, so each line has `seq` and `time`
     as the engine writes them. Return the path of the journal file.
     """
-    from delegate.journal import Journal
+    from delegate.run.journal import Journal
 
     path = journal_path(repo, run_id)
     journal = Journal(path)
@@ -363,7 +363,7 @@ def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]
 
 def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
     """Append `(event name, fields)` pairs to an existing journal file, as a run in progress does."""
-    from delegate.journal import Journal
+    from delegate.run.journal import Journal
 
     journal, _ = Journal.reopen(path)
     for name, fields in events:

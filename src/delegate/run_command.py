@@ -16,9 +16,9 @@ from pathlib import Path
 from . import adapters
 from .adapters.git import GitVersionControl
 from .cli import add_opencode_override_flags, apply_opencode_override
-from .engine import EngineError, run_workflow, workflow_of_run
+from .run.engine import EngineError, run_workflow, workflow_of_run
+from .run.workflow import WorkflowError, load_workflow, plan_order
 from .tiers import Tiers, load_tiers
-from .workflow import WorkflowError, load_workflow, plan_order
 
 
 def build_parser() -> argparse.ArgumentParser:

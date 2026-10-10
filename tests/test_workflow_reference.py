@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from delegate import delegate
-from delegate.workflow import ADAPTERS, MODES, ROLES, STACK_FIELDS, TICKET_FIELDS, TOP_LEVEL_FIELDS
+from delegate.run.workflow import ADAPTERS, MODES, ROLES, STACK_FIELDS, TICKET_FIELDS, TOP_LEVEL_FIELDS
 
 from .pages import repository_root
 

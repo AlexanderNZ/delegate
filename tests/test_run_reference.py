@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from delegate import adapters, delegate
-from delegate.reports import (
+from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 

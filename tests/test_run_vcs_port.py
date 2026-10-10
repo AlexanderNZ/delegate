@@ -9,10 +9,10 @@ import pytest
 
 from delegate import adapters
 from delegate.adapters.git import GitVersionControl
-from delegate.engine import EngineError, run_workflow
 from delegate.ports.vcs import VcsError
+from delegate.run.engine import EngineError, run_workflow
+from delegate.run.workflow import load_workflow
 from delegate.tiers import load_tiers
-from delegate.workflow import load_workflow
 
 from .support import ScriptedAdapter, git, make_repo
 
@@ -28,11 +28,11 @@ class SpyVcs:
     def __getattr__(self, name):
         method = getattr(self._inner, name)
 
-        def call(*args):
+        def call(*args, **kwargs):
             self.calls.append((name, args))
             if name == self._refuse:
                 raise VcsError(f"{name} refused by the test")
-            return method(*args)
+            return method(*args, **kwargs)
 
         return call
 

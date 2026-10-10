@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli, reference, run, status, watch
+from . import brief, cli, reference, run_command, status, watch
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -28,7 +28,7 @@ AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
 BRIEF_COMMAND: str = "brief"
 BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 
-# The subcommand that `delegate.run` owns.
+# The subcommand that `delegate.run_command` owns.
 RUN_COMMAND: str = "run"
 RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
 
@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        return run.main(args[at + 1 :])
+        return run_command.main(args[at + 1 :])
     if command == STATUS_COMMAND:
         if at:
             print(

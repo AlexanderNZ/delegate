@@ -9,9 +9,11 @@ The rule, in words:
 * `adapters` implement the ports, and `cli` drives the domain. Both point
   inward, so both may import the contexts and the ports. `adapters` never
   imports `cli`.
-* The engine and the workflow reader are flat modules of the run context. They
-  never import `adapters`. The command-line driver is the composition point: it
-  picks the adapter and hands it to the engine.
+* The command-line driver is the composition point: it picks the adapter and
+  hands it to the engine. The three commands that take the git backend, `brief`,
+  `status` and `watch`, are thin modules at the top of the package for now. Each
+  one makes the backend and calls the module of the same name in `run`, until a
+  later ticket moves them into `cli`.
 * The run context never runs git. It keeps the work of a run through the
   version-control port, and only the git backend in `adapters` runs the
   command. A call to `subprocess` that names git breaks the rule. A call to
@@ -21,11 +23,9 @@ The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
 standard library. It runs no code of the package and needs no other tool.
 
-A layer is a subpackage directory of the package. A flat module that carries the
-name of a layer, such as `run.py`, is not part of that layer yet. It joins the
-layer when a later ticket moves it into the subpackage. Until then a flat module
-that holds domain code has its own entry in `FLAT_FORBIDDEN`. An import is a
-violation by the name of its target, so `from delegate import
+A layer is a subpackage directory of the package. A flat module is not part of a
+layer. It joins the layer when a later ticket moves it into the subpackage. An
+import is a violation by the name of its target, so `from delegate import
 adapters` breaks the rule whether `adapters` is a module or a subpackage.
 """
 
@@ -45,17 +45,13 @@ FORBIDDEN = {
     "adapters": {"cli"},
 }
 
-# Flat module -> the layers that it never imports, until a later ticket moves it into its layer.
-FLAT_FORBIDDEN = {
-    "engine": {"adapters", "cli"},
-    "workflow": {"adapters", "cli"},
-}
-
-
-# The files of the run context that never run git: these flat modules, until a later ticket moves them,
-# and every file of these layers.
-GIT_FREE_FLAT = {"engine", "workflow"}
+# The layers whose files never run git.
 GIT_FREE_LAYERS = {"run"}
+
+# The modules of the run context, by their path under the package.
+RUN_MODULES = (
+    "engine", "workflow", "journal", "lock", "reports", "brief", "guards", "runs", "status", "watch",
+)
 
 
 def layer_of(parts: tuple[str, ...]) -> str | None:
@@ -84,10 +80,9 @@ def violations(package_dir: Path) -> list[str]:
         relative = path.relative_to(package_dir.parent).with_suffix("")
         parts = relative.parts
         layer = layer_of(parts)
-        rules = FORBIDDEN.get(layer) if layer else FLAT_FORBIDDEN.get(parts[-1]) if len(parts) == 2 else None
+        rules = FORBIDDEN.get(layer) if layer else None
         if rules is None:
             continue
-        layer = layer or parts[-1]
         package = parts[:-1]
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
@@ -122,7 +117,7 @@ def git_calls(package_dir: Path) -> list[str]:
     found = []
     for path in sorted(package_dir.rglob("*.py")):
         parts = path.relative_to(package_dir.parent).with_suffix("").parts
-        if not (layer_of(parts) in GIT_FREE_LAYERS or (len(parts) == 2 and parts[-1] in GIT_FREE_FLAT)):
+        if layer_of(parts) not in GIT_FREE_LAYERS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         modules, functions = _subprocess_names(tree)
@@ -169,9 +164,12 @@ def test_the_package_follows_the_dependency_rule():
         ("ports/bad.py", "from .. import cli\n", "ports", "cli"),
         ("adapters/bad.py", "from delegate.cli import main\n", "adapters", "cli"),
         ("adapters/bad.py", "from .. import cli\n", "adapters", "cli"),
-        ("engine.py", "from delegate.adapters import get\n", "engine", "adapters"),
-        ("engine.py", "from . import adapters\n", "engine", "adapters"),
-        ("workflow.py", "from .adapters import registered_names\n", "workflow", "adapters"),
+        ("run/engine.py", "from delegate.adapters import get\n", "run", "adapters"),
+        ("run/engine.py", "from .. import adapters\n", "run", "adapters"),
+        ("run/workflow.py", "from ..adapters import registered_names\n", "run", "adapters"),
+        ("run/status.py", "from ..adapters.git import GitVersionControl\n", "run", "adapters"),
+        ("run/watch.py", "from delegate.adapters.git import GitVersionControl\n", "run", "adapters"),
+        ("run/brief.py", "from ..cli import main\n", "run", "cli"),
     ],
 )
 def test_a_planted_bad_import_fails_the_rule(tmp_path, where, source, layer, forbidden):
@@ -221,11 +219,13 @@ def test_the_run_context_runs_no_git():
 @pytest.mark.parametrize(
     ("where", "source"),
     [
-        ("engine.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "status"])\n'),
-        ("engine.py", 'import subprocess as sp\nsp.check_output(["git", "log"])\n'),
-        ("engine.py", 'from subprocess import run\nrun(["git", "log"])\n'),
-        ("engine.py", 'import subprocess\nsubprocess.run(["bash", "-c", "git push"], cwd=".")\n'),
-        ("workflow.py", 'import subprocess\nsubprocess.run(args=["git", "gc"])\n'),
+        ("run/engine.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "status"])\n'),
+        ("run/engine.py", 'import subprocess as sp\nsp.check_output(["git", "log"])\n'),
+        ("run/engine.py", 'from subprocess import run\nrun(["git", "log"])\n'),
+        ("run/engine.py", 'import subprocess\nsubprocess.run(["bash", "-c", "git push"], cwd=".")\n'),
+        ("run/workflow.py", 'import subprocess\nsubprocess.run(args=["git", "gc"])\n'),
+        ("run/guards.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "config", "core.hooksPath", "x"])\n'),
+        ("run/brief.py", 'import subprocess\nsubprocess.run(["git", "diff"], capture_output=True)\n'),
         ("run/bad.py", 'import subprocess\ndef late():\n    subprocess.Popen(["git", "fetch"])\n'),
     ],
 )
@@ -241,7 +241,7 @@ def test_a_planted_git_call_fails_the_rule(tmp_path, where, source):
 
 def test_a_gate_command_through_subprocess_passes_the_git_rule(tmp_path):
     source = 'import subprocess\nsubprocess.run(["bash", "-c", "python -m pytest"], cwd=".")\n'
-    copy = planted_copy(tmp_path, "engine.py", source)
+    copy = planted_copy(tmp_path, "run/engine.py", source)
 
     assert git_calls(copy) == []
 
@@ -250,3 +250,24 @@ def test_the_adapters_may_run_git(tmp_path):
     copy = planted_copy(tmp_path, "adapters/fine.py", 'import subprocess\nsubprocess.run(["git", "status"])\n')
 
     assert git_calls(copy) == []
+
+
+def test_the_run_context_holds_its_modules():
+    present = {path.stem for path in (PACKAGE / "run").glob("*.py")}
+
+    assert set(RUN_MODULES) <= present
+
+
+def test_the_run_modules_are_not_flat_modules_of_the_package_any_more():
+    flat = {path.stem for path in PACKAGE.glob("*.py")}
+
+    assert flat.isdisjoint({"engine", "workflow", "journal", "lock", "reports", "guards", "runs"})
+
+
+def test_a_flat_module_that_stands_in_for_a_run_module_is_only_a_thin_driver():
+    # The flat `brief`, `status` and `watch` make the git backend and call the run module of the same name.
+    for name in ("brief", "status", "watch"):
+        tree = ast.parse((PACKAGE / f"{name}.py").read_text(encoding="utf-8"))
+        defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+        assert defined == {"main"}, name
