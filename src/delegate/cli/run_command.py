@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .. import adapters
 from ..adapters.git import GitVersionControl
+from ..adapters.shell import ShellGateRunner
 from ..run.engine import EngineError, run_workflow, workflow_of_run
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
@@ -75,7 +76,7 @@ def _override_tiers(tiers: Tiers, args: argparse.Namespace) -> Tiers:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    # The composition point also makes the version-control backend that the engine drives.
+    # The composition point also makes the version-control backend and the gate runner that the engine drives.
     vcs = GitVersionControl()
     if args.workflow is None and args.resume is None:
         parser.error("a workflow file or --resume RUN_ID is required")
@@ -106,7 +107,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: adapter {workflow.adapter!r} has no implementation yet; registered: {registered}", file=sys.stderr)
             return 1
         try:
-            result = run_workflow(workflow, args.workflow, args.repo, tiers, adapter, vcs, resume=args.resume, break_lock=args.break_lock)
+            result = run_workflow(
+                workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, break_lock=args.break_lock
+            )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

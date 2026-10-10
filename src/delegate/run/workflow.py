@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..shared.tiers import Tiers
 from . import domain
-from .domain import MODES  # noqa: F401 - the modes of a run live in `domain`
+from .domain import MODES
 
 # The built-in harness adapters. A workflow can name these, and any adapter
 # that the caller of `load_workflow` reports as registered (a test registers a scripted one).

@@ -1,8 +1,9 @@
-"""The adapters of the ports: the harness adapters with their registry, and the git backend.
+"""The adapters of the ports: the harness adapters with their registry, the git backend, and the shell backend.
 
 The git backend, `delegate.adapters.git`, implements the version-control port in
-`delegate.ports.vcs`. It is not in the registry: the driver makes it and hands
-it to the engine.
+`delegate.ports.vcs`. The shell backend, `delegate.adapters.shell`, implements
+the gate port in `delegate.ports.gates`. Neither is in the registry: the driver
+makes them and hands them to the engine.
 
 An adapter implements the harness port in `delegate.ports.harness`. Adapters
 register by name. The workflow names the adapter, and the command-line driver

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from ..ports.vcs import VersionControl
 from .journal import JournalError, read_new_events
-from .runs import RunsError, journal_of
+from .runs import journal_of
 
 # One exit code for each reason that `watch` exits. Code 2 is also the exit code of a usage error.
 EXIT_SUCCEEDED: int = 0

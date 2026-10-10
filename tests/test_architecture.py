@@ -3,8 +3,8 @@
 The rule, in words:
 
 * `run` and `definitions` are the two bounded contexts. They hold the domain.
-  They never import `adapters`, `cli` or `docs`. The definitions context never
-  imports `run`.
+  They never import `adapters`, `cli` or `docs`, and they never import each
+  other: they share the tier table only.
 * `shared` holds what the two contexts share: the tier table. It imports no
   other layer, so every layer may import it.
 * `docs` is the docs tooling: the reference generator and the neutrality check.
@@ -20,11 +20,14 @@ The rule, in words:
   backend of the version-control port, the harness adapter), calls a use case and
   prints the result. No module outside `cli` parses command-line arguments: no
   `ArgumentParser`, no `parse_args` and no `sys.argv` outside `cli`.
-* The run context never runs git. It keeps the work of a run through the
-  version-control port, and only the git backend in `adapters` runs the
-  command. A call to `subprocess` that names git breaks the rule. A call to
-  `subprocess` for something else, such as a gate command, does not.
-
+* The run context starts no process. It imports no `subprocess`, and it uses
+  none of `os.system`, `os.popen`, `os.exec*`, `os.spawn*` and `os.posix_spawn*`.
+  All its process work goes through the ports: git through the version-control
+  port, the agent through the harness port, and a gate command through the gate
+  port. Only an adapter starts a process. The rule is about imports, so a name
+  that holds `"git"` or any other command cannot get round it.
+* A moved name has one address. No file of the package keeps an import for
+  compatibility: a `noqa: F401` comment, the mark of a re-export, fails the test.
 * The domain module of the run context, `run/domain.py`, holds the rules of a run
   as functions of plain values. It imports nothing but `__future__`,
   `collections.abc` and `typing`: no module of the package, no git, no harness,
@@ -41,6 +44,7 @@ adapters` breaks the rule whether `adapters` is a module or a subpackage.
 """
 
 import ast
+import re
 import shutil
 import tomllib
 from pathlib import Path
@@ -51,15 +55,19 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "delegate"
 
 # Layer -> the layers that its files never import.
 FORBIDDEN = {
-    "run": {"adapters", "cli", "docs"},
+    "run": {"adapters", "cli", "docs", "definitions"},
     "definitions": {"adapters", "cli", "docs", "run"},
     "ports": {"adapters", "cli", "docs"},
     "adapters": {"cli", "docs"},
     "shared": {"adapters", "cli", "docs", "run", "definitions", "ports"},
 }
 
-# The layers whose files never run git.
-GIT_FREE_LAYERS = {"run"}
+# The layers whose files start no process: they import no `subprocess` and use no `os` function that starts one.
+PROCESS_FREE_LAYERS = {"run"}
+
+# The functions of `os` that start a process, by the start of their names. `system` and `popen` are exact names.
+OS_PROCESS_EXACT = {"system", "popen"}
+OS_PROCESS_PREFIXES = ("exec", "spawn", "posix_spawn")
 
 # The modules of the run context, by their path under the package.
 RUN_MODULES = (
@@ -123,44 +131,48 @@ def violations(package_dir: Path) -> list[str]:
     return sorted(set(found))
 
 
-def _subprocess_names(tree: ast.AST) -> tuple[set[str], set[str]]:
-    """The names under which a file reaches `subprocess`: the module aliases, and the functions imported from it."""
-    modules: set[str] = set()
-    functions: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "subprocess"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess" and not node.level:
-            functions |= {alias.asname or alias.name for alias in node.names}
-    return modules, functions
+def _is_os_process_function(name: str) -> bool:
+    """Tell whether `name` is a function of `os` that starts a process."""
+    return name in OS_PROCESS_EXACT or name.startswith(OS_PROCESS_PREFIXES)
 
 
-def _names_git(node: ast.AST) -> bool:
-    """Tell whether an argument of a call holds the word `git` as a command: `"git"`, or a string that starts with `git `."""
-    return any(
-        isinstance(part, ast.Constant) and isinstance(part.value, str) and (part.value == "git" or part.value.startswith("git "))
-        for part in ast.walk(node)
-    )
+def process_starts(package_dir: Path) -> list[str]:
+    """Every use of a process-starting module or function in a process-free layer, as `file:line: <layer> <what>`.
 
-
-def git_calls(package_dir: Path) -> list[str]:
-    """Every call to `subprocess` that names git in a file of the run context, as `file:line: run context runs git`."""
+    `<what>` is `imports subprocess`, or `uses os.<function>`. It finds `import subprocess` and
+    `from subprocess import ...` in any form and at any depth, and the use of `os.system`,
+    `os.popen`, `os.exec*`, `os.spawn*` and `os.posix_spawn*` through any name of `os`, and by
+    `from os import ...`. A command in a variable, in a constant or in a string does not matter:
+    the rule reads imports and attribute names, never arguments.
+    """
     found = []
     for path in sorted(package_dir.rglob("*.py")):
         parts = path.relative_to(package_dir.parent).with_suffix("").parts
-        if layer_of(parts) not in GIT_FREE_LAYERS:
+        layer = layer_of(parts)
+        if layer not in PROCESS_FREE_LAYERS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        modules, functions = _subprocess_names(tree)
+        os_names = {
+            alias.asname or alias.name
+            for node in ast.walk(tree) if isinstance(node, ast.Import)
+            for alias in node.names if alias.name == "os"
+        }
+        where = path.relative_to(package_dir.parent)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            reaches = (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules) or (
-                isinstance(func, ast.Name) and func.id in functions
-            )
-            if reaches and any(_names_git(argument) for argument in [*node.args, *(k.value for k in node.keywords)]):
-                found.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}: run context runs git")
+            if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "subprocess" for alias in node.names):
+                found.append(f"{where}:{node.lineno}: {layer} imports subprocess")
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module and node.module.split(".")[0] == "subprocess":
+                found.append(f"{where}:{node.lineno}: {layer} imports subprocess")
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module == "os":
+                found += [
+                    f"{where}:{node.lineno}: {layer} uses os.{alias.name}"
+                    for alias in node.names if alias.name == "*" or _is_os_process_function(alias.name)
+                ]
+            elif (
+                isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in os_names
+                and _is_os_process_function(node.attr)
+            ):
+                found.append(f"{where}:{node.lineno}: {layer} uses os.{node.attr}")
     return sorted(set(found))
 
 
@@ -201,6 +213,14 @@ def test_the_package_follows_the_dependency_rule():
         ("shared/bad.py", "from .. import cli\n", "shared", "cli"),
         ("shared/bad.py", "from delegate.ports import vcs\n", "shared", "ports"),
         ("shared/tiers.py", "from ..docs import reference\n", "shared", "docs"),
+        ("run/bad.py", "from delegate.definitions import render\n", "run", "definitions"),
+        ("run/bad.py", "from delegate.definitions.render import render_pair\n", "run", "definitions"),
+        ("run/bad.py", "import delegate.definitions\n", "run", "definitions"),
+        ("run/bad.py", "from ..definitions import validate\n", "run", "definitions"),
+        ("run/bad.py", "from .. import definitions\n", "run", "definitions"),
+        ("run/bad.py", "def late():\n    from ..definitions.bootstrap import bootstrap\n", "run", "definitions"),
+        ("run/engine.py", "from ..definitions.declaration import load_declaration\n", "run", "definitions"),
+        ("run/brief.py", "from delegate.definitions import declaration\n", "run", "definitions"),
         ("run/bad.py", "from delegate.docs import neutrality\n", "run", "docs"),
         ("adapters/bad.py", "from delegate.docs import reference\n", "adapters", "docs"),
         ("ports/bad.py", "from ..docs import reference\n", "ports", "docs"),
@@ -229,7 +249,7 @@ def test_a_planted_bad_import_fails_the_rule(tmp_path, where, source, layer, for
 
 
 def test_an_inward_import_passes_the_rule(tmp_path):
-    source = "from delegate.ports import something\nfrom ..definitions import other\nfrom . import sibling\n"
+    source = "from delegate.ports import something\nfrom ..shared import other\nfrom . import sibling\n"
     copy = planted_copy(tmp_path, "run/fine.py", source)
 
     assert violations(copy) == []
@@ -307,14 +327,16 @@ def test_the_ports_and_the_adapters_are_inside_the_layers_that_the_rule_covers()
     assert {
         "delegate.ports.harness",
         "delegate.ports.vcs",
+        "delegate.ports.gates",
         "delegate.adapters.claude_code",
         "delegate.adapters.opencode",
         "delegate.adapters.git",
+        "delegate.adapters.shell",
     } <= covered
 
 
-def test_the_run_context_runs_no_git():
-    assert git_calls(PACKAGE) == []
+def test_the_run_context_starts_no_process():
+    assert process_starts(PACKAGE) == []
 
 
 @pytest.mark.parametrize(
@@ -323,34 +345,76 @@ def test_the_run_context_runs_no_git():
         ("run/engine.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "status"])\n'),
         ("run/engine.py", 'import subprocess as sp\nsp.check_output(["git", "log"])\n'),
         ("run/engine.py", 'from subprocess import run\nrun(["git", "log"])\n'),
-        ("run/engine.py", 'import subprocess\nsubprocess.run(["bash", "-c", "git push"], cwd=".")\n'),
-        ("run/workflow.py", 'import subprocess\nsubprocess.run(args=["git", "gc"])\n'),
-        ("run/guards.py", 'import subprocess\nsubprocess.run(["git", "-C", ".", "config", "core.hooksPath", "x"])\n'),
-        ("run/brief.py", 'import subprocess\nsubprocess.run(["git", "diff"], capture_output=True)\n'),
-        ("run/bad.py", 'import subprocess\ndef late():\n    subprocess.Popen(["git", "fetch"])\n'),
+        ("run/engine.py", 'from subprocess import run as go\n'),
+        ("run/engine.py", 'from subprocess import *\n'),
+        ("run/engine.py", 'import subprocess.something\n'),
+        # A gate command is a process too: it goes through the gate port, never through `subprocess` in the run context.
+        ("run/engine.py", 'import subprocess\nsubprocess.run(["bash", "-c", "python -m pytest"], cwd=".")\n'),
+        # The mutant of the old rule: the command is in a constant, so no call names `git`.
+        ("run/engine.py", 'import subprocess\n_TOOL = "git"\nsubprocess.run([_TOOL, "status"])\n'),
+        ("run/guards.py", 'import subprocess\nTOOL = "gi" + "t"\nsubprocess.run([TOOL, "status"])\n'),
+        ("run/brief.py", 'import subprocess\nCOMMAND = ["git", "diff"]\nsubprocess.run(COMMAND, capture_output=True)\n'),
+        ("run/bad.py", 'def late():\n    import subprocess\n'),
+        ("run/bad.py", 'def late():\n    from subprocess import Popen\n'),
     ],
 )
-def test_a_planted_git_call_fails_the_rule(tmp_path, where, source):
+def test_a_planted_subprocess_import_in_the_run_context_fails_the_rule(tmp_path, where, source):
     copy = planted_copy(tmp_path, where, source)
 
-    found = git_calls(copy)
+    found = process_starts(copy)
 
     assert len(found) == 1
     assert found[0].startswith(f"delegate/{where}:")
-    assert found[0].endswith("run context runs git")
+    assert found[0].endswith("run imports subprocess")
 
 
-def test_a_gate_command_through_subprocess_passes_the_git_rule(tmp_path):
-    source = 'import subprocess\nsubprocess.run(["bash", "-c", "python -m pytest"], cwd=".")\n'
+@pytest.mark.parametrize(
+    ("source", "function"),
+    [
+        ('import os\nos.system("ls")\n', "system"),
+        ('import os\nos.popen("ls")\n', "popen"),
+        ('import os\nos.execvp("ls", ["ls"])\n', "execvp"),
+        ('import os\nos.execv("/bin/ls", ["ls"])\n', "execv"),
+        ('import os\nos.spawnl(os.P_WAIT, "/bin/ls", "ls")\n', "spawnl"),
+        ('import os\nos.posix_spawn("/bin/ls", ["ls"], {})\n', "posix_spawn"),
+        ('import os as o\no.system("ls")\n', "system"),
+        ('from os import system\n', "system"),
+        ('from os import path, execv as go\n', "execv"),
+        ('from os import *\n', "*"),
+        ('import os\ndef late():\n    os.system("ls")\n', "system"),
+    ],
+)
+def test_a_planted_os_process_call_in_the_run_context_fails_the_rule(tmp_path, source, function):
     copy = planted_copy(tmp_path, "run/engine.py", source)
 
-    assert git_calls(copy) == []
+    found = process_starts(copy)
+
+    assert len(found) == 1
+    assert found[0].startswith("delegate/run/engine.py:")
+    assert found[0].endswith(f"run uses os.{function}")
 
 
-def test_the_adapters_may_run_git(tmp_path):
-    copy = planted_copy(tmp_path, "adapters/fine.py", 'import subprocess\nsubprocess.run(["git", "status"])\n')
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import os\nos.getpid()\nos.kill(1, 0)\nos.replace('a', 'b')\nos.environ.get('X')\n",
+        "from os import getpid, path\n",
+        "import os as o\no.path.join('a', 'b')\n",
+        "import shutil\nimport tempfile\n",
+        "SPAWNED = 'subprocess'\n",
+    ],
+)
+def test_the_run_context_may_use_os_for_something_that_starts_no_process(tmp_path, source):
+    copy = planted_copy(tmp_path, "run/engine.py", source)
 
-    assert git_calls(copy) == []
+    assert process_starts(copy) == []
+
+
+@pytest.mark.parametrize("where", ["adapters/fine.py", "definitions/fine.py", "cli/fine.py", "docs/fine.py"])
+def test_a_layer_outside_the_run_context_may_start_a_process(tmp_path, where):
+    copy = planted_copy(tmp_path, where, 'import subprocess\nsubprocess.run(["git", "status"])\n')
+
+    assert process_starts(copy) == []
 
 
 def test_the_run_context_holds_its_modules():
@@ -496,3 +560,45 @@ def test_a_parser_inside_cli_passes_the_rule(tmp_path):
     copy = planted_copy(tmp_path, "cli/fine.py", "import argparse\nargparse.ArgumentParser().parse_args()\n")
 
     assert parsing(copy) == []
+
+
+def reexports(package_dir: Path) -> list[str]:
+    """Every import in the package that a `noqa: F401` comment marks, as `file:line: <module> keeps an import for compatibility`.
+
+    The comment tells the linter that an import is unused. In this package the
+    only reason for it is a re-export: a name that moved, and that an old
+    address still gives. A moved name has one address.
+    """
+    found = []
+    for path in sorted(package_dir.rglob("*.py")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if re.search(r"#\s*noqa:?\s*F401", line):
+                found.append(f"{path.relative_to(package_dir.parent)}:{number}: keeps an import for compatibility")
+    return sorted(found)
+
+
+def test_no_module_keeps_an_import_for_compatibility():
+    assert reexports(PACKAGE) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "source"),
+    [
+        ("run/engine.py", "from .domain import MODES  # noqa: F401 - the modes live in `domain`\n"),
+        ("cli/old.py", "from .delegate import main  # noqa:F401\n"),
+        ("old.py", "from delegate.cli.delegate import main  #noqa: F401\n"),
+    ],
+)
+def test_a_planted_reexport_fails_the_rule(tmp_path, where, source):
+    copy = planted_copy(tmp_path, where, source)
+
+    found = reexports(copy)
+
+    assert len(found) == 1
+    assert found[0].startswith(f"delegate/{where}:")
+
+
+def test_an_ordinary_import_passes_the_reexport_rule(tmp_path):
+    copy = planted_copy(tmp_path, "run/fine.py", "from .domain import MODES\nprint(MODES)  # noqa: T201\n")
+
+    assert reexports(copy) == []

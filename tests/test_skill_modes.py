@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from delegate.cli import delegate
-from delegate.run import engine, workflow
+from delegate.run import domain
 from delegate.docs.neutrality import KIT_ROOT_VAR
 
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal
@@ -89,22 +89,22 @@ def test_the_table_names_the_two_modes_of_the_engine_and_the_six_settings():
 
     assert set(table) == {"Verifier runs", "Branch starts from", "Specialist tier", "Verifier tier", "Fix-up rounds", "Continuations"}
     for cells in table.values():
-        assert tuple(cells) == workflow.MODES
+        assert tuple(cells) == domain.MODES
 
 
 @in_the_kit
-@pytest.mark.parametrize("mode", workflow.MODES)
+@pytest.mark.parametrize("mode", domain.MODES)
 def test_the_tiers_and_the_limits_in_the_table_are_the_ones_the_engine_uses(mode):
     cells = {setting: row[mode] for setting, row in mode_table().items()}
 
-    assert cells["Specialist tier"] == f"`{engine.SPECIALIST_TIER[mode]}`"
-    assert cells["Verifier tier"] == f"`{engine.VERIFIER_TIER}`"
-    assert cells["Fix-up rounds"] == str(engine.FIXUP_ROUND_LIMIT[mode])
-    assert cells["Continuations"] == str(engine.CONTINUATION_LIMIT[mode])
+    assert cells["Specialist tier"] == f"`{domain.SPECIALIST_TIER[mode]}`"
+    assert cells["Verifier tier"] == f"`{domain.VERIFIER_TIER}`"
+    assert cells["Fix-up rounds"] == str(domain.FIXUP_ROUND_LIMIT[mode])
+    assert cells["Continuations"] == str(domain.CONTINUATION_LIMIT[mode])
 
 
 @in_the_kit
-@pytest.mark.parametrize("mode", workflow.MODES)
+@pytest.mark.parametrize("mode", domain.MODES)
 def test_the_verification_point_and_the_branch_start_in_the_table_are_what_a_real_run_does(tmp_path, capsys, scripted, mode):
     cells = {setting: row[mode] for setting, row in mode_table().items()}
 

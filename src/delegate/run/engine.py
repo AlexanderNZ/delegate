@@ -54,15 +54,16 @@ The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
 start of a ticket in a chain, and the handling of a verdict. The engine reads
 and writes the world, and asks that module what the rules say.
 
-Standard library only. The engine runs no git command: the version-control port
-keeps the work of a run, and it runs gate commands through `subprocess`.
+Standard library only. The engine starts no process: the version-control port
+keeps the work of a run, the harness port runs the agents, and the gate port
+runs the gate commands. `tests/test_architecture.py` checks that no module of
+the run context imports `subprocess`.
 """
 
 from __future__ import annotations
 
 import secrets
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -71,6 +72,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports import harness
+from ..ports.gates import GateRunner
 from ..ports.harness import Adapter, AdapterRequest
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
@@ -86,7 +88,6 @@ from .guards import (
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
-from .domain import CONTINUATION_LIMIT, FIXUP_ROUND_LIMIT, SPECIALIST_TIER, VERIFIER_TIER  # noqa: F401 - the rules of a run live in `domain`
 from .workflow import Stack, Ticket, Workflow, plan_order
 
 # The journal keeps this many characters of the end of a gate's output.
@@ -288,14 +289,15 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
 
 
 def run_workflow(
-    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, *,
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, break_lock: bool = False,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
-    The caller picks the adapter that the workflow names, and the version-control
-    backend `vcs`. The engine knows the ports only, never an adapter module. The
-    run branch, the worktrees and the file-watcher setting come from `vcs`.
+    The caller picks the adapter that the workflow names, the version-control
+    backend `vcs`, and the gate runner `gates`. The engine knows the ports only,
+    never an adapter module. The run branch, the worktrees and the file-watcher
+    setting come from `vcs`. The engine runs each gate command through `gates`.
 
     With `resume`, the run id of an earlier run, go on with that run: build the
     tickets that are not complete, and append to its journal.
@@ -314,14 +316,14 @@ def run_workflow(
         if resume is None:
             _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
-            return _execute(workflow, workflow_path, adapter, vcs, roles, repo, state_dir, run_id, resume is not None, broken)
+            return _execute(workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken)
     except LockError as error:
         raise EngineError(str(error)) from None
 
 
 def _execute(
-    workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]],
-    repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
+    workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
+    roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
 ) -> RunResult:
     order = plan_order(workflow)
     if not resuming:
@@ -361,7 +363,7 @@ def _execute(
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
             reason = _build_ticket(
-                workflow, ticket, adapter, vcs, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
+                workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
             )
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
@@ -385,7 +387,7 @@ def _execute(
             built.append(ticket.id)
     unmapped: list[str] = []
     if workflow.mode == "economy" and built and not ended_early:
-        chain = _ChainRun(workflow, order, adapter, vcs, roles, repo, state_dir, run_id, journal, built, failed, failures)
+        chain = _ChainRun(workflow, order, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, built, failed, failures)
         unmapped = chain.verify()
     journal.append(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
@@ -431,7 +433,7 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
 
 
 def _build_ticket(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]],
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, roles: dict[str, tuple[str, str]],
     repo: Path, state_dir: Path, run_id: str, journal: Journal, prior: list[dict[str, object]] | None = None,
     start_ref: str | None = None,
 ) -> str | None:
@@ -478,21 +480,21 @@ def _build_ticket(
     # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
     since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit)
     reason = _build_with_continuations(
-        workflow, ticket, adapter, vcs, model, repo, worktree, branch, report_path, journal, since,
+        workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
     )
     if reason:
         return reason
     if workflow.mode == "assure":
-        step = _Step(workflow, ticket, adapter, vcs, roles, repo, state_dir, run_id, journal)
+        step = _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal)
         reason = _rebase_onto_run_branch(step)
         return reason if reason else _verify_ticket(step, verify_rounds)
     return None
 
 
 def _build_with_continuations(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, model: str, repo: Path, worktree: Path,
-    branch: str, report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
+    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, model: str, repo: Path,
+    worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
 
@@ -556,7 +558,7 @@ def _build_with_continuations(
             stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
             if stop:
                 return stop
-            outcomes = [(gate, *_run_gate_with_output(gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
+            outcomes = [(gate, *_run_gate_with_output(gates, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
             red = [(gate, output) for gate, green, output in outcomes if not green]
             if not red:
                 return None
@@ -607,6 +609,7 @@ class _Step:
     ticket: Ticket
     adapter: Adapter
     vcs: VersionControl
+    gates: GateRunner
     roles: dict[str, tuple[str, str]]
     repo: Path
     state_dir: Path
@@ -673,7 +676,10 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
             f"branch {step.branch} holds no commit beyond {run_branch} after the rebase; "
             f"{run_branch} holds its work already"
         )
-    red = [gate for gate in step.stack.gates if not _run_gate(gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE)]
+    red = [
+        gate for gate in step.stack.gates
+        if not _run_gate(step.gates, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE)
+    ]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
     return None
@@ -776,7 +782,7 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
     red = [
         gate for gate in step.stack.gates
-        if not _run_gate(gate, ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
+        if not _run_gate(step.gates, gate, ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
     ]
     if red:
         raise _StepFailed("gates red: " + "; ".join(red))
@@ -916,10 +922,11 @@ class _ChainRun:
     """
 
     def __init__(
-        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, vcs: VersionControl, roles: dict[str, tuple[str, str]], repo: Path,
-        state_dir: Path, run_id: str, journal: Journal, built: list[str], failed: list[str], failures: dict[str, str],
+        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, vcs: VersionControl, gates: GateRunner,
+        roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, journal: Journal, built: list[str],
+        failed: list[str], failures: dict[str, str],
     ) -> None:
-        self.workflow, self.adapter, self.vcs, self.roles, self.repo = workflow, adapter, vcs, roles, repo
+        self.workflow, self.adapter, self.vcs, self.gates, self.roles, self.repo = workflow, adapter, vcs, gates, roles, repo
         self.state_dir, self.run_id, self.journal = state_dir, run_id, journal
         self.chain = [ticket for ticket in order if ticket.id in built]
         self.built, self.failed, self.failures = built, failed, failures
@@ -964,8 +971,8 @@ class _ChainRun:
             tickets = [ticket for ticket in self.chain if ticket.stack == name]
             verdicts = [e["verdict"] for e in events if e["event"] == "verdict" and e.get("stack") == name]
             step = _Step(
-                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.vcs, self.roles, self.repo,
-                self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
+                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.vcs, self.gates, self.roles,
+                self.repo, self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
             )
             last = step
             if verdicts and domain.is_accepted(verdicts[-1]):
@@ -1007,23 +1014,25 @@ def _chain_text(tickets: list[Ticket]) -> str:
     return "\n\n".join(f"Ticket {ticket.id}: {ticket.text.rstrip(chr(10))}" for ticket in tickets)
 
 
-def _run_gate(command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str) -> bool:
-    """Run one gate command in the worktree, record the result, and return True when it is green.
+def _run_gate(
+    gates: GateRunner, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
+) -> bool:
+    """Run one gate command in the worktree through `gates`, record the result, and return True when it is green.
 
     `round_number` is 0 for the first build and the fix-up round for a later run.
     `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
     """
-    return _run_gate_with_output(command, ticket, worktree, journal, round_number, phase)[0]
+    return _run_gate_with_output(gates, command, ticket, worktree, journal, round_number, phase)[0]
 
 
 def _run_gate_with_output(
-    command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
+    gates: GateRunner, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
 ) -> tuple[bool, str]:
     """Run one gate command as `_run_gate` does. Return whether it is green, and the tail of its output."""
-    r = subprocess.run(["bash", "-c", command], cwd=worktree, capture_output=True, text=True)
-    output = (r.stdout + r.stderr)[-GATE_OUTPUT_TAIL_CHARS:]
+    result = gates.run(command, worktree)
+    output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
     journal.append(
-        "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, exit_status=r.returncode, green=r.returncode == 0,
-        output_tail=output,
+        "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, exit_status=result.exit_status,
+        green=result.green, output_tail=output,
     )
-    return r.returncode == 0, output
+    return result.green, output

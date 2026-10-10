@@ -9,6 +9,7 @@ import pytest
 
 from delegate import adapters
 from delegate.adapters.git import GitVersionControl
+from delegate.adapters.shell import ShellGateRunner
 from delegate.ports.vcs import VcsError
 from delegate.run.engine import EngineError, run_workflow
 from delegate.run.workflow import load_workflow
@@ -49,7 +50,7 @@ def start_run(repo, vcs, adapter):
     tiers = load_tiers()
     workflow_path = repo / "workflow.toml"
     workflow = load_workflow(workflow_path, tiers, adapters.registered_names())
-    return run_workflow(workflow, workflow_path, repo, tiers, adapter, vcs)
+    return run_workflow(workflow, workflow_path, repo, tiers, adapter, vcs, ShellGateRunner())
 
 
 def test_the_run_branch_and_the_ticket_worktree_come_from_the_port(tmp_path, scripted_adapter):
