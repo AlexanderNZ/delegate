@@ -73,7 +73,7 @@ from pathlib import Path
 from ..ports import harness
 from ..ports.harness import Adapter, AdapterRequest
 from ..ports.vcs import REBASED, VcsError, VersionControl
-from ..tiers import Tiers
+from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,

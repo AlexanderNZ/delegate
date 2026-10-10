@@ -40,7 +40,7 @@ The push-pattern decision was recorded with no separate reason. The table under 
 - 2026-09-19: the test `test_the_two_harnesses_are_not_equal_on_compound_commands` in [`tests/test_render.py`](../../tests/test_render.py) runs the Claude Code hook and the OpenCode map on the three forms. The hook stops each one. The map allows each one.
 - 2026-09-19: the Claude Code verifier got a `git -C <path> <read>` rule. The OpenCode verifier map stayed unchanged, because `git -C * diff*` also matches `git -C /x push; git diff`, and this decision forbids that widening.
 - 2026-10-08: the Claude Code specialist hook denied a `grep` command whose pattern held the words `git push`. No push was in the command.
-- 2026-10-08: the table below comes from `opencode_bash_action` in [`src/delegate/validate.py`](../../src/delegate/validate.py). That function models the rule order and the glob of OpenCode. It is a model, not a run of OpenCode.
+- 2026-10-08: the table below comes from `opencode_bash_action` in [`src/delegate/definitions/validate.py`](../../src/delegate/definitions/validate.py). That function models the rule order and the glob of OpenCode. It is a model, not a run of OpenCode.
 
 | Command | Current map | Current map plus `*git push*` | `*git push*` only |
 |---|---|---|---|

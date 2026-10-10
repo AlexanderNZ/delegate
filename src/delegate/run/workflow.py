@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..tiers import Tiers
+from ..shared.tiers import Tiers
 from . import domain
 from .domain import MODES  # noqa: F401 - the modes of a run live in `domain`
 

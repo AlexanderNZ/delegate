@@ -37,7 +37,7 @@ def test_the_model_on_the_command_comes_from_the_claude_code_tier_column_of_the_
 
 def test_a_tier_file_of_the_user_changes_the_model_on_the_command(tmp_path, monkeypatch, capsys):
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
-    bundled = resources.files("delegate").joinpath("tiers.toml").read_text()
+    bundled = resources.files("delegate.shared").joinpath("tiers.toml").read_text()
     tiers = tmp_path / "gateway-tiers.toml"
     tiers.write_text(bundled.replace('[tiers.strong]\nclaude-code = "opus"', '[tiers.strong]\nclaude-code = "claude-opus-5"'))
     repo = make_repo(tmp_path, CLAUDE_CODE)

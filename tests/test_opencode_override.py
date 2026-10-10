@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 
 from delegate.cli import main
-from delegate.tiers import load_tiers
-from delegate.validate import split_frontmatter
+from delegate.shared.tiers import load_tiers
+from delegate.definitions.validate import split_frontmatter
 from tests.conftest import EXAMPLE
 
 GATEWAY = {

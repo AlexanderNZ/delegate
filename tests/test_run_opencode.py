@@ -42,7 +42,7 @@ def test_the_model_on_the_command_comes_from_the_opencode_tier_column_of_the_mod
 
 def test_a_tier_file_of_the_user_changes_the_model_on_the_command(tmp_path, monkeypatch, capsys):
     fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
-    bundled = resources.files("delegate").joinpath("tiers.toml").read_text()
+    bundled = resources.files("delegate.shared").joinpath("tiers.toml").read_text()
     tiers = tmp_path / "gateway-tiers.toml"
     tiers.write_text(bundled.replace('opencode = "anthropic/claude-opus-5"\n\n[tiers.standard]', 'opencode = "gateway/claude-opus-5"\n\n[tiers.standard]'))
     repo = make_repo(tmp_path, OPENCODE)

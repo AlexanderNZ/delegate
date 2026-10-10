@@ -16,10 +16,11 @@ verifier-brief = "delegate.brief:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["delegate", "delegate.adapters", "delegate.definitions", "delegate.ports", "delegate.run"]
+packages = ["delegate", "delegate.adapters", "delegate.definitions", "delegate.docs", "delegate.ports", "delegate.run", "delegate.shared"]
 
 [tool.setuptools.package-data]
-delegate = ["tiers.toml", "templates/*.md"]
+"delegate.definitions" = ["templates/*.md"]
+"delegate.shared" = ["tiers.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

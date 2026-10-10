@@ -14,7 +14,7 @@ import pytest
 
 from delegate import delegate
 from delegate.run import engine, workflow
-from delegate.neutrality import KIT_ROOT_VAR
+from delegate.docs.neutrality import KIT_ROOT_VAR
 
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal
 

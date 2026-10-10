@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from .render import VERIFIER_GUARD_MARKER
-from .tiers import Tiers
+from ..shared.tiers import Tiers
 
 CLAUDE_CODE_KEYS = {
     "name", "description", "tools", "disallowedTools", "model", "permissionMode",

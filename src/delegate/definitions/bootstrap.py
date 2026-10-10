@@ -32,7 +32,7 @@ import yaml
 
 from .declaration import OUTPUT_LANGUAGES, parse_declaration
 from .render import render
-from .tiers import Tiers, load_tiers
+from ..shared.tiers import Tiers, load_tiers
 from .validate import validate_set
 
 #: Claude Code reads a project skill from `.claude/skills/<name>/SKILL.md` and

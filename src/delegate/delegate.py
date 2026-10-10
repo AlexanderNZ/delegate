@@ -14,7 +14,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli, reference, run_command, status, watch
+from . import brief, cli, run_command, status, watch
+from .docs import reference
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.

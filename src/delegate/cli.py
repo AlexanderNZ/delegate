@@ -6,11 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from .bootstrap import DEFAULT_SKILLS_ROOT, run_from_args
-from .declaration import load_declaration
-from .render import render
-from .tiers import Tiers, load_tiers
-from .validate import validate_set
+from .definitions.bootstrap import DEFAULT_SKILLS_ROOT, run_from_args
+from .definitions.declaration import load_declaration
+from .definitions.render import render
+from .definitions.validate import validate_set
+from .shared.tiers import Tiers, load_tiers
 
 
 def opencode_model_pair(text: str) -> tuple[str, str]:

@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from delegate.declaration import load_declaration
-from delegate.render import render
-from delegate.tiers import load_tiers
+from delegate.definitions.declaration import load_declaration
+from delegate.definitions.render import render
+from delegate.shared.tiers import load_tiers
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 

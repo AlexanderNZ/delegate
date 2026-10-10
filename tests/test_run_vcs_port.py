@@ -12,7 +12,7 @@ from delegate.adapters.git import GitVersionControl
 from delegate.ports.vcs import VcsError
 from delegate.run.engine import EngineError, run_workflow
 from delegate.run.workflow import load_workflow
-from delegate.tiers import load_tiers
+from delegate.shared.tiers import load_tiers
 
 from .support import ScriptedAdapter, git, make_repo
 

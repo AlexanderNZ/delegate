@@ -18,7 +18,7 @@ from .adapters.git import GitVersionControl
 from .cli import add_opencode_override_flags, apply_opencode_override
 from .run.engine import EngineError, run_workflow, workflow_of_run
 from .run.workflow import WorkflowError, load_workflow, plan_order
-from .tiers import Tiers, load_tiers
+from .shared.tiers import Tiers, load_tiers
 
 
 def build_parser() -> argparse.ArgumentParser:

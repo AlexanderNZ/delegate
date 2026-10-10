@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from delegate.declaration import Agent, load_declaration, parse_declaration
-from delegate.render import render_claude_code, render_opencode
-from delegate.validate import opencode_bash_action, split_frontmatter
+from delegate.definitions.declaration import Agent, load_declaration, parse_declaration
+from delegate.definitions.render import render_claude_code, render_opencode
+from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 
 SHELLS = ("bash", "/bin/sh")
 

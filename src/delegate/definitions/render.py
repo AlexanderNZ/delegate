@@ -13,7 +13,7 @@ from string import Template
 import yaml
 
 from .declaration import Agent
-from .tiers import Tiers
+from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 OPENCODE_READ_TOOLS = ["read", "grep", "glob", "list"]

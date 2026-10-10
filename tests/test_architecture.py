@@ -3,12 +3,17 @@
 The rule, in words:
 
 * `run` and `definitions` are the two bounded contexts. They hold the domain.
-  They never import `adapters` or `cli`.
+  They never import `adapters`, `cli` or `docs`. The definitions context never
+  imports `run`.
+* `shared` holds what the two contexts share: the tier table. It imports no
+  other layer, so every layer may import it.
+* `docs` is the docs tooling: the reference generator and the neutrality check.
+  It reads the other layers, and none of them imports it.
 * `ports` holds the interfaces that the domain drives. It imports neither
-  `adapters` nor `cli`.
+  `adapters`, `cli` nor `docs`.
 * `adapters` implement the ports, and `cli` drives the domain. Both point
   inward, so both may import the contexts and the ports. `adapters` never
-  imports `cli`.
+  imports `cli` or `docs`.
 * The command-line driver is the composition point: it picks the adapter and
   hands it to the engine. The three commands that take the git backend, `brief`,
   `status` and `watch`, are thin modules at the top of the package for now. Each
@@ -36,6 +41,7 @@ adapters` breaks the rule whether `adapters` is a module or a subpackage.
 
 import ast
 import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -44,10 +50,11 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "delegate"
 
 # Layer -> the layers that its files never import.
 FORBIDDEN = {
-    "run": {"adapters", "cli"},
-    "definitions": {"adapters", "cli"},
-    "ports": {"adapters", "cli"},
-    "adapters": {"cli"},
+    "run": {"adapters", "cli", "docs"},
+    "definitions": {"adapters", "cli", "docs", "run"},
+    "ports": {"adapters", "cli", "docs"},
+    "adapters": {"cli", "docs"},
+    "shared": {"adapters", "cli", "docs", "run", "definitions", "ports"},
 }
 
 # The layers whose files never run git.
@@ -57,6 +64,15 @@ GIT_FREE_LAYERS = {"run"}
 RUN_MODULES = (
     "engine", "workflow", "journal", "lock", "reports", "brief", "guards", "runs", "status", "watch", "domain",
 )
+
+# The modules of the definitions context, by their path under the package.
+DEFINITIONS_MODULES = ("declaration", "render", "validate", "bootstrap")
+
+# The modules that the two contexts share: the tier table.
+SHARED_MODULES = ("tiers",)
+
+# The modules of the docs tooling, the supporting package that reads the code of the kit to write the docs and to check the kit.
+DOCS_MODULES = ("reference", "neutrality")
 
 # The domain module of the run context: the rules of a run, as functions of plain values.
 DOMAIN_MODULE = "run/domain.py"
@@ -169,6 +185,21 @@ def test_the_package_follows_the_dependency_rule():
         ("definitions/bad.py", "import delegate.cli\n", "definitions", "cli"),
         ("definitions/bad.py", "from ..adapters import Adapter\n", "definitions", "adapters"),
         ("definitions/bad.py", "from .. import cli\n", "definitions", "cli"),
+        ("definitions/bad.py", "from delegate.run import engine\n", "definitions", "run"),
+        ("definitions/bad.py", "from delegate.run.domain import MODES\n", "definitions", "run"),
+        ("definitions/bad.py", "from ..run import workflow\n", "definitions", "run"),
+        ("definitions/bad.py", "from .. import run\n", "definitions", "run"),
+        ("definitions/render.py", "from ..run.engine import run_workflow\n", "definitions", "run"),
+        ("definitions/bad.py", "from delegate.docs import reference\n", "definitions", "docs"),
+        ("shared/bad.py", "from delegate.run import domain\n", "shared", "run"),
+        ("shared/bad.py", "from ..definitions import render\n", "shared", "definitions"),
+        ("shared/bad.py", "from delegate.adapters import get\n", "shared", "adapters"),
+        ("shared/bad.py", "from .. import cli\n", "shared", "cli"),
+        ("shared/bad.py", "from delegate.ports import vcs\n", "shared", "ports"),
+        ("shared/tiers.py", "from ..docs import reference\n", "shared", "docs"),
+        ("run/bad.py", "from delegate.docs import neutrality\n", "run", "docs"),
+        ("adapters/bad.py", "from delegate.docs import reference\n", "adapters", "docs"),
+        ("ports/bad.py", "from ..docs import reference\n", "ports", "docs"),
         ("run/bad.py", "from delegate.adapters import Adapter\n", "run", "adapters"),
         ("run/bad.py", "def late():\n    from ..cli import main\n", "run", "cli"),
         ("ports/bad.py", "from delegate.adapters import Adapter\n", "ports", "adapters"),
@@ -205,6 +236,61 @@ def test_an_outer_layer_may_import_inward(tmp_path):
     copy = planted_copy(tmp_path, "adapters/fine.py", source)
 
     assert violations(copy) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "source"),
+    [
+        ("run/fine.py", "from delegate.shared.tiers import Tiers\nfrom ..shared import tiers\n"),
+        ("definitions/fine.py", "from delegate.shared.tiers import load_tiers\nfrom ..shared import tiers\n"),
+        ("docs/fine.py", "from delegate.run import brief\nfrom delegate.definitions import render\nfrom delegate import cli\n"),
+        ("adapters/fine.py", "from delegate.shared import tiers\n"),
+    ],
+)
+def test_both_contexts_and_the_outer_layers_may_import_the_shared_tier_table(tmp_path, where, source):
+    copy = planted_copy(tmp_path, where, source)
+
+    assert violations(copy) == []
+
+
+def test_the_definitions_context_holds_its_modules_and_the_templates():
+    present = {path.stem for path in (PACKAGE / "definitions").glob("*.py")}
+
+    assert set(DEFINITIONS_MODULES) <= present
+    assert {path.name for path in (PACKAGE / "definitions" / "templates").glob("*.md")} >= {
+        "claude-code-specialist.md",
+        "claude-code-verifier.md",
+        "context-skill-section.md",
+        "context-skill.md",
+        "opencode-specialist.md",
+        "opencode-verifier.md",
+    }
+
+
+def test_the_tier_table_is_a_shared_module_with_its_data_beside_it():
+    assert {path.name for path in (PACKAGE / "shared").iterdir()} >= {"tiers.py", "tiers.toml"}
+
+
+def test_the_docs_tooling_is_its_own_package():
+    present = {path.stem for path in (PACKAGE / "docs").glob("*.py")}
+
+    assert set(DOCS_MODULES) <= present
+
+
+def test_the_moved_modules_are_not_flat_modules_of_the_package_any_more():
+    flat = {path.stem for path in PACKAGE.glob("*.py")}
+
+    assert flat.isdisjoint({*DEFINITIONS_MODULES, *SHARED_MODULES, *DOCS_MODULES})
+    assert not (PACKAGE / "templates").exists()
+    assert not (PACKAGE / "tiers.toml").exists()
+
+
+def test_every_package_of_the_source_tree_is_in_the_packages_list_of_the_build():
+    pyproject = tomllib.loads((PACKAGE.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    listed = set(pyproject["tool"]["setuptools"]["packages"])
+    on_disk = {".".join(path.parent.relative_to(PACKAGE.parent).parts) for path in PACKAGE.rglob("__init__.py")}
+
+    assert on_disk == listed
 
 
 def test_the_ports_and_the_adapters_are_inside_the_layers_that_the_rule_covers():

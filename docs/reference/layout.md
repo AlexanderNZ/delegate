@@ -24,39 +24,47 @@ The repository holds three things: two skills that an agent reads, one Python pa
 
 ## The package
 
-The modules of `src/delegate/` fall into five groups. Each group does one job.
+The modules of `src/delegate/` fall into seven groups. Each group does one job.
 
 | Group | Modules | Job |
 | --- | --- | --- |
-| Definitions | `declaration.py`, `render.py`, `validate.py`, `bootstrap.py`, `templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
+| Definitions | `definitions/declaration.py`, `definitions/render.py`, `definitions/validate.py`, `definitions/bootstrap.py`, `definitions/templates/` | Load a declaration, render an [**agent pair**](../glossary.md#agent-pair) for each harness, validate the rendered files, and [**bootstrap**](../glossary.md#bootstrap) a repository. |
 | Run | `run/domain.py`, `run/workflow.py`, `run/engine.py`, `run/guards.py`, `run/journal.py`, `run/lock.py`, `run/reports.py`, `run/runs.py`, `run/brief.py`, `run/status.py`, `run/watch.py` | Hold the rules of a [**run**](../glossary.md#run), check a [**workflow**](../glossary.md#workflow), build its [**tickets**](../glossary.md#ticket), hold the guards, write the [**journal**](../glossary.md#journal), build the [**verifier**](../glossary.md#verifier) [**brief**](../glossary.md#brief) from the ticket, the diff and the [**gates**](../glossary.md#gate) and never from the [**report**](../glossary.md#report), and report the state of a [**run**](../glossary.md#run). |
 | [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py`, `adapters/git.py` | Implement the ports. Each harness adapter drives one harness through its [**headless**](../glossary.md#headless) command line. The git backend implements the version-control port. The package also holds the registry of harness adapters by name. |
 | Ports | `ports/harness.py`, `ports/vcs.py` | The interfaces that the [**engine**](../glossary.md#engine) drives. The harness port runs one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. The version-control port keeps the work of a run: the branches, the commits, the [**worktrees**](../glossary.md#worktree), the rebase, and the [**verifier copy**](../glossary.md#verifier-copy). |
-| Commands and checks | `delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py`, `watch.py`, `reference.py`, `neutrality.py`, `tiers.py`, `tiers.toml` | The command-line entry points, the generator of the reference sections, the [**neutrality check**](../glossary.md#neutrality-check), and the [**tier table**](../glossary.md#tier-table). `brief.py`, `status.py` and `watch.py` are thin: each one makes the git backend and calls the module of the same name in `run/`. `run_command.py` is the driver of `delegate run`. |
+| Shared | `shared/tiers.py`, `shared/tiers.toml` | The [**tier table**](../glossary.md#tier-table), which both contexts read. The data file is beside the module that loads it, and the build ships it as package data. |
+| Docs tooling | `docs/reference.py`, `docs/neutrality.py` | The generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). This package reads the code of the other layers, and no other layer imports it. |
+| Commands | `delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py`, `watch.py` | The command-line entry points. `brief.py`, `status.py` and `watch.py` are thin: each one makes the git backend and calls the module of the same name in `run/`. `run_command.py` is the driver of `delegate run`. |
 
 ## The dependency rule
 
-Dependencies point inward. Run and Definitions are the two bounded contexts, and they hold the domain. The ports are the interfaces that the domain drives. The adapters implement the ports, and the command line drives the domain.
+Dependencies point inward. Run and Definitions are the two bounded contexts, and they hold the domain. They know nothing of each other: the tier table is the one thing that they share. The ports are the interfaces that the domain drives. The adapters implement the ports, and the command line drives the domain. The docs tooling stands outside and reads them all.
 
 ```mermaid
 flowchart LR
   cli[Command line] --> run[Run]
   cli --> definitions[Definitions]
+  docs[Docs tooling] --> run
+  docs --> definitions
   adapters[Adapters] --> ports[Ports]
   run --> ports
   adapters --> run
+  run --> shared[Shared tier table]
+  definitions --> shared
 ```
 
-Six rules follow, and `tests/test_architecture.py` holds them:
+Eight rules follow, and `tests/test_architecture.py` holds them:
 
-- `run` never imports `adapters` or `cli`.
-- `definitions` never imports `adapters` or `cli`.
-- `ports` never imports `adapters` or `cli`.
-- `adapters` never imports `cli`.
+- `run` never imports `adapters`, `cli` or `docs`.
+- `definitions` never imports `adapters`, `cli`, `docs` or `run`.
+- `ports` never imports `adapters`, `cli` or `docs`.
+- `adapters` never imports `cli` or `docs`.
+- `shared` imports no other layer of the package. It holds the tier table, so both contexts, the adapters and the command line may import it.
+- Every directory of `src/delegate/` that holds an `__init__.py` is in the `packages` list of `pyproject.toml`. A package that is not there is missing from the built wheel.
 - The domain module `run/domain.py` imports no module of the package and no module that does I/O. It imports `__future__`, `collections.abc` and `typing` only, so it has no git, no harness, no file system and no subprocess. The test reads the imports of the module and fails on any other. A test plants an import in a [**temporary copy**](../glossary.md#temporary-copy) of the package and checks that the rule fails.
 - The files of `run/` run no git command. The guards and the [**brief generator**](../glossary.md#brief-generator) read the repository through the version-control port, as the engine does. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
 
-A layer is a subpackage of `src/delegate/`. Today `run/`, `definitions/`, `ports/` and `adapters/` exist, and `definitions/` is empty. The other modules are flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
+A layer is a subpackage of `src/delegate/`. Today `run/`, `definitions/`, `shared/`, `docs/`, `ports/` and `adapters/` exist. The command modules (`delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py` and `watch.py`) are still flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
 The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter. The commands `verifier-brief`, `delegate status` and `delegate watch` make the git backend in the same way, and pass it to the module of the same name in `run/`.
 

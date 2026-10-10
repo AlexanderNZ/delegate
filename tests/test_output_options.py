@@ -8,9 +8,9 @@ rule and no flake reason.
 
 import pytest
 
-from delegate.declaration import parse_declaration
-from delegate.render import render
-from delegate.tiers import load_tiers
+from delegate.definitions.declaration import parse_declaration
+from delegate.definitions.render import render
+from delegate.shared.tiers import load_tiers
 
 STE = "Write in ASD-STE100 Simplified Technical English."
 STAGE_RULE = "- Stage every new file with `git add` before you run the gates."

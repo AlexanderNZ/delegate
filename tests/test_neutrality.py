@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate.neutrality import DENYLIST_VAR, Finding, StaleEntry, check_kit
+from delegate.docs.neutrality import DENYLIST_VAR, Finding, StaleEntry, check_kit
 
 # tests/ -> the repository root -> skills/, the directory with both kit dirs.
 KIT_ROOT = Path(__file__).resolve().parents[1] / "skills"
@@ -126,7 +126,7 @@ def test_a_term_matches_in_any_case_in_a_nested_file(tmp_path, denylist):
 
 
 def test_the_kit_root_variable_replaces_the_default_kit_root(tmp_path, denylist):
-    from delegate.neutrality import KIT_ROOT_VAR
+    from delegate.docs.neutrality import KIT_ROOT_VAR
 
     clean = _kit(tmp_path / "clean", {"agent-delegation/SKILL.md": "Nothing here.\n"})
     other = _kit(tmp_path / "other", {"agent-delegation/SKILL.md": "Ask Zorblax.\n"})

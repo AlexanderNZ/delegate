@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from delegate import delegate, reference, validate
+from delegate import delegate
+from delegate.definitions import validate
+from delegate.docs import reference
 
 from .pages import repository_root
 
