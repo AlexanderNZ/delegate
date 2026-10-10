@@ -117,7 +117,8 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
 
 KILL = """\
 import os, signal, sys
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 from tests.support import ScriptedAdapter
 from tests.test_howto_watch_resume import FILES
 

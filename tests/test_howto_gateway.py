@@ -6,7 +6,8 @@ is the model that the live harness would receive on its command line.
 
 import pytest
 
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
 from .support import ScriptedAdapter, git

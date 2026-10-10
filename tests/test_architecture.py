@@ -14,11 +14,12 @@ The rule, in words:
 * `adapters` implement the ports, and `cli` drives the domain. Both point
   inward, so both may import the contexts and the ports. `adapters` never
   imports `cli` or `docs`.
-* The command-line driver is the composition point: it picks the adapter and
-  hands it to the engine. The three commands that take the git backend, `brief`,
-  `status` and `watch`, are thin modules at the top of the package for now. Each
-  one makes the backend and calls the module of the same name in `run`, until a
-  later ticket moves them into `cli`.
+* `cli` holds the command-line drivers: the `delegate` umbrella command, `agent-definitions`,
+  `verifier-brief`, `delegate run`, `delegate status`, `delegate watch` and `delegate docs`. A driver
+  is the composition point: it parses its arguments, makes the adapters (the git
+  backend of the version-control port, the harness adapter), calls a use case and
+  prints the result. No module outside `cli` parses command-line arguments: no
+  `ArgumentParser`, no `parse_args` and no `sys.argv` outside `cli`.
 * The run context never runs git. It keeps the work of a run through the
   version-control port, and only the git backend in `adapters` runs the
   command. A call to `subprocess` that names git breaks the rule. A call to
@@ -73,6 +74,9 @@ SHARED_MODULES = ("tiers",)
 
 # The modules of the docs tooling, the supporting package that reads the code of the kit to write the docs and to check the kit.
 DOCS_MODULES = ("reference", "neutrality")
+
+# The modules of the command-line drivers, by their path under the package.
+CLI_MODULES = ("delegate", "agent_definitions", "brief", "run_command", "status", "watch", "docs_command")
 
 # The domain module of the run context: the rules of a run, as functions of plain values.
 DOMAIN_MODULE = "run/domain.py"
@@ -433,10 +437,62 @@ def test_the_run_modules_are_not_flat_modules_of_the_package_any_more():
     assert flat.isdisjoint({"engine", "workflow", "journal", "lock", "reports", "guards", "runs"})
 
 
-def test_a_flat_module_that_stands_in_for_a_run_module_is_only_a_thin_driver():
-    # The flat `brief`, `status` and `watch` make the git backend and call the run module of the same name.
-    for name in ("brief", "status", "watch"):
-        tree = ast.parse((PACKAGE / f"{name}.py").read_text(encoding="utf-8"))
-        defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+def test_the_command_line_drivers_are_in_the_cli_package_and_no_flat_module_is_left():
+    present = {path.stem for path in (PACKAGE / "cli").glob("*.py")}
 
-        assert defined == {"main"}, name
+    assert set(CLI_MODULES) <= present
+    assert {path.stem for path in PACKAGE.glob("*.py")} == {"__init__"}
+
+
+def parsing(package_dir: Path) -> list[str]:
+    """Every place outside `cli` that parses command-line arguments, as `file:line: <layer> parses command-line arguments`.
+
+    It finds a call of `ArgumentParser`, a call of `parse_args` or `parse_known_args`,
+    and a read of `sys.argv`. A module that only reads a parser that `cli` built,
+    such as the reference generator, does none of these.
+    """
+    found = []
+    for path in sorted(package_dir.rglob("*.py")):
+        parts = path.relative_to(package_dir.parent).with_suffix("").parts
+        if layer_of(parts) == "cli":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            called = node.func if isinstance(node, ast.Call) else None
+            name = called.attr if isinstance(called, ast.Attribute) else called.id if isinstance(called, ast.Name) else None
+            reads_argv = isinstance(node, ast.Attribute) and node.attr == "argv" and isinstance(node.value, ast.Name) and node.value.id == "sys"
+            if name in ("ArgumentParser", "parse_args", "parse_known_args") or reads_argv:
+                found.append(f"{path.relative_to(package_dir.parent)}:{node.lineno}: {layer_of(parts) or 'a flat module'} parses command-line arguments")
+    return sorted(set(found))
+
+
+def test_no_module_outside_cli_parses_command_line_arguments():
+    assert parsing(PACKAGE) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "source", "layer"),
+    [
+        ("run/bad.py", "import argparse\nparser = argparse.ArgumentParser()\n", "run"),
+        ("run/bad.py", "from argparse import ArgumentParser\nparser = ArgumentParser()\n", "run"),
+        ("run/status.py", "def main(argv):\n    return build().parse_args(argv)\n", "run"),
+        ("definitions/bad.py", "def late(parser):\n    parser.parse_known_args()\n", "definitions"),
+        ("docs/reference.py", "import sys\nargs = sys.argv[1:]\n", "docs"),
+        ("adapters/bad.py", "from sys import argv\nimport sys\nsys.argv\n", "adapters"),
+        ("bad.py", "import argparse\nargparse.ArgumentParser(prog='x')\n", "a flat module"),
+    ],
+)
+def test_a_planted_parser_outside_cli_fails_the_rule(tmp_path, where, source, layer):
+    copy = planted_copy(tmp_path, where, source)
+
+    found = parsing(copy)
+
+    assert len(found) == 1
+    assert found[0].startswith(f"delegate/{where}:")
+    assert found[0].endswith(f"{layer} parses command-line arguments")
+
+
+def test_a_parser_inside_cli_passes_the_rule(tmp_path):
+    copy = planted_copy(tmp_path, "cli/fine.py", "import argparse\nargparse.ArgumentParser().parse_args()\n")
+
+    assert parsing(copy) == []

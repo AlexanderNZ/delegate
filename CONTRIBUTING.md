@@ -30,7 +30,7 @@ The repository has a Nix flake for people who use Nix. Nothing needs it: the set
 
 ## Find your way around
 
-The package is in `src/delegate/`, its tests are in `tests/`, and the two skills are in `skills/`. [The layout of the repository](docs/reference/layout.md) gives the place of each part, the groups of modules, and the dependency rule that `tests/test_architecture.py` holds.
+The package is in `src/delegate/`, its tests are in `tests/`, and the two skills are in `skills/`. The commands are in `src/delegate/cli/`: a command parses its arguments, calls a use case and prints the result, and no other module parses arguments. [The layout of the repository](docs/reference/layout.md) gives the place of each part, the groups of modules, and the dependency rule that `tests/test_architecture.py` holds.
 
 ## Write the test first
 

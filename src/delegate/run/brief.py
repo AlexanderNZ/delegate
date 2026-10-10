@@ -1,4 +1,4 @@
-"""verifier-brief: build a verifier's brief from the state of the repository.
+"""Build a verifier's brief from the state of the repository. The `verifier-brief` command in `delegate.cli.brief` drives it.
 
 The shape of a brief selects the verifier's mode. A brief with a
 "## Findings under verification" section puts the verifier in fix-up mode. A
@@ -13,9 +13,7 @@ a dependency to assemble text.
 
 from __future__ import annotations
 
-import argparse
 import re
-import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -465,59 +463,3 @@ def verifier_run_brief(
     of the branch that the engine prepared.
     """
     return full_brief(vcs, copy, branch, base, task, gate_commands=gates) + verifier_run_sections(copy, report_path, "full")
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="verifier-brief",
-        description="Print a verifier's brief. The mode of the brief sets the mode of the verifier.",
-    )
-    sub = p.add_subparsers(dest="mode", required=True)
-
-    f = sub.add_parser("full", help="a first-pass brief: task, three-dot diff, gates")
-    f.add_argument("--repo", required=True, help="path to the repository or worktree")
-    f.add_argument("--branch", required=True, help="the branch under verification")
-    f.add_argument("--base", default="main", help="the base of the three-dot diff; default main")
-    f.add_argument("--task", required=True, help="the task text, or @PATH to read it from a file")
-
-    x = sub.add_parser("fixup", help="a scoped brief: findings, delta, gates")
-    x.add_argument("--repo", required=True, help="path to the repository or worktree")
-    x.add_argument("--branch", required=True, help="the branch that holds the fix-up commit")
-    x.add_argument("--rejected", required=True, help="the commit the first verifier rejected")
-    x.add_argument("--findings", required=True, help="path to the first verifier's findings")
-    x.add_argument("--authorised", help="additions the coordinator authorised beyond the findings")
-
-    for mode in (f, x):
-        mode.add_argument(
-            "--stack",
-            action="append",
-            default=[],
-            metavar="HEADING",
-            help="select the gate block under this sub-heading of \"Verification gates\"; "
-            "it overrides the path match; give it again for a second block",
-        )
-    return p
-
-
-def main(argv: list[str] | None, vcs: VersionControl) -> int:
-    """Run the command. The caller gives the version-control backend: this module imports no adapter."""
-    args = build_parser().parse_args(argv)
-    try:
-        if args.mode == "full":
-            out = full_brief(vcs, args.repo, args.branch, args.base, read_task(args.task), args.stack)
-        else:
-            out = fixup_brief(
-                vcs,
-                args.repo,
-                args.branch,
-                args.rejected,
-                Path(args.findings).read_text(),
-                args.authorised,
-                args.stack,
-            )
-    except (BriefError, OSError) as e:
-        print(f"verifier-brief: {e}", file=sys.stderr)
-        return 1
-    print(out, end="")
-    return 0
-

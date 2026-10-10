@@ -10,7 +10,7 @@ and the declaration keys.
 import shlex
 import tomllib
 
-from delegate.cli import main
+from delegate.cli.agent_definitions import main
 from tests.test_bootstrap import _agent_files, _args, _paths, repo  # noqa: F401  (repo is a fixture)
 
 STE = "Write in ASD-STE100 Simplified Technical English."

@@ -33,19 +33,21 @@ The modules of `src/delegate/` fall into seven groups. Each group does one job.
 | [**Adapters**](../glossary.md#adapter) | `adapters/__init__.py`, `adapters/streams.py`, `adapters/claude_code.py`, `adapters/opencode.py`, `adapters/git.py` | Implement the ports. Each harness adapter drives one harness through its [**headless**](../glossary.md#headless) command line. The git backend implements the version-control port. The package also holds the registry of harness adapters by name. |
 | Ports | `ports/harness.py`, `ports/vcs.py` | The interfaces that the [**engine**](../glossary.md#engine) drives. The harness port runs one agent: the request, the result, the [**end states**](../glossary.md#end-state), and the error. The version-control port keeps the work of a run: the branches, the commits, the [**worktrees**](../glossary.md#worktree), the rebase, and the [**verifier copy**](../glossary.md#verifier-copy). |
 | Shared | `shared/tiers.py`, `shared/tiers.toml` | The [**tier table**](../glossary.md#tier-table), which both contexts read. The data file is beside the module that loads it, and the build ships it as package data. |
-| Docs tooling | `docs/reference.py`, `docs/neutrality.py` | The generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). This package reads the code of the other layers, and no other layer imports it. |
-| Commands | `delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py`, `watch.py` | The command-line entry points. `brief.py`, `status.py` and `watch.py` are thin: each one makes the git backend and calls the module of the same name in `run/`. `run_command.py` is the driver of `delegate run`. |
+| Docs tooling | `docs/reference.py`, `docs/neutrality.py` | The generator of the reference sections, and the [**neutrality check**](../glossary.md#neutrality-check). This package reads the code of the other layers, and no layer but the command line imports it. |
+| Command line | `cli/delegate.py`, `cli/agent_definitions.py`, `cli/brief.py`, `cli/run_command.py`, `cli/status.py`, `cli/watch.py`, `cli/docs_command.py` | The command-line drivers. A driver parses its arguments, makes the adapters (the git backend and the harness adapter), calls a use case, and prints the result. `cli/delegate.py` is the `delegate` command, and it passes each subcommand to the driver of that subcommand. `cli/agent_definitions.py` and `cli/brief.py` are the standalone commands `agent-definitions` and `verifier-brief`. No module outside `cli/` parses command-line arguments. |
 
 ## The dependency rule
 
-Dependencies point inward. Run and Definitions are the two bounded contexts, and they hold the domain. They know nothing of each other: the tier table is the one thing that they share. The ports are the interfaces that the domain drives. The adapters implement the ports, and the command line drives the domain. The docs tooling stands outside and reads them all.
+Dependencies point inward. Run and Definitions are the two bounded contexts, and they hold the domain. They know nothing of each other: the tier table is the one thing that they share. The ports are the interfaces that the domain drives. The adapters implement the ports, and the command line drives the domain and picks the adapters. The docs tooling stands outside and reads them all.
 
 ```mermaid
 flowchart LR
   cli[Command line] --> run[Run]
   cli --> definitions[Definitions]
+  cli --> adapters
   docs[Docs tooling] --> run
   docs --> definitions
+  docs --> cli
   adapters[Adapters] --> ports[Ports]
   run --> ports
   adapters --> run
@@ -53,20 +55,21 @@ flowchart LR
   definitions --> shared
 ```
 
-Eight rules follow, and `tests/test_architecture.py` holds them:
+Nine rules follow, and `tests/test_architecture.py` holds them:
 
 - `run` never imports `adapters`, `cli` or `docs`.
 - `definitions` never imports `adapters`, `cli`, `docs` or `run`.
 - `ports` never imports `adapters`, `cli` or `docs`.
 - `adapters` never imports `cli` or `docs`.
+- No module outside `cli` parses command-line arguments. The test fails on a call of `ArgumentParser`, on a call of `parse_args` or `parse_known_args`, and on a read of `sys.argv` in any other module. The generator in `docs` reads the parsers that `cli` builds, and it parses nothing.
 - `shared` imports no other layer of the package. It holds the tier table, so both contexts, the adapters and the command line may import it.
 - Every directory of `src/delegate/` that holds an `__init__.py` is in the `packages` list of `pyproject.toml`. A package that is not there is missing from the built wheel.
 - The domain module `run/domain.py` imports no module of the package and no module that does I/O. It imports `__future__`, `collections.abc` and `typing` only, so it has no git, no harness, no file system and no subprocess. The test reads the imports of the module and fails on any other. A test plants an import in a [**temporary copy**](../glossary.md#temporary-copy) of the package and checks that the rule fails.
 - The files of `run/` run no git command. The guards and the [**brief generator**](../glossary.md#brief-generator) read the repository through the version-control port, as the engine does. The test reads the calls to `subprocess` in these files and fails on a call that names git. A gate command that the engine runs through `subprocess` is not git, so it passes.
 
-A layer is a subpackage of `src/delegate/`. Today `run/`, `definitions/`, `shared/`, `docs/`, `ports/` and `adapters/` exist. The command modules (`delegate.py`, `cli.py`, `run_command.py`, `brief.py`, `status.py` and `watch.py`) are still flat. A flat module joins its layer when it moves into the subpackage, and from then on the test checks it. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
+A layer is a subpackage of `src/delegate/`: `run/`, `definitions/`, `shared/`, `docs/`, `ports/`, `adapters/` and `cli/`. The package top holds only `__init__.py`, and the test fails on any other flat module. The test reads the imports with the `ast` module of the standard library, so it runs no code of the package.
 
-The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter. The commands `verifier-brief`, `delegate status` and `delegate watch` make the git backend in the same way, and pass it to the module of the same name in `run/`.
+The composition point is the command-line driver. `delegate run` reads the name of the adapter from the workflow, looks it up in `adapters`, and passes the adapter to the engine. The engine never chooses an adapter. The commands `verifier-brief`, `delegate status` and `delegate watch` make the git backend in the same way, and pass it to the use case of the same name in `run/`: `cli/brief.py` calls the brief generator in `run/brief.py`, `cli/status.py` calls `report` in `run/status.py`, and `cli/watch.py` calls `follow` in `run/watch.py`. The `delegate docs` command is in `cli/docs_command.py`, and it calls the generator in `docs/reference.py`.
 
 ## The domain module
 

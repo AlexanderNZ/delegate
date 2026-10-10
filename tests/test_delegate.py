@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from delegate import brief, cli, delegate
+from delegate.cli import agent_definitions as cli
+from delegate.cli import brief, delegate
 from tests.conftest import EXAMPLE
 from tests.pages import repository_root
 
@@ -293,7 +294,7 @@ def test_the_package_installs_exactly_the_three_commands():
 
 def test_the_module_entry_point_lists_the_subcommands():
     r = subprocess.run(
-        [sys.executable, "-m", "delegate.delegate", "--help"], capture_output=True, text=True
+        [sys.executable, "-m", "delegate.cli.delegate", "--help"], capture_output=True, text=True
     )
     assert r.returncode == 0
     assert "bootstrap" in r.stdout and "brief" in r.stdout

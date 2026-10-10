@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate import delegate
+from delegate.cli import delegate
 
 VALID = """\
 base-branch = "main"

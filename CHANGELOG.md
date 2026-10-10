@@ -7,6 +7,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 ### Changed
 
 - The tier table moved from `src/delegate/tiers.toml` to `src/delegate/shared/tiers.toml`. A consumer that reads the file by its path, such as a Nix configuration, must use the new path. The renderer, the validator, the bootstrap and the agent templates moved into `src/delegate/definitions/`, and the reference generator and the neutrality check moved into `src/delegate/docs/`. The commands and their output do not change.
+- The command modules moved into `src/delegate/cli/`, and the argument parsing of every command is there. The console scripts `delegate`, `agent-definitions` and `verifier-brief` do not change. A module that you start with `python -m` has a new name: `delegate.cli.delegate`, `delegate.cli.agent_definitions` and `delegate.cli.brief`. A git failure in a guard names the directory where git ran, as it did before the restructure.
 
 ## [1.0.0] - 2026-10-09
 

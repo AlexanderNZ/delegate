@@ -10,13 +10,13 @@ requires-python = ">=3.11"
 dependencies = ["pyyaml>=6"]
 
 [project.scripts]
-delegate = "delegate.delegate:main"
-agent-definitions = "delegate.cli:main"
-verifier-brief = "delegate.brief:main"
+delegate = "delegate.cli.delegate:main"
+agent-definitions = "delegate.cli.agent_definitions:main"
+verifier-brief = "delegate.cli.brief:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["delegate", "delegate.adapters", "delegate.definitions", "delegate.docs", "delegate.ports", "delegate.run", "delegate.shared"]
+packages = ["delegate", "delegate.adapters", "delegate.cli", "delegate.definitions", "delegate.docs", "delegate.ports", "delegate.run", "delegate.shared"]
 
 [tool.setuptools.package-data]
 "delegate.definitions" = ["templates/*.md"]

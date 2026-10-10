@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report, valid_verdict
 

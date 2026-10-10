@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate.cli import main
+from delegate.cli.agent_definitions import main
 from tests.test_bootstrap import LONG_DOC, SHORT_DOC, _args, _blocks, _git, _paths
 
 # The heading index of LONG_DOC: line 1 is "# Operate", line 201 is "## Runbooks".

@@ -6,7 +6,8 @@ calls `delegate.main`.
 
 import pytest
 
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 
 from .support import ScriptedAdapter, git, make_repo
 

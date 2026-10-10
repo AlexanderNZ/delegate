@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from delegate import delegate
+from delegate.cli import delegate
 
 from .support import bare_repo, run_end, run_start, step_end, step_start, write_journal
 

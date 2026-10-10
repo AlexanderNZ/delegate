@@ -1,4 +1,4 @@
-"""`delegate run`: check a workflow file and print its plan, or build its tickets.
+"""The `delegate run` command: check a workflow file and print its plan, or build its tickets.
 
 `--dry-run` validates the file and prints the plan in dependency order. It
 creates no branch, no worktree and no journal. Without it, the engine builds
@@ -13,12 +13,12 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import adapters
-from .adapters.git import GitVersionControl
-from .cli import add_opencode_override_flags, apply_opencode_override
-from .run.engine import EngineError, run_workflow, workflow_of_run
-from .run.workflow import WorkflowError, load_workflow, plan_order
-from .shared.tiers import Tiers, load_tiers
+from .. import adapters
+from ..adapters.git import GitVersionControl
+from ..run.engine import EngineError, run_workflow, workflow_of_run
+from ..run.workflow import WorkflowError, load_workflow, plan_order
+from ..shared.tiers import Tiers, load_tiers
+from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 
 
 def build_parser() -> argparse.ArgumentParser:

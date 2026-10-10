@@ -262,7 +262,8 @@ def event_names(events: list[dict[str, object]]) -> list[str]:
 # so it leaves what a real kill leaves: an open journal, a lock, and a worktree.
 KILL_SCRIPT = """\
 import os, signal, sys
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 from tests.support import ScriptedAdapter
 
 class Killer(ScriptedAdapter):
@@ -317,7 +318,7 @@ def read_journal_file(repo: Path, run_id: str) -> list[dict[str, object]]:
 
 def run_main(capsys, *argv: str) -> tuple[int, str, str]:
     """Call `delegate run <argv>` and return the exit code, stdout and stderr."""
-    from delegate import delegate
+    from delegate.cli import delegate
 
     code = delegate.main(["run", *argv])
     captured = capsys.readouterr()

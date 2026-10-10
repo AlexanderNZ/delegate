@@ -8,7 +8,8 @@ The expected values come from the ticket's acceptance criteria.
 
 import pytest
 
-from delegate import adapters, delegate
+from delegate import adapters
+from delegate.cli import delegate
 
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
 

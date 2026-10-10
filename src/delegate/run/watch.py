@@ -1,4 +1,4 @@
-"""`delegate watch`: follow the journal of a run, print each new event, and exit with a code for the reason.
+"""Follow the journal of a run, report each new event, and end with a code for the reason. The `delegate watch` command is in `delegate.cli.watch`.
 
 It reads the journal of the run and nothing else. It needs no adapter, no
 workflow file, and no tool beyond git, which finds the state directory.
@@ -9,9 +9,9 @@ in any harness can run `watch` as a background task and act on the code.
 
 from __future__ import annotations
 
-import argparse
-import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
@@ -64,50 +64,23 @@ UNTIL_VERDICT: str = "verdict"
 LONG_FIELDS: frozenset[str] = frozenset({"output_tail"})
 
 
-def _positive(text: str) -> float:
-    """An option value that is a number greater than 0."""
-    try:
-        value = float(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
-    if value <= 0:
-        raise argparse.ArgumentTypeError(f"must be greater than 0, not {text}")
-    return value
+@dataclass(frozen=True)
+class WatchOptions:
+    """How to follow a run. `from_position` is the `seq` of the last event that an earlier watch reported."""
+
+    until: str | None = None
+    stall_minutes: float | None = None
+    max_minutes: float | None = None
+    from_position: int = 0
+    poll_seconds: float = 1.0
 
 
-def _position(text: str) -> int:
-    """An option value that is a journal position: a whole number, 0 or more."""
-    try:
-        value = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must be 0 or more, not {text}")
-    return value
+@dataclass(frozen=True)
+class WatchResult:
+    """Why the watch ended (`code`, one of `EXIT_CODES`) and the `seq` of the last event that it reported."""
 
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
-    parser.add_argument("run_id", nargs="?", help="the run to follow; default is the newest run of the repository")
-    parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
-    parser.add_argument(
-        "--until", choices=[UNTIL_VERDICT],
-        help="also exit when a verifier verdict is written to the journal; default is to follow the run to its end",
-    )
-    parser.add_argument(
-        "--stall-minutes", type=_positive, metavar="N",
-        help="exit when the journal and the captured event streams have not changed for N minutes; N is a number greater than 0",
-    )
-    parser.add_argument(
-        "--max-minutes", type=_positive, metavar="N",
-        help="exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0",
-    )
-    parser.add_argument(
-        "--from", type=_position, default=0, metavar="POSITION", dest="from_position",
-        help="go on after the event with this position, which an earlier watch printed; no event is reported twice",
-    )
-    parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
-    return parser
+    code: int
+    position: int
 
 
 def format_event(event: dict[str, object]) -> str:
@@ -167,23 +140,19 @@ def _last_change(journal: Path, streams: set[Path]) -> float:
     return max(times)
 
 
-def main(argv: list[str] | None, vcs: VersionControl) -> int:
-    """Run the command. The caller gives the version-control backend: this module imports no adapter."""
-    args = build_parser().parse_args(argv)
-    try:
-        journal = journal_of(args.repo, args.run_id, vcs)
-        code, position = _follow(args, journal)
-    except (RunsError, JournalError) as error:
-        print(f"delegate watch: {error}", file=sys.stderr)
-        return EXIT_ERROR
-    print(f"position {position}")
-    return code
+def follow(repo: Path, run_id: str | None, options: WatchOptions, vcs: VersionControl, emit: Callable[[str], None]) -> WatchResult:
+    """Follow the journal of a run of the repository: the run with that id, or the newest run when `run_id` is None.
+
+    Each event, and the line that gives the reason to end, goes to `emit` as it happens.
+    Raise RunsError when there is no such run, and JournalError when its journal is not valid or `from_position` is beyond its end.
+    """
+    return _follow(options, journal_of(repo, run_id, vcs), emit)
 
 
-def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
+def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -> WatchResult:
     """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
     started = time.monotonic()
-    offset, next_seq, position = 0, 1, args.from_position
+    offset, next_seq, position = 0, 1, options.from_position
     tracker = _Tracker()
     streams: set[Path] = set()
     last_event: dict[str, object] | None = None
@@ -191,8 +160,8 @@ def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
     while True:
         events, offset = read_new_events(journal, offset, next_seq)
         next_seq += len(events)
-        if first_read and next_seq - 1 < args.from_position:
-            raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {args.from_position} is beyond its end")
+        if first_read and next_seq - 1 < options.from_position:
+            raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {options.from_position} is beyond its end")
         first_read = False
         for event in events:
             last_event = event
@@ -200,33 +169,33 @@ def _follow(args: argparse.Namespace, journal: Path) -> tuple[int, int]:
             if "event_stream" in event:
                 streams.add(Path(str(event["event_stream"])))
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
-            if seq <= args.from_position:
+            if seq <= options.from_position:
                 if event["event"] == "run-end":
-                    return (EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED), position
+                    return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
                 continue
             position = seq
-            print(format_event(event), flush=True)
+            emit(format_event(event))
             if problem is not None:
-                print(f"watch: problem: ticket {event.get('ticket')}: {problem}")
-                return EXIT_PROBLEM, position
-            if args.until == UNTIL_VERDICT and event["event"] == "verdict":
+                emit(f"watch: problem: ticket {event.get('ticket')}: {problem}")
+                return WatchResult(EXIT_PROBLEM, position)
+            if options.until == UNTIL_VERDICT and event["event"] == "verdict":
                 findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
                 # The verdict of a chain names a stack and its tickets, not one ticket.
                 subject = (
                     f"stack {event['stack']} (tickets {', '.join(str(t) for t in event['tickets'])})"  # type: ignore[attr-defined]
                     if "tickets" in event else f"ticket {event['ticket']}"
                 )
-                print(f"watch: verdict: {subject} round {event['round']}: {event['verdict']}" + (f": {findings}" if findings else ""))
-                return EXIT_VERDICT, position
+                emit(f"watch: verdict: {subject} round {event['round']}: {event['verdict']}" + (f": {findings}" if findings else ""))
+                return WatchResult(EXIT_VERDICT, position)
             if event["event"] == "run-end":
-                return (EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED), position
-        if args.stall_minutes is not None and time.time() - _last_change(journal, streams) >= args.stall_minutes * 60:
-            print(
-                f"watch: stall: the journal and the event streams have not changed for {args.stall_minutes:g} minutes; "
+                return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
+        if options.stall_minutes is not None and time.time() - _last_change(journal, streams) >= options.stall_minutes * 60:
+            emit(
+                f"watch: stall: the journal and the event streams have not changed for {options.stall_minutes:g} minutes; "
                 f"last event: {format_event(last_event) if last_event else 'none'}"
             )
-            return EXIT_STALL, position
-        if args.max_minutes is not None and time.monotonic() - started >= args.max_minutes * 60:
-            print(f"watch: time limit: {args.max_minutes:g} minutes are used; the run is not at its end")
-            return EXIT_TIME_LIMIT, position
-        time.sleep(args.poll_seconds)
+            return WatchResult(EXIT_STALL, position)
+        if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:
+            emit(f"watch: time limit: {options.max_minutes:g} minutes are used; the run is not at its end")
+            return WatchResult(EXIT_TIME_LIMIT, position)
+        time.sleep(options.poll_seconds)

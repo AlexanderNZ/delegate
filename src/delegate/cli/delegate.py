@@ -1,7 +1,7 @@
 """delegate: one command over the renderer, the validator, bootstrap and the brief generator.
 
 This module only dispatches. `render`, `validate` and `bootstrap` go to
-`delegate.cli.main`, and `brief` goes to `delegate.brief.main`.
+`delegate.cli.agent_definitions.main`, and `brief` goes to `delegate.cli.brief.main`.
 Each one receives the argument list it would receive from its standalone
 command (`agent-definitions` or `verifier-brief`), so the exit code, the output
 and the files written match by construction, and the two standalone parsers
@@ -14,8 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import brief, cli, run_command, status, watch
-from .docs import reference
+from . import agent_definitions, brief, docs_command, run_command, status, watch
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -29,19 +28,19 @@ AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
 BRIEF_COMMAND: str = "brief"
 BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 
-# The subcommand that `delegate.run_command` owns.
+# The subcommand that `delegate.cli.run_command` owns.
 RUN_COMMAND: str = "run"
 RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
 
-# The subcommand that `delegate.status` owns.
+# The subcommand that `delegate.cli.status` owns.
 STATUS_COMMAND: str = "status"
 STATUS_HELP: str = "print the state of each ticket of a run, from its journal"
 
-# The subcommand that `delegate.watch` owns.
+# The subcommand that `delegate.cli.watch` owns.
 WATCH_COMMAND: str = "watch"
 WATCH_HELP: str = "follow the journal of a run, print each event, and exit with a code for the reason"
 
-# The subcommand that `delegate.reference` owns.
+# The subcommand that `delegate.cli.docs_command` owns.
 DOCS_COMMAND: str = "docs"
 DOCS_HELP: str = "write the generated sections of the reference pages from the code, or check that they are current"
 
@@ -94,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.parse_args(args)  # -h prints the help and exits 0; any other option is a usage error
         return 2
     if command in AGENT_DEFINITIONS_COMMANDS:
-        return cli.main(args)
+        return agent_definitions.main(args)
     if command == BRIEF_COMMAND:
         if at:
             print(
@@ -134,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        return reference.main(args[at + 1 :])
+        return docs_command.main(args[at + 1 :])
     known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND, WATCH_COMMAND, DOCS_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
     return 2

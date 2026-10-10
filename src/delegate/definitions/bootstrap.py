@@ -32,7 +32,7 @@ import yaml
 
 from .declaration import OUTPUT_LANGUAGES, parse_declaration
 from .render import render
-from ..shared.tiers import Tiers, load_tiers
+from ..shared.tiers import Tiers
 from .validate import validate_set
 
 #: Claude Code reads a project skill from `.claude/skills/<name>/SKILL.md` and
@@ -412,30 +412,3 @@ def run(
     for path in [*sources, *pair]:
         print(path)
     return 0
-
-
-def run_from_args(args) -> int:
-    try:
-        tiers = load_tiers(args.tiers)
-    except (OSError, KeyError) as e:
-        print(f"tier table not readable: {e}", file=sys.stderr)
-        return 1
-    raw_usd = getattr(args, "user_skills_dir", None)
-    return run(
-        repo=Path(args.repo).resolve(),
-        name=args.name,
-        domain=args.domain,
-        tier=args.tier,
-        skills=list(args.skill),
-        references=list(args.reference),
-        prompt_file=args.prompt_file,
-        max_turns=args.max_turns,
-        skills_root=args.skills_root,
-        dry_run=args.dry_run,
-        tiers=tiers,
-        user_skills_dir=Path(raw_usd) if raw_usd else None,
-        gate_commands=list(getattr(args, "gate_command", None) or []),
-        get_only_commands=list(getattr(args, "get_only_command", None) or []),
-        output_language=getattr(args, "output_language", None),
-        tracked_file_build=bool(getattr(args, "tracked_file_build", False)),
-    )

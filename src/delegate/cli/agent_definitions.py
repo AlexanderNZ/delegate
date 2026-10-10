@@ -1,4 +1,4 @@
-"""agent-definitions: render a declaration, validate rendered agent directories, or bootstrap a repository."""
+"""The `agent-definitions` command: render a declaration, validate rendered agent directories, or bootstrap a repository."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from .definitions.bootstrap import DEFAULT_SKILLS_ROOT, run_from_args
-from .definitions.declaration import load_declaration
-from .definitions.render import render
-from .definitions.validate import validate_set
-from .shared.tiers import Tiers, load_tiers
+from ..definitions import bootstrap
+from ..definitions.bootstrap import DEFAULT_SKILLS_ROOT
+from ..definitions.declaration import load_declaration
+from ..definitions.render import render
+from ..definitions.validate import validate_set
+from ..shared.tiers import Tiers, load_tiers
 
 
 def opencode_model_pair(text: str) -> tuple[str, str]:
@@ -96,6 +97,33 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    try:
+        tiers = load_tiers(args.tiers)
+    except (OSError, KeyError) as e:
+        print(f"tier table not readable: {e}", file=sys.stderr)
+        return 1
+    raw_usd = getattr(args, "user_skills_dir", None)
+    return bootstrap.run(
+        repo=Path(args.repo).resolve(),
+        name=args.name,
+        domain=args.domain,
+        tier=args.tier,
+        skills=list(args.skill),
+        references=list(args.reference),
+        prompt_file=args.prompt_file,
+        max_turns=args.max_turns,
+        skills_root=args.skills_root,
+        dry_run=args.dry_run,
+        tiers=tiers,
+        user_skills_dir=Path(raw_usd) if raw_usd else None,
+        gate_commands=list(getattr(args, "gate_command", None) or []),
+        get_only_commands=list(getattr(args, "get_only_command", None) or []),
+        output_language=getattr(args, "output_language", None),
+        tracked_file_build=bool(getattr(args, "tracked_file_build", False)),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agent-definitions")
     p.add_argument("--tiers", help="path to a tiers.toml; default is the bundled table")
@@ -168,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="a second skills directory to search; default: ~/.claude/skills",
     )
     b.add_argument("--dry-run", action="store_true", help="print every file with its content and write nothing")
-    b.set_defaults(fn=run_from_args)
+    b.set_defaults(fn=cmd_bootstrap)
     return p
 
 

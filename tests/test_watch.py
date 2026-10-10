@@ -11,7 +11,7 @@ adapter installed when `watch` runs.
 import threading
 import time
 
-from delegate import delegate
+from delegate.cli import delegate
 
 from .support import append_events, bare_repo, run_end, run_start, step_end, step_start, write_journal
 

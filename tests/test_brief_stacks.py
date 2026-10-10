@@ -15,7 +15,7 @@ import subprocess
 
 import pytest
 
-from delegate import brief
+from delegate.cli import brief
 
 GIT_ENV = {
     "GIT_CONFIG_GLOBAL": "/dev/null",

@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from delegate import run_command
+from delegate.cli import run_command
 
 from .pages import ROOT, outside_the_package
 

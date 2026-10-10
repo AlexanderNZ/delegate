@@ -57,9 +57,9 @@
               pkgs.git
               pkgs.bash
               pkgs.uv
-              (wrapper "delegate" "delegate.delegate")
-              (wrapper "agent-definitions" "delegate.cli")
-              (wrapper "verifier-brief" "delegate.brief")
+              (wrapper "delegate" "delegate.cli.delegate")
+              (wrapper "agent-definitions" "delegate.cli.agent_definitions")
+              (wrapper "verifier-brief" "delegate.cli.brief")
             ];
             # The root comes from git, so the shell works in a subdirectory.
             shellHook = ''
