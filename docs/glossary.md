@@ -82,6 +82,10 @@ A chain is the sequence of tickets in `economy` mode: each ticket branch starts 
 
 See [Verifier guard](#verifier-guard).
 
+## Context
+
+A context is one of the two parts of the package that hold the domain: the run context and the definitions context. Neither imports the other, so a change in one cannot break the other. See [the two contexts](explanation/why-the-code-has-this-shape.md#two-contexts).
+
 ## Context skill
 
 A context skill is the skill that `delegate bootstrap` writes for a repository. It reads the reference documents of the repository when the agent loads it, so no copy of a document goes out of date.
@@ -206,6 +210,10 @@ A generated section is the part of a reference page between the `generated:begin
 
 A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET. The guard denies it when an argument sets a method, a body or an output file. See [gate commands](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#gate-commands).
 
+## Git backend
+
+The git backend is the code that implements the version-control port with real git commands. No other code starts git, so the engine names no git command. See [the adapters](explanation/why-the-code-has-this-shape.md#the-adapters).
+
 ## `grilling`
 
 `grilling` is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made. The decisions are settled before a spec exists, so no agent guesses them. See [the `grilling` skill](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md) and [the idea](overview.md#the-idea).
@@ -281,6 +289,14 @@ The neutrality check is a test that fails when a term of the denylist appears in
 ## Pair
 
 See [Agent pair](#agent-pair).
+
+## Port
+
+A port is an interface that the run context drives: the harness port, the version-control port or the gate port. A port names no outside tool, so a test can pass a scripted object in its place.
+
+The code that implements a port is an adapter for the harness port. For the other two ports, it is a backend.
+
+See [the ports](explanation/why-the-code-has-this-shape.md#the-ports).
 
 ## Pre-push hook
 

@@ -6,7 +6,7 @@ You do not read the engine for this. You need the interface below, one recorded 
 
 ## The interface
 
-An adapter is one object behind one interface. The interface is the harness port, in `delegate/ports/harness.py`. The adapters are in the package `delegate/adapters/`.
+An adapter is one object behind one interface. The interface is the harness [**port**](../glossary.md#port), in `delegate/ports/harness.py`. The adapters are in the package `delegate/adapters/`.
 
 The engine gives the adapter an `AdapterRequest`. It has these fields:
 

@@ -21,6 +21,10 @@ from pathlib import Path
 # A term that is also a common verb or adjective counts only after a determiner: "the run", not "it runs".
 AFTER_A_DETERMINER = {"run", "step", "report", "skill", "resume", "skip", "brief", "blind", "finding", "chain", "spec"}
 
+# A term with a common sense beside its own counts only after one of these words: "the run context" and "both contexts"
+# use the term, and "the context of a decision" and "a context window" do not.
+AFTER_A_QUALIFIER = {"context": ("run", "definitions", "bounded", "two", "both")}
+
 # A term that is only ever a state name in code, never a word of the prose.
 NOT_PROSE = {"built"}
 
@@ -99,6 +103,8 @@ def _term_pattern(term: Term) -> re.Pattern[str]:
     body = r"(?<![\w/-])`?" + word + r"(?:s|es)?`?(?![\w-])"
     if term.name.casefold() in AFTER_A_DETERMINER:
         body = DETERMINER + body
+    if term.name.casefold() in AFTER_A_QUALIFIER:
+        body = "(?:" + "|".join(rf"(?<=\b{word} )" for word in AFTER_A_QUALIFIER[term.name.casefold()]) + ")" + body
     flags = 0 if term.name.casefold() in CASE_SENSITIVE else re.IGNORECASE
     return re.compile(body, flags)
 

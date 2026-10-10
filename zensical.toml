@@ -35,6 +35,7 @@ nav = [
     { "The mode trade-off" = "explanation/the-mode-trade-off.md" },
     { "Prior art" = "explanation/prior-art.md" },
     { "The enforcement model and its limits" = "explanation/the-enforcement-model-and-its-limits.md" },
+    { "Why the code has this shape" = "explanation/why-the-code-has-this-shape.md" },
     { "The decision records" = "explanation/decision-records.md" },
   ] },
   { "Reference" = [

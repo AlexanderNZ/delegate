@@ -25,6 +25,7 @@ PAGES = [
     "the-enforcement-model-and-its-limits.md",
     "decision-records.md",
     "why-the-model-should-not-matter.md",
+    "why-the-code-has-this-shape.md",
 ]
 
 # The reasons that each page must give, as a pattern for each reason. The reasons come from the ticket and the spec.
@@ -81,6 +82,22 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("the inputs of a run are files", r"inputs of a run are files"),
         ("the coordinator role is not yet fixed", r"not yet fixed"),
         ("the verifier recommendation is not enforced", r"not enforced"),
+    ],
+    "why-the-code-has-this-shape.md": [
+        ("there are two contexts, run and definitions", r"two contexts"),
+        ("the contexts know nothing of each other", r"nothing of each other"),
+        ("the tier table is the one thing that they share", r"tier table"),
+        ("a port is an interface that the domain drives", r"ports?\b.*\bdrives?"),
+        ("the three ports are the harness, version control and the gates", r"(?s)harness port.*version-control port.*gate port"),
+        ("the claude-code and opencode adapters implement the harness port", r"(?s)claude-code.*opencode"),
+        ("the git backend implements the version-control port", r"git backend"),
+        ("the shell gate runner implements the gate port", r"shell gate runner"),
+        ("only the cli package parses command-line arguments", r"(?s)only .*cli.* parses? command-line arguments"),
+        ("the docs tooling reads the code of the other layers", r"docs tooling"),
+        ("dependencies point inward", r"point inward"),
+        ("a test holds the rule", r"tests/test_architecture\.py"),
+        ("the run context starts no process", r"starts no process"),
+        ("the page sends the reader to the layout reference for the detail", r"layout"),
     ],
 }
 
@@ -334,6 +351,41 @@ def test_the_adr_index_lists_every_adr_of_the_repository_with_its_title_and_no_o
 
 
 @outside_the_package
-def test_the_explanation_directory_holds_the_seven_pages_of_the_tickets_and_no_other():
+def test_the_explanation_directory_holds_the_eight_pages_of_the_tickets_and_no_other():
     assert sorted(path.name for path in EXPLANATION.glob("*.md")) == sorted(PAGES)
-    assert len(PAGES) == 7
+    assert len(PAGES) == 8
+
+
+SHAPE = "why-the-code-has-this-shape.md"
+
+
+@outside_the_package
+def test_the_shape_page_has_one_mermaid_diagram_and_no_other_drawing():
+    fences = re.findall(r"^`{3,}(\w*)", (EXPLANATION / SHAPE).read_text(), flags=re.MULTILINE)
+    assert fences == ["mermaid", ""], "one opening fence of a Mermaid block, and its closing fence"
+
+
+@outside_the_package
+def test_the_shape_page_never_addresses_the_reader():
+    assert re.findall(r"\byou(r|rs|rself)?\b", prose(SHAPE), flags=re.IGNORECASE) == []
+
+
+@outside_the_package
+def test_the_shape_page_is_in_the_explanation_section_of_the_navigation():
+    nav = tomllib.loads((ROOT / "zensical.toml").read_text())["project"]["nav"]
+    explanation = next(value for item in nav for label, value in item.items() if label == "Explanation")
+    assert [label for entry in explanation for label, target in entry.items() if target == f"explanation/{SHAPE}"] == ["Why the code has this shape"]
+
+
+@outside_the_package
+def test_contributing_links_the_shape_page_in_its_code_map():
+    text = (ROOT / "CONTRIBUTING.md").read_text()
+    assert f"docs/explanation/{SHAPE}" in text
+
+
+@outside_the_package
+def test_the_glossary_holds_the_terms_of_the_shape_page():
+    glossary = (ROOT / "docs" / "glossary.md").read_text()
+    headings = re.findall(r"^## (.+)$", glossary, flags=re.MULTILINE)
+    assert {"Port", "Context", "Git backend"} <= set(headings)
+    assert "## Adapter" in glossary, "the glossary keeps adapter for the harness adapter that a user chooses"

@@ -30,7 +30,16 @@ The repository has a Nix flake for people who use Nix. Nothing needs it: the set
 
 ## Find your way around
 
-The package is in `src/delegate/`, its tests are in `tests/`, and the two skills are in `skills/`. The commands are in `src/delegate/cli/`: a command parses its arguments, calls a use case and prints the result, and no other module parses arguments. [The layout of the repository](docs/reference/layout.md) gives the place of each part, the groups of modules, and the dependency rule that `tests/test_architecture.py` holds.
+The package is in `src/delegate/`, its tests are in `tests/`, and the two skills are in `skills/`. Each subpackage of `src/delegate/` is one layer:
+
+- `run/` and `definitions/` are the two contexts. `run/` builds tickets through a harness. `definitions/` renders, validates and bootstraps agent files. Neither imports the other.
+- `shared/` holds the tier table, which both contexts read.
+- `ports/` holds the interfaces that `run/` drives: the harness, version control and the gates.
+- `adapters/` implements the ports: the harness adapters, the git backend and the shell gate runner. Only this layer starts a process.
+- `cli/` holds the commands. A command parses its arguments, makes the adapters, calls a use case and prints the result. No other module parses arguments.
+- `docs/` holds the docs tooling: the generator behind `delegate docs`, and the neutrality check.
+
+Imports point inward, and `tests/test_architecture.py` holds that rule. [Why the code has this shape](docs/explanation/why-the-code-has-this-shape.md) gives my reasons. [The layout of the repository](docs/reference/layout.md) gives the place of each module.
 
 ## Write the test first
 

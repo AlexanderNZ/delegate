@@ -47,6 +47,10 @@
 *[chain]: A chain is the sequence of tickets in economy mode: each ticket branch starts from the branch of the previous ticket.
 *[chains]: A chain is the sequence of tickets in economy mode: each ticket branch starts from the branch of the previous ticket.
 *[Command guard]: See Verifier guard.
+*[Context]: A context is one of the two parts of the package that hold the domain: the run context and the definitions context.
+*[Contexts]: A context is one of the two parts of the package that hold the domain: the run context and the definitions context.
+*[context]: A context is one of the two parts of the package that hold the domain: the run context and the definitions context.
+*[contexts]: A context is one of the two parts of the package that hold the domain: the run context and the definitions context.
 *[Context skill]: A context skill is the skill that delegate bootstrap writes for a repository.
 *[Context skills]: A context skill is the skill that delegate bootstrap writes for a repository.
 *[context skill]: A context skill is the skill that delegate bootstrap writes for a repository.
@@ -127,6 +131,10 @@
 *[generated sections]: A generated section is the part of a reference page between the generated:begin and generated:end markers, which delegate docs writes from the code.
 *[GET-only command]: A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET.
 *[GET-only commands]: A GET-only command is a command that the verifier can run only while it reads, for example a script that sends an HTTP GET.
+*[Git backend]: The git backend is the code that implements the version-control port with real git commands.
+*[Git backends]: The git backend is the code that implements the version-control port with real git commands.
+*[git backend]: The git backend is the code that implements the version-control port with real git commands.
+*[git backends]: The git backend is the code that implements the version-control port with real git commands.
 *[grilling]: grilling is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made.
 *[Harness]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
 *[Harnesses]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
@@ -172,6 +180,10 @@
 *[neutrality check]: The neutrality check is a test that fails when a term of the denylist appears in the kit.
 *[neutrality checks]: The neutrality check is a test that fails when a term of the denylist appears in the kit.
 *[Pair]: See Agent pair.
+*[Port]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
+*[Ports]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
+*[port]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
+*[ports]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
 *[Pre-push hook]: See Push guard.
 *[Print mode]: See Headless.
 *[Protocol]: The protocol is the set of rules for delegation in the agent-delegation skill: the roles, the brief template, blind verification, fix-ups and hotspots.
