@@ -2,9 +2,17 @@
 
 The kit says that a [**specialist**](../glossary.md#specialist) never pushes, that a [**verifier**](../glossary.md#verifier) never writes to the [**worktree**](../glossary.md#worktree) of the [**ticket**](../glossary.md#ticket), and that only the [**coordinator**](../glossary.md#coordinator) edits a [**hotspot**](../glossary.md#hotspot). This page says how the kit makes those rules hold, and where it stops. A guard deserves trust exactly as far as it goes, and not further.
 
+## Why git, and not the harness
+
+Each [**harness**](../glossary.md#harness) guards in its own way, and some harnesses do not guard at all in a [**headless**](../glossary.md#headless) run. A rule that depends on a [**harness hook**](../glossary.md#harness-hook) is as strong as that hook. In a headless [**session**](../glossary.md#session) the hook may not run.
+
+So the first guard is the same in every harness. A pre-push hook, a diff and a snapshot work with every harness that the [**engine**](../glossary.md#engine) drives, because they are git and the file system.
+
+The harness hooks in the agent files stay. A harness that supports hooks gets a second guard from them: a [**push guard**](../glossary.md#push-guard) for the specialist, and a command guard for the verifier. I count them as a second line, not as the first.
+
 ## What the engine enforces
 
-The [**engine**](../glossary.md#engine) uses tools that every [**harness**](../glossary.md#harness) has: git, a diff and a snapshot. It does not rely on the hooks of a harness.
+The engine builds the first guard from git, a diff and a snapshot. It has four checks.
 
 - **A pre-push hook in each worktree.** The engine makes each worktree itself, and it sets a `pre-push` hook for that worktree only. The hook refuses every push. The main checkout and the other worktrees keep their own hooks.
 - **A diff check against the hotspot paths.** After a specialist reports, and before the [**gates**](../glossary.md#gate) run, the engine compares the changed paths with the hotspot patterns of the [**stack**](../glossary.md#stack). A match stops the [**step**](../glossary.md#step). No gate runs and no verifier starts.
@@ -12,14 +20,6 @@ The [**engine**](../glossary.md#engine) uses tools that every [**harness**](../g
 - **Gates outside the specialist.** The engine runs the gates itself. The verifier works in a [**temporary copy**](../glossary.md#temporary-copy) that the engine prepares, so the verifier may break the copy and not the branch.
 
 The reference describes each check in detail. See [the guards in the `delegate run` reference](../reference/run.md#the-guards).
-
-## Why git, and not the harness
-
-Each harness guards in its own way, and some harnesses do not guard at all in a [**headless**](../glossary.md#headless) run. A rule that depends on a [**harness hook**](../glossary.md#harness-hook) is as strong as that hook. In a headless [**session**](../glossary.md#session) the hook may not run.
-
-So the first guard is the same in every harness. A pre-push hook, a diff and a snapshot work with every harness that the engine drives, because they are git and the file system.
-
-The harness hooks in the agent files stay. A harness that supports hooks gets a second guard from them: a [**push guard**](../glossary.md#push-guard) for the specialist, and a command guard for the verifier. I count them as a second line, not as the first.
 
 ## What the engine does not stop
 

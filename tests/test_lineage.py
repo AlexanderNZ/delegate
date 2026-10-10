@@ -15,9 +15,9 @@ package skips these cases with a reason.
 """
 
 import re
-import xml.etree.ElementTree as ET
 
 from .pages import ROOT, outside_the_package
+from .svg import SVG, accessibility_problems, parse, without_colours
 
 DOCS = ROOT / "docs"
 OVERVIEW = DOCS / "overview.md"
@@ -43,7 +43,6 @@ PLANNING_SKILLS = ["grilling", "wayfinder", "to-spec", "to-tickets"]
 # Each version of the visual, by the image fragment that shows it in one colour scheme.
 VERSIONS = {"assets/ladder-light.svg": "#gh-light-mode-only", "assets/ladder-dark.svg": "#gh-dark-mode-only"}
 
-SVG = "{http://www.w3.org/2000/svg}"
 FENCED = re.compile(r"^(`{3,}).*?^\1$", flags=re.DOTALL | re.MULTILINE)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_TEXT = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -74,7 +73,7 @@ def text_alternative() -> list[tuple[str, str, str]]:
 
 def svg_texts(path: str) -> list[str]:
     """The text of each <text> element of one version of the visual, in document order, with its spaces normalised."""
-    root = ET.parse(DOCS / path).getroot()
+    root = parse(DOCS / path)
     return [" ".join("".join(element.itertext()).split()) for element in root.iter(f"{SVG}text")]
 
 
@@ -89,18 +88,13 @@ def test_the_ladder_section_shows_a_light_and_a_dark_version_of_the_visual_each_
 
 @outside_the_package
 def test_each_version_of_the_visual_is_an_svg_image_with_a_title_and_a_description():
-    for path in VERSIONS:
-        root = ET.parse(DOCS / path).getroot()
-        assert root.tag == f"{SVG}svg", path
-        assert root.get("role") == "img", path
-        assert (root.findtext(f"{SVG}title") or "").strip(), f"{path} has no <title>"
-        assert (root.findtext(f"{SVG}desc") or "").strip(), f"{path} has no <desc>"
+    assert accessibility_problems(DOCS / path for path in VERSIONS) == []
 
 
 @outside_the_package
 def test_the_two_versions_of_the_visual_differ_only_in_their_colours():
     # The colours are in the <style> element. All the rest, so all the information, is the same in both files.
-    light, dark = (re.sub(r"<style>.*?</style>", "", (DOCS / path).read_text(), flags=re.DOTALL) for path in VERSIONS)
+    light, dark = (without_colours(DOCS / path) for path in VERSIONS)
     assert light == dark
 
 

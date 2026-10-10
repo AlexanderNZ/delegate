@@ -21,9 +21,9 @@ package skips these cases with a reason.
 """
 
 import re
-import xml.etree.ElementTree as ET
 
 from .pages import ROOT, outside_the_package
+from .svg import SVG, accessibility_problems, parse, without_colours
 
 DOCS = ROOT / "docs"
 PAGE = DOCS / "explanation" / "why-the-model-should-not-matter.md"
@@ -61,7 +61,6 @@ NAMED_QUOTES = ["Constraints > instructions.", "Don't let the same model grade i
 
 # Each version of the visual, by the image fragment that shows it in one colour scheme.
 VERSIONS = {"assets/lineage-light.svg": "#gh-light-mode-only", "assets/lineage-dark.svg": "#gh-dark-mode-only"}
-SVG = "{http://www.w3.org/2000/svg}"
 
 FENCED = re.compile(r"^(`{3,}).*?^\1$", flags=re.DOTALL | re.MULTILINE)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
@@ -193,7 +192,7 @@ def test_every_term_in_bold_links_its_glossary_entry_once():
 
 def svg_marks(path: str) -> dict[str, list[str]]:
     """The marks of one version of the visual: for each rule, the class of the mark at each of the four stages, or "none"."""
-    root = ET.parse(DOCS / path).getroot()
+    root = parse(DOCS / path)
     marks = {}
     for group in root.iter(f"{SVG}g"):
         rule = group.get("data-rule")
@@ -220,17 +219,12 @@ def test_the_lineage_shows_a_light_and_a_dark_version_of_the_visual_each_with_al
 
 @outside_the_package
 def test_each_version_of_the_visual_is_an_svg_image_with_a_title_and_a_description():
-    for path in VERSIONS:
-        root = ET.parse(DOCS / path).getroot()
-        assert root.tag == f"{SVG}svg", path
-        assert root.get("role") == "img", path
-        assert (root.findtext(f"{SVG}title") or "").strip(), f"{path} has no <title>"
-        assert (root.findtext(f"{SVG}desc") or "").strip(), f"{path} has no <desc>"
+    assert accessibility_problems(DOCS / path for path in VERSIONS) == []
 
 
 @outside_the_package
 def test_the_two_versions_of_the_visual_differ_only_in_their_colours():
-    light, dark = (re.sub(r"<style>.*?</style>", "", (DOCS / path).read_text(), flags=re.DOTALL) for path in VERSIONS)
+    light, dark = (without_colours(DOCS / path) for path in VERSIONS)
     assert light == dark
 
 

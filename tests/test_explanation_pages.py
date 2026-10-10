@@ -337,6 +337,19 @@ def test_the_enforcement_page_lists_every_limit_of_the_skill_in_the_order_of_the
 
 
 @outside_the_package
+def test_the_enforcement_page_gives_the_pain_then_the_idea_then_the_mechanism_then_the_limits():
+    # The pain and the idea: a harness guard is only as strong as its hook, so the first guard is git.
+    # Then the mechanism: what the engine enforces. Then the limits: what it does not stop, and how I read them.
+    assert list(entries("the-enforcement-model-and-its-limits.md")) == [
+        "Why git, and not the harness",
+        "What the engine enforces",
+        "What the engine does not stop",
+        "The limits of the guards",
+        "How I read the limits",
+    ]
+
+
+@outside_the_package
 def test_the_enforcement_page_links_the_limits_of_the_skill_for_the_full_text():
     text = (EXPLANATION / "the-enforcement-model-and-its-limits.md").read_text()
     assert "/blob/main/skills/agent-definitions/SKILL.md#limits)" in text
