@@ -16,7 +16,7 @@ import pytest
 
 from delegate.adapters.git import GitVersionControl
 from delegate.ports import vcs as port
-from delegate.ports.vcs import CONFLICT, FAILED, REBASED, Commit, RebaseResult, VcsError, VersionControl
+from delegate.ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError, VersionControl
 
 from .support import git, make_repo
 from .test_fsmonitor import alive, daemon_pid, why_no_daemon_can_start
@@ -617,6 +617,202 @@ def test_fast_forward_branch_of_a_branch_that_does_not_exist_is_an_error(tmp_pat
 
     with pytest.raises(VcsError):
         vcs.fast_forward_branch(repo, "no-such-branch", sha(repo, "main"))
+
+
+# What changed.
+
+
+def repo_with_a_feature_branch(tmp_path: Path) -> tuple[Path, str]:
+    """A repository whose `main` moved on after `feature` left it. Returns the repository and the feature tip."""
+    repo = make_repo(tmp_path)
+    git(repo, "checkout", "-q", "-b", "feature")
+    tip = commit(repo, "feature.txt", "feature\n", "feature work")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "main.txt", "main\n", "main work")
+    return repo, tip
+
+
+def test_changed_paths_lists_the_paths_that_the_checkout_changed_after_a_commit(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    start = sha(repo, "main")
+    commit(repo, "a.txt", "a\n", "a")
+    commit(repo, "b.txt", "b\n", "b")
+
+    assert vcs.changed_paths(repo, start) == ["a.txt", "b.txt"]
+
+
+def test_changed_paths_up_to_a_branch_counts_that_branch_and_not_the_checkout(tmp_path, vcs):
+    repo, tip = repo_with_a_feature_branch(tmp_path)
+
+    # The two tips differ in the work of both sides.
+    assert vcs.changed_paths(repo, "main", "feature") == ["feature.txt", "main.txt"]
+
+
+def test_changed_paths_from_the_merge_base_leaves_out_what_the_other_side_did(tmp_path, vcs):
+    repo, tip = repo_with_a_feature_branch(tmp_path)
+
+    assert vcs.changed_paths(repo, "main", "feature", from_merge_base=True) == ["feature.txt"]
+
+
+def test_changed_paths_counts_a_rename_as_its_old_and_its_new_path(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    start = sha(repo, "main")
+    git(repo, "mv", "seed.txt", "moved.txt")
+    git(repo, "commit", "-q", "-m", "move")
+
+    assert vcs.changed_paths(repo, start) == ["moved.txt", "seed.txt"]
+
+
+def test_changed_paths_that_follow_renames_count_a_rename_as_its_new_path(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    start = sha(repo, "main")
+    git(repo, "mv", "seed.txt", "moved.txt")
+    git(repo, "commit", "-q", "-m", "move")
+
+    assert vcs.changed_paths(repo, start, follow_renames=True) == ["moved.txt"]
+
+
+def test_changed_paths_from_a_ref_that_does_not_exist_is_an_error(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError):
+        vcs.changed_paths(repo, "no-such-ref")
+    with pytest.raises(VcsError):
+        vcs.changed_paths(repo, "no-such-ref", follow_renames=True)
+
+
+def test_diff_text_from_the_merge_base_holds_the_work_of_one_side_only(tmp_path, vcs):
+    repo, tip = repo_with_a_feature_branch(tmp_path)
+
+    text = vcs.diff_text(repo, "main", "feature", from_merge_base=True)
+
+    assert "feature.txt" in text
+    assert "+feature" in text
+    assert "main.txt" not in text
+
+
+def test_diff_text_between_two_tips_shows_the_work_of_both_sides(tmp_path, vcs):
+    repo, tip = repo_with_a_feature_branch(tmp_path)
+
+    text = vcs.diff_text(repo, "main", "feature")
+
+    assert "feature.txt" in text
+    assert "main.txt" in text
+
+
+def test_diff_text_keeps_the_text_as_git_wrote_it(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    (repo / "seed.txt").write_text("seed\n\n")
+    git(repo, "commit", "-q", "-a", "-m", "blank line")
+
+    text = vcs.diff_text(repo, "HEAD~1", "HEAD")
+
+    assert text.endswith("+\n")
+
+
+def test_diff_text_of_a_ref_that_does_not_exist_is_an_error(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError, match="failed"):
+        vcs.diff_text(repo, "no-such-ref", "main")
+
+
+def test_diff_text_is_empty_when_nothing_differs(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    assert vcs.diff_text(repo, "main", "main") == ""
+
+
+def test_uncommitted_changes_names_each_changed_and_each_new_path_with_its_state(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    (repo / "seed.txt").write_text("changed\n")
+    (repo / "new").mkdir()
+    (repo / "new" / "inner.txt").write_text("inner\n")
+    (repo / "staged.txt").write_text("staged\n")
+    git(repo, "add", "staged.txt")
+
+    changes = vcs.uncommitted_changes(repo)
+
+    assert sorted(changes, key=lambda change: change.path) == [
+        PathChange("??", "new/inner.txt"),
+        PathChange(" M", "seed.txt"),
+        PathChange("A ", "staged.txt"),
+    ]
+
+
+def test_uncommitted_changes_is_empty_for_a_clean_checkout(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    assert vcs.uncommitted_changes(repo) == []
+
+
+def test_uncommitted_changes_leaves_out_a_path_that_git_ignores(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text("ignored.txt\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-q", "-m", "ignore")
+    (repo / "ignored.txt").write_text("x\n")
+
+    assert vcs.uncommitted_changes(repo) == []
+
+
+def test_uncommitted_changes_of_a_directory_that_is_no_checkout_is_an_error(tmp_path, vcs, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(VcsError):
+        vcs.uncommitted_changes(outside)
+
+
+# The hooks of a worktree.
+
+
+def test_the_hooks_directory_of_a_checkout_is_the_directory_that_it_uses(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    assert vcs.hooks_directory(repo).resolve() == (repo / ".git" / "hooks").resolve()
+
+
+def test_a_worktree_uses_the_hooks_directory_that_was_set_for_it_and_no_other_checkout_does(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    mine = tmp_path / "my-hooks"
+    mine.mkdir()
+
+    vcs.use_hooks_directory(repo, worktree, mine)
+
+    assert vcs.hooks_directory(worktree).resolve() == mine.resolve()
+    assert vcs.hooks_directory(repo).resolve() == (repo / ".git" / "hooks").resolve()
+
+
+def test_a_hook_in_the_directory_that_was_set_runs_in_the_worktree(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    hooks = tmp_path / "my-hooks"
+    hooks.mkdir()
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    vcs.use_hooks_directory(repo, worktree, hooks)
+    (worktree / "x.txt").write_text("x\n")
+    git(worktree, "add", "x.txt")
+
+    refused = git_status(worktree, "commit", "-q", "-m", "x")
+
+    assert refused.returncode != 0
+
+
+def test_setting_the_hooks_directory_of_a_path_that_is_no_worktree_is_an_error(tmp_path, vcs, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    repo = make_repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(VcsError):
+        vcs.use_hooks_directory(repo, outside, tmp_path)
 
 
 # The verifier copy.

@@ -18,7 +18,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, RebaseResult, VcsError
+from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError
 
 # The limit, in seconds, for the command that stops the fsmonitor daemon of a directory.
 _FSMONITOR_STOP_TIMEOUT: int = 30
@@ -29,12 +29,17 @@ def _run(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
 
 
-def _git(directory: Path, *args: str) -> str:
-    """Run git in `directory` and return its output without the final newline. Raise VcsError when git fails."""
+def _git_raw(directory: Path, *args: str) -> str:
+    """Run git in `directory` and return its output as it is. Raise VcsError when git fails."""
     result = _run(directory, *args)
     if result.returncode != 0:
         raise VcsError(f"git {' '.join(args)} failed: {result.stderr.strip() or result.returncode}")
-    return result.stdout.strip()
+    return result.stdout
+
+
+def _git(directory: Path, *args: str) -> str:
+    """Run git in `directory` and return its output without the surrounding white space. Raise VcsError when git fails."""
+    return _git_raw(directory, *args).strip()
 
 
 def _rebase_in_progress(worktree: Path) -> bool:
@@ -112,6 +117,30 @@ class GitVersionControl:
             commit_id, _, subject = line.partition(" ")
             commits.append(Commit(commit_id, subject))
         return commits
+
+    def changed_paths(
+        self, path: Path, since: str, until: str | None = None, *, from_merge_base: bool = False, follow_renames: bool = False
+    ) -> list[str]:
+        spec = f"{since}{'...' if from_merge_base else '..'}{until or 'HEAD'}"
+        if follow_renames:
+            return _git_raw(path, "diff", "--name-only", spec).splitlines()
+        return _git(path, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", spec).splitlines()
+
+    def diff_text(self, path: Path, since: str, until: str, *, from_merge_base: bool = False) -> str:
+        return _git_raw(path, "diff", f"{since}{'...' if from_merge_base else '..'}{until}")
+
+    def uncommitted_changes(self, worktree: Path) -> list[PathChange]:
+        # The state code starts with a space for a change that is not staged, so the output must not be stripped.
+        out = _git_raw(worktree, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
+        return [PathChange(entry[:2], entry[3:]) for entry in out.split("\0") if entry]
+
+    def hooks_directory(self, worktree: Path) -> Path:
+        return Path(_git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
+
+    def use_hooks_directory(self, repo: Path, worktree: Path, hooks: Path) -> None:
+        # Without this extension `--worktree` writes to the configuration that every worktree shares.
+        _git(repo, "config", "extensions.worktreeConfig", "true")
+        _git(worktree, "config", "--worktree", "core.hooksPath", str(hooks))
 
     def is_ancestor(self, repo: Path, ancestor: str, descendant: str) -> bool:
         # Exit status 1 means no. Any other failure, such as a name that is no commit, is an error.

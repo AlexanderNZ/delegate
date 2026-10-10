@@ -39,6 +39,19 @@ class Commit:
 
 
 @dataclass(frozen=True)
+class PathChange:
+    """One path of a checkout that differs from its newest commit, and how it differs.
+
+    `code` is the two-letter state of the path: the first letter is the state in
+    the staging area, the second is the state in the working directory, and a
+    space means no change there. `??` is a path that no commit holds.
+    """
+
+    code: str
+    path: str
+
+
+@dataclass(frozen=True)
 class RebaseResult:
     """What a rebase gave back. `status` is one of REBASE_STATUSES.
 
@@ -122,6 +135,45 @@ class VersionControl(Protocol):
 
         `until` is the commit that `path` has checked out when it is None.
         """
+        ...
+
+    def changed_paths(
+        self, path: Path, since: str, until: str | None = None, *, from_merge_base: bool = False, follow_renames: bool = False
+    ) -> list[str]:
+        """The paths whose content differs between `since` and `until`, in the order of their names.
+
+        `until` is the commit that `path` has checked out when it is None. With
+        `from_merge_base` the comparison starts at the newest commit that both
+        hold, so the work that `since` gained on its own does not count. A
+        renamed path counts as its old name and its new name. With
+        `follow_renames` it counts as its new name only. Raise VcsError when a
+        name is no commit.
+        """
+        ...
+
+    def diff_text(self, path: Path, since: str, until: str, *, from_merge_base: bool = False) -> str:
+        """The text of the changes between `since` and `until`, as a reader sees them, exactly as the tool wrote it.
+
+        `from_merge_base` is as in `changed_paths`. The text is empty when
+        nothing differs. Raise VcsError when a name is no commit.
+        """
+        ...
+
+    def uncommitted_changes(self, worktree: Path) -> list[PathChange]:
+        """Each path of the worktree that differs from its newest commit, one entry for each file.
+
+        A new file in a new directory is listed as a file. A path that the
+        repository ignores is not listed. A rename is two entries. The order is
+        the order of the paths.
+        """
+        ...
+
+    def hooks_directory(self, worktree: Path) -> Path:
+        """The absolute path of the directory whose hooks run for the worktree."""
+        ...
+
+    def use_hooks_directory(self, repo: Path, worktree: Path, hooks: Path) -> None:
+        """Make the hooks in the directory `hooks` run for `worktree`, and for no other checkout of the repository."""
         ...
 
     def is_ancestor(self, repo: Path, ancestor: str, descendant: str) -> bool:
