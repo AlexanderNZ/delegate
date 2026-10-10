@@ -287,6 +287,17 @@ def test_ensure_worktree_refuses_a_worktree_that_holds_another_branch(tmp_path, 
         vcs.ensure_worktree(repo, worktree, "other", "main")
 
 
+def test_ensure_worktree_names_the_ticket_in_the_refusal_of_a_worktree_that_holds_another_branch(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+
+    with pytest.raises(VcsError) as refusal:
+        vcs.ensure_worktree(repo, worktree, "other", "main")
+
+    assert str(refusal.value) == f"worktree {worktree} holds 'feature', not the branch 'other' of its ticket"
+
+
 def test_ensure_worktree_refuses_a_start_that_does_not_exist(tmp_path, vcs):
     repo = make_repo(tmp_path)
     worktree = tmp_path / "wt"
@@ -465,6 +476,16 @@ def test_rebase_onto_a_target_that_does_not_exist_gives_a_failed_result(tmp_path
     assert result.detail != ""
 
 
+def test_rebase_onto_a_refusal_whose_list_of_conflicts_cannot_be_read_is_an_error(tmp_path, vcs):
+    repo, worktree = worktree_behind_main(tmp_path, vcs)
+    (worktree / "feature.txt").write_text("changed but not committed\n")
+    # The rebase refuses to start and needs no diff. The command that lists the conflicts reads this setting and dies.
+    git(repo, "config", "diff.algorithm", "no-such-algorithm")
+
+    with pytest.raises(VcsError, match="diff --name-only --diff-filter=U failed"):
+        vcs.rebase_onto(worktree, "main")
+
+
 def test_a_rebase_result_with_an_unknown_status_is_refused():
     with pytest.raises(ValueError, match="rebase status"):
         RebaseResult("merged")
@@ -578,6 +599,16 @@ def test_fast_forward_branch_to_the_tip_it_has_already_moves_nothing_and_succeed
     tip = sha(repo, "main")
 
     assert vcs.fast_forward_branch(repo, "main", tip) is True
+    assert sha(repo, "main") == tip
+
+
+def test_fast_forward_branch_to_a_commit_that_does_not_exist_leaves_the_branch_and_moves_nothing(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    tip = sha(repo, "main")
+
+    moved = vcs.fast_forward_branch(repo, "main", "0" * 40)
+
+    assert moved is False
     assert sha(repo, "main") == tip
 
 

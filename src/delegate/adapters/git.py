@@ -76,7 +76,7 @@ class GitVersionControl:
                 _git(worktree, "rebase", "--abort")
             current = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD")
             if current != branch:
-                raise VcsError(f"worktree {worktree} holds {current!r}, not the branch {branch!r}")
+                raise VcsError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
         else:
             _git(repo, "worktree", "prune")
             if self.branch_exists(repo, branch):
@@ -96,8 +96,8 @@ class GitVersionControl:
         rebase = _run(worktree, "rebase", onto)
         if rebase.returncode == 0:
             return RebaseResult(REBASED)
-        unmerged = _run(worktree, "diff", "--name-only", "--diff-filter=U")
-        conflicts = tuple(unmerged.stdout.splitlines()) if unmerged.returncode == 0 else ()
+        # A list of conflicts that git cannot give is an error, and the rebase is left as it is.
+        conflicts = tuple(_git(worktree, "diff", "--name-only", "--diff-filter=U").splitlines())
         if _rebase_in_progress(worktree):
             _git(worktree, "rebase", "--abort")
         if conflicts:
@@ -126,9 +126,10 @@ class GitVersionControl:
 
     def fast_forward_branch(self, repo: Path, branch: str, to_commit: str) -> bool:
         tip = self.branch_tip(repo, branch)
-        target = self.commit_of(repo, to_commit)
-        if not self.is_ancestor(repo, tip, target):
+        # Any failure of the ancestor check, such as a `to_commit` that names no commit, is the answer no.
+        if _run(repo, "merge-base", "--is-ancestor", tip, to_commit).returncode != 0:
             return False
+        target = self.commit_of(repo, to_commit)
         # The old value in the last argument makes the move fail if the branch moved in the meantime.
         _git(repo, "update-ref", f"refs/heads/{branch}", target, tip)
         return True

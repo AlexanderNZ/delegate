@@ -132,7 +132,8 @@ class VersionControl(Protocol):
         """Move the branch to `to_commit` when the branch holds only commits that `to_commit` holds.
 
         Return True when the branch moved. Return False, and leave the branch
-        where it is, when it holds a commit that `to_commit` does not hold.
+        where it is, when it holds a commit that `to_commit` does not hold, or
+        when `to_commit` names no commit.
         Raise VcsError when there is no such branch.
         """
         ...
