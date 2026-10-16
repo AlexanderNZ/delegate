@@ -96,21 +96,30 @@ class _Tracker:
     """Reads the events of one journal in order and finds the problem events.
 
     It keeps the last result of each gate command of each ticket, because the
-    gates of a step are not green only when the step ends with a red gate.
+    gates of a step are not green only when the step ends with a red gate. It
+    also keeps each ticket whose agent the engine ended at the idle timeout, so
+    the result event that follows is no problem.
     """
 
     def __init__(self) -> None:
         self._gates: dict[str, dict[str, bool]] = {}
+        self._idle: set[str] = set()
 
     def problem(self, event: dict[str, object]) -> str | None:
         """The reason that the event is a problem, or `None`. Call it for every event, in order."""
         kind, ticket = str(event["event"]), str(event.get("ticket"))
         if kind == "gate-result":
             self._gates.setdefault(ticket, {})[str(event["command"])] = bool(event["green"])
+        elif kind == "idle-timeout":
+            self._idle.add(ticket)
+        elif kind in AGENT_RESULT_ROLES and ticket in self._idle:
+            # The engine ended the session after a valid report, so its end state is no problem.
+            self._idle.discard(ticket)
         elif kind in AGENT_RESULT_ROLES:
             state, status = event["end_state"], event["exit_status"]
-            # A specialist that ends capped continues; any other agent that ends capped fails its step.
-            failed = state == "failed" or (state == "finished" and status != 0) or (state == "capped" and kind != "adapter-result")
+            # A specialist that ends capped continues; any other agent that ends capped fails its step. A finished agent
+            # with a bad exit status continues when its report is valid, so the report event or the step end decides.
+            failed = state == "failed" or (state == "capped" and kind != "adapter-result")
             if failed:
                 return f"the {AGENT_RESULT_ROLES[kind]} ended {state} with exit status {status}"
         elif kind in AGENT_REPORT_ROLES:

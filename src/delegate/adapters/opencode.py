@@ -8,6 +8,9 @@ The prompt goes on standard input, never in argv, so a long brief meets no
 argument limit and shows in no process list. The harness writes one JSON event
 on each line of standard output. The adapter copies that stream to the file
 that the request names, and reads the end state and the session id from it.
+The exit status does not change the end state (see `AdapterResult`). After a
+valid report, the adapter ends a session that writes no event for the idle
+timeout of the request (see `process.py`).
 
 The activity of a stream comes from the `step_finish` events and the
 `timestamp` field (epoch milliseconds). Each `step_finish` event carries
@@ -16,11 +19,11 @@ The activity of a stream comes from the `step_finish` events and the
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
+from .process import run_harness
 from .streams import read_events
 
 # The command that starts the harness.
@@ -66,8 +69,7 @@ class OpenCodeAdapter:
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
-        with stream.open("w") as out:
-            process = subprocess.run(command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd)
+        process = run_harness(command, request)
         if not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
@@ -80,10 +82,7 @@ class OpenCodeAdapter:
             )
         events = read_events(stream)
         session_id = next((event["sessionID"] for event in events if "sessionID" in event), None)
-        end_state = _end_state(events, stream)
-        if process.returncode != 0 and end_state == FINISHED:
-            end_state = FAILED
-        return AdapterResult(process.returncode, end_state, session_id, stream)
+        return AdapterResult(process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle)
 
     def activity(self, stream: Path) -> Activity:
         tokens, last = 0, None

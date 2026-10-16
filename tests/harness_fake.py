@@ -5,6 +5,10 @@ real executable on PATH: it records its arguments, its standard input, its
 working directory and its environment, then replays a recorded stream and exits with a status that
 the test sets. The adapter starts it as a subprocess, as it starts the real
 command.
+
+A test can make the stand-in write one line of the stream each `drip_seconds`,
+as a harness that works writes its events, and stay alive for `hold_seconds`
+after the stream, as an idle session that does not exit does.
 """
 
 from __future__ import annotations
@@ -18,12 +22,17 @@ from pathlib import Path
 
 SCRIPT = """\
 #!{python}
-import json, os, sys
+import json, os, sys, time
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
     log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ)}}) + "\\n")
+drip = float(os.environ.get("FAKE_HARNESS_DRIP", "0"))
 with open(os.environ["FAKE_HARNESS_STREAM"]) as stream:
-    sys.stdout.write(stream.read())
+    for line in stream:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        time.sleep(drip)
 sys.stderr.write(os.environ.get("FAKE_HARNESS_STDERR", ""))
+time.sleep(float(os.environ.get("FAKE_HARNESS_HOLD", "0")))
 sys.exit(int(os.environ.get("FAKE_HARNESS_EXIT", "0")))
 """
 
@@ -41,7 +50,8 @@ class FakeHarness:
 
 
 def install(
-    tmp_path: Path, monkeypatch, command: str, fixtures: Path, fixture: str, *, exit_status: int = 0, stderr: str = ""
+    tmp_path: Path, monkeypatch, command: str, fixtures: Path, fixture: str, *, exit_status: int = 0, stderr: str = "",
+    drip_seconds: float = 0, hold_seconds: float = 0,
 ) -> FakeHarness:
     """Put a `command` that replays `fixture` first on PATH. An empty `fixture` replays nothing."""
     bin_dir = tmp_path / "fake-bin"
@@ -55,4 +65,6 @@ def install(
     monkeypatch.setenv("FAKE_HARNESS_STREAM", str(fixtures / fixture) if fixture else os.devnull)
     monkeypatch.setenv("FAKE_HARNESS_EXIT", str(exit_status))
     monkeypatch.setenv("FAKE_HARNESS_STDERR", stderr)
+    monkeypatch.setenv("FAKE_HARNESS_DRIP", str(drip_seconds))
+    monkeypatch.setenv("FAKE_HARNESS_HOLD", str(hold_seconds))
     return FakeHarness(log)

@@ -10,6 +10,7 @@ import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
+from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
@@ -91,6 +92,34 @@ def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_
 @pytest.mark.parametrize("name", ["resume_session", "supports_resume", "continuation", "continuation-limit", "crashed: <exception type>: <message>"])
 def test_the_reference_names_the_resume_field_and_the_continuation_events(name):
     assert f"`{name}`" in REFERENCE.read_text()
+
+
+@outside_the_package
+@pytest.mark.parametrize("name", ["idle_timeout", "report_valid", "ended_idle", "idle-timeout"])
+def test_the_reference_names_the_idle_fields_of_the_adapter_interface_and_the_idle_event(name):
+    assert f"`{name}`" in REFERENCE.read_text()
+
+
+@outside_the_package
+def test_the_reference_states_the_idle_timeout_of_the_engine():
+    assert f"{IDLE_TIMEOUT_SECONDS} seconds" in REFERENCE.read_text()
+
+
+@outside_the_package
+def test_the_reference_lists_the_idle_timeout_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys):
+    adapters.register("scripted", ScriptedAdapter(idle_roles={"specialist"}))
+    try:
+        repo = make_repo(tmp_path)
+        code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    events = read_journal(capsys.readouterr().out)
+    assert code == 0
+    (idle,) = [e for e in events if e["event"] == "idle-timeout"]
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for field in idle:
+        if field not in ("seq", "time", "event"):
+            assert f"`{field}`" in rows["`idle-timeout`"], field
 
 
 @outside_the_package

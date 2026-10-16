@@ -19,13 +19,15 @@ The engine gives the adapter an `AdapterRequest`. It has these fields:
 - `report_path`: where the agent writes its JSON report.
 - `event_stream`: the file where the adapter writes the event stream of the harness. The engine chooses it, and writes it to the [**journal**](../glossary.md#journal) before the agent starts, so `delegate status` can read the stream while the agent runs. Its directory exists.
 - `resume_session`: the [**session**](../glossary.md#session) id of an earlier run to resume, or `None`.
+- `idle_timeout` and `report_valid`: the idle timeout in seconds, and a function that gives true when the file at `report_path` is valid. When the check is true and the harness wrote no event for the idle timeout, the adapter ends the session. The helper `run_harness` does this for you.
 
 The adapter gives back an `AdapterResult`. It has these fields:
 
 - `exit_status`: the exit status of the harness process.
-- `end_state`: `finished`, `failed`, or `capped`. Any other value is an error.
+- `end_state`: `finished`, `failed`, or `capped`. Any other value is an error. The stream of the session decides it. The exit status does not change it: the engine weighs the exit status itself.
 - `session_id`: the session id that the harness gave, or `None`.
 - `event_stream`: the path of the captured stream, which is the `event_stream` of the request.
+- `ended_idle`: true when the adapter ended the session at the idle timeout. `run_harness` tells you.
 
 The adapter class has two attributes and two methods:
 
@@ -34,7 +36,7 @@ The adapter class has two attributes and two methods:
 - `run`: takes the request and returns the result.
 - `activity`: takes the path of a stream that the adapter wrote, and returns an `Activity`: `tokens`, the tokens that the agent used so far, and `last_event`, the time (UTC) of the newest event that has a time, or `None`. The stream can be the stream of an agent that still runs, so it can end in half a line.
 
-The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/streams.py` gives you the helper `read_events`. It reads a line-delimited JSON stream, and ignores half a line at the end. A missing file, or a bad line before the end, raises `AdapterError`. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
+The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/process.py` gives you the helper `run_harness`. It starts the command with the prompt on standard input, and writes the standard output to the event stream of the request. It also ends an idle session after a valid report. It returns the exit status, the standard error, and `ended_idle`. The module `delegate/adapters/streams.py` gives you the helper `read_events`. It reads a line-delimited JSON stream, and ignores half a line at the end. A missing file, or a bad line before the end, raises `AdapterError`. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
 ## Steps
 
@@ -58,10 +60,10 @@ This example drives a harness `myharness`. The prompt goes on standard input. Th
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from delegate.adapters.process import run_harness
 from delegate.adapters.streams import read_events
 from delegate.ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
 
@@ -83,10 +85,7 @@ class MyHarnessAdapter:
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
-        with stream.open("w") as out:
-            process = subprocess.run(
-                command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd
-            )
+        process = run_harness(command, request)
         if not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: "
@@ -96,9 +95,7 @@ class MyHarnessAdapter:
         session_id = next((str(event["session"]) for event in events if "session" in event), None)
         results = [event for event in events if event.get("type") == "result"]
         end_state = END_STATE_OF_STATUS.get(str(results[-1].get("status")), FAILED) if results else FAILED
-        if process.returncode != 0 and end_state == FINISHED:
-            end_state = FAILED
-        return AdapterResult(process.returncode, end_state, session_id, stream)
+        return AdapterResult(process.returncode, end_state, session_id, stream, process.ended_idle)
 
     def activity(self, stream: Path) -> Activity:
         events = read_events(stream)
@@ -107,7 +104,7 @@ class MyHarnessAdapter:
         return Activity(tokens, times[-1] if times else None)
 ```
 
-The adapter fails loud. A harness that writes no event raises `AdapterError` with a message that names the agent. A stream with no `result` event ends `failed`. A harness that exits with an error cannot end `finished`.
+The adapter fails loud. A harness that writes no event raises `AdapterError` with a message that names the agent. A stream with no `result` event ends `failed`. The exit status stays beside the end state and does not change it: the engine weighs the exit status itself.
 
 ### 3. Record the streams and write the contract test
 
@@ -212,12 +209,12 @@ def test_a_stream_that_stops_at_the_output_limit_gives_capped_and_keeps_the_sess
     assert (result.end_state, result.session_id) == ("capped", "ses-2")
 
 
-def test_a_finished_stream_with_a_failing_exit_status_gives_failed(tmp_path, monkeypatch):
-    install(tmp_path, monkeypatch, FIXTURES / "finished.jsonl", exit_status=3)
+def test_a_finished_stream_with_a_failing_exit_status_stays_finished_and_keeps_the_exit_status(tmp_path, monkeypatch):
+    install(tmp_path, monkeypatch, FIXTURES / "finished.jsonl", exit_status=143)
 
     result = MyHarnessAdapter().run(request(tmp_path))
 
-    assert (result.exit_status, result.end_state) == (3, "failed")
+    assert (result.exit_status, result.end_state, result.ended_idle) == (143, "finished", False)
 
 
 def test_the_command_carries_the_model_and_the_agent_of_the_request_and_the_prompt_goes_on_stdin(tmp_path, monkeypatch):

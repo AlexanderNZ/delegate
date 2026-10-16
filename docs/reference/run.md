@@ -64,7 +64,7 @@ The engine sets `core.fsmonitor` to false in the configuration of each worktree 
 
 A specialist that ends `capped` or `failed`, or whose gates are red, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
 
-- A specialist ends `capped` or `failed` when the adapter result has the [**end state**](../glossary.md#end-state) `capped` or `failed`, or an exit status other than 0. The engine does not read the report of that run.
+- A specialist ends `capped` or `failed` when the adapter result has the [**end state**](../glossary.md#end-state) `capped` or `failed`. The engine does not read the report of that run. A result `finished` with an exit status other than 0 and no valid report also counts as `failed`. See [the end of an agent session](#the-end-of-an-agent-session).
 - A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0.
 - A report that is missing, is not valid, or has a status other than `committed` fails the step. It does not start a continuation.
 - The continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. It also holds the report rule with the absolute report path, as the first brief does. The specialist continues from these commits, and adds each change as a new commit.
@@ -81,6 +81,16 @@ One count covers the three triggers. Each mode has a continuation limit:
 | `economy` | 1 |
 
 When the specialist is not done after the limit, the step fails. The journal records `continuation-limit` with the count, and the reason of the step ends with `the continuation limit of <n> is reached`. The branch and the worktree stay, with all commits. The fix-up specialist of an `assure` round is not continued: its failure fails the step.
+
+## The end of an agent session
+
+Two rules decide how the engine reads the end of an agent session. They apply to the specialist, the fix-up specialist, and the verifier.
+
+**A valid report and a success continue the step, whatever the exit status.** The end state of the adapter result comes from the last result event of the session. The exit status does not change it. When the end state is `finished` and the exit status is not 0, the engine reads the report. A valid report continues the step, as with the exit status 0. For example, a coordinator stops an idle session with SIGTERM after its valid report. The exit status is 143, and the step continues. When the report is missing or not valid, the run counts as `failed`, as before. The specialist then continues, and the fix-up specialist and the verifier fail the step. The end states `capped` and `failed` are never a success, also with a valid report.
+
+**After a valid report, an idle session ends.** The engine gives each agent run an idle timeout of 900 seconds and a check of its report. While the agent runs, the adapter watches the stream of the session. The report can be valid, and the agent can write no event to the stream for 900 seconds. Then the adapter ends the session: it sends SIGTERM, and SIGKILL after 10 seconds more. The adapter result has `ended_idle` set. The journal records `idle-timeout` just before the result event of that agent. The step continues with the report, whatever the end state and the exit status. A session that ends at the idle timeout is not a failure, so it does not start a continuation.
+
+The idle timeout is longer than the ten minutes that a harness gives one foreground command at most. A foreground command writes no event while it runs. So the engine does not stop an agent that waits for one.
 
 ## The resume
 
@@ -278,7 +288,7 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 
 | Reason in the journal | Cause |
 |---|---|
-| `the specialist ended <state> with exit status <n>` | The adapter result is `failed` or `capped`, or the exit status is not 0. The engine does not read the report. |
+| `the specialist ended <state> with exit status <n>` | The adapter result is `failed` or `capped`, and the engine does not read the report. Or the result is `finished` with a bad exit status, and the report is not valid. See [the end of an agent session](#the-end-of-an-agent-session). |
 | `report missing: ...` | The specialist wrote no file at the report path. |
 | `report ... is not valid JSON`, `must be a JSON object`, `invalid: <field>: ...` | The report does not match the schema. The message names the field. |
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
@@ -292,12 +302,12 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | `branch ... holds no commit beyond <run branch> after the rebase; ...` | The run branch holds the work of the ticket already, so no commit is left. |
 | `the verifier could not start: ...` | The engine could not make the copy or the verifier brief. The message holds the cause. |
 | `invariant violation: the verifier changed the real worktree <path>: ...` | The worktree of the ticket differs after the verifier run. The run halts. See [the worktree invariant](#the-worktree-invariant). |
-| `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, or the exit status is not 0. The engine does not read the verdict report. |
+| `the verifier ended <state> with exit status <n>` | The verifier result is `failed` or `capped`, and the engine does not read the verdict report. Or the result is `finished` with a bad exit status, and the verdict report is not valid. |
 | `report missing: ...`, `report ... is invalid: <field>: ...` | The verdict report does not match the schema. The message names the field. A report that names another mode than the mode of the run (`full`, or `fix-up` in a fix-up round) is invalid. |
 | `the verifier rejected the branch after 2 fix-up rounds: <findings>` | The verdict is REJECT after the last fix-up round. In `economy` mode, the text is `after 1 fix-up round`. |
 | `the verifier rejected the chain after 1 fix-up round: <findings>` | `economy` mode. The findings of the last verdict name this ticket. See [the finding map](#the-finding-map). |
 | `not verified: the chain ended when the verification of the stack '<name>' failed` | `economy` mode. The ticket is in a stack after a stack that failed. |
-| `the fix-up specialist ended <state> with exit status <n>` | The adapter result of the fix-up specialist is `failed` or `capped`, or the exit status is not 0. |
+| `the fix-up specialist ended <state> with exit status <n>` | The adapter result of the fix-up specialist is `failed` or `capped`. Or the result is `finished` with a bad exit status, and the report is not valid. |
 | `the fix-up specialist reported status 'blocked': ...`, and the report errors above | The report of the fix-up specialist is missing, is invalid, or has a status other than `committed`. |
 | `the fix-up of round <n> is refused: ...` | The branch does not hold the rejected commit, or holds no commit beyond it. The message holds the cause from the brief generator. |
 | `run branch <name> cannot fast-forward to <branch>: ...` | The verdict is ACCEPT, but the run branch holds a commit that the ticket branch does not hold. |
@@ -321,15 +331,18 @@ The adapter has the method `run(request)`.
 | `report_path` | The path where the agent writes its report. |
 | `event_stream` | The path of the file where the adapter captures the event stream of the harness. The engine chooses it beside the report, and never over an earlier stream: `<report name>.stream.jsonl`, then `<report name>.stream-2.jsonl`, and so on. The stream of a verifier goes in `runs/<run id>/verifier/<ticket id>/` (or its `fixup-<round>/` directory) from the start, outside the temporary copy. The directory of the file exists. The engine writes the path to the journal in `agent-start` before it calls `run`. |
 | `resume_session` | The session id of the last run, when the engine resumes that session for a continuation. Otherwise `None`. The engine sets it only for an adapter with `supports_resume` set to true. |
+| `idle_timeout` | The idle timeout in seconds: 900 for each agent run. See [the end of an agent session](#the-end-of-an-agent-session). |
+| `report_valid` | The check of the report: a function with no argument. It reads the report at `report_path`, and gives true when the report is valid. |
 
 `run` returns a result.
 
 | `result` field | Meaning |
 |---|---|
 | `exit_status` | The exit status of the harness process. |
-| `end_state` | `finished`, `failed`, or `capped`. |
+| `end_state` | `finished`, `failed`, or `capped`: the end that the stream of the session gives. The exit status does not change it. |
 | `session_id` | The session id, or `None` when the harness gives none. |
 | `event_stream` | The path of the captured event stream: the `event_stream` of the request. |
+| `ended_idle` | True when the adapter ended the session at the idle timeout. Then `report_valid` gave true, and the harness wrote no event for `idle_timeout` seconds. Otherwise false. An adapter that cannot end a session ignores `idle_timeout` and `report_valid`, and gives false. |
 
 The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with two fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
 
@@ -384,6 +397,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `agent-start` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (0 for the specialist and the first verifier, else the fix-up round), `event_stream` (the path of the stream of the agent). The engine writes it just before each agent starts: the specialist, each continuation, the fix-up specialist, and each verifier. The result event of the agent names the same path. |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
+| `idle-timeout` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (as in `agent-start`), `seconds` (the idle timeout). The adapter ended the session of the agent after its valid report, because the agent wrote no event for that time. The engine writes it just before the result event of the agent, and the step continues. |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
 | `hotspot-finding` | `ticket`, `phase` (`build` or `fixup`), `round` (0 for the first build, else the fix-up round), `matches` (a list of objects, each with the changed `path` and the `pattern` it matches) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |

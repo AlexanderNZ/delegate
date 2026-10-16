@@ -175,12 +175,18 @@ def test_a_missing_verdict_report_fails_the_step_and_the_run_branch_does_not_cha
     assert "missing" in err and "verifier" in err and "Traceback" not in err
 
 
-@pytest.mark.parametrize(("end_state", "exit_status"), [("failed", 1), ("capped", 0), ("finished", 2)])
+@pytest.mark.parametrize(
+    ("end_state", "exit_status", "verdict_text"),
+    [("failed", 1, None), ("capped", 0, None), ("finished", 2, '{"verdict": "ACCEPT"}')],
+)
 def test_a_verifier_that_ends_failed_capped_or_with_a_bad_exit_status_never_advances_the_run_branch_even_with_an_accept_on_disk(
-    tmp_path, capsys, scripted, end_state, exit_status
+    tmp_path, capsys, scripted, end_state, exit_status, verdict_text
 ):
+    # A failed or capped run with a valid ACCEPT on disk did not finish. A finished run with a bad exit status
+    # counts only with a valid verdict report, and this ACCEPT is not valid.
     scripted.verifier_end_state = end_state
-    scripted.verifier_exit_status = exit_status  # the ACCEPT report is valid, but the run did not finish
+    scripted.verifier_exit_status = exit_status
+    scripted.verifier_report_text = verdict_text
     repo = make_repo(tmp_path)
     base_tip = tip(repo, "main")
 

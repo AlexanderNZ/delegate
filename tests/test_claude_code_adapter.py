@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,12 +76,47 @@ def test_a_stream_whose_result_is_an_api_error_gives_the_end_state_failed(tmp_pa
     assert (result.exit_status, result.end_state, result.session_id) == (1, "failed", "2c4ee840-1107-4928-874f-fde608ad16bb")
 
 
-def test_a_finished_result_with_a_non_zero_exit_status_gives_the_end_state_failed(tmp_path, monkeypatch):
-    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", exit_status=3)
+def test_a_finished_result_with_the_exit_status_of_sigterm_keeps_the_end_state_finished_and_the_exit_status(tmp_path, monkeypatch):
+    # A coordinator stopped an idle session with SIGTERM after its last `result` event, a success.
+    # The end state comes from the stream; the engine weighs the exit status itself.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", exit_status=143)
 
     result = adapters.get("claude-code").run(request(tmp_path))
 
-    assert (result.exit_status, result.end_state) == (3, "failed")
+    assert (result.exit_status, result.end_state, result.ended_idle) == (143, "finished", False)
+    assert result.session_id == "af2a3741-3f76-4944-91f5-3d5102c79b6b"
+
+
+def test_after_a_valid_report_a_session_that_writes_no_event_for_the_idle_timeout_ends_and_keeps_its_stream(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)  # the session stays open after its result
+    started = time.monotonic()
+
+    result = adapters.get("claude-code").run(request(tmp_path, idle_timeout=0.5, report_valid=lambda: True))
+
+    assert time.monotonic() - started < 60
+    assert (result.end_state, result.ended_idle) == ("finished", True)
+    assert result.exit_status != 0
+    assert result.session_id == "af2a3741-3f76-4944-91f5-3d5102c79b6b"
+    assert result.event_stream.read_text() == (claude_fake.FIXTURES / "finished.jsonl").read_text()
+
+
+def test_a_session_whose_report_is_not_valid_is_not_ended_at_the_idle_timeout(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=1.5)
+    started = time.monotonic()
+
+    result = adapters.get("claude-code").run(request(tmp_path, idle_timeout=0.3, report_valid=lambda: False))
+
+    assert time.monotonic() - started >= 1.5
+    assert (result.exit_status, result.end_state, result.ended_idle) == (0, "finished", False)
+
+
+def test_a_session_that_writes_events_more_often_than_the_idle_timeout_is_not_ended(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", drip_seconds=0.2)  # seven events, one each 0.2 seconds
+
+    result = adapters.get("claude-code").run(request(tmp_path, idle_timeout=1.0, report_valid=lambda: True))
+
+    assert (result.exit_status, result.end_state, result.ended_idle) == (0, "finished", False)
+    assert result.event_stream.read_text() == (claude_fake.FIXTURES / "finished.jsonl").read_text()
 
 
 def test_a_stream_cut_off_before_its_result_gives_the_end_state_failed_and_no_session_id(tmp_path, monkeypatch):

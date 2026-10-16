@@ -197,7 +197,10 @@ def test_a_fixup_that_does_not_sit_on_top_of_the_rejected_commit_makes_the_brief
     [
         pytest.param({"fixup_end_state": "failed", "fixup_exit_status": 1}, "failed with exit status 1", id="the-specialist-failed"),
         pytest.param({"fixup_end_state": "capped"}, "capped with exit status 0", id="the-specialist-hit-its-cap"),
-        pytest.param({"fixup_exit_status": 2}, "finished with exit status 2", id="the-exit-status-is-not-zero"),
+        pytest.param(
+            {"fixup_exit_status": 2, "fixup_write_report": False}, "finished with exit status 2",
+            id="the-exit-status-is-not-zero-and-no-report",
+        ),
         pytest.param({"fixup_write_report": False}, "report missing", id="no-report"),
         pytest.param({"fixup_report_text": "not json"}, "not valid JSON", id="a-report-that-is-not-json"),
         pytest.param(

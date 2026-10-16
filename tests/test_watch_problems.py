@@ -90,6 +90,38 @@ def test_the_second_continuation_of_a_step_is_a_problem_and_the_first_is_not(tmp
     assert problem_line(out) == "watch: problem: ticket a: the step continued 2 times (limit 2, trigger capped)"
 
 
+def test_a_finished_agent_with_the_exit_status_of_sigterm_and_a_valid_report_is_not_a_problem(tmp_path, capsys, git_identity):
+    # A coordinator stops an idle session with SIGTERM after its valid report; the step continues.
+    adapter = ScriptedAdapter(outcomes=[("finished", 143)], verifier_exit_status=143)
+
+    code, out, err, events = build_then_watch(tmp_path, capsys, adapter)
+
+    assert (code, err) == (0, "")
+    assert "watch: problem" not in out
+    assert [e["exit_status"] for e in events if e["event"] in ("adapter-result", "verify-result")] == [143, 143]
+
+
+@pytest.mark.parametrize("role", ["specialist", "verifier"])
+def test_an_agent_that_the_engine_ended_at_the_idle_timeout_is_not_a_problem(tmp_path, capsys, git_identity, role):
+    # The session wrote no `result` event, so it ended `failed`; but its report was valid, and the step continues.
+    adapter = ScriptedAdapter(idle_roles={role})
+
+    code, out, err, events = build_then_watch(tmp_path, capsys, adapter)
+
+    assert (code, err) == (0, "")
+    assert "watch: problem" not in out
+    assert [e["role"] for e in events if e["event"] == "idle-timeout"] == [role]
+
+
+def test_a_finished_agent_with_a_bad_exit_status_and_no_valid_report_is_a_problem_at_its_step_end(tmp_path, capsys, git_identity):
+    adapter = ScriptedAdapter(verifier_exit_status=2, write_verifier_report=False)
+
+    code, out, err, _ = build_then_watch(tmp_path, capsys, adapter)
+
+    assert (code, err) == (PROBLEM, "")
+    assert problem_line(out) == "watch: problem: ticket a: the step failed: the verifier ended finished with exit status 2"
+
+
 def test_one_continuation_after_a_capped_specialist_is_not_a_problem(tmp_path, capsys, git_identity):
     adapter = ScriptedAdapter(outcomes=[("capped", 0), ("finished", 0)])
 
@@ -120,10 +152,6 @@ def test_a_verifier_that_returns_no_result_is_a_problem_that_names_the_ticket(tm
         pytest.param(
             "fixup-result", {"round": 1, "exit_status": 0, "end_state": "failed", "session_id": None, "event_stream": "/s"},
             "the fix-up specialist ended failed with exit status 0", id="fixup-failed",
-        ),
-        pytest.param(
-            "adapter-result", {"exit_status": 3, "end_state": "finished", "session_id": None, "event_stream": "/s"},
-            "the specialist ended finished with exit status 3", id="nonzero-exit",
         ),
         pytest.param(
             "fixup-report", {"round": 1, "valid": False, "path": "/r.json", "reason": "report /r.json not found"},

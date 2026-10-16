@@ -19,6 +19,7 @@ end with no model.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +52,14 @@ class AdapterRequest:
     `resume_session` is the session id of an earlier run that the adapter
     resumes. The engine sets it only for an adapter whose `supports_resume` is
     true, and only for a continuation. It is `None` for a new agent.
+
+    `idle_timeout` (seconds) and `report_valid` let the adapter end a session
+    that stays open after its work: when `report_valid()` is true and the
+    harness wrote no event to the stream for `idle_timeout` seconds, the adapter
+    ends the session and sets `ended_idle` in its result. `report_valid` is the
+    check of the engine: it reads the report at `report_path` and tells whether
+    the report is valid. An adapter that cannot end a session ignores the two
+    fields.
     """
 
     agent: str
@@ -60,16 +69,26 @@ class AdapterRequest:
     report_path: Path
     event_stream: Path
     resume_session: str | None = None
+    idle_timeout: float | None = None
+    report_valid: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
 class AdapterResult:
-    """What an adapter gives back. `end_state` is one of END_STATES."""
+    """What an adapter gives back.
+
+    `end_state` is one of END_STATES: the end that the event stream of the
+    harness gives. The exit status does not change it, because the engine weighs
+    the exit status itself: a `finished` session with a valid report continues
+    the step, whatever the exit status. `ended_idle` is true when the adapter
+    ended the session at the idle timeout of the request.
+    """
 
     exit_status: int
     end_state: str
     session_id: str | None
     event_stream: Path
+    ended_idle: bool = False
 
     def __post_init__(self) -> None:
         if self.end_state not in END_STATES:

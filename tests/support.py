@@ -138,6 +138,15 @@ class ScriptedAdapter:
     `on_specialist` runs at the start of every specialist request, before the
     adapter touches the working directory. A test uses it to raise an error, to
     break the repository, or to start another command while the run holds its lock.
+
+    `report_checks` holds, for each request, the role (`specialist`, `fix-up`
+    or `verifier`), the `idle_timeout` of the request, and the answer of its
+    `report_valid` check before and after the adapter writes the report (`None`
+    when the request has no check). A request of a role in `idle_roles` plays an
+    idle session that the adapter ends at the idle timeout: when the check says
+    that the report is valid, the result has `ended_idle` set, the exit status
+    -15 (SIGTERM) and the end state `failed`, because the session wrote no
+    `result` event.
     """
 
     tier_column: str = "claude-code"
@@ -177,6 +186,19 @@ class ScriptedAdapter:
     outcomes: list[tuple[str, int]] = field(default_factory=list)
     session_ids: list[str] = field(default_factory=list)
     on_specialist: Callable[[AdapterRequest], None] | None = None
+    idle_roles: set[str] = field(default_factory=set)
+    report_checks: list[tuple[str, float | None, bool | None, bool | None]] = field(default_factory=list)
+
+    def _report_check(self, request: AdapterRequest) -> bool | None:
+        return None if request.report_valid is None else request.report_valid()
+
+    def _ended(self, role: str, request: AdapterRequest, before: bool | None, result: AdapterResult) -> AdapterResult:
+        """Record the checks of the request, and end an idle session of a role in `idle_roles` after a valid report."""
+        after = self._report_check(request)
+        self.report_checks.append((role, request.idle_timeout, before, after))
+        if role in self.idle_roles and after:
+            return AdapterResult(-15, "failed", result.session_id, result.event_stream, ended_idle=True)
+        return result
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         if request.agent.endswith("verifier"):
@@ -205,6 +227,8 @@ class ScriptedAdapter:
         elif (self.fixup_commit if is_fixup else self.commit) and files:
             git(request.cwd, "commit", "-q", "-m", f"scripted work ({request.agent})")
             head = git(request.cwd, "rev-parse", "HEAD").strip()
+        before = self._report_check(request)
+        role = "fix-up" if is_fixup else "specialist"
         if (self.fixup_write_report if is_fixup else self.write_report):
             branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
             if is_fixup and callable(self.fixup_report_text):
@@ -223,12 +247,12 @@ class ScriptedAdapter:
         stream = request.event_stream
         stream.write_text('{"type":"result"}\n')
         if is_fixup:
-            return AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream)
+            return self._ended(role, request, before, AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream))
         if ticket in self.failing_tickets:
-            return AdapterResult(1, "failed", self.session_id, stream)
+            return self._ended(role, request, before, AdapterResult(1, "failed", self.session_id, stream))
         end_state, exit_status = self.outcomes[min(index, len(self.outcomes) - 1)] if self.outcomes else (self.end_state, self.exit_status)
         session = self.session_ids[min(index, len(self.session_ids) - 1)] if self.session_ids else self.session_id
-        return AdapterResult(exit_status, end_state, session, stream)
+        return self._ended(role, request, before, AdapterResult(exit_status, end_state, session, stream))
 
     def activity(self, stream: Path) -> Activity:
         if not stream.is_file():
@@ -245,6 +269,7 @@ class ScriptedAdapter:
         if self.during_verifier is not None:
             self.during_verifier(request)
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        before = self._report_check(request)
         if self.write_verifier_report:
             text = self.verifier_report_text
             if callable(text):
@@ -256,7 +281,8 @@ class ScriptedAdapter:
             request.report_path.write_text(text)
         stream = request.event_stream
         stream.write_text('{"type":"result"}\n')
-        return AdapterResult(self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream)
+        result = AdapterResult(self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream)
+        return self._ended("verifier", request, before, result)
 
 
 def read_journal(stdout: str) -> list[dict[str, object]]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -77,12 +78,23 @@ def test_a_stream_with_an_error_event_gives_the_end_state_failed_although_the_ex
     assert (result.exit_status, result.end_state, result.session_id) == (0, "failed", "ses_ee2d2a428ffefX3Jkh7WsGRki5")
 
 
-def test_a_finished_stream_with_a_non_zero_exit_status_gives_the_end_state_failed(tmp_path, monkeypatch):
-    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl", exit_status=3)
+def test_a_finished_stream_with_the_exit_status_of_sigterm_keeps_the_end_state_finished_and_the_exit_status(tmp_path, monkeypatch):
+    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl", exit_status=143)
 
     result = adapters.get("opencode").run(request(tmp_path))
 
-    assert (result.exit_status, result.end_state) == (3, "failed")
+    assert (result.exit_status, result.end_state, result.ended_idle) == (143, "finished", False)
+
+
+def test_after_a_valid_report_a_session_that_writes_no_event_for_the_idle_timeout_ends(tmp_path, monkeypatch):
+    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)
+    started = time.monotonic()
+
+    result = adapters.get("opencode").run(request(tmp_path, idle_timeout=0.5, report_valid=lambda: True))
+
+    assert time.monotonic() - started < 60
+    assert (result.end_state, result.ended_idle, result.session_id) == ("finished", True, "ses_ee2d28a59ffevBJM22I2ZGtbFd")
+    assert result.exit_status != 0
 
 
 def test_an_error_event_after_a_finished_step_gives_the_end_state_failed(tmp_path, monkeypatch):

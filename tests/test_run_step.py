@@ -319,12 +319,17 @@ def test_the_brief_gives_the_text_of_a_ticket_file_and_states_when_no_path_is_re
     assert "no path is reserved" in sections["File boundary"].lower()
 
 
-@pytest.mark.parametrize(("end_state", "exit_status"), [("failed", 1), ("capped", 0), ("finished", 2)])
+@pytest.mark.parametrize(
+    ("end_state", "exit_status", "write_report"), [("failed", 1, True), ("capped", 0, True), ("finished", 2, False)]
+)
 def test_a_specialist_that_ends_failed_capped_or_with_a_bad_exit_status_fails_the_step_and_the_report_is_not_trusted(
-    tmp_path, capsys, scripted, end_state, exit_status
+    tmp_path, capsys, scripted, end_state, exit_status, write_report
 ):
+    # A failed or capped run with a valid report on disk did not finish. A finished run with a bad exit status
+    # counts only with a valid report, and this one wrote none.
     scripted.end_state = end_state
-    scripted.exit_status = exit_status  # the report on disk is valid, but the run did not finish
+    scripted.exit_status = exit_status
+    scripted.write_report = write_report
     repo = make_repo(tmp_path)
 
     code, out, err = run(repo, capsys)

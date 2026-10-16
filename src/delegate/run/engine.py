@@ -65,7 +65,7 @@ from __future__ import annotations
 import secrets
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -73,7 +73,7 @@ from pathlib import Path
 
 from ..ports import harness
 from ..ports.gates import GateRunner
-from ..ports.harness import Adapter, AdapterRequest
+from ..ports.harness import Adapter, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
@@ -426,6 +426,51 @@ def _start_agent(journal: Journal, ticket: str, role: str, round_number: int, re
     return stream
 
 
+def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
+    """The check of a report that an adapter calls: true when `read` gives a report, false when it raises ReportError."""
+
+    def valid() -> bool:
+        try:
+            read()
+        except ReportError:
+            return False
+        return True
+
+    return valid
+
+
+def _request(
+    agent: str, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path, report_valid: Callable[[], bool],
+    resume_session: str | None = None,
+) -> AdapterRequest:
+    """The request for one agent run, with the idle timeout of the run and the check of its report."""
+    return AdapterRequest(
+        agent, model, prompt, cwd, report_path, stream, resume_session,
+        idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid,
+    )
+
+
+def _journal_idle(journal: Journal, result: AdapterResult, ticket: str, role: str, round_number: int) -> None:
+    """Record that the adapter ended the session of the agent at the idle timeout, if it did, before its result event."""
+    if result.ended_idle:
+        journal.append("idle-timeout", ticket=ticket, role=role, round=round_number, seconds=domain.IDLE_TIMEOUT_SECONDS)
+
+
+def _session_done(result: AdapterResult, report_valid: Callable[[], bool]) -> bool:
+    """Tell whether the engine takes the report of an agent run.
+
+    A session that the adapter ended at the idle timeout had a valid report. A
+    session whose stream ends in a success (`finished`) counts with exit status
+    0, and with any other exit status when its report is valid: a coordinator
+    or the adapter can stop an idle session after its work, with SIGTERM.
+    """
+    if result.ended_idle:
+        return True
+    if result.end_state != harness.FINISHED:
+        return False
+    return result.exit_status == 0 or report_valid()
+
+
 def _specialist_done(prior: list[dict[str, object]]) -> bool:
     """True when the journal shows a valid specialist report after the last time the specialist was spawned."""
     spawned = valid = -1
@@ -547,17 +592,19 @@ def _build_with_continuations(
                 "the run was interrupted", resumed=False,
             )
     resume_session: str | None = None
+    report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     while True:
         if spawned:
             spawned, result = False, None
         else:
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
-            result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, stream, resume_session))
+            result = adapter.run(_request(stack.specialist, model, prompt, worktree, report_path, stream, report_valid, resume_session))
+            _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream),
             )
-        if result is not None and (result.end_state != harness.FINISHED or result.exit_status != 0):
+        if result is not None and not _session_done(result, report_valid):
             trigger = harness.CAPPED if result.end_state == harness.CAPPED else harness.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
             gate_output = None
@@ -773,12 +820,14 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
         ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
-    result = step.adapter.run(AdapterRequest(step.stack.specialist, model, prompt, step.worktree, report_path, stream))
+    report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
+    result = step.adapter.run(_request(step.stack.specialist, model, prompt, step.worktree, report_path, stream, report_valid))
+    _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),
     )
-    if result.end_state != harness.FINISHED or result.exit_status != 0:
+    if not _session_done(result, report_valid):
         raise _StepFailed(f"the fix-up specialist ended {result.end_state} with exit status {result.exit_status}")
     try:
         report = read_specialist_report(report_path, ticket.id)
@@ -854,7 +903,10 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
         before = snapshot_worktree(step.vcs, step.worktree)
         # The stream goes in the evidence directory from the start, outside the copy, so it stays when the copy goes.
         stream = _start_agent(step.journal, ticket.id, ROLE_VERIFIER, round_number, evidence / report_path.name)
-        result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path, stream))
+        # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
+        in_scratch = report_path
+        report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
+        result = step.adapter.run(_request(step.stack.verifier, model, prompt, copy, report_path, stream, report_valid))
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:
@@ -873,6 +925,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
     stream = result.event_stream
     if stream.is_relative_to(scratch):
         stream = evidence / stream.relative_to(scratch)
+    _journal_idle(step.journal, result, ticket.id, ROLE_VERIFIER, round_number)
     step.journal.append(
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(stream),
@@ -883,7 +936,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
         )
         raise violation
-    if result.end_state != harness.FINISHED or result.exit_status != 0:
+    if not _session_done(result, _report_check(lambda: read_verifier_report(report_path, mode))):
         raise _StepFailed(f"the verifier ended {result.end_state} with exit status {result.exit_status}")
     try:
         report = read_verifier_report(report_path, mode)

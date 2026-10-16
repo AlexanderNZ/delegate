@@ -13,6 +13,12 @@ from .harness_fake import FakeHarness as FakeClaude
 FIXTURES: Path = Path(__file__).parent / "fixtures" / "claude-code"
 
 
-def install(tmp_path: Path, monkeypatch, fixture: str, *, exit_status: int = 0, stderr: str = "") -> FakeClaude:
-    """Put a `claude` command that replays `fixture` first on PATH."""
-    return harness_fake.install(tmp_path, monkeypatch, "claude", FIXTURES, fixture, exit_status=exit_status, stderr=stderr)
+def install(
+    tmp_path: Path, monkeypatch, fixture: str, *, exit_status: int = 0, stderr: str = "", drip_seconds: float = 0,
+    hold_seconds: float = 0,
+) -> FakeClaude:
+    """Put a `claude` command that replays `fixture` first on PATH. See `harness_fake.install` for the options."""
+    return harness_fake.install(
+        tmp_path, monkeypatch, "claude", FIXTURES, fixture, exit_status=exit_status, stderr=stderr,
+        drip_seconds=drip_seconds, hold_seconds=hold_seconds,
+    )

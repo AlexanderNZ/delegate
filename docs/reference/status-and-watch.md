@@ -226,12 +226,14 @@ A problem is one of these events. The line `watch: problem: ticket <id>: <reason
 |---|---|---|
 | A step ends blocked or partial | `report-validation` or `fixup-report` with a `status` other than `committed` | `the step ended <status>: <blocked_reason>` |
 | A step ends with [**gates**](../glossary.md#gate) that are not green | `step-end` with the state `failed`, when the newest result of a gate command of the ticket is red | `the gates are not green: <commands>` |
-| An agent fails | `adapter-result`, `fixup-result` or `verify-result` with the [**end state**](../glossary.md#end-state) `failed`, an exit status other than 0, or (for a [**fix-up**](../glossary.md#fix-up) [**specialist**](../glossary.md#specialist) and a [**verifier**](../glossary.md#verifier)) the end state `capped` | `the <role> ended <end state> with exit status <n>` |
+| An agent fails | `adapter-result`, `fixup-result` or `verify-result` with the [**end state**](../glossary.md#end-state) `failed`, or (for a [**fix-up**](../glossary.md#fix-up) [**specialist**](../glossary.md#specialist) and a [**verifier**](../glossary.md#verifier)) the end state `capped` | `the <role> ended <end state> with exit status <n>` |
 | An agent returns no result | `report-validation`, `fixup-report` or `verify-report` with `valid` false | `the <role> returned no valid result: <reason>` |
 | A second [**continuation**](../glossary.md#continuation) of a step | `continuation` with a `count` of 2 or more | `the step continued <n> times (limit <n>, trigger <trigger>)` |
 | A step fails for any other reason | `step-end` with the state `failed`, and no red gate | `the step failed: <reason>` |
 
 A specialist that ends `capped` continues, so it is not a problem. The first continuation of a step is also not a problem. A gate that is red and turns green after a continuation is not a problem.
+
+An agent that ends `finished` with an exit status other than 0 is not a problem at its result event. With a valid report, the step continues. Without a valid report, the next report event or the `step-end` gives the problem. An agent that `delegate run` ended at the idle timeout is also not a problem. The journal records `idle-timeout` before its result event, and `watch` does not check that result event. See [the end of an agent session](run.md#the-end-of-an-agent-session).
 
 ### The verdict
 

@@ -36,6 +36,12 @@ FIXUP_ROUND_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 1}
 # more assurance, `economy` for fewer tokens.
 CONTINUATION_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 1}
 
+# After its report is valid, an agent session that writes no event for this
+# many seconds is idle, and the engine ends it. A foreground command of an agent
+# writes no event while it runs, so the time is longer than the ten minutes
+# that a harness gives one such command at most.
+IDLE_TIMEOUT_SECONDS: int = 900
+
 # The two verdicts of a verifier.
 ACCEPT: str = "ACCEPT"
 REJECT: str = "REJECT"
