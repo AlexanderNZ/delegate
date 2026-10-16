@@ -52,7 +52,7 @@ delegate status
 delegate watch --stall-minutes 30 --max-minutes 50
 ```
 
-`status` prints the progress of the run: the percentage, the ETA, and the tokens. Then it prints one line for each ticket, with the state, the [**verdict**](../glossary.md#verdict), and the branch. Under the line of a ticket with a [**step**](../glossary.md#step), it prints the time used, the tokens, and, while an agent runs, the time since the last activity of the agent. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
+`status` prints the progress of the run: the percentage, the ETA, and the tokens. Then it prints one line for each ticket, with the state, the [**verdict**](../glossary.md#verdict), and the branch. Under the line of a ticket with a [**step**](../glossary.md#step), it prints the time used and the tokens. While an agent runs, it also prints the time since its last activity. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
 
 `watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. The journal names the [**event stream**](../glossary.md#event-stream) of each agent when the agent starts, so an agent that writes its stream is not a stall.
 
