@@ -501,22 +501,44 @@ def test_json_and_follow_together_are_a_usage_error(tmp_path, capsys):
 
 # The streams that `delegate status` cannot read. Each is the stream of one agent; the kind names why it cannot be read.
 OPENCODE_STEP_WITH_NO_TOKENS = '{"type":"step_finish","timestamp":1791490924475,"sessionID":"s","part":{"reason":"stop"}}\n'
-BAD_STREAMS = ["missing", "unreadable", "directory", "first-line-not-json", "opencode-step-finish-with-no-tokens", "not-utf-8"]
+# A line that is JSON but that has a bad event shape makes the reader of the adapter raise an error that is not an
+# AdapterError: ValueError, TypeError, or AttributeError.
+BAD_SHAPES = {
+    "opencode-tokens-total-not-a-number": '{"type":"step_finish","timestamp":1791490924475,"part":{"tokens":{"total":"abc"}}}\n',
+    "opencode-timestamp-not-a-number": '{"type":"text","timestamp":"x"}\n',
+    "opencode-line-is-a-number": "5\n",
+    "claude-code-timestamp-not-a-time": '{"type":"assistant","timestamp":"not a time","message":{"id":"m","usage":{"output_tokens":1}}}\n',
+    "claude-code-usage-not-a-number": '{"type":"result","subtype":"success","usage":{"input_tokens":"many"}}\n',
+    "claude-code-line-is-a-list": "[1, 2]\n",
+}
+BAD_STREAMS = [
+    "missing", "unreadable", "parent-not-searchable", "directory", "first-line-not-json",
+    "opencode-step-finish-with-no-tokens", "not-utf-8", *BAD_SHAPES,
+]
 
 
 @pytest.fixture
 def bad_stream(request, tmp_path):
     """Make a stream that cannot be read, of the kind that the case names. Give its path and the adapter of its harness."""
-    made: list[Path] = []
+    made: list[tuple[Path, int]] = []  # each path that has no permission, and the mode that it gets back
 
     def make(run: Run, kind: str) -> str:
         path = run.streams / f"{kind}.stream.jsonl"
+        if kind in ("unreadable", "parent-not-searchable") and os.geteuid() == 0:
+            pytest.skip("the root user can read a file that has no read permission")
         if kind == "unreadable":
-            if os.geteuid() == 0:
-                pytest.skip("the root user can read a file that has no read permission")
             path.write_text(claude("finished.jsonl"))
             path.chmod(0)
-            made.append(path)
+            made.append((path, 0o600))
+        elif kind == "parent-not-searchable":
+            parent = run.streams / "locked"
+            parent.mkdir()
+            path = parent / f"{kind}.stream.jsonl"
+            path.write_text(claude("finished.jsonl"))
+            parent.chmod(0)
+            made.append((parent, 0o700))
+        elif kind in BAD_SHAPES:
+            path.write_text(BAD_SHAPES[kind])
         elif kind == "directory":
             path.mkdir()
         elif kind == "first-line-not-json":
@@ -528,8 +550,8 @@ def bad_stream(request, tmp_path):
         return str(path)
 
     yield make
-    for path in made:
-        path.chmod(0o600)
+    for path, mode in made:
+        path.chmod(mode)
 
 
 def adapter_of(kind: str) -> str:
@@ -604,7 +626,7 @@ def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens
 
 @pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
 def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
-    tmp_path, monkeypatch, bad_stream, kind, where
+    tmp_path, capsys, monkeypatch, bad_stream, kind, where
 ):
     repo = bare_repo(tmp_path)
     run, adapter = a_run_with_a_bad_stream(repo, bad_stream, kind, where)
@@ -616,5 +638,5 @@ def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_n
         "ended": (f"run r1 running 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good} tokens", "  b built, 30s used"),
         "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  b running specialist, 50s used"),
     }[where]
-    assert code == 0
+    assert (code, capsys.readouterr().err) == (0, "")
     assert out.splitlines()[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ..ports.harness import Activity, AdapterError
+from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain
 from .journal import JournalError, read_new_events
@@ -216,10 +216,7 @@ def _ticket(
     idle = None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
-        if is_live and not Path(stream).exists():
-            found: Activity | None = Activity(0, None)  # the harness has not opened the stream yet
-        else:
-            found = _read(activity, Path(stream))
+        found = _read(activity, Path(stream), is_live)
         if found is None:
             tokens = None  # a count without this agent is not the count of the ticket
             continue
@@ -230,15 +227,23 @@ def _ticket(
     return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle), duration
 
 
-def _read(activity: StreamReader, stream: Path) -> Activity | None:
+def _read(activity: StreamReader, stream: Path, is_live: bool) -> Activity | None:
     """The activity in a stream, or None when the stream cannot be read.
 
-    The stream can be missing, a file that the process cannot read, a directory, not text, or not an event stream of the
-    harness. The status then shows no tokens and no activity for that agent, and does not fail.
+    The stream of the agent that runs now (`is_live`) can be missing before the harness opens it: it then has no
+    activity yet. Any other failure is a stream that cannot be read: a missing stream of an agent that ended, a parent
+    directory that the process cannot search, a file that it cannot read, a directory, not text, not an event stream of
+    the harness, or an event that the reader cannot use. The status only shows data, so it then shows no tokens and no
+    activity for that agent, and does not fail. `delegate run` keeps the errors of the reader.
     """
     try:
+        if is_live:
+            try:
+                stream.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                return Activity(0, None)  # the harness has not opened the stream yet
         return activity(stream)
-    except (AdapterError, OSError, UnicodeDecodeError):
+    except Exception:  # noqa: BLE001 - any failure to read one stream is no data for that agent
         return None
 
 
