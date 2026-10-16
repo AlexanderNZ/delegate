@@ -227,6 +227,21 @@ def _report_shape(path: str | Path, required: str, optional: str | None, notes: 
     return "\n\n".join(parts)
 
 
+def _report_rule(place: str, report_path: str | Path) -> str:
+    """The rule for the one file that an agent writes outside its `place`: the report, at its absolute path.
+
+    The report path is outside the place where the agent works, and the engine
+    keeps its state in the git directory. An agent that makes a relative path to
+    the report can make a directory there, and then remove it.
+    """
+    return (
+        f"The report path is outside the {place}. Write the report only at the absolute path `{report_path}`. "
+        f"Use this path as it is. Do not make a relative path to it from the {place}. "
+        f"Except for the {place} and the report, create, change, or remove nothing inside the git directory of the repository. "
+        f"Change no other file outside the {place}."
+    )
+
+
 def _sections(*pairs: tuple[str, str]) -> str:
     return "\n\n".join(f"{title}\n\n{body}" for title, body in pairs) + "\n"
 
@@ -378,7 +393,8 @@ def specialist_brief(
     """The brief the engine sends a specialist: the ticket, the file boundary, the gates, the report path.
 
     The ticket text is behavioural and holds no path. The file boundary is the
-    worktree, and the hotspot patterns that only the coordinator may change.
+    worktree, the report rule, and the hotspot patterns that only the coordinator
+    may change.
 
     With `rejected` and `findings` the brief is a fix-up brief. It adds the
     findings verbatim and the rejected commit, and it tells the specialist to
@@ -391,7 +407,8 @@ def specialist_brief(
     else:
         reserved = "No path is reserved for the coordinator in this stack."
     boundary = (
-        f"Work only in the worktree `{worktree}`. Change no file outside it.\n\n"
+        f"Work only in the worktree `{worktree}`.\n\n"
+        f"{_report_rule('worktree', report_path)}\n\n"
         f"{reserved}\n\n"
         "Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit."
     )
@@ -456,7 +473,7 @@ def continuation_brief(
         lines += ["The branch holds no commit yet."]
     if gate_output:
         lines += ["", "The engine ran the gates after the last run. This is the output of the red gates:", "", "```", gate_output.rstrip("\n"), "```"]
-    lines += ["", f"When you finish, write the report to `{report_path}`, as the first brief says."]
+    lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]
     section = _sections(("## Continuation", "\n".join(lines)))
     if resumed:
         return section
@@ -464,14 +481,14 @@ def continuation_brief(
 
 
 def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:
-    """The sections the engine adds to a verifier brief: the working copy and the report path.
+    """The sections the engine adds to a verifier brief: the working copy, the report rule, and the report path.
 
     `copy` is the temporary copy of the branch that the engine prepared. `mode`
     is `full` or `fix-up`, and the report must name it.
     """
     working_copy = (
         f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
-        "You may break the copy to prove a test red. Change no file outside it. Never push."
+        "You may break the copy to prove a test red. Never push.\n\n" + _report_rule("copy", report_path)
     )
     report = _report_shape(
         report_path,
