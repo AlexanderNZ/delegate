@@ -1,14 +1,14 @@
 ---
 man: DELEGATE-RUN(1)
 man_name: "delegate-run — build the tickets of a workflow"
-synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--break-lock] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--retry <ticket>] [--break-lock] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
 ---
 
 # Reference: `delegate run`
 
 `delegate run <workflow>` builds the [**tickets**](../glossary.md#ticket) of a [**workflow**](../glossary.md#workflow). For each ticket, the [**engine**](../glossary.md#engine) makes a [**worktree**](../glossary.md#worktree), spawns the [**specialist**](../glossary.md#specialist) of the [**stack**](../glossary.md#stack) through a [**harness**](../glossary.md#harness) [**adapter**](../glossary.md#adapter), checks the specialist report, runs the [**gates**](../glossary.md#gate) itself, and records each event in a [**journal**](../glossary.md#journal). In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode), the engine then verifies the branch with a [**blind**](../glossary.md#blind) [**verifier**](../glossary.md#verifier), and moves the [**run branch**](../glossary.md#run-branch) to the branch only on [**ACCEPT**](../glossary.md#accept). A [**REJECT**](../glossary.md#reject) starts a [**fix-up**](../glossary.md#fix-up) round, up to two rounds. In [**`economy`**](../glossary.md#economy) mode, the engine builds a [**chain**](../glossary.md#chain) of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, whose gates are red, or whose report is not valid after it committed work, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
-A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
+A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To go on with one failed step of a run, add `--retry <ticket>`. See [the retry](#the-retry). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
 
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
@@ -24,6 +24,7 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
 | `--dry-run` | Validate the workflow and print the plan; create nothing. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run. |
+| `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the gates, the verifier or the scoped verifier. |
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |
 | `--repo <repo>` | The git repository to build in; default is the current directory. |
 | `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |
@@ -115,7 +116,37 @@ An open step goes on as follows:
 - If the journal shows a valid report after the last time the specialist was spawned, the engine does not spawn the specialist again. It runs the gates, and the step goes on from there.
 - Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond `base-branch`, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
 - The continuations that the journal holds count against the limit of the mode.
-- In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of verifier runs that the journal holds, and the limit of two fix-up rounds counts across the stop.
+- In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of [**verdicts**](../glossary.md#verdict) that the journal holds, and the limit of two fix-up rounds counts across the stop. A verifier run that ended with no verdict does not count: for example, a verifier that a stop or the time limit of a harness killed. The resume runs that round again.
+
+## The retry
+
+`delegate run --resume <run-id> --retry <ticket>` goes on with one failed step of a run. A failed step has a `step-end`, so a resume without `--retry` does not build it again. The retry also works in a run that has a `run-end`. It takes the [**run lock**](../glossary.md#run-lock), and it builds the steps that are not complete, as a resume does.
+
+The retry spawns no specialist. It uses the worktree and the commits of the step again, and goes on at the first phase that did not complete. The phase comes from the journal events of the step:
+
+| Events of the failed step | Where the step goes on |
+|---|---|
+| No `verify-start` | The gates. The engine checks the report of the specialist again, runs the gates, rebases onto the run branch, runs the gates again, and starts the full verifier at round 0. A step whose gates are red uses the continuations that are left. |
+| A `verify-start`, and no `verdict` | The full verifier, at round 0. |
+| A `verify-start` after the last `verdict`, which is a REJECT | The scoped verifier of the fix-up commit, at the same round. The engine checks the fix-up commit again: the hotspots, and the rule that it is a new commit on top of the rejected commit. The gates do not run again. |
+| A REJECT as the last `verdict`, and a `fixup-report` of the next round that says `committed` | The gates of the fix-up. The engine checks the fix-up commit again and runs the gates, then starts the scoped verifier. |
+
+The verifier round of the retry is the number of verdicts in the journal. A verifier run that ended with no verdict does not count against the fix-up limit. After the first verifier of the retry, the step goes on as usual: a REJECT starts a fix-up round, up to the limit.
+
+The run branch can move after the step failed, when the run built another ticket after it. The branch of the step then does not hold the tip of the run branch. The engine checks a fix-up commit, rebases the branch onto the run branch, runs the gates, and starts a full verifier at the round of the retry. The rejected commit is not on the rebased branch, so a scoped verifier cannot run.
+
+The engine writes `retry` before it goes on, then a new `step-end` and a new `run-end`. The newest `step-end` of a ticket wins, and so does the newest `run-end`. A ticket that the failed step made the engine skip stays skipped.
+
+The command exits 1, names the ticket, and changes nothing, when the step cannot be retried:
+
+- The ticket is not a ticket of the run.
+- The run is in `economy` mode.
+- The step is built, was skipped, did not start, or is open. Resume an open step without `--retry`.
+- The specialist, or the fix-up specialist of the next round, gave no valid report that says `committed`. A retry spawns no specialist.
+- The verifier accepted the branch, and the step failed after the verdict.
+- The verifier rejected the branch after the last fix-up round.
+
+`--retry` without `--resume` is a usage error, and the command exits 2.
 
 ## The run lock
 
@@ -226,7 +257,7 @@ When a stack fails after the fix-up round:
 
 A ticket that failed in the build is not in the chain. The engine still verifies the tickets that were built. If they are all accepted, the run branch moves to the chain tip, and the run ends `failed` because of the ticket that failed.
 
-A resume that stops before the end of the chain verifies the stacks again. A stack with an ACCEPT verdict in the journal is not verified again. The verifier runs of the stack in the journal count against the fix-up limit.
+A resume that stops before the end of the chain verifies the stacks again. A stack with an ACCEPT verdict in the journal is not verified again. The verdicts of the stack in the journal count against the fix-up limit. A verifier run that ended with no verdict does not count.
 
 ## The verifier step
 
@@ -405,6 +436,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, or `report-invalid`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
+| `retry` | `ticket`, `phase` (`gates`, `verifier`, or `scoped-verifier`: where the step goes on), `round` (the verifier round of the retry), `reason` (the reason the step failed before). See [the retry](#the-retry). |
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock `--break-lock` removed) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
@@ -424,7 +456,8 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 ## Limits of this version
 
 - In `assure` mode, every ticket branch starts from `base-branch`, not from the work of the tickets that block it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
-- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run.
+- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run. `--retry` goes on with one failed step also after `run-end`, but only in `assure` mode, and the tickets that the engine skipped for that step stay skipped.
+- During a retry of a run that ended, `delegate status` and `delegate watch` read the old `run-end` until the retry writes a new one.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
 - In `economy` mode, a defect shows only at the end of the chain. The stack of a rejected chain fails as a whole when no finding names a ticket.
 - In `economy` mode, a fix-up commit goes on the chain tip. A stack that the engine verified before it does not see that commit. The verifier of the fix-up sees only the delta.

@@ -242,7 +242,7 @@ def test_the_continuations_in_the_journal_count_against_the_limit_after_a_stop(t
     assert [e["count"] for e in events if e["event"] == "continuation-limit"] == [2]
 
 
-def test_a_verifier_round_that_a_stop_left_open_goes_on_with_the_next_round_number(tmp_path, capsys, scripted):
+def test_a_verifier_round_that_a_stop_left_open_goes_on_with_the_same_round_number(tmp_path, capsys, scripted):
     scripted.verdict_sequence = ["REJECT", "ACCEPT"]
     repo = make_repo(tmp_path, HEAD + ticket("a"))
     run_id = finished_run(repo, capsys)
@@ -256,17 +256,17 @@ def test_a_verifier_round_that_a_stop_left_open_goes_on_with_the_next_round_numb
     assert (code, err) == (0, "")
     assert scripted.calls == [] and scripted.fixup_calls == [] and len(scripted.verifier_calls) == 1
     starts = [e for e in read_journal_file(repo, run_id) if e["event"] == "verify-start"]
-    assert [e["round"] for e in starts] == [0, 1, 2]
+    assert [e["round"] for e in starts] == [0, 1, 1]
     assert "a.txt" in tree(repo, "run/demo")
 
 
-def test_the_verifier_runs_in_the_journal_count_against_the_fix_up_limit_after_a_stop(tmp_path, capsys, scripted):
+def test_the_verdicts_in_the_journal_count_against_the_fix_up_limit_after_a_stop(tmp_path, capsys, scripted):
     scripted.verdict_sequence = ["REJECT"]
     repo = make_repo(tmp_path, HEAD + ticket("a"))
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
     assert code == 1
     run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
-    cut_journal_after(repo, run_id, "verify-start", nth=3)  # stopped in the last round the limit allows
+    cut_journal_after(repo, run_id, "verdict", nth=3)  # stopped after the verdict of the last round the limit allows
     scripted.verifier_calls.clear(), scripted.fixup_calls.clear()
 
     code, out, err = resume_main(repo, capsys, run_id)
@@ -276,3 +276,17 @@ def test_the_verifier_runs_in_the_journal_count_against_the_fix_up_limit_after_a
     events = read_journal_file(repo, run_id)
     assert [e["state"] for e in events if e["event"] == "step-end"] == ["failed"]
     assert event_names(events)[-1] == "run-end"
+
+
+def test_a_verifier_that_a_stop_ended_with_no_verdict_does_not_count_against_the_fix_up_limit(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    run_id, _ = kill_a_run(repo, 2)  # killed as the verifier of ticket a starts: verify-start, and no verdict
+    scripted.verdict_sequence = ["REJECT", "REJECT", "ACCEPT"]
+
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+
+    assert (code, err) == (0, "")
+    assert len(scripted.fixup_calls) == 2
+    starts = [e for e in read_journal_file(repo, run_id) if e["event"] == "verify-start"]
+    assert [e["round"] for e in starts] == [0, 0, 1, 2]
+    assert {"a.txt", "fixup-1.txt", "fixup-2.txt"} <= set(tree(repo, "run/demo"))

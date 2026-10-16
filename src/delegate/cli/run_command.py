@@ -3,7 +3,8 @@
 `--dry-run` validates the file and prints the plan in dependency order. It
 creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
-with a run that stopped, from its journal.
+with a run that stopped, from its journal. `--retry <ticket>` with it goes on
+with one failed step of that run, also when the run ended.
 """
 
 from __future__ import annotations
@@ -30,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="validate the workflow and print the plan; create nothing")
     parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run")
+    parser.add_argument(
+        "--retry", metavar="TICKET",
+        help="with --resume, go on with the failed step of TICKET, also in a run that ended; "
+        "use its worktree and its commits again, and go on at the gates, the verifier or the scoped verifier",
+    )
     parser.add_argument(
         "--break-lock", action="store_true",
         help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
@@ -82,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("a workflow file or --resume RUN_ID is required")
     if args.resume is not None and args.dry_run:
         parser.error("--resume and --dry-run cannot go together")
+    if args.retry is not None and args.resume is None:
+        parser.error("--retry needs --resume RUN_ID")
     if args.workflow is None:
         try:
             args.workflow = workflow_of_run(args.repo, args.resume, vcs)
@@ -108,7 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             result = run_workflow(
-                workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, break_lock=args.break_lock
+                workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
+                break_lock=args.break_lock,
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

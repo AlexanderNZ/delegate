@@ -48,7 +48,16 @@ a `step-end` is complete, and the engine never builds it again. A step with a
 `run-branch-advance` has its commit on the run branch already, so the engine
 only closes it. Any other open step restarts in its own worktree, which the
 engine makes again if it is gone. A specialist whose report the journal shows as
-valid is not spawned again.
+valid is not spawned again. A verifier run that ended with no verdict does not
+count against the fix-up limit: the resume runs that round again.
+
+A resume with `retry` goes on with one failed step of `assure` mode, also in a
+run that ended (see `_retry_plan`). It uses the worktree and the commits of the
+step again, spawns no specialist, and goes on at the first phase that did not
+complete: the gates, the verifier, or the scoped verifier. When the run branch
+moved after the step failed, the retry rebases, runs the gates, and verifies
+the whole branch. The journal records `retry`, and then a new `step-end` and a
+new `run-end`. The newest of each wins.
 
 The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
 start of a ticket in a chain, and the handling of a verdict. The engine reads
@@ -110,6 +119,11 @@ PHASE_FIXUP: str = "fixup"
 
 # The `trigger` of a `continuation` whose report check failed on a branch with work: it asks only for a corrected report.
 TRIGGER_REPORT_INVALID: str = "report-invalid"
+
+# The `phase` of a `retry` event: the first phase of the failed step that did not complete.
+RETRY_GATES: str = "gates"
+RETRY_VERIFIER: str = "verifier"
+RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
 
 
 class EngineError(Exception):
@@ -256,22 +270,26 @@ class _Progress:
     events: list[dict[str, object]] = field(default_factory=list)
 
 
-def _restore(events: list[dict[str, object]], run_id: str) -> _Progress:
-    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended."""
+def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
+    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended, unless `retrying`."""
     progress = _Progress(events=events)
     started: str | None = None
     for event in events:
         kind, ticket = event["event"], str(event.get("ticket"))
-        if kind == "run-end":
+        if kind == "run-end" and not retrying:
             raise EngineError(f"run {run_id!r} has ended with the result {event['result']!r}; it cannot be resumed")
         if kind == "step-start":
             started = ticket
         elif kind == "step-end":
             # The newest step-end of a ticket wins: the verification at the end of an
             # `economy` chain can fail a ticket that was built.
+            # A retry can build a ticket that failed before.
             if ticket in progress.built:
                 progress.built.remove(ticket)
             if event["state"] == BUILT:
+                if ticket in progress.failed:
+                    progress.failed.remove(ticket)
+                    del progress.failures[ticket]
                 progress.built.append(ticket)
             else:
                 if ticket not in progress.failed:
@@ -296,9 +314,89 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
             raise EngineError(f"workflow {workflow_path} differs from run {run_id}: {name} was {run_start[name]!r}, is now {value!r}")
 
 
+@dataclass(frozen=True)
+class _RetryPlan:
+    """Where a failed step goes on: the phase and the verifier round, from the journal events of the step (`prior`).
+
+    `rejected` and `findings` are set when the branch holds a fix-up commit: the
+    commit that the last verdict rejected, and the findings of that verdict.
+    """
+
+    ticket: str
+    phase: str
+    round: int
+    prior: tuple[dict[str, object], ...]
+    rejected: str | None = None
+    findings: tuple[str, ...] = ()
+
+
+def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str) -> _RetryPlan:
+    """The first phase of the failed step of `ticket_id` that did not complete. Raise EngineError when it cannot be retried.
+
+    The phase comes from the journal events of the step. The round is the
+    number of verdicts, because a verifier run that ended with no verdict does
+    not count against the fix-up limit:
+
+    - No verifier started: the gates.
+    - The last verifier started after the last verdict: that verifier again.
+      It is the full verifier when the step has no verdict, and otherwise the
+      scoped verifier of the fix-up commit.
+    - The last verdict is a REJECT, and the fix-up specialist of the next round
+      reported committed work: the gates of that fix-up, then its scoped verifier.
+
+    A retry spawns no specialist. So a step whose specialist, or whose fix-up
+    specialist, gave no valid report that says committed is refused. So is a
+    step that the verifier accepted, or rejected after the last fix-up round.
+    Only a failed step of `assure` mode can be retried.
+    """
+    refused = f"ticket {ticket_id!r} of run {run_id!r} cannot be retried"
+    if ticket_id not in {ticket.id for ticket in workflow.tickets}:
+        raise EngineError(f"{refused}: it is not a ticket of the run")
+    if workflow.mode != domain.ASSURE:
+        raise EngineError(f"{refused}: --retry works only in assure mode, and the run is in {workflow.mode} mode")
+    if ticket_id in progress.built:
+        raise EngineError(f"{refused}: it is built; --retry goes on only with a step that failed")
+    if ticket_id in progress.skipped:
+        raise EngineError(f"{refused}: it was skipped; --retry goes on only with a step that failed")
+    if ticket_id == progress.open_ticket:
+        raise EngineError(f"{refused}: its step is open; --resume without --retry goes on with it")
+    if ticket_id not in progress.failed:
+        raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that failed")
+    prior = tuple(e for e in progress.events if e.get("ticket") == ticket_id)
+    validations = [e for e in prior if e["event"] == "report-validation"]
+    if not _specialist_done(list(prior)) or validations[-1]["status"] != domain.COMMITTED:
+        raise EngineError(
+            f"{refused}: its specialist gave no valid report that says committed; "
+            "--retry goes on only at the gates, the verifier or the scoped verifier"
+        )
+    starts = [index for index, e in enumerate(prior) if e["event"] == "verify-start"]
+    verdicts = [index for index, e in enumerate(prior) if e["event"] == "verdict"]
+    round_number = len(verdicts)
+    if not starts:
+        return _RetryPlan(ticket_id, RETRY_GATES, 0, prior)
+    if not verdicts:
+        return _RetryPlan(ticket_id, RETRY_VERIFIER, 0, prior)
+    last = prior[verdicts[-1]]
+    if domain.is_accepted(str(last["verdict"])):
+        raise EngineError(f"{refused}: its verifier accepted it, and the step failed after the verdict: {progress.failures[ticket_id]}")
+    rejected = str(prior[max(index for index in starts if index < verdicts[-1])]["commit"])
+    findings = tuple(str(finding) for finding in last["findings"])  # type: ignore[union-attr]
+    if starts[-1] > verdicts[-1]:
+        return _RetryPlan(ticket_id, RETRY_SCOPED_VERIFIER, round_number, prior, rejected, findings)
+    if round_number > domain.fixup_round_limit(workflow.mode):
+        raise EngineError(f"{refused}: its verifier rejected it after the last fix-up round")
+    reports = [e for e in prior if e["event"] == "fixup-report" and e["round"] == round_number]
+    if not reports or not reports[-1]["valid"] or reports[-1]["status"] != domain.COMMITTED:
+        raise EngineError(
+            f"{refused}: the fix-up specialist of round {round_number} gave no valid report that says committed; "
+            "--retry goes on only at the gates, the verifier or the scoped verifier"
+        )
+    return _RetryPlan(ticket_id, RETRY_GATES, round_number, prior, rejected, findings)
+
+
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
-    resume: str | None = None, break_lock: bool = False,
+    resume: str | None = None, retry: str | None = None, break_lock: bool = False,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -308,7 +406,10 @@ def run_workflow(
     setting come from `vcs`. The engine runs each gate command through `gates`.
 
     With `resume`, the run id of an earlier run, go on with that run: build the
-    tickets that are not complete, and append to its journal.
+    tickets that are not complete, and append to its journal. With `retry` too,
+    the id of a ticket whose step failed, also go on with that step (see
+    `_retry_plan`). Raise EngineError, which names the ticket, when the step
+    cannot be retried.
 
     The run holds the lock of its run branch until it ends. Raise EngineError,
     which names the holder, when another run holds the lock. `break_lock`
@@ -324,7 +425,9 @@ def run_workflow(
         if resume is None:
             _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
-            return _execute(workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken)
+            return _execute(
+                workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry
+            )
     except LockError as error:
         raise EngineError(str(error)) from None
 
@@ -332,8 +435,10 @@ def run_workflow(
 def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
+    retry: str | None = None,
 ) -> RunResult:
     order = plan_order(workflow)
+    plan: _RetryPlan | None = None
     if not resuming:
         with _vcs_errors():
             vcs.create_branch(repo, workflow.run_branch, workflow.base_branch)
@@ -345,12 +450,14 @@ def _execute(
         progress = _Progress()
     else:
         journal, events = _journal_events(state_dir, run_id)
-        progress = _restore(events, run_id)
+        progress = _restore(events, run_id, retrying=retry is not None)
         _check_same_run(workflow, workflow_path, events[0], run_id)
         with _vcs_errors():
             run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
         if not run_branch_exists:
             raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
+        # A step that cannot be retried is refused before the journal changes.
+        plan = _retry_plan(workflow, progress, run_id, retry) if retry is not None else None
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket,
@@ -358,6 +465,10 @@ def _execute(
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
+    retried_reason = ""
+    if plan is not None:
+        failed.remove(plan.ticket)
+        retried_reason = failures.pop(plan.ticket)
     complete = {*built, *failed, *skipped}
     ended_early = False
     for position, ticket in enumerate(order):
@@ -370,9 +481,14 @@ def _execute(
             continue
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         try:
-            reason = _build_ticket(
-                workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
-            )
+            if plan is not None and ticket.id == plan.ticket:
+                reason = _retry_ticket(
+                    _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason
+                )
+            else:
+                reason = _build_ticket(
+                    workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
+                )
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
             # step unknown, so the run ends here. The journal says why. A verifier
@@ -384,6 +500,8 @@ def _execute(
             failed.append(ticket.id)
             failures[ticket.id] = reason
             for unreached in order[position + 1 :]:
+                if unreached.id in complete:
+                    continue  # a retry: the ticket ended in the run before
                 skipped[unreached.id] = domain.unreached_reason(ticket.id, halted)
                 journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
             break
@@ -546,7 +664,8 @@ def _build_ticket(
         _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         specialist_done = _specialist_done(prior)
         continuations = sum(1 for e in prior if e["event"] == "continuation")
-        verify_rounds = sum(1 for e in prior if e["event"] == "verify-start")
+        # A verifier run that ended with no verdict does not count against the fix-up limit.
+        verify_rounds = sum(1 for e in prior if e["event"] == "verdict")
     # The commits of a ticket are the commits beyond the point where its branch started. In a chain that
     # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
     since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit)
@@ -781,16 +900,18 @@ def _verify_ticket(step: _Step, first_round: int = 0) -> str | None:
         return str(failed)
 
 
-def _accepted_commit(step: _Step, first_round: int = 0) -> str:
+def _accepted_commit(step: _Step, first_round: int = 0, first_body: str | None = None) -> str:
     """Verify the branch of the step blind, and return the commit that a verifier accepted.
 
     A REJECT starts a fix-up round, up to `FIXUP_ROUND_LIMIT` of the mode.
     Each round, and the first pass, spawns a fresh verifier. Raise `_Rejected`
     after the last round, and `_StepFailed` for any other cause.
 
-    A resume sets `first_round` to the number of verifier runs that the journal
+    A resume sets `first_round` to the number of verdicts that the journal
     holds. The first pass of the resume is a full verification at that round
-    number, and the limit counts across the stop.
+    number, and the limit counts across the stop. A retry that goes on at the
+    scoped verifier gives its fix-up brief in `first_body`: the first pass is
+    then the scoped verifier of the fix-up commit that the branch holds.
     """
     mode = step.workflow.mode
     used_up = domain.rounds_used_up_reason(mode, first_round)
@@ -799,7 +920,7 @@ def _accepted_commit(step: _Step, first_round: int = 0) -> str:
     rejected = ""
     report: VerifierReport | None = None
     for round_number in domain.verification_rounds(mode, first_round):
-        fixup_body = None
+        fixup_body = first_body if round_number == first_round else None
         if report is not None:
             fixup_body = _fixup_round(step, round_number, rejected, report.findings)
         verified = _tip(step.vcs, step.repo, step.branch)
@@ -823,7 +944,7 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     tier, model = step.roles["specialist"]
     findings_path = step.run_dir / "findings" / f"{ticket.id}.fixup-{round_number}.md"
     findings_path.parent.mkdir(parents=True, exist_ok=True)
-    findings_path.write_text("".join(f"- {finding}\n" for finding in findings))
+    findings_path.write_text(_findings_text(findings))
     findings_text = findings_path.read_text()
     step.journal.append(
         "fixup-start", ticket=ticket.id, round=round_number, rejected_commit=rejected, findings_file=str(findings_path),
@@ -858,23 +979,44 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the fix-up specialist")
     if unfinished:
         raise _StepFailed(unfinished)
+    brief = _checked_fixup_brief(step, round_number, rejected, findings_text)
+    _fixup_gates(step, round_number)
+    return brief
+
+
+def _findings_text(findings: list[str]) -> str:
+    """The findings of a verdict as the fix-up specialist and the scoped verifier get them: one list item for each."""
+    return "".join(f"- {finding}\n" for finding in findings)
+
+
+def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings_text: str) -> str:
+    """Check the fix-up commit of a round, and return the scoped brief for the fresh verifier.
+
+    The paths that the fix-up changed must match no hotspot, and the brief
+    generator must accept the fix as a new commit on top of the rejected commit.
+    Raise `_StepFailed` otherwise.
+    """
+    ticket = step.ticket
     stop = _hotspot_stop(
         step.vcs, step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
     )
     if stop:
         raise _StepFailed(stop)
     try:
-        brief = fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
+        return fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
+
+
+def _fixup_gates(step: _Step, round_number: int) -> None:
+    """Run the gates after the fix-up of a round. Raise `_StepFailed` when one is red."""
     red = [
         gate for gate in step.stack.gates
-        if not _run_gate(step.gates, gate, ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
+        if not _run_gate(step.gates, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
     ]
     if red:
         raise _StepFailed("gates red: " + "; ".join(red))
-    return brief
 
 
 def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> VerifierReport:
@@ -993,6 +1135,56 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     return None
 
 
+def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str) -> str | None:
+    """Go on with a failed step at the phase of `plan`. Return None when it is built, or the reason it failed.
+
+    The step uses its worktree and its commits again, and the engine writes
+    `retry` with the phase where the step goes on, and the reason it failed
+    (`failure`). A step that failed before any verifier goes on at the gates of
+    the first build, as an open step does after a stop. Otherwise:
+
+    - The branch must hold the tip of the run branch. If it does not, the run
+      branch moved after the step failed: the engine rebases, runs the gates,
+      and starts a full verifier at the round of the plan. A fix-up commit is
+      checked against the hotspots and the brief generator before the rebase.
+    - The verifier phase starts a full verifier at round 0.
+    - The scoped verifier phase checks the fix-up commit again, and starts the
+      scoped verifier of the fix-up round.
+    - The gates of a fix-up check the fix-up commit and run the gates, then the
+      scoped verifier starts.
+    """
+    workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
+    if plan.phase == RETRY_GATES and plan.rejected is None:
+        step.journal.append("retry", ticket=ticket.id, phase=RETRY_GATES, round=plan.round, reason=failure)
+        return _build_ticket(
+            workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
+            list(plan.prior),
+        )
+    branch_ref = f"refs/heads/{step.branch}"
+    on_tip = _holds(vcs, step.repo, _tip(vcs, step.repo, workflow.run_branch), branch_ref)
+    fixup_held = plan.rejected is not None and _holds(vcs, step.repo, plan.rejected, branch_ref)
+    goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_GATES
+    step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
+    _prepare_worktree(
+        vcs, step.repo, step.worktree, step.branch, workflow.base_branch, step.state_dir / "hooks" / step.run_id / ticket.id
+    )
+    try:
+        if plan.rejected is not None and fixup_held:
+            brief = _checked_fixup_brief(step, plan.round, plan.rejected, _findings_text(list(plan.findings)))
+            if on_tip:
+                if plan.phase == RETRY_GATES:
+                    _fixup_gates(step, plan.round)
+                return _advance_run_branch(step, _accepted_commit(step, plan.round, brief))
+        elif goes_on == RETRY_VERIFIER:
+            return _advance_run_branch(step, _accepted_commit(step, plan.round))
+        reason = _rebase_onto_run_branch(step)
+        if reason:
+            return reason
+        return _advance_run_branch(step, _accepted_commit(step, plan.round))
+    except _StepFailed as failed:
+        return str(failed)
+
+
 class _ChainRun:
     """The verification at the end of an `economy` chain.
 
@@ -1071,7 +1263,8 @@ class _ChainRun:
             last = step
             if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
-            first_round = sum(1 for e in events if e["event"] == "verify-start" and e.get("stack") == name)
+            # A verifier run that ended with no verdict does not count against the fix-up limit.
+            first_round = len(verdicts)
             try:
                 _accepted_commit(step, first_round)
             except _StepFailed as failed:

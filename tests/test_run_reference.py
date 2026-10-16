@@ -183,6 +183,32 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
 
 
 @outside_the_package
+def test_the_reference_lists_the_retry_event_of_a_real_retried_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
+    from .support import read_journal_file, resume_main, run_main
+    from .test_run_multi import HEAD, ticket
+
+    # The first verifier ends with no report, so the step fails; the retry runs that verifier again.
+    adapter = ScriptedAdapter(write_verifier_report=False)
+    adapters.register("scripted", adapter)
+    try:
+        repo = make_repo(tmp_path, HEAD + ticket("a"))
+        code, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+        run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+        adapter.write_verifier_report = True
+        retried, _, _ = resume_main(repo, capsys, run_id, "--retry", "a")
+    finally:
+        adapters.unregister("scripted")
+    assert (code, retried) == (1, 0)
+    events = read_journal_file(repo, run_id)
+    assert "retry" in [e["event"] for e in events]
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    for event in events:
+        for name in event:
+            if name not in ("seq", "time", "event"):
+                assert f"`{name}`" in rows[f"`{event['event']}`"], (event["event"], name)
+
+
+@outside_the_package
 def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
     from .support import kill_a_run, read_journal_file, resume_main
 

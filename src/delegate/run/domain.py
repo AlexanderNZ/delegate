@@ -148,9 +148,10 @@ def is_accepted(verdict: str) -> bool:
 def verification_rounds(mode: str, first_round: int) -> range:
     """The rounds of verification of a step: round 0 is the full pass, and each later round follows a fix-up.
 
-    A resume sets `first_round` to the number of verifier runs that the journal
-    holds, so the limit counts across the stop. The range is empty when those
-    runs use up the fix-up rounds of the mode.
+    A resume sets `first_round` to the number of verdicts that the journal
+    holds, so the limit counts across the stop. A verifier run that ended with
+    no verdict does not count. The range is empty when those verdicts use up the
+    fix-up rounds of the mode.
     """
     return range(first_round, fixup_round_limit(mode) + 1)
 
@@ -158,8 +159,8 @@ def verification_rounds(mode: str, first_round: int) -> range:
 def rounds_used_up_reason(mode: str, first_round: int) -> str | None:
     """The reason a resumed step fails at once, or None when a round is left.
 
-    The reason holds when the verifier runs of the stopped run are more than the
-    fix-up rounds of the mode.
+    The reason holds when the verifier runs with a verdict of the stopped run are
+    more than the fix-up rounds of the mode.
     """
     limit = fixup_round_limit(mode)
     if first_round > limit:
