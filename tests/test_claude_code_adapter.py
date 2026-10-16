@@ -114,6 +114,29 @@ def test_a_continuation_resumes_the_session_of_the_last_run(tmp_path, monkeypatc
     assert result.end_state == "finished"
 
 
+@pytest.mark.parametrize("agent, resume_session", [
+    ("python-specialist", None),
+    ("python-verifier", None),
+    ("python-specialist", "af2a3741-3f76-4944-91f5-3d5102c79b6b"),
+])
+def test_every_run_disallows_the_monitor_and_the_background_tasks(tmp_path, monkeypatch, agent, resume_session):
+    # Under `claude --print` the notification of a background task or a monitor never reaches the agent.
+    # An agent that waits for one polls until its turns end, and an expired monitor keeps the session alive.
+    monkeypatch.delenv("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", raising=False)
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path, agent=agent, resume_session=resume_session))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv.count("--disallowedTools") == 1
+    disallowed = set(re.split(r"[,\s]+", argv[argv.index("--disallowedTools") + 1]))
+    assert {"Monitor", "TaskStop"} <= disallowed
+    # The `run_in_background` parameter of the Bash and subagent tools is no tool name, so only this variable removes it.
+    assert call["env"].get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS") == "1"
+    assert argv[argv.index("--agent") + 1] == agent
+
+
 def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):
     claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     stream = tmp_path / "chosen" / "x.jsonl"

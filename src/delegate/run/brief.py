@@ -242,6 +242,13 @@ def _report_rule(place: str, report_path: str | Path) -> str:
     )
 
 
+FOREGROUND_RULE = (
+    "Run every command in the foreground. Do not use background tasks or a monitor tool. "
+    "In a headless session, their notifications do not come to you, and a monitor that stays open "
+    "keeps the session alive after your report. For a long command, give the command a long timeout."
+)
+
+
 def _sections(*pairs: tuple[str, str]) -> str:
     return "\n\n".join(f"{title}\n\n{body}" for title, body in pairs) + "\n"
 
@@ -390,7 +397,7 @@ def specialist_brief(
     rejected: str | None = None,
     findings: str | None = None,
 ) -> str:
-    """The brief the engine sends a specialist: the ticket, the file boundary, the gates, the report path.
+    """The brief the engine sends a specialist: the ticket, the file boundary, the foreground rule, the gates, the report path.
 
     The ticket text is behavioural and holds no path. The file boundary is the
     worktree, the report rule, and the hotspot patterns that only the coordinator
@@ -432,6 +439,7 @@ def specialist_brief(
         ))
     pairs += [
         ("## File boundary", boundary),
+        ("## Commands", FOREGROUND_RULE),
         ("## Gates", "The engine runs these gates itself after you finish.\n\n" + _bash("\n".join(gates))),
         ("## Report", report),
     ]
@@ -481,7 +489,7 @@ def continuation_brief(
 
 
 def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:
-    """The sections the engine adds to a verifier brief: the working copy, the report rule, and the report path.
+    """The sections the engine adds to a verifier brief: the working copy, the report rule, the foreground rule, and the report path.
 
     `copy` is the temporary copy of the branch that the engine prepared. `mode`
     is `full` or `fix-up`, and the report must name it.
@@ -501,7 +509,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) 
         "`unverified` lists what you could not verify.",
         verifier_example(mode),
     )
-    return "\n" + _sections(("## Working copy", working_copy), ("## Report", report))
+    return "\n" + _sections(("## Working copy", working_copy), ("## Commands", FOREGROUND_RULE), ("## Report", report))
 
 
 def verifier_run_brief(

@@ -1,8 +1,10 @@
 """The Claude Code adapter: drive `claude` in headless mode.
 
 The command is `claude --print --output-format stream-json --verbose --model
-<model> --agent <agent>`. The prompt goes on standard input, never in argv, so
-a long brief meets no argument limit and shows in no process list. The
+<model> --agent <agent> --disallowedTools Monitor,TaskStop`, with
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in its environment, so each agent runs
+every command in the foreground. The prompt goes on standard input, never in
+argv, so a long brief meets no argument limit and shows in no process list. The
 harness writes one JSON event on each line of standard output. The adapter
 copies that stream to the file that the request names, and reads the final
 `result` event from it.
@@ -20,6 +22,7 @@ message id once.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +35,17 @@ COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
 TIER_COLUMN: str = "claude-code"
+
+# The tools that the adapter disallows for every agent. Under `--print` the
+# notification of a monitor never comes to the agent, and a monitor that stays
+# open keeps the session alive after the report. `TaskStop` only stops a
+# background task, and the environment below removes the background tasks.
+DISALLOWED_TOOLS: tuple[str, ...] = ("Monitor", "TaskStop")
+
+# The environment that removes the background tasks. The `run_in_background`
+# parameter of the Bash tool and of the subagent tool is not a tool name, so
+# `--disallowedTools` cannot remove it.
+FOREGROUND_ENVIRONMENT: dict[str, str] = {"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 
 # The fields of a `usage` object that its token count adds: the input, the cache, and the output.
 USAGE_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
@@ -66,12 +80,16 @@ class ClaudeCodeAdapter:
         command = [
             COMMAND, "--print", "--output-format", "stream-json", "--verbose",
             "--model", request.model, "--agent", request.agent,
+            "--disallowedTools", ",".join(DISALLOWED_TOOLS),
         ]
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
         stream = request.event_stream
         with stream.open("w") as out:
-            process = subprocess.run(command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd)
+            process = subprocess.run(
+                command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd,
+                env={**os.environ, **FOREGROUND_ENVIRONMENT},
+            )
         text = stream.read_text()
         if not text.strip():
             raise AdapterError(

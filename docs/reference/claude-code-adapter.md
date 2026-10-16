@@ -13,8 +13,10 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --agent <agent> [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --agent <agent> --disallowedTools Monitor,TaskStop [--resume <session id>]
 ```
+
+The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
 
 | Part | Meaning |
 |---|---|
@@ -23,11 +25,19 @@ claude --print --output-format stream-json --verbose --model <model> --agent <ag
 | `--verbose` | The harness needs it to write the events with `--print` and `--output-format stream-json`. |
 | `--model <model>` | The model from the `claude-code` column of the [**tier table**](../glossary.md#tier-table). The adapter never chooses a model. A `--tiers` file changes it. |
 | `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
+| `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
 | `--resume <session id>` | Only for a [**continuation**](../glossary.md#continuation). See [the resume](#the-resume). |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | An environment variable, not an argument. It removes the `run_in_background` parameter of the Bash tool and of the subagent tool. That parameter is not a tool name, so `--disallowedTools` cannot remove it. |
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
-The adapter passes no permission option. The permission rules of the repository and of the user decide which tools the agent can use. See [what the adapter does not set](#what-the-adapter-does-not-set).
+The adapter passes no permission option other than `--disallowedTools`. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [what the adapter does not set](#what-the-adapter-does-not-set).
+
+## The foreground rule
+
+Each agent runs every command in the foreground. Under `--print`, the notification of a background task or of a monitor does not come to the agent. An agent that waits for one polls with sleep commands and uses its turns. A monitor that stays open keeps the [**session**](../glossary.md#session) alive after the agent writes its [**report**](../glossary.md#report), and the engine waits for the session to end.
+
+The adapter therefore removes these tools for every agent, and the specialist brief and the verifier brief tell the agent to run every command in the foreground. Measured on Claude Code 2.1.287 on 2026-10-17: with `--disallowedTools Monitor,TaskStop`, the `init` event lists neither tool. With `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, the Bash tool has no `run_in_background` parameter.
 
 ## How the adapter selects the agent
 
