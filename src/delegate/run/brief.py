@@ -13,6 +13,7 @@ a dependency to assemble text.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -20,7 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
-from .reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS
+from .reports import (
+    SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
+    specialist_example, verifier_example,
+)
 
 DELEGATION_DOC = Path("docs") / "agents" / "delegation.md"
 FINDINGS_HEADING = "## Findings under verification"
@@ -195,6 +199,34 @@ def _fenced_diff(diff: str) -> str:
     return "```diff\n" + diff.rstrip("\n") + "\n```"
 
 
+def _field_list(fields: dict[str, str], values: dict[str, Sequence[str]]) -> str:
+    """One line for each report field: its name and its JSON type, from the tables of the report module.
+
+    `values` gives the permitted values of a field that has a fixed set.
+    """
+    lines = []
+    for name, kind in fields.items():
+        line = f"- `{name}`: {kind}"
+        if name in values:
+            line += ", one of " + ", ".join(f"`{value}`" for value in values[name])
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _report_shape(path: str | Path, required: str, optional: str | None, notes: str, example: dict[str, object]) -> str:
+    """The text of a `## Report` section: the path, the type of each field, the notes, and one example object."""
+    parts = [
+        f"When you finish, write one JSON object to `{path}`. "
+        "Give each field the JSON type that this list names. The engine rejects a report with a field of a different type.",
+        "Required fields:\n\n" + required,
+    ]
+    if optional is not None:
+        parts.append("Optional fields:\n\n" + optional)
+    parts.append(notes)
+    parts.append("Example:\n\n```json\n" + json.dumps(example, indent=2) + "\n```")
+    return "\n\n".join(parts)
+
+
 def _sections(*pairs: tuple[str, str]) -> str:
     return "\n\n".join(f"{title}\n\n{body}" for title, body in pairs) + "\n"
 
@@ -363,12 +395,13 @@ def specialist_brief(
         f"{reserved}\n\n"
         "Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit."
     )
-    fields = ", ".join(f"`{name}`" for name in SPECIALIST_REQUIRED)
-    report = (
-        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
-        "`status` is one of " + ", ".join(f"`{s}`" for s in SPECIALIST_STATUSES) + ". "
+    report = _report_shape(
+        report_path,
+        _field_list(SPECIALIST_REQUIRED, {"status": SPECIALIST_STATUSES}),
+        _field_list(SPECIALIST_OPTIONAL, {}),
         "`gates_green` states whether the gates passed in your run. "
-        "Optional fields: " + ", ".join(f"`{name}`" for name in SPECIALIST_OPTIONAL) + "."
+        "A string field holds one string. To give more than one item in a string field, join the items with \"; \".",
+        specialist_example(ticket, str(worktree)),
     )
     pairs = [("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}")]
     if rejected is not None and findings is not None:
@@ -440,14 +473,16 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) 
         f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
         "You may break the copy to prove a test red. Change no file outside it. Never push."
     )
-    fields = ", ".join(f"`{name}`" for name in VERIFIER_REQUIRED)
-    report = (
-        f"When you finish, write a JSON object to `{report_path}` with these fields: {fields}. "
-        f"`mode` is `{mode}`. `verdict` is one of " + ", ".join(f"`{v}`" for v in VERIFIER_VERDICTS) + ". "
-        "Each entry of `criteria` is an object with the strings `criterion` and `evidence`. "
-        "`gate_output` holds the output of the gates that you ran. "
+    report = _report_shape(
+        report_path,
+        _field_list(VERIFIER_REQUIRED, {"verdict": VERIFIER_VERDICTS}),
+        None,
+        f"`mode` is `{mode}`. "
+        "`gate_output` holds the output of the gates that you ran, as one string. "
         "A REJECT lists at least one finding in `findings`. "
-        "`unverified` lists what you could not verify."
+        "Write each finding as one string with its file, its line and its text, not as an object. "
+        "`unverified` lists what you could not verify.",
+        verifier_example(mode),
     )
     return "\n" + _sections(("## Working copy", working_copy), ("## Report", report))
 

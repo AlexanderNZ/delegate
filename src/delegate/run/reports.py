@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import VERDICTS
+from .domain import ACCEPT, COMMITTED, VERDICTS
 
 # The values of the `status` field of a specialist report.
 SPECIALIST_STATUSES: tuple[str, ...] = ("committed", "blocked", "partial")
@@ -52,6 +52,44 @@ VERIFIER_REQUIRED: dict[str, str] = {
     "findings": "list of strings",
     "unverified": "list of strings",
 }
+
+
+def specialist_example(ticket: str, worktree: str) -> dict[str, object]:
+    """One specialist report for `ticket` that passes `read_specialist_report`.
+
+    The brief shows it to the specialist as the exact shape of the report. It
+    holds each field of the tables above, with a value of the type that the
+    table names. A text in angle brackets tells the agent what to put there.
+    """
+    return {
+        "ticket": ticket,
+        "status": COMMITTED,
+        "branch": "<the branch of the worktree>",
+        "head_sha": "<the full SHA of the tip of the branch>",
+        "commits": ["<the full SHA of the first commit that you added>", "<the full SHA of the next commit>"],
+        "gates_green": True,
+        "summary": "<what you changed, in one or two sentences>",
+        "worktree": worktree,
+        "judgement_calls": "<the first decision that you made>; <the next decision>",
+    }
+
+
+def verifier_example(mode: str) -> dict[str, object]:
+    """One verdict report for `mode` that passes `read_verifier_report`.
+
+    The brief shows it to the verifier as the exact shape of the report, as
+    `specialist_example` does for the specialist.
+    """
+    return {
+        "mode": mode,
+        "verdict": ACCEPT,
+        "criteria": [
+            {"criterion": "<the text of one acceptance criterion>", "evidence": "<the file, the line, or the output that proves it>"}
+        ],
+        "gate_output": "<the output of the first gate>\n<the output of the next gate>",
+        "findings": [],
+        "unverified": ["<one thing that you could not verify>"],
+    }
 
 
 class ReportError(Exception):

@@ -101,7 +101,8 @@ class ScriptedAdapter:
 
     On a verifier call it writes `verifier_files` to the working directory (a
     verifier that breaks its copy), and writes the verdict report: `verdict` with
-    `verdict_findings`, or the `verifier_report_text` you give, or none.
+    `verdict_findings`, or the `verifier_report_text` you give (a text, or a
+    function of the request that gives the text or None for the default), or none.
     `during_verifier` runs while the verifier runs, so a test can change the
     real repository then. `verifier_calls` holds every verifier request. `verifier_heads` and
     `verifier_remotes` hold the HEAD commit and the remotes of the working
@@ -115,8 +116,8 @@ class ScriptedAdapter:
     a fix-up. The adapter then commits `fixup_files` (by default one new file
     for each fix-up), or amends the last commit when `fixup_amend` is set, or
     commits nothing when `fixup_commit` is false. It ends with `fixup_end_state`
-    and `fixup_exit_status`, and writes the report `fixup_report_text` (by
-    default a valid report) unless `fixup_write_report` is false. `fixup_calls`
+    and `fixup_exit_status`, and writes the report `fixup_report_text` (a text,
+    or a function of the request and the head; by default a valid report) unless `fixup_write_report` is false. `fixup_calls`
     holds these requests. `verdict_sequence` gives the verdict of each verifier call in
     turn; the last verdict repeats. A verifier request whose prompt starts with
     "## Findings under verification" gets a report for the mode `fix-up`.
@@ -153,7 +154,7 @@ class ScriptedAdapter:
     calls: list[AdapterRequest] = field(default_factory=list)
     verdict: str = "ACCEPT"
     verdict_findings: list[str] | None = None
-    verifier_report_text: str | None = None
+    verifier_report_text: str | Callable[[AdapterRequest], str] | None = None
     write_verifier_report: bool = True
     verifier_files: dict[str, str] = field(default_factory=dict)
     verifier_end_state: str = "finished"
@@ -169,7 +170,7 @@ class ScriptedAdapter:
     fixup_calls: list[AdapterRequest] = field(default_factory=list)
     fixup_end_state: str = "finished"
     fixup_exit_status: int = 0
-    fixup_report_text: str | None = None
+    fixup_report_text: str | Callable[[AdapterRequest, str], str] | None = None
     fixup_write_report: bool = True
     continuation_files: list[dict[str, str]] = field(default_factory=list)
     continuation_calls: list[AdapterRequest] = field(default_factory=list)
@@ -206,7 +207,9 @@ class ScriptedAdapter:
             head = git(request.cwd, "rev-parse", "HEAD").strip()
         if (self.fixup_write_report if is_fixup else self.write_report):
             branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
-            if is_fixup and self.fixup_report_text is not None:
+            if is_fixup and callable(self.fixup_report_text):
+                text = self.fixup_report_text(request, head)
+            elif is_fixup and self.fixup_report_text is not None:
                 text = self.fixup_report_text
             elif callable(self.report_text):
                 text = self.report_text(request, head)
@@ -244,6 +247,8 @@ class ScriptedAdapter:
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
         if self.write_verifier_report:
             text = self.verifier_report_text
+            if callable(text):
+                text = text(request)
             if text is None:
                 verdict = self.verdict_sequence[min(turn, len(self.verdict_sequence) - 1)] if self.verdict_sequence else self.verdict
                 mode = "fix-up" if request.prompt.startswith("## Findings under verification") else "full"

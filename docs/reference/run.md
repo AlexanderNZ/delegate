@@ -342,7 +342,7 @@ Half a line at the end of a stream is not an error, because a live harness write
 
 ## The specialist brief
 
-The brief has four sections. `## Task` holds the ticket id and the ticket text. `## File boundary` holds the worktree path, the hotspot patterns of the stack, and the no-push rule. `## Gates` holds the gate commands. `## Report` holds the report path and the report fields.
+The brief has four sections. `## Task` holds the ticket id and the ticket text. `## File boundary` holds the worktree path, the hotspot patterns of the stack, and the no-push rule. `## Gates` holds the gate commands. `## Report` holds the report path, the JSON type of each report field, and one example object. The engine makes this text from the field tables of the report module, so the brief and the report check always agree. The example passes the report check.
 
 ## The specialist report
 
@@ -363,7 +363,7 @@ The specialist writes a JSON object to the report path. A field that this table 
 
 ## The verdict report
 
-The verifier writes a JSON object to the report path. A field that this table does not list is ignored.
+The `## Report` section of the verifier brief holds the report path, the JSON type of each field, and one example object, as in the specialist brief. The verifier writes a JSON object to the report path. A field that this table does not list is ignored.
 
 | Field | Type | Meaning |
 |---|---|---|
