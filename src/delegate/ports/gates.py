@@ -2,7 +2,9 @@
 
 A gate is a command that a stack names, such as its test command. The engine
 runs each gate in the worktree of a ticket, and it reads two things: the exit
-status, and the output. The engine never starts the process itself. An adapter
+status, and the output. While the gate runs, the runner also writes the output
+to a log file that the engine names, so `delegate status` and `delegate watch`
+see that a long gate is active. The engine never starts the process itself. An adapter
 in `delegate.adapters` implements the interface, and the command-line driver
 hands it to the engine. A test passes the real adapter, or any object with the
 same method.
@@ -36,8 +38,13 @@ class GateResult:
 class GateRunner(Protocol):
     """Runs a gate command in a directory."""
 
-    def run(self, command: str, worktree: Path) -> GateResult:
+    def run(self, command: str, worktree: Path, log: Path | None = None) -> GateResult:
         """Run `command` with `worktree` as its working directory, wait for it, and return the result.
+
+        When `log` is not None, the runner appends the output of the command
+        to that file while the command runs, so a reader of the file sees the
+        progress of a long gate. The file exists before the call. The engine
+        gives a new file for each gate run.
 
         A command that fails gives a result with a non-zero `exit_status`. It
         never raises.

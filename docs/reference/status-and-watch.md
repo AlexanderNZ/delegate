@@ -8,7 +8,7 @@ synopsis:
 
 # Reference: `delegate status` and `delegate watch`
 
-`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run and the event-stream files that the journal names. They need no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`. `status` reads the [**event streams**](../glossary.md#event-stream) through the [**adapter**](../glossary.md#adapter) of the run, for the tokens and the activity of each agent. It does not need the adapter: see [a run with no stream reader](#a-run-with-no-stream-reader). `watch` needs no adapter.
+`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run, and the event-stream files and the [**gate**](../glossary.md#gate) log files that the journal names. They need no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`. `status` reads the [**event streams**](../glossary.md#event-stream) through the [**adapter**](../glossary.md#adapter) of the run, for the tokens and the activity of each agent. It does not need the adapter: see [a run with no stream reader](#a-run-with-no-stream-reader). `watch` needs no adapter.
 
 Both commands find the journal in the state directory of the repository, in `runs/<run-id>/journal.jsonl`. See [the journal](run.md#the-journal).
 
@@ -59,7 +59,7 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
 
 - The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA.
-- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent.
+- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, 19k tokens, gate python3 -m pytest -q, gate log changed 30s ago`.
 - A pending ticket and a skipped ticket have no progress line.
 
 A ticket that failed or was skipped has the line `  reason: <reason>`, after its progress line.
@@ -91,13 +91,15 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
 | `tokens` | integer or `null` | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a ticket with [a stream that cannot be read](#a-stream-that-cannot-be-read). |
 | `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and when the stream of the agent that runs [cannot be read](#a-stream-that-cannot-be-read). |
+| `gate` | string or `null` | While a gate of the ticket runs: the gate command, from its `gate-start`. A gate runs from its `gate-start` until its `gate-result`, a `step-end`, or `run-end`. The gates of the phase `gates` and the gates of a fix-up round both show. `null` when no gate of the ticket runs. |
+| `gate_idle_seconds` | integer or `null` | While a gate of the ticket runs: the seconds from the last change of its log file (the `gate_log` of its `gate-start`) to `time`. The gate runner appends the output of the gate to the log while the gate runs. `null` when no gate of the ticket runs, and when the log file is missing or cannot be read. It needs no stream reader. |
 
 The phase of a running ticket follows its newest event:
 
 | Event | Phase |
 |---|---|
 | `step-start`, [**`continuation`**](../glossary.md#continuation), or `agent-start` with the role `specialist` | `specialist` |
-| `report-validation` that is valid, `rebase`, or `gate-result` or `gate-skip` of the phase `build` or `rebase` | `gates` |
+| `report-validation` that is valid, `rebase`, or `gate-start`, `gate-result` or `gate-skip` of the phase `build` or `rebase` | `gates` |
 | `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
 | `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round stay in the phase `fix-up`. |
 
@@ -117,7 +119,7 @@ The `status` process can have no reader of the streams of a run:
 - The adapter of the run is not known to the process. For example, a script registered the adapter in its own process.
 - The adapter has no method `activity`. For example, an adapter of an earlier version.
 
-Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens` and `idle_seconds` are `null`, and the lines of `status` and `status --follow` have no tokens and no last activity. `status` does not read the streams of such a run.
+Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens` and `idle_seconds` are `null`, and the lines of `status` and `status --follow` have no tokens and no last activity. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
 
 ### A stream that cannot be read
 
@@ -169,7 +171,7 @@ run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 52k
 ```
 
 - The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA.
-- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity.
+- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the plain lines do.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
 - The view cuts each line to the width of the terminal. It shows no tool call and no path.
 - When standard output is not a terminal, the view prints each snapshot as plain lines, one snapshot after the other, with no cursor control.
@@ -190,7 +192,7 @@ delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--
 | `[<run-id>]` | The run to follow; default is the newest run of the repository. |
 | `--repo <repo>` | The git repository that holds the run; default is the current directory. |
 | `--until verdict` | Also exit when a verifier verdict is written to the journal; default is to follow the run to its end. |
-| `--stall-minutes <n>` | Exit when the journal and the captured event streams have not changed for N minutes; N is a number greater than 0. |
+| `--stall-minutes <n>` | Exit when the journal, the captured event streams and the gate logs have not changed for N minutes; N is a number greater than 0. |
 | `--max-minutes <n>` | Exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0. |
 | `--from <position>` | Go on after the event with this position, which an earlier watch printed; no event is reported twice. |
 | `--poll-seconds <poll-seconds>` | How often to read the journal; default 1. |
@@ -241,9 +243,9 @@ With `--until verdict`, `watch` exits at the first `verdict` event. The line is 
 
 ### The stall
 
-`--stall-minutes N` compares the time now with the newest modification time of the journal and of the event-stream files that the events name (`event_stream`). If the difference is N minutes or more, `watch` exits. The line is `watch: stall: the journal and the event streams have not changed for N minutes; last event: <the line of the last event>`. A run that has ended is not a stall.
+`--stall-minutes N` compares the time now with the newest modification time of the journal, of the event-stream files that the events name (`event_stream`), and of the gate log files that the events name (`gate_log`). If the difference is N minutes or more, `watch` exits. The line is `watch: stall: the journal, the event streams and the gate logs have not changed for N minutes; last event: <the line of the last event>`. A run that has ended is not a stall.
 
-The journal names the [**event stream**](../glossary.md#event-stream) of an agent in `agent-start`, before the agent starts. While an agent runs, its own stream therefore shows a change too. A journal of an earlier version names a stream only when the agent has ended: for such a run, set N to more than the longest time of one agent run.
+The journal names the [**event stream**](../glossary.md#event-stream) of an agent in `agent-start`, before the agent starts. While an agent runs, its own stream therefore shows a change too. The journal names the log file of a gate in `gate-start`, before the gate runs, and the gate runner appends the output of the gate to it. A long gate that writes output is therefore not a stall. A gate that writes no output for N minutes is a stall. A journal of an earlier version names a stream only when the agent has ended: for such a run, set N to more than the longest time of one agent run.
 
 ### The position
 

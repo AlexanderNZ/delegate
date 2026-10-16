@@ -44,3 +44,34 @@ def test_the_command_goes_to_bash_so_a_pipeline_and_a_list_work(tmp_path):
 
     assert result.output == "ONE\ntwo\n"
     assert result.green
+
+
+def test_the_output_goes_to_the_log_file_while_the_command_runs(tmp_path):
+    # The command waits until its first line is in the log, so it is green only when the log grows while it runs.
+    log = tmp_path / "gate.log"
+    log.touch()
+    command = (
+        f'echo first; for i in $(seq 200); do grep -qx first "{log}" && {{ echo seen; exit 0; }}; sleep 0.05; done; exit 9'
+    )
+
+    result = ShellGateRunner().run(command, tmp_path, log=log)
+
+    assert result == GateResult(exit_status=0, output="first\nseen\n")
+    assert log.read_text() == "first\nseen\n"
+
+
+def test_the_log_file_holds_the_standard_error_too_and_the_output_keeps_its_order(tmp_path):
+    log = tmp_path / "gate.log"
+    log.touch()
+
+    result = ShellGateRunner().run("echo err >&2; echo out", tmp_path, log=log)
+
+    assert result.output == "out\nerr\n"
+    assert sorted(log.read_text().splitlines()) == ["err", "out"]
+
+
+def test_a_command_with_no_log_file_writes_no_file(tmp_path):
+    result = ShellGateRunner().run("echo out", tmp_path)
+
+    assert result.output == "out\n"
+    assert list(tmp_path.iterdir()) == []

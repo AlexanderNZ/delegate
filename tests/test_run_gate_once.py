@@ -30,9 +30,9 @@ class SpyGates:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, command, worktree):
+    def run(self, command, worktree, log=None):
         self.calls.append((command, worktree.name))
-        return ShellGateRunner().run(command, worktree)
+        return ShellGateRunner().run(command, worktree, log=log)
 
 
 def start_run(repo, adapter, gates, **options):

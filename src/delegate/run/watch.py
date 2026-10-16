@@ -138,14 +138,18 @@ class _Tracker:
         return None
 
 
-def _last_change(journal: Path, streams: set[Path]) -> float:
-    """The newest modification time of the journal and of the event streams that exist."""
+# The fields of an event that name a file whose change is activity: the event stream of an agent, and the log of a gate.
+ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log")
+
+
+def _last_change(journal: Path, files: set[Path]) -> float:
+    """The newest modification time of the journal and of the event streams and gate logs that exist."""
     times = [journal.stat().st_mtime]
-    for stream in streams:
+    for file in files:
         try:
-            times.append(stream.stat().st_mtime)
+            times.append(file.stat().st_mtime)
         except FileNotFoundError:
-            continue  # a stream that the journal names and the disk lacks cannot show a change
+            continue  # a file that the journal names and the disk lacks cannot show a change
     return max(times)
 
 
@@ -163,7 +167,7 @@ def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -
     started = time.monotonic()
     offset, next_seq, position = 0, 1, options.from_position
     tracker = _Tracker()
-    streams: set[Path] = set()
+    files: set[Path] = set()  # the event streams and the gate logs that the journal names
     last_event: dict[str, object] | None = None
     first_read = True
     while True:
@@ -175,8 +179,7 @@ def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -
         for event in events:
             last_event = event
             seq = int(event["seq"])  # type: ignore[call-overload]
-            if "event_stream" in event:
-                streams.add(Path(str(event["event_stream"])))
+            files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
             if seq <= options.from_position:
                 if event["event"] == "run-end":
@@ -198,9 +201,9 @@ def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -
                 return WatchResult(EXIT_VERDICT, position)
             if event["event"] == "run-end":
                 return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
-        if options.stall_minutes is not None and time.time() - _last_change(journal, streams) >= options.stall_minutes * 60:
+        if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
             emit(
-                f"watch: stall: the journal and the event streams have not changed for {options.stall_minutes:g} minutes; "
+                f"watch: stall: the journal, the event streams and the gate logs have not changed for {options.stall_minutes:g} minutes; "
                 f"last event: {format_event(last_event) if last_event else 'none'}"
             )
             return WatchResult(EXIT_STALL, position)

@@ -109,9 +109,9 @@ def test_a_live_claude_code_stream_gives_the_tokens_and_the_seconds_since_the_la
 
     assert ticket_of(snap, "a") == {
         "id": "a", "state": "running", "phase": "specialist", "elapsed_seconds": 120, "tokens": 25794,
-        "idle_seconds": int((now - last_line).total_seconds()),
+        "idle_seconds": int((now - last_line).total_seconds()), "gate": None, "gate_idle_seconds": None,
     }
-    assert ticket_of(snap, "b") == {"id": "b", "state": "pending", "phase": None, "elapsed_seconds": 0, "tokens": 0, "idle_seconds": None}
+    assert ticket_of(snap, "b") == {"id": "b", "state": "pending", "phase": None, "elapsed_seconds": 0, "tokens": 0, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
     assert (snap["run_id"], snap["state"], snap["elapsed_seconds"], snap["tokens"]) == ("r1", "running", 120, 25794)
     assert (snap["tickets_total"], snap["tickets_ended"], snap["percent"]) == (2, 0, 0)
 
@@ -242,7 +242,7 @@ def test_a_run_that_ended_stops_its_clock_at_the_end_and_has_no_running_agent(tm
     snap = snapshot(repo, capsys)
 
     assert (snap["state"], snap["elapsed_seconds"], snap["percent"], snap["eta"], snap["time"]) == ("built", 610, 100, at(610), at(610))
-    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": 19326, "idle_seconds": None}
+    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": 19326, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
 
 
 def test_the_tokens_of_a_ticket_add_every_agent_that_it_ran(tmp_path, capsys, monkeypatch):
@@ -370,8 +370,8 @@ def test_json_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_et
     snap = snapshot(repo, capsys)
 
     assert (snap["percent"], snap["tickets_ended"], snap["eta"], snap["tokens"]) == (50, 1, at(650 + 550), None)
-    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": None, "idle_seconds": None}
-    assert ticket_of(snap, "b") == {"id": "b", "state": "running", "phase": "specialist", "elapsed_seconds": 50, "tokens": None, "idle_seconds": None}
+    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
+    assert ticket_of(snap, "b") == {"id": "b", "state": "running", "phase": "specialist", "elapsed_seconds": 50, "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
 
 
 def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
@@ -608,7 +608,7 @@ def test_json_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_
 
     good = GOOD_TOKENS[adapter][0]
     b = {"ended": ("built", None, 30), "live": ("running", "specialist", 50)}[where]
-    assert ticket_of(snap, "b") == {"id": "b", "state": b[0], "phase": b[1], "elapsed_seconds": b[2], "tokens": None, "idle_seconds": None}
+    assert ticket_of(snap, "b") == {"id": "b", "state": b[0], "phase": b[1], "elapsed_seconds": b[2], "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
     assert (ticket_of(snap, "a")["tokens"], snap["tokens"]) == (good, good)
 
 
@@ -648,3 +648,130 @@ def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_n
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
     assert out.splitlines()[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]
+
+
+# The running gate. The engine writes `gate-start` with the log of the gate, and the gate runner appends to the log.
+# A case sets the modification time of the log with `os.utime`, which is the real boundary of the clock for a file.
+
+GATE = "nix develop -c python3 -m pytest -q"
+
+
+def a_run_with_a_running_gate(repo: Path, phase: str = "build", log_changed: float | None = 200) -> tuple[Run, Path]:
+    """The specialist of ticket a reported at 100, and its gate started at 110. Its log last changed at `log_changed`.
+
+    With `log_changed` None, the log file is missing. Ticket b is pending.
+    """
+    run = Run(repo, "r1", "a", "b")
+    run.step_start(0, "a")
+    stream = run.stream("a.stream.jsonl", claude("finished.jsonl"))
+    run.agent_start(0, "a", "specialist", stream)
+    run.add(100, "adapter-result", ticket="a", exit_status=0, end_state="finished", session_id=None, event_stream=stream)
+    run.add(100, "report-validation", ticket="a", valid=True, path="/r", reason=None, status="committed", blocked_reason=None)
+    round_number = 0
+    if phase == "fixup":
+        round_number = 1
+        run.add(105, "fixup-start", ticket="a", round=1, rejected_commit="3", findings_file="/f", agent="s", tier="strong", model="m")
+    log = run.path.parent / "gates" / "a" / f"{phase}-{round_number}.log"
+    if log_changed is not None:
+        log.parent.mkdir(parents=True)
+        log.write_text("....\n")
+        changed = (START + timedelta(seconds=log_changed)).timestamp()
+        os.utime(log, (changed, changed))
+    run.add(110, "gate-start", ticket="a", round=round_number, phase=phase, command=GATE, gate_log=str(log))
+    return run, log
+
+
+@pytest.mark.parametrize(("phase", "shown"), [pytest.param("build", "gates", id="gates"), pytest.param("fixup", "fix-up", id="gates-of-a-fix-up")])
+def test_json_gives_the_running_gate_and_the_seconds_since_its_log_changed(tmp_path, capsys, monkeypatch, phase, shown):
+    repo = bare_repo(tmp_path)
+    a_run_with_a_running_gate(repo, phase)
+    frozen(monkeypatch, 230)
+
+    snap = snapshot(repo, capsys)
+
+    assert ticket_of(snap, "a") == {
+        "id": "a", "state": "running", "phase": shown, "elapsed_seconds": 230, "tokens": 19326, "idle_seconds": None,
+        "gate": GATE, "gate_idle_seconds": 30,
+    }
+    assert (ticket_of(snap, "b")["gate"], ticket_of(snap, "b")["gate_idle_seconds"]) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "end",
+    [
+        pytest.param(("gate-result", {"round": 0, "phase": "build", "command": GATE, "commit": "3", "exit_status": 0, "green": True, "output_tail": ""}), id="gate-result"),
+        pytest.param(("step-end", {"state": "failed", "reason": "crashed: OSError: no space"}), id="step-end"),
+    ],
+)
+def test_a_gate_that_ended_is_not_the_running_gate(tmp_path, capsys, monkeypatch, end):
+    repo = bare_repo(tmp_path)
+    run, _ = a_run_with_a_running_gate(repo)
+    name, fields = end
+    run.add(220, name, ticket="a", **fields)
+    frozen(monkeypatch, 230)
+
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["gate"], a["gate_idle_seconds"]) == (None, None)
+
+
+def test_a_gate_whose_log_is_missing_shows_the_gate_and_no_idle_seconds(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    a_run_with_a_running_gate(repo, log_changed=None)
+    frozen(monkeypatch, 230)
+
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["phase"], a["gate"], a["gate_idle_seconds"]) == ("gates", GATE, None)
+
+
+def test_a_run_that_ended_has_no_running_gate(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run, _ = a_run_with_a_running_gate(repo)
+    run.add(220, "run-end", result="failed", built=[], failed=[], skipped=[])
+    frozen(monkeypatch, 9000)
+
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["gate"], a["gate_idle_seconds"]) == (None, None)
+
+
+def test_plain_status_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    a_run_with_a_running_gate(repo)
+    frozen(monkeypatch, 230)
+
+    lines = plain_status(repo, capsys)
+
+    assert [line for line in lines if line.startswith("  progress: ")] == [
+        f"  progress: gates, 3m50s used, 19k tokens, gate {GATE}, gate log changed 30s ago",
+    ]
+
+
+def test_follow_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run, log = a_run_with_a_running_gate(repo)
+    changed = (START + timedelta(seconds=590)).timestamp()
+    os.utime(log, (changed, changed))
+
+    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+
+    assert code == 0
+    assert out.splitlines()[1] == f"  a running gates, 10m50s used, 19k tokens, gate {GATE}, gate log changed 1m00s ago"
+
+
+def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a", adapter=adapter_with_no_reader)
+    run.step_start(0, "a")
+    log = run.path.parent / "gates" / "a" / "build-0.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("")
+    changed = (START + timedelta(seconds=20)).timestamp()
+    os.utime(log, (changed, changed))
+    run.add(10, "gate-start", ticket="a", round=0, phase="build", command=GATE, gate_log=str(log))
+    frozen(monkeypatch, 50)
+
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["phase"], a["tokens"], a["gate"], a["gate_idle_seconds"]) == ("gates", None, GATE, 30)

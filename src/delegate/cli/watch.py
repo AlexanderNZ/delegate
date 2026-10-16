@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stall-minutes", type=_positive, metavar="N",
-        help="exit when the journal and the captured event streams have not changed for N minutes; N is a number greater than 0",
+        help="exit when the journal, the captured event streams and the gate logs have not changed for N minutes; N is a number greater than 0",
     )
     parser.add_argument(
         "--max-minutes", type=_positive, metavar="N",

@@ -103,7 +103,7 @@ def test_stall_minutes_exits_5_when_the_journal_has_not_changed_that_long_and_na
     assert (code, err) == (5, "")
     last = [line for line in out.splitlines() if line.startswith("watch: stall")]
     assert len(last) == 1
-    assert last[0].startswith("watch: stall: the journal and the event streams have not changed for 5 minutes; last event: 2 ")
+    assert last[0].startswith("watch: stall: the journal, the event streams and the gate logs have not changed for 5 minutes; last event: 2 ")
     assert last[0].endswith(" step-start ticket=a stack=python branch=run/demo-a worktree=/w/a base_commit=" + "0" * 40 + " agent=python-specialist tier=strong model=m")
 
 
@@ -144,6 +144,26 @@ def test_an_agent_that_writes_to_its_stream_is_not_a_stall_while_the_journal_has
     path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), agent_start("a", stream))
     age(path, 10)
     age(stream, stream_minutes)
+
+    exit_code, out, _ = watch(repo, capsys, "--stall-minutes", "5", "--max-minutes", "0.01")
+
+    assert exit_code == code
+    assert ("watch: stall" in out) == (code == 5)
+
+
+def gate_start(ticket, log):
+    return "gate-start", {"ticket": ticket, "round": 0, "phase": "build", "command": "pytest -q", "gate_log": str(log)}
+
+
+@pytest.mark.parametrize(("log_minutes", "code"), [pytest.param(1, 6, id="the-gate-log-changes"), pytest.param(10, 5, id="the-gate-log-is-old")])
+def test_a_gate_that_writes_to_its_log_is_not_a_stall_while_the_journal_has_no_new_event(tmp_path, capsys, log_minutes, code):
+    # The engine journals the log of the gate before the gate runs, and the gate has no result event yet.
+    repo = bare_repo(tmp_path)
+    log = tmp_path / "build-0.log"
+    log.write_text("....\n")
+    path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), gate_start("a", log))
+    age(path, 10)
+    age(log, log_minutes)
 
     exit_code, out, _ = watch(repo, capsys, "--stall-minutes", "5", "--max-minutes", "0.01")
 

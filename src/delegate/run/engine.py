@@ -107,6 +107,9 @@ from .workflow import Stack, Ticket, Workflow, plan_order
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
 
+# The directory of the run that holds the log file of each gate run, in one directory for each ticket.
+GATE_LOG_DIRECTORY: str = "gates"
+
 BUILT: str = "built"
 FAILED: str = "failed"
 SKIPPED: str = "skipped"
@@ -1339,6 +1342,11 @@ def _run_gate_with_output(
     with that commit and the `seq` of the green result, and the gate counts as
     green. A rebase that keeps the commit, and a resume after a stop, so cost no
     second gate run.
+
+    Before a gate runs, the engine makes an empty log file for it and writes
+    `gate-start` with the path of the file. The gate runner appends the output
+    to the file while the gate runs, so `delegate status` and `delegate watch`
+    see the activity of a long gate.
     """
     commit = _head(vcs, worktree)
     green_seq = _green_result(journal, command, commit)
@@ -1348,13 +1356,34 @@ def _run_gate_with_output(
             reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})",
         )
         return True, ""
-    result = gates.run(command, worktree)
+    log = _gate_log_path(journal, ticket, phase, round_number)
+    journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
+    result = gates.run(command, worktree, log=log)
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
         exit_status=result.exit_status, green=result.green, output_tail=output,
     )
     return result.green, output
+
+
+def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int) -> Path:
+    """Make a new, empty log file for one gate run, and return its path.
+
+    The file is `gates/<ticket>/<phase>-<round>.log` in the run directory, then
+    `<phase>-<round>-2.log`, and so on. It is never an earlier log.
+    """
+    directory = journal.path.parent / GATE_LOG_DIRECTORY / ticket
+    directory.mkdir(parents=True, exist_ok=True)
+    number = 1
+    while True:
+        path = directory / (f"{phase}-{round_number}.log" if number == 1 else f"{phase}-{round_number}-{number}.log")
+        try:
+            path.touch(exist_ok=False)
+        except FileExistsError:
+            number += 1
+            continue
+        return path
 
 
 def _green_result(journal: Journal, command: str, commit: str) -> int | None:

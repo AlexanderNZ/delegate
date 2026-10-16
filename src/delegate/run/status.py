@@ -1,7 +1,8 @@
 """The state of each ticket of a run, for `delegate status` (the command is in `delegate.cli.status`).
 
 The snapshot (`snapshot`) reads the journal of the run and the event streams
-that the journal names, through a reader that the command gives. The reader is
+that the journal names, through a reader that the command gives. It also reads
+the modification time of the log file of a gate that runs, with no reader. The reader is
 the `activity` method of the harness adapter of the run, so this module never
 imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
 the activity of each agent. When the command has no reader for the adapter of
@@ -122,6 +123,10 @@ class TicketSnapshot:
 
     `tokens` and `idle_seconds` are None when the snapshot has no reader of the streams. `tokens` is None also when a
     stream of the ticket cannot be read, and `idle_seconds` when the stream of the agent that runs now cannot be read.
+
+    `gate` is the command of the gate that runs now, from its `gate-start`, and None when no gate of the ticket runs.
+    `gate_idle_seconds` is the seconds since the log file of that gate last changed. It is None when no gate runs, or
+    when the log file cannot be read. It needs no reader of the streams.
     """
 
     id: str
@@ -130,6 +135,8 @@ class TicketSnapshot:
     elapsed_seconds: int
     tokens: int | None
     idle_seconds: int | None
+    gate: str | None = None
+    gate_idle_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -158,7 +165,10 @@ class Snapshot:
             "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
             "eta": self.eta.isoformat() if self.eta else None, "tokens": self.tokens,
             "tickets": [
-                {"id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens": t.tokens, "idle_seconds": t.idle_seconds}
+                {
+                    "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens": t.tokens,
+                    "idle_seconds": t.idle_seconds, "gate": t.gate, "gate_idle_seconds": t.gate_idle_seconds,
+                }
                 for t in self.tickets
             ],
         }
@@ -181,17 +191,19 @@ def _ticket(
 
     An agent runs from its `agent-start` until its result event, a `step-end` (a crash), or the end of the run. The
     verifier of an `economy` chain starts after its ticket ended, so a ticket that ended can have an agent that runs.
+    A gate runs from its `gate-start` until its `gate-result`, a `step-end` (a crash), or the end of the run.
     """
     state, phase = PENDING, None
     started = ended = None
     streams: list[str] = []
     live: dict[str, object] | None = None  # the `agent-start` of the agent that runs now
+    gate: dict[str, object] | None = None  # the `gate-start` of the gate that runs now
     for event in own:
         kind = str(event["event"])
         if kind == "step-start":
             state, started = RUNNING, started or _time(event)
         elif kind == "step-end":
-            state, ended, live = str(event["state"]), ended or _time(event), None
+            state, ended, live, gate = str(event["state"]), ended or _time(event), None, None
         elif kind == "skip":
             state = SKIPPED
         if kind == "agent-start":
@@ -200,18 +212,24 @@ def _ticket(
             live = None
         elif kind in PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
             phase = PHASE_OF_EVENT[kind]
-        elif kind in ("gate-result", "gate-skip") and event["phase"] != "fixup":
+        elif kind in ("gate-start", "gate-result", "gate-skip") and event["phase"] != "fixup":
             phase = domain.PHASE_GATES
+        if kind == "gate-start":
+            gate = event
+        elif kind == "gate-result":
+            gate = None
         if "event_stream" in event and str(event["event_stream"]) not in streams:
             streams.append(str(event["event_stream"]))
     if state != RUNNING:
         phase = None
     if run_ended:
-        live = None
+        live = gate = None
     elapsed = _seconds(started, ended or now) if started else 0
     duration = elapsed if started and ended else None
+    gate_command = None if gate is None else str(gate["command"])
+    gate_idle = None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now)
     if activity is None:
-        return TicketSnapshot(ticket, state, phase, elapsed, None, None), duration
+        return TicketSnapshot(ticket, state, phase, elapsed, None, None, gate_command, gate_idle), duration
     tokens: int | None = 0
     idle = None
     for stream in streams:
@@ -224,7 +242,20 @@ def _ticket(
             tokens += found.tokens
         if is_live:
             idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type]
-    return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle), duration
+    return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle, gate_command, gate_idle), duration
+
+
+def _log_idle_seconds(log: Path, now: datetime) -> int | None:
+    """The seconds from the last change of a gate log to `now`, or None when the log cannot be read.
+
+    The status only shows data, so a log that is missing, or that the process cannot reach, gives no idle time and
+    is not an error.
+    """
+    try:
+        changed = log.stat().st_mtime
+    except OSError:
+        return None
+    return _seconds(datetime.fromtimestamp(changed, now.tzinfo), now)
 
 
 def _read(activity: StreamReader, stream: Path, is_live: bool) -> Activity | None:
@@ -329,12 +360,19 @@ def _run_progress(snap: Snapshot) -> str:
 
 
 def _ticket_progress(ticket: TicketSnapshot) -> str:
-    """The progress of a ticket: the time used, the tokens when the snapshot has them, and the time since the last activity."""
+    """The progress of a ticket: the time used, the tokens when the snapshot has them, and the time since the last activity.
+
+    While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed.
+    """
     parts = [f"{_duration(ticket.elapsed_seconds)} used"]
     if ticket.tokens is not None:
         parts.append(f"{_tokens(ticket.tokens)} tokens")
     if ticket.idle_seconds is not None:
         parts.append(f"last activity {_duration(ticket.idle_seconds)} ago")
+    if ticket.gate is not None:
+        parts.append(f"gate {ticket.gate}")
+    if ticket.gate_idle_seconds is not None:
+        parts.append(f"gate log changed {_duration(ticket.gate_idle_seconds)} ago")
     return ", ".join(parts)
 
 

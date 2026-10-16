@@ -7,6 +7,8 @@ and what came of it. The gate runner stands at a system boundary: it starts a
 process.
 """
 
+from pathlib import Path
+
 import pytest
 
 from delegate import adapters
@@ -17,7 +19,7 @@ from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import ScriptedAdapter, make_repo, read_journal_file
+from .support import WORKFLOW, ScriptedAdapter, make_repo, read_journal_file, journal_path
 
 
 class SpyGates:
@@ -27,9 +29,9 @@ class SpyGates:
         self._answer = answer
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, command, worktree):
+    def run(self, command, worktree, log=None):
         self.calls.append((command, worktree.name))
-        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree)
+        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log)
 
 
 @pytest.fixture
@@ -80,3 +82,48 @@ def test_a_gate_that_the_runner_reports_green_passes_whatever_the_command_says(t
 
     assert result.ok
     assert {command for command, _ in gates.calls} == {"test -f feature.txt"}
+
+
+# The gate waits until the journal holds `gate-start` and its first line is in a gate log of ticket a. So it is green
+# only when the engine journals the gate before it runs, and the log grows while the gate runs.
+WATCHED_GATE = (
+    'echo first; d="$(git rev-parse --git-common-dir)/delegate/runs"; for i in $(seq 100); do '
+    'grep -q gate-start "$d"/*/journal.jsonl && grep -qx first "$d"/*/gates/a/*.log && { echo seen; exit 0; }; '
+    "sleep 0.05; done; exit 9"
+)
+
+
+def test_while_a_gate_runs_the_journal_holds_gate_start_with_its_log_and_the_log_grows(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path, WORKFLOW.replace('"test -f feature.txt"', f"'{WATCHED_GATE}'"))
+
+    result = start_run(repo, ShellGateRunner(), scripted_adapter)
+
+    assert result.ok, result.failures
+    events = read_journal_file(repo, result.run_id)
+    (start,) = [e for e in events if e["event"] == "gate-start"]
+    (gate,) = [e for e in events if e["event"] == "gate-result"]
+    assert events[events.index(start) + 1] is gate
+    assert (start["ticket"], start["round"], start["phase"], start["command"]) == ("a", 0, "build", WATCHED_GATE)
+    log = Path(start["gate_log"])
+    assert log.parent == journal_path(repo, result.run_id).parent / "gates" / "a"
+    assert log.read_text() == gate["output_tail"] == "first\nseen\n"
+
+
+def test_gate_result_keeps_its_fields(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path)
+
+    result = start_run(repo, ShellGateRunner(), scripted_adapter)
+
+    (gate,) = [e for e in read_journal_file(repo, result.run_id) if e["event"] == "gate-result"]
+    assert set(gate) == {"seq", "time", "event", "ticket", "round", "phase", "command", "commit", "exit_status", "green", "output_tail"}
+
+
+def test_each_gate_run_has_its_own_log_with_its_own_output(tmp_path, scripted_adapter):
+    repo = make_repo(tmp_path, WORKFLOW.replace('"test -f feature.txt"', '"echo one", "echo two"'))
+
+    result = start_run(repo, ShellGateRunner(), scripted_adapter)
+
+    assert result.ok
+    starts = [e for e in read_journal_file(repo, result.run_id) if e["event"] == "gate-start"]
+    assert [e["command"] for e in starts] == ["echo one", "echo two"]
+    assert [Path(e["gate_log"]).read_text() for e in starts] == ["one\n", "two\n"]
