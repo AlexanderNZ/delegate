@@ -296,7 +296,7 @@ LIMIT_PHRASES = [
     "attached by path",
     "hook input",
     "not a sandbox",
-    "without respect for quoting",
+    "reads quotes in its own way",
     "bash string operators",
     "command substitution",
     "destination-flag",

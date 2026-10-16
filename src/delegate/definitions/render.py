@@ -132,12 +132,52 @@ GET_ONLY_ARGUMENT_CHECK = (
 )
 
 
+#: The shell text that divides the command text "$s" into the array "segs". It
+#: reads "$s" one character at a time, and it divides at &&, ||, ;, | and a
+#: newline only outside quotes. It reads quotes as bash and zsh do: a single
+#: quote ends at the next single quote; a double quote ends at the next double
+#: quote that no backslash escapes; outside quotes, a backslash makes the next
+#: character a literal. An unquoted "#" starts a comment, and a quote or a
+#: backslash in a comment does nothing until the next newline.
+#:
+#: Four forms read quotes in their own way: a command substitution ($( and the
+#: backtick), a parameter expansion with braces, an ANSI-C quote ($') and a
+#: here-document (<<). The divider does not parse them. When the text holds one
+#: of them, it divides at each separator, also inside quotes, as the guard did
+#: before. Each of these differences gives more segments, never fewer, so a
+#: separator that the shell sees always divides the command.
+#:
+#: At the end, $q holds "s" or "d" when a quote is not closed. The guard then
+#: cannot read the command, and it fails closed.
+COMMAND_DIVIDER = " ".join(
+    [
+        r"""q=; case "$s" in *'`'*|*'$('*|*'${'*|*"\$'"*|*'<<'*) q=L ;; esac;""",
+        r"""segs=(); o=; e=0; i=0; n=${#s};""",
+        r"""while [ "$i" -lt "$n" ]; do c=${s:$i:1}; i=$((i+1));""",
+        r"""if [ "$e" = 1 ]; then e=0; o+=$c; continue; fi;""",
+        r"""case "$q" in""",
+        r"""s) [ "$c" = "'" ] && q=; o+=$c; continue ;;""",
+        r"""d) case "$c" in '\') e=1 ;; '"') q= ;; esac; o+=$c; continue ;;""",
+        r"""esac;""",
+        r"""case "$c" in""",
+        r"""$'\n'|';'|'|') segs+=("$o"); o=; [ "$c$q" = $'\n'c ] && q=; continue ;;""",
+        r"""'&') [ "${s:$i:1}" = '&' ] && { i=$((i+1)); segs+=("$o"); o=; continue; } ;;""",
+        r"""esac;""",
+        r"""[ -n "$q" ] || case "$c" in "'") q=s ;; '"') q=d ;; '\') e=1 ;; '#') q=c ;; esac;""",
+        r"""o+=$c;""",
+        r"""done;""",
+        r"""segs+=("$o")""",
+    ]
+)
+
+
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
-    The guard divides the command at &&, ||, ; and |, and it examines each
-    segment. One segment that is not on the allow list denies the full command,
-    and the message names that segment.
+    The guard divides the command at &&, ||, ;, | and a newline outside quotes
+    (COMMAND_DIVIDER), and it examines each segment. One segment that is not on
+    the allow list denies the full command, and the message names that segment.
+    A quote that is not closed denies the full command.
 
     A segment that starts with "git -C <path>" loses that prefix before the
     test, so a read of a repository by path is the same read as a read of the
@@ -252,12 +292,14 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # A tab becomes a space first: the prefix strips cut at a space,
             # and a tab between words must not hide a flag or a write.
             "s=${cmd//$'\\t'/ }",
-            "s=${s//&&/$'\\n'}",
-            "s=${s//||/$'\\n'}",
-            "s=${s//;/$'\\n'}",
-            "s=${s//|/$'\\n'}",
+            COMMAND_DIVIDER,
+            'case "$q" in s|d) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
+            'The guard fails closed." >&2; exit 2 ;; esac',
             "set -f",
-            f'while read -r seg; do {segment} done <<< "$s"',
+            # The divider keeps the spaces at each end of a segment. The prefix
+            # tests match from the first word, so remove them.
+            'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
+            f"{segment} done",
             f"exit 0 {VERIFIER_GUARD_MARKER}",
         ]
     )

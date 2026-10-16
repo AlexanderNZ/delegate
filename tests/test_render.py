@@ -656,6 +656,96 @@ def test_a_tab_does_not_hide_a_word_from_a_prefix_strip(shell):
         assert _run_guard(command, shell=shell).returncode == 2, (shell, command)
 
 
+# --- A separator inside quotes (issue #73) ----------------------------------
+
+#: Read commands whose quoted argument holds a separator. The shell runs each
+#: one as one command, so the guard must not divide it.
+QUOTED_SEPARATOR_READS = [
+    'grep -rn "a\\|b" src',
+    "grep -e 'a;b' src",
+    'grep -E "a|b" src && grep -e \'x;y\' src',
+    "git log --format='%h|%s' -3",
+    'grep "a && b || c" src',
+    "grep -e \"it's;x\" src",
+    "grep -e 'say \"a|b\"' src",
+    'grep -rn "a\\"|b" src',
+    "grep -rn \"a\nb;c\" src",
+]
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", QUOTED_SEPARATOR_READS)
+def test_a_separator_inside_quotes_does_not_divide_the_command(command, shell):
+    # Seen in a run: the guard denied grep -rn "a\|b" src, because it divided
+    # the command at the quoted pipe and the part b" src is not a command.
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+        assert r.stderr == "", (shell, command, r.stderr)
+
+
+#: (command, the segment the deny message must name). Each command runs
+#: "rm -rf src" in bash and in zsh. A guard that reads quotes in a different
+#: way than the shell must not hide that segment.
+SEPARATOR_OUTSIDE_QUOTES = [
+    ("cat x | rm -rf src", "rm -rf src"),
+    ('grep "a" src; rm -rf src', "rm -rf src"),
+    ("grep 'a|b' src && rm -rf src", "rm -rf src"),
+    ('grep "a;b" src || rm -rf src', "rm -rf src"),
+    ("grep 'a' src\nrm -rf src", "rm -rf src"),
+    # A backslash outside quotes makes a quote character a literal.
+    ('echo \\"; rm -rf src; echo \\"', "rm -rf src"),
+    ("echo \\'; rm -rf src; echo \\'", "rm -rf src"),
+    # A backslash inside single quotes is a literal, so it escapes nothing.
+    ("echo 'a\\'; rm -rf src; echo 'b'", "rm -rf src"),
+    # An escaped backslash inside double quotes does not escape the quote.
+    ('grep "a\\\\" src; rm -rf src', "rm -rf src"),
+    # A quote character in a comment opens no quote, and a backslash in a
+    # comment does not continue the line.
+    ("echo a #'\nrm -rf src\necho #'", "rm -rf src"),
+    ("echo a # \\\nrm -rf src", "rm -rf src"),
+    # A command substitution, an ANSI-C quote and a here-document read quotes
+    # in their own way. The guard divides these commands at each separator.
+    # The here-document delimiter is "pwd", so that the first segment the
+    # guard refuses is the hidden command.
+    ('echo "$(echo ")"; rm -rf src; echo "(")"', "rm -rf src"),
+    ("echo $'\\''; rm -rf src; echo \\'", "rm -rf src"),
+    ("cat <<pwd\necho it's\npwd\nrm -rf src\ncat <<pwd\nit's\npwd", "rm -rf src"),
+]
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command,segment", SEPARATOR_OUTSIDE_QUOTES)
+def test_a_separator_outside_quotes_still_divides_the_command(command, segment, shell):
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+        assert f"[{segment}]" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not on PATH")
+def test_the_quote_reader_gives_the_same_verdicts_under_zsh():
+    # zsh reads ${s:i:1} as a history modifier and exits 1. A hook that exits
+    # 1 does not block the call, so that spelling opens the guard under zsh.
+    for command in QUOTED_SEPARATOR_READS:
+        r = _run_guard(command, shell="zsh")
+        assert r.returncode == 0, (command, r.stdout, r.stderr)
+    for command, segment in SEPARATOR_OUTSIDE_QUOTES:
+        r = _run_guard(command, shell="zsh")
+        assert r.returncode == 2, (command, r.stdout, r.stderr)
+        assert f"[{segment}]" in r.stderr, (command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", ['grep "a src', "grep 'a;b src", "grep -e 'a' \"b|c src"])
+def test_a_quote_that_is_not_closed_fails_closed(command, shell):
+    # The guard cannot tell where the argument ends, so it cannot read the
+    # command. It blocks the call and says why.
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+    assert "quote" in r.stderr, (shell, command, r.stderr)
+
+
 def test_the_guard_denies_an_empty_command():
     r = _run_guard("")
     assert r.returncode == 2
