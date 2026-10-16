@@ -54,6 +54,16 @@ def apply_opencode_override(tiers: Tiers, args: argparse.Namespace) -> Tiers:
     return tiers
 
 
+def user_skills_dir_from_args(args: argparse.Namespace) -> Path:
+    """The --user-skills-dir of the arguments, or the documented default `~/.claude/skills`.
+
+    The default comes from the home directory at run time, not at parse time, so
+    the generated reference does not show the home directory of one machine.
+    """
+    raw = getattr(args, "user_skills_dir", None)
+    return Path(raw) if raw else Path.home() / ".claude" / "skills"
+
+
 def tiers_from_args(args: argparse.Namespace) -> Tiers:
     """The tier table with any override applied."""
     return apply_opencode_override(load_tiers(args.tiers), args)
@@ -86,8 +96,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if cc is None and oc is None:
         print("nothing to validate: give a rendered root, --claude-code, or --opencode", file=sys.stderr)
         return 2
-    user_sd = Path(args.user_skills_dir) if args.user_skills_dir else None
-    findings = validate_set(tiers, cc, oc, Path(args.skills_dir) if args.skills_dir else None, user_skills_dir=user_sd)
+    findings = validate_set(
+        tiers, cc, oc, Path(args.skills_dir) if args.skills_dir else None,
+        user_skills_dir=user_skills_dir_from_args(args),
+    )
     for f in findings:
         print(f)
     if findings:
@@ -103,7 +115,6 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     except (OSError, KeyError) as e:
         print(f"tier table not readable: {e}", file=sys.stderr)
         return 1
-    raw_usd = getattr(args, "user_skills_dir", None)
     return bootstrap.run(
         repo=Path(args.repo).resolve(),
         name=args.name,
@@ -116,7 +127,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         skills_root=args.skills_root,
         dry_run=args.dry_run,
         tiers=tiers,
-        user_skills_dir=Path(raw_usd) if raw_usd else None,
+        user_skills_dir=user_skills_dir_from_args(args),
         gate_commands=list(getattr(args, "gate_command", None) or []),
         get_only_commands=list(getattr(args, "get_only_command", None) or []),
         output_language=getattr(args, "output_language", None),
