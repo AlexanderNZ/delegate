@@ -121,13 +121,15 @@ Each form of `status` then works, and exits 0. It shows the progress and the ETA
 
 ### A stream that cannot be read
 
-Each form of `status` works, and exits 0, when an event stream of the run cannot be read. A stream cannot be read when:
+`status` only shows data. Each form of `status` works, and exits 0, when an event stream of the run cannot be read. The rule: any error from the check that the stream exists, or from the method `activity` of the adapter, makes that stream a stream that cannot be read. For example, a stream cannot be read when:
 
 - The file is missing. The stream of an agent that runs now is the exception: before the harness opens it, it has 0 tokens.
+- The process cannot search a parent directory of the file.
 - The process cannot read the file, for example because the file has no read permission.
 - The path is a directory.
 - The file is not UTF-8 text.
-- The method `activity` of the adapter raises an `AdapterError` for the stream. For example, a line before the last one is not JSON, or a `step_finish` event of an `opencode` stream has no `part.tokens.total` field.
+- A line before the last one is not JSON.
+- A line is JSON, but it is not an event that the adapter can use. For example, a line is a number or a list, a `timestamp` is not a time, a usage value of a `claude-code` stream is not a number, or a `step_finish` event of an `opencode` stream has no `part.tokens.total` number.
 
 `status` then shows no tokens and no activity for that agent:
 
