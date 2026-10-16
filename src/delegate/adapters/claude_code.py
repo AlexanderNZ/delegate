@@ -4,21 +4,33 @@ The command is `claude --print --output-format stream-json --verbose --model
 <model> --agent <agent>`. The prompt goes on standard input, never in argv, so
 a long brief meets no argument limit and shows in no process list. The
 harness writes one JSON event on each line of standard output. The adapter
-copies that stream to a file and reads the final `result` event from it.
+copies that stream to the file that the request names, and reads the final
+`result` event from it.
+
+The activity of a stream comes from the `assistant` events and the `timestamp`
+field. Each `assistant` event carries `message.usage`. The harness writes one
+event for each content block of a message, and each event of a message repeats
+the usage of that message, so the adapter counts the newest usage of each
+message id once.
 """
 
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
+from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
-from .streams import read_events, stream_path
+from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
+from .streams import read_events
 
 # The command that starts the harness.
 COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
 TIER_COLUMN: str = "claude-code"
+
+# The fields of `message.usage` that the token count of a message adds: the input, the cache, and the output.
+USAGE_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 
 
 def _end_state(result: dict[str, object]) -> str:
@@ -48,7 +60,7 @@ class ClaudeCodeAdapter:
         ]
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
-        stream = stream_path(request.report_path)
+        stream = request.event_stream
         with stream.open("w") as out:
             process = subprocess.run(command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd)
         text = stream.read_text()
@@ -63,3 +75,15 @@ class ClaudeCodeAdapter:
         if process.returncode != 0 and end_state == FINISHED:
             end_state = FAILED
         return AdapterResult(process.returncode, end_state, session_id, stream)
+
+    def activity(self, stream: Path) -> Activity:
+        usage_of: dict[str, dict[str, object]] = {}
+        last: datetime | None = None
+        for event in read_events(stream):
+            if "timestamp" in event:
+                last = datetime.fromisoformat(str(event["timestamp"]))
+            message = event.get("message")
+            if event.get("type") == "assistant" and isinstance(message, dict) and isinstance(message.get("usage"), dict):
+                usage_of[str(message.get("id"))] = message["usage"]
+        tokens = sum(int(usage.get(name) or 0) for usage in usage_of.values() for name in USAGE_FIELDS)  # type: ignore[call-overload]
+        return Activity(tokens, last)

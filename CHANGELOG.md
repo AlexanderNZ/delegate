@@ -4,7 +4,16 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- `delegate status --json` prints one snapshot of a run as JSON. It gives the state, the time used, the tickets that ended, the percentage, the ETA, and the tokens of the run. For each ticket it gives the state, the phase, the time used, the tokens, and the seconds since the last activity of its agent. The reference page of `status` documents each field, and the rules of the percentage and the ETA.
+- `delegate status --follow` draws the same snapshot in the terminal: one line for the run, and one for each ticket. It draws the lines again in place after each interval (`--interval`, 2 seconds by default). It exits when the run ends. When standard output is not a terminal, it prints each snapshot as plain lines.
+- The journal event `agent-start` names the event stream of each agent before the agent starts: the specialist, each continuation, the fix-up specialist, and each verifier.
+
 ### Changed
+
+- The harness port changed, so an adapter outside the kit must change too. `AdapterRequest` has the new field `event_stream`: the engine chooses the file of the stream, and the adapter writes the stream there. The helper `stream_path` of `delegate.adapters.streams` is gone. An adapter has the new method `activity(stream)`, which returns an `Activity` with the tokens so far and the time of the newest event. `read_events` raises `AdapterError` for a stream file that is missing.
+- The stream of a verifier is in `runs/<run id>/verifier/<ticket id>/` from the start, not in the temporary copy. `delegate watch --stall-minutes` now sees the stream of an agent that runs, because the journal names it at the start.
 
 - The tier table moved from `src/delegate/tiers.toml` to `src/delegate/shared/tiers.toml`. A consumer that reads the file by its path, such as a Nix configuration, must use the new path. The renderer, the validator, the bootstrap and the agent templates moved into `src/delegate/definitions/`, and the reference generator and the neutrality check moved into `src/delegate/docs/`. The commands and their output do not change.
 - The command modules moved into `src/delegate/cli/`, and the argument parsing of every command is there. The console scripts `delegate`, `agent-definitions` and `verifier-brief` do not change. A module that you start with `python -m` has a new name: `delegate.cli.delegate`, `delegate.cli.agent_definitions` and `delegate.cli.brief`. A git failure in a guard names the directory where git ran, as it did before the restructure.

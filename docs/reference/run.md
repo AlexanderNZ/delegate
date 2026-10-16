@@ -255,7 +255,8 @@ All files are in `<git common dir>/delegate/`. The working tree of the repositor
 | `runs/<run id>/reports/<ticket id>.specialist.json` | The report path that the brief gives the specialist. |
 | `runs/<run id>/findings/<ticket id>.fixup-<round>.md` | The findings that start a fix-up round. |
 | `runs/<run id>/reports/<ticket id>.fixup-<round>.specialist.json` | The report path that the fix-up brief gives the specialist. |
-| `runs/<run id>/verifier/<ticket id>/` | The verdict report (`verdict.json`) and the files that the verifier run wrote beside it. |
+| `runs/<run id>/reports/<report name>.stream.jsonl` | The event stream of the specialist or the fix-up specialist, beside its report. A continuation writes `<report name>.stream-2.jsonl`, then `-3`, and so on. |
+| `runs/<run id>/verifier/<ticket id>/` | The verdict report (`verdict.json`), the event stream of the verifier (`verdict.stream.jsonl`), and the files that the verifier run wrote beside the report. |
 | `runs/<run id>/verifier/<ticket id>/fixup-<round>/` | The same files for the verifier of a fix-up round. |
 | `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. |
 | `hooks/<run id>/<ticket id>/` | The hooks directory of the worktree. See [the push guard](#the-push-guard). |
@@ -318,6 +319,7 @@ The adapter has the method `run(request)`.
 | `prompt` | The specialist brief, or the verifier brief. |
 | `cwd` | The worktree path for the specialist. The path of the temporary copy for the verifier. |
 | `report_path` | The path where the agent writes its report. |
+| `event_stream` | The path of the file where the adapter captures the event stream of the harness. The engine chooses it beside the report, and never over an earlier stream: `<report name>.stream.jsonl`, then `<report name>.stream-2.jsonl`, and so on. The stream of a verifier goes in `runs/<run id>/verifier/<ticket id>/` (or its `fixup-<round>/` directory) from the start, outside the temporary copy. The directory of the file exists. The engine writes the path to the journal in `agent-start` before it calls `run`. |
 | `resume_session` | The session id of the last run, when the engine resumes that session for a continuation. Otherwise `None`. The engine sets it only for an adapter with `supports_resume` set to true. |
 
 `run` returns a result.
@@ -327,7 +329,16 @@ The adapter has the method `run(request)`.
 | `exit_status` | The exit status of the harness process. |
 | `end_state` | `finished`, `failed`, or `capped`. |
 | `session_id` | The session id, or `None` when the harness gives none. |
-| `event_stream` | The path of the captured event stream. |
+| `event_stream` | The path of the captured event stream: the `event_stream` of the request. |
+
+The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with two fields. The stream can be the partial stream of an agent that still runs. `delegate status --json` and `delegate status --follow` use it. See [the snapshot](status-and-watch.md#the-snapshot).
+
+| `Activity` field | Meaning |
+|---|---|
+| `tokens` | The tokens that the agent used so far, as a whole number. |
+| `last_event` | The time (UTC) of the newest event of the stream that has a time, or `None` when the stream has no such event. |
+
+Half a line at the end of a stream is not an error, because a live harness writes it now. A missing file, or a line before the last one that is not JSON, raises an `AdapterError`.
 
 ## The specialist brief
 
@@ -371,6 +382,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 |---|---|
 | `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `run_branch`, `tickets` (the ids in plan order) |
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
+| `agent-start` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (0 for the specialist and the first verifier, else the fix-up round), `event_stream` (the path of the stream of the agent). The engine writes it just before each agent starts: the specialist, each continuation, the fix-up specialist, and each verifier. The result event of the agent names the same path. |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream` |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
 | `hotspot-finding` | `ticket`, `phase` (`build` or `fixup`), `round` (0 for the first build, else the fix-up round), `matches` (a list of objects, each with the changed `path` and the `pattern` it matches) |

@@ -1,15 +1,27 @@
 """The state of each ticket of a run, for `delegate status` (the command is in `delegate.cli.status`).
 
-It reads the journal of the run and nothing else. It needs no adapter, no
-workflow file, and no tool beyond git, which finds the state directory.
+The report (`report`) reads the journal of the run and nothing else. It needs no
+adapter, no workflow file, and no tool beyond git, which finds the state
+directory.
+
+The snapshot (`snapshot`) also reads the event streams that the journal names,
+through a reader that the command gives. The reader is the `activity` method of
+the harness adapter of the run, so this module never imports an adapter. The
+snapshot gives the progress, the ETA, the tokens, and the activity of each
+agent. `view_lines` draws it as one line for the run and one for each ticket.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
+from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
-from .journal import JournalError, read_events
+from . import domain
+from .journal import JournalError, read_events, read_new_events
 from .runs import journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
@@ -67,3 +79,209 @@ def report(repo: Path, run_id: str | None, vcs: VersionControl) -> list[str]:
     if not events:
         raise JournalError(f"journal {journal} holds no event")
     return render(events, journal)
+
+
+# The states of a ticket that ended.
+ENDED: tuple[str, ...] = (BUILT, FAILED, SKIPPED)
+
+# The phase that an event of a running ticket starts. `report-validation` starts the gates only when the report is valid.
+PHASE_OF_EVENT: dict[str, str] = {
+    "step-start": domain.PHASE_SPECIALIST, "continuation": domain.PHASE_SPECIALIST, "report-validation": domain.PHASE_GATES,
+    "rebase": domain.PHASE_GATES, "verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP,
+}
+
+# The phase of the agent that an `agent-start` event names, by its `role`.
+PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
+
+# The events that end an agent run.
+AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
+
+# A reader of an event stream: the path of the stream gives the activity of the agent.
+StreamReader = Callable[[Path], Activity]
+
+# The reader of the streams of a run, from the adapter name of the run. It raises when it knows no such adapter.
+ReaderOf = Callable[[str], StreamReader]
+
+
+@dataclass(frozen=True)
+class TicketSnapshot:
+    """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs."""
+
+    id: str
+    state: str
+    phase: str | None
+    elapsed_seconds: int
+    tokens: int
+    idle_seconds: int | None
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended."""
+
+    run_id: str
+    state: str
+    time: datetime
+    elapsed_seconds: int
+    tickets_total: int
+    tickets_ended: int
+    percent: int
+    eta: datetime | None
+    tokens: int
+    tickets: tuple[TicketSnapshot, ...]
+
+    def to_json(self) -> dict[str, object]:
+        """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it."""
+        return {
+            "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
+            "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
+            "eta": self.eta.isoformat() if self.eta else None, "tokens": self.tokens,
+            "tickets": [
+                {"id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens": t.tokens, "idle_seconds": t.idle_seconds}
+                for t in self.tickets
+            ],
+        }
+
+
+def _time(event: dict[str, object]) -> datetime:
+    return datetime.fromisoformat(str(event["time"]))
+
+
+def _seconds(start: datetime, end: datetime) -> int:
+    return max(0, int((end - start).total_seconds()))
+
+
+def _ticket(
+    ticket: str, own: list[dict[str, object]], activity: StreamReader, now: datetime, run_ended: bool
+) -> tuple[TicketSnapshot, int | None]:
+    """The snapshot of one ticket from its own events, and the seconds of its step when it ended after one.
+
+    An agent runs from its `agent-start` until its result event, a `step-end` (a crash), or the end of the run. The
+    verifier of an `economy` chain starts after its ticket ended, so a ticket that ended can have an agent that runs.
+    """
+    state, phase = PENDING, None
+    started = ended = None
+    streams: list[str] = []
+    live: dict[str, object] | None = None  # the `agent-start` of the agent that runs now
+    for event in own:
+        kind = str(event["event"])
+        if kind == "step-start":
+            state, started = RUNNING, started or _time(event)
+        elif kind == "step-end":
+            state, ended, live = str(event["state"]), ended or _time(event), None
+        elif kind == "skip":
+            state = SKIPPED
+        if kind == "agent-start":
+            phase, live = PHASE_OF_ROLE[str(event["role"])], event
+        elif kind in AGENT_RESULTS:
+            live = None
+        elif kind in PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
+            phase = PHASE_OF_EVENT[kind]
+        elif kind == "gate-result" and event["phase"] != "fixup":
+            phase = domain.PHASE_GATES
+        if "event_stream" in event and str(event["event_stream"]) not in streams:
+            streams.append(str(event["event_stream"]))
+    if state != RUNNING:
+        phase = None
+    if run_ended:
+        live = None
+    tokens, idle = 0, None
+    for stream in streams:
+        is_live = live is not None and stream == str(live["event_stream"])
+        if is_live and not Path(stream).exists():
+            found = Activity(0, None)  # the harness has not opened the stream yet
+        else:
+            found = activity(Path(stream))
+        tokens += found.tokens
+        if is_live:
+            idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type]
+    elapsed = _seconds(started, ended or now) if started else 0
+    duration = elapsed if started and ended else None
+    return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle), duration
+
+
+def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime) -> Snapshot:
+    """The snapshot of a run from its journal events. `now` is the time of the clock, in UTC.
+
+    The reader of the streams comes from `reader_of` at once, so an adapter that is not known fails the snapshot also
+    when no stream exists yet.
+    """
+    if not events or events[0]["event"] != "run-start":
+        raise JournalError(f"journal {journal}: the first event is not 'run-start'")
+    start = events[0]
+    end = next((e for e in reversed(events) if e["event"] == "run-end"), None)
+    if end is not None:
+        now = _time(end)  # the clock of a run that ended stops at its end
+    now = now.replace(microsecond=0)
+    activity = reader_of(str(start["adapter"]))
+    tickets: list[TicketSnapshot] = []
+    durations: list[float] = []
+    for ticket in [str(t) for t in start["tickets"]]:  # type: ignore[union-attr]
+        found, duration = _ticket(ticket, [e for e in events if e.get("ticket") == ticket], activity, now, end is not None)
+        tickets.append(found)
+        if duration is not None:
+            durations.append(duration)
+    ended = sum(1 for t in tickets if t.state in ENDED)
+    running = [t for t in tickets if t.state == RUNNING]
+    to_end = domain.seconds_to_end(durations, len(tickets) - ended, sum(t.elapsed_seconds for t in running))
+    return Snapshot(
+        run_id=str(start["run_id"]), state=str(end["result"]) if end else RUNNING, time=now,
+        elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
+        percent=domain.percent_complete(ended, [t.phase for t in running if t.phase], len(tickets)),
+        eta=None if to_end is None else now + timedelta(seconds=to_end), tokens=sum(t.tokens for t in tickets), tickets=tuple(tickets),
+    )
+
+
+def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> Snapshot:
+    """The snapshot of a run of the repository: the run with that id, or the newest run when `run_id` is None.
+
+    A run in progress appends to its journal, so a last line with no newline is
+    left for the next snapshot. Raise RunsError when there is no such run,
+    JournalError when its journal is not valid, and the error of `reader_of` or
+    of its reader when the adapter is not known or a stream cannot be read.
+    The stream of an agent that runs now can be missing: the harness has not
+    opened it yet.
+    """
+    journal = journal_of(repo, run_id, vcs)
+    events, _ = read_new_events(journal, 0, 1)
+    return snapshot_of(events, journal, reader_of, now)
+
+
+def _duration(seconds: int) -> str:
+    """A duration in a short form: `45s`, `12m05s`, `2h03m`, or `3d04h`."""
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    if seconds < 86400:
+        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+    return f"{seconds // 86400}d{seconds % 86400 // 3600:02d}h"
+
+
+def _tokens(count: int) -> str:
+    """A token count in a short form: `950`, `26k`, or `1.2M`."""
+    if count < 1000:
+        return str(count)
+    if count < 1_000_000:
+        return f"{count / 1000:.0f}k"
+    return f"{count / 1_000_000:.1f}M"
+
+
+def view_lines(snap: Snapshot, width: int) -> list[str]:
+    """The lines of the terminal view of a snapshot: one for the run, then one for each ticket, each cut to `width`.
+
+    The view names only the run id, the ticket ids, the states, the phases, and the numbers. It shows no path and no tool call.
+    The ETA shows only while the run runs: in the time from now, or `-` before the first ticket ends.
+    """
+    eta = _duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
+    lines = [
+        f"run {snap.run_id} {snap.state} {snap.percent}%, {snap.tickets_ended} of {snap.tickets_total} ended, "
+        f"{_duration(snap.elapsed_seconds)} used, " + (f"ETA {eta}, " if snap.state == RUNNING else "") + f"{_tokens(snap.tokens)} tokens"
+    ]
+    for ticket in snap.tickets:
+        line = f"  {ticket.id} {ticket.state}" + (f" {ticket.phase}" if ticket.phase else "")
+        line += f", {_duration(ticket.elapsed_seconds)} used, {_tokens(ticket.tokens)} tokens"
+        if ticket.idle_seconds is not None:
+            line += f", last activity {_duration(ticket.idle_seconds)} ago"
+        lines.append(line)
+    return [line[: max(width, 1)] for line in lines]
