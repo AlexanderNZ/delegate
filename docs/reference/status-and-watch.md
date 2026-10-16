@@ -97,7 +97,7 @@ The phase of a running ticket follows its newest event:
 | Event | Phase |
 |---|---|
 | `step-start`, [**`continuation`**](../glossary.md#continuation), or `agent-start` with the role `specialist` | `specialist` |
-| `report-validation` that is valid, `rebase`, or `gate-result` of the phase `build` or `rebase` | `gates` |
+| `report-validation` that is valid, `rebase`, or `gate-result` or `gate-skip` of the phase `build` or `rebase` | `gates` |
 | `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
 | `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round stay in the phase `fix-up`. |
 

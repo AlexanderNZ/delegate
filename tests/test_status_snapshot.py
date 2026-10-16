@@ -209,6 +209,14 @@ def test_the_eta_is_never_earlier_than_now(tmp_path, capsys, monkeypatch):
             ("gate-result", {"round": 0, "phase": "build", "command": "t", "exit_status": 1, "green": False, "output_tail": ""}),
             ("continuation", {"count": 1, "limit": 2, "trigger": "gates-red", "mode": "brief", "resume_session": None, "commits": [], "reason": "r"}),
         ], "specialist", 0, id="continuation"),
+        pytest.param([
+            ("verify-start", {"round": 0, "agent": "v", "tier": "verifier", "model": "m", "commit": "3", "copy": "/c"}),
+            ("gate-skip", {"round": 0, "phase": "build", "command": "t", "commit": "3", "green_seq": 4, "reason": "r"}),
+        ], "gates", 60, id="gate-skip-of-a-resume"),
+        pytest.param([
+            ("fixup-start", {"round": 1, "rejected_commit": "3", "findings_file": "/f", "agent": "s", "tier": "strong", "model": "m"}),
+            ("gate-skip", {"round": 1, "phase": "fixup", "command": "t", "commit": "4", "green_seq": 9, "reason": "r"}),
+        ], "fix-up", 80, id="gate-skip-of-a-fix-up"),
     ],
 )
 def test_the_phase_of_a_running_ticket_follows_its_newest_event(tmp_path, capsys, monkeypatch, events, phase, percent):

@@ -51,7 +51,7 @@ A step has these parts:
 3. Read the [**report**](../glossary.md#report) from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, the tip of the previous ticket in `economy` mode, or the tip of the run branch with `ticket-start = "run-branch"`).
 5. Compare the changed paths with the [**hotspot**](../glossary.md#hotspot) patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
-6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, a red gate, and a report that is not valid on a branch with a commit start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
+6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A gate that the journal holds green on the same commit does not run again. See [one green gate run for each commit](#one-green-gate-run-for-each-commit). A specialist that ends `failed` or `capped`, a red gate, and a report that is not valid on a branch with a commit start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
 8. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
 
@@ -113,7 +113,7 @@ The engine treats each ticket by what the journal holds for it:
 An open step goes on as follows:
 
 - The worktree is used again as it is. A rebase that the stop left half done is aborted. If the worktree is gone, the engine makes it again on the same branch.
-- If the journal shows a valid report after the last time the specialist was spawned, the engine does not spawn the specialist again. It runs the gates, and the step goes on from there.
+- If the journal shows a valid report after the last time the specialist was spawned, the engine does not spawn the specialist again. It runs the gates, and the step goes on from there. A gate that the journal holds green on the commit of the branch does not run again. So a resume after a stop at the verifier runs no gate on that commit.
 - Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond `base-branch`, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
 - The continuations that the journal holds count against the limit of the mode.
 - In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of [**verdicts**](../glossary.md#verdict) that the journal holds, and the limit of two fix-up rounds counts across the stop. A verifier run that ended with no verdict does not count: for example, a verifier that a stop or the time limit of a harness killed. The resume runs that round again.
@@ -210,7 +210,7 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 
 ## The rebase onto the run branch
 
-In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. A ticket branch that starts from the run branch (`ticket-start = "run-branch"`) holds the run branch already, so its rebase has no conflict. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
+In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. A ticket branch that starts from the run branch (`ticket-start = "run-branch"`) holds the run branch already, so its rebase has no conflict. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. A rebase that changes the commit runs the gates again, so the journal shows a gate result before and after the rebase. A rebase that keeps the commit runs no gate again: for example, when the run branch is still at the commit where the ticket branch started. The journal then shows `gate-skip` with the phase `rebase` for each gate. See [one green gate run for each commit](#one-green-gate-run-for-each-commit).
 
 - The engine writes `rebase` with the run branch tip (`onto_commit`) and the branch tip before (`from_commit`) and after (`to_commit`) the rebase.
 - A rebase that stops with a conflict fails the step. The engine aborts the rebase, so the branch keeps its commits and the worktree is clean. The journal records `rebase` with the result `conflict` and the conflicting files in `files`. The independent tickets go on.
@@ -219,6 +219,17 @@ In `assure` mode, the engine rebases the ticket branch onto the run branch befor
 - A red gate after the rebase fails the step. No verifier starts.
 
 The engine does not rebase in `economy` mode.
+
+## One green gate run for each commit
+
+The engine does not run a gate again on a commit for which the journal holds a green result of that gate. Before each gate, the engine reads the commit that the worktree has checked out. If the journal holds a `gate-result` of the same command on that commit, with `green` true, the gate does not run. The engine writes `gate-skip` with the commit, the `seq` of the green result in `green_seq`, and the reason. The gate counts as green, and the step goes on.
+
+- A rebase that keeps the commit runs no gate again. The `rebase` event then has the same `from_commit` and `to_commit`. The green gate results of the phase `build` are valid for the rebased commit.
+- A rebase that changes the commit runs the gates again on the new commit.
+- `delegate run --resume` after a stop at the verifier runs no gate on the commit whose gates the journal holds green. The journal of the resume shows `gate-skip` for the phase `build` and for the phase `rebase`.
+- A red result does not count. A gate that was red on a commit runs again on that commit, for example in a retry.
+- A `gate-result` without `commit`, from a journal of an earlier version, does not count.
+- The rule looks at the commit only. A gate whose result depends on a file outside the commit, or on the environment, keeps its first green result for that commit.
 
 ## The economy chain
 
@@ -432,7 +443,8 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `idle-timeout` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (as in `agent-start`), `seconds` (the idle timeout). The adapter ended the session of the agent after its valid report, because the agent wrote no event for that time. The engine writes it just before the result event of the agent, and the step continues. |
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
 | `hotspot-finding` | `ticket`, `phase` (`build` or `fixup`), `round` (0 for the first build, else the fix-up round), `matches` (a list of objects, each with the changed `path` and the `pattern` it matches) |
-| `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
+| `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `commit` (the commit that the worktree has checked out when the gate runs), `exit_status`, `green`, `output_tail` (the last 4000 characters) |
+| `gate-skip` | `ticket`, `round`, `phase`, `command` (as in `gate-result`), `commit` (the commit that the worktree has checked out), `green_seq` (the `seq` of the green `gate-result` of the same command on that commit), `reason`. The gate does not run again, and it counts as green. See [one green gate run for each commit](#one-green-gate-run-for-each-commit). |
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, or `report-invalid`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |

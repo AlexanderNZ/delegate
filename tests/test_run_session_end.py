@@ -77,7 +77,8 @@ def test_a_valid_report_a_success_result_and_exit_status_143_continue_the_specia
     assert len(scripted.calls) == 1
     report = next(e for e in events if e["event"] == "report-validation")
     assert report["valid"] is True
-    assert [e["green"] for e in events if e["event"] == "gate-result"] == [True, True]  # the build and the rebase
+    assert [e["green"] for e in events if e["event"] == "gate-result"] == [True]  # the build
+    assert [e["phase"] for e in events if e["event"] == "gate-skip"] == ["rebase"]  # the rebase keeps the commit
 
 
 def test_a_valid_verdict_a_success_result_and_exit_status_143_continue_the_verifier_step(tmp_path, capsys, scripted):

@@ -57,7 +57,7 @@ def test_every_gate_command_reaches_the_runner_with_the_worktree_of_its_ticket(t
     assert gates.calls
     assert set(gates.calls) == {("test -f feature.txt", "a")}
     results = [e for e in read_journal_file(repo, result.run_id) if e["event"] == "gate-result"]
-    assert [(e["phase"], e["green"]) for e in results] == [("build", True), ("rebase", True)]
+    assert [(e["phase"], e["green"]) for e in results] == [("build", True)]  # the rebase keeps the commit
 
 
 def test_a_gate_that_the_runner_reports_red_fails_the_ticket_and_the_journal_keeps_its_output(tmp_path, scripted_adapter):

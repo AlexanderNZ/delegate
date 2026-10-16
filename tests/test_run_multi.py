@@ -75,19 +75,20 @@ def test_tickets_run_in_dependency_order_and_the_run_branch_holds_all_three_when
     assert git(repo, "rev-parse", "main").strip() == base_tip
 
 
-def test_the_journal_shows_a_gate_result_before_and_after_the_rebase_for_each_ticket(tmp_path, capsys, scripted):
+def test_the_journal_shows_the_gates_before_and_after_the_rebase_for_each_ticket(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
 
     code, out, err = run(repo, capsys)
 
     assert (code, err) == (0, "")
     events = read_journal(out)
-    for ticket_id in ("a", "b"):
+    # The rebase of ticket a keeps its commit, so its gates do not run again; the rebase of ticket b changes its commit.
+    for ticket_id, after in (("a", "gate-skip"), ("b", "gate-result")):
         mine = of_ticket(events, ticket_id)
         names = event_names(mine)
-        gates = [i for i, name in enumerate(names) if name == "gate-result"]
-        assert gates[0] < names.index("rebase") < gates[1] < names.index("verify-start")
-        assert [e["phase"] for e in mine if e["event"] == "gate-result"] == ["build", "rebase"]
+        assert names.index("gate-result") < names.index("rebase") < names.index(after, names.index("rebase")) < names.index("verify-start")
+        gates = [(e["event"], e["phase"]) for e in mine if e["event"] in ("gate-result", "gate-skip")]
+        assert gates == [("gate-result", "build"), (after, "rebase")]
     b_gates = [e for e in of_ticket(events, "b") if e["event"] == "gate-result"]
     # Ticket b is built from main, so it lacks a.txt until the rebase puts the accepted work of ticket a under it.
     assert b_gates[0]["output_tail"] == "b.txt\nseed.txt\n"
@@ -107,9 +108,11 @@ def test_a_gate_that_is_red_only_after_the_rebase_fails_the_step_before_the_veri
     assert code == 1
     assert "Traceback" not in err
     events = read_journal(out)
+    # The rebase of ticket a keeps its commit, so its gate does not run again.
     assert [(e["ticket"], e["phase"], e["green"]) for e in events if e["event"] == "gate-result"] == [
-        ("a", "build", True), ("a", "rebase", True), ("b", "build", True), ("b", "rebase", False),
+        ("a", "build", True), ("b", "build", True), ("b", "rebase", False),
     ]
+    assert [(e["ticket"], e["phase"]) for e in events if e["event"] == "gate-skip"] == [("a", "rebase")]
     assert "ticket b: gates red" in err
     assert [e["ticket"] for e in events if e["event"] == "verify-start"] == ["a"]
     assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-a").strip()

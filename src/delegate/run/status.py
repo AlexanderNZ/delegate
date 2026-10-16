@@ -200,7 +200,7 @@ def _ticket(
             live = None
         elif kind in PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
             phase = PHASE_OF_EVENT[kind]
-        elif kind == "gate-result" and event["phase"] != "fixup":
+        elif kind in ("gate-result", "gate-skip") and event["phase"] != "fixup":
             phase = domain.PHASE_GATES
         if "event_stream" in event and str(event["event_stream"]) not in streams:
             streams.append(str(event["event_stream"]))

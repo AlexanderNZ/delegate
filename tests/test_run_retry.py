@@ -110,7 +110,9 @@ def test_a_step_whose_gates_were_red_goes_on_at_the_gates_with_no_new_specialist
     assert scripted.calls == [] and scripted.continuation_calls == [] and len(scripted.verifier_calls) == 1
     retried = after_retry(read_journal_file(repo, run_id))
     assert {k: retried[0][k] for k in ("phase", "round")} == {"phase": "gates", "round": 0}
-    assert [(e["phase"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("build", True), ("rebase", True)]
+    # The gate was red on the commit, so it runs again. The rebase keeps the commit, so the gate does not run a third time.
+    assert [(e["phase"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("build", True)]
+    assert [e["phase"] for e in retried if e["event"] == "gate-skip"] == ["rebase"]
     assert "a.txt" in tree(repo, "run/demo")
 
 
