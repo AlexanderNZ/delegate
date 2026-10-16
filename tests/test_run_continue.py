@@ -6,12 +6,14 @@ each call in the state that the test gives, so the engine runs end to end with
 no model.
 """
 
+import json
+
 import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
+from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 
 @pytest.fixture
@@ -228,3 +230,74 @@ def test_a_continuation_uses_the_agent_and_the_model_of_the_first_run(tmp_path, 
     (first,) = scripted.calls
     (second,) = scripted.continuation_calls
     assert (second.agent, second.model, second.report_path) == (first.agent, first.model, first.report_path)
+
+
+def invalid_until_continued(request, head):
+    """A report with two fields of the wrong type on the first run, and a valid report on a continuation."""
+    branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    if "## Continuation" in request.prompt:
+        return json.dumps(valid_report("a", branch, head))
+    return json.dumps(valid_report("a", branch, head, gates_green="yes", commits="abc"))
+
+
+@pytest.mark.parametrize("supports_resume", [False, True], ids=["new-agent", "resumed-session"])
+def test_a_report_with_a_wrong_field_type_and_a_committed_branch_gets_a_continuation_for_the_report_only_and_the_step_goes_on(
+    tmp_path, capsys, scripted, supports_resume
+):
+    scripted.supports_resume = supports_resume
+    scripted.report_text = invalid_until_continued
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    (first,) = scripted.calls
+    (second,) = scripted.continuation_calls
+    assert second.cwd == first.cwd
+    assert second.resume_session == ("session-1" if supports_resume else None)
+    # The continuation names each problem of the check, and the path of the report.
+    assert "gates_green: must be a boolean" in second.prompt
+    assert "commits: must be a list of strings" in second.prompt
+    assert str(second.report_path) in second.prompt
+    # It asks only for the report: it does not give the task again.
+    assert "The export command writes a CSV file." not in second.prompt and "## Task" not in second.prompt
+    events = read_journal(out)
+    (continuation,) = [e for e in events if e["event"] == "continuation"]
+    assert (continuation["count"], continuation["trigger"]) == (1, "report-invalid")
+    assert [e["valid"] for e in events if e["event"] == "report-validation"] == [False, True]
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "built"
+    # The work of the first run is the work that the run branch gets.
+    assert git(repo, "show", "run/demo:feature.txt") == "feature\n"
+
+
+@pytest.mark.parametrize(("mode", "limit"), [("assure", 2), ("economy", 1)])
+def test_a_report_that_stays_invalid_fails_the_step_at_the_continuation_limit(tmp_path, capsys, scripted, mode, limit):
+    scripted.report_text = lambda request, head: json.dumps(valid_report("a", "b", head, gates_green="yes"))
+    repo = make_repo(tmp_path, WORKFLOW.replace('mode = "assure"', f'mode = "{mode}"'))
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert "Traceback" not in err
+    assert len(scripted.continuation_calls) == limit
+    assert scripted.verifier_calls == []
+    (limit_event,) = limit_events(out)
+    assert (limit_event["count"], limit_event["limit"], limit_event["trigger"]) == (limit, limit, "report-invalid")
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["state"] == "failed"
+    assert "gates_green" in step_end["reason"] and f"continuation limit of {limit}" in step_end["reason"]
+
+
+def test_an_invalid_report_on_a_branch_with_no_commit_fails_the_step_and_the_specialist_is_not_continued(tmp_path, capsys, scripted):
+    scripted.files = {}  # the specialist commits nothing
+    scripted.report_text = lambda request, head: json.dumps(valid_report("a", "b", head, gates_green="yes"))
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    assert scripted.continuation_calls == []
+    assert "continuation" not in event_names(read_journal(out))
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["state"] == "failed" and "gates_green" in step_end["reason"]

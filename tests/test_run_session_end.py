@@ -142,4 +142,5 @@ def test_the_report_check_of_an_agent_is_false_for_a_report_that_is_not_valid(tm
     code, out, err = run(repo, capsys)
 
     assert code == 1
-    assert scripted.report_checks == [("specialist", IDLE_TIMEOUT_SECONDS, False, False)]
+    # The first run and the two continuations that ask for a corrected report: each check is false.
+    assert scripted.report_checks == [("specialist", IDLE_TIMEOUT_SECONDS, False, False)] * 3

@@ -96,7 +96,7 @@ See [the `bootstrap` command](reference/commands.md#delegate-bootstrap) and [the
 
 ## Continuation
 
-A continuation is a new run of a specialist in the same worktree, after the specialist stopped capped or failed, or left a red gate. The commits stay, so no finished work is lost, and each mode sets a limit. See [the continuation](reference/run.md#the-continuation).
+A continuation is a new run of a specialist in the same worktree, after the specialist stopped capped or failed, or left a red gate. A specialist that committed work with a report that is not valid also continues: it writes only a corrected report. The commits stay, so no finished work is lost, and each mode sets a limit. See [the continuation](reference/run.md#the-continuation).
 
 ## Contract test
 

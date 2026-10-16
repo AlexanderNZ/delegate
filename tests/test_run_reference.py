@@ -4,6 +4,7 @@ The reference is outside the package source, as the README is, so a Nix build
 that copies only the package skips these cases with a reason.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 
-from .support import ScriptedAdapter, make_repo, read_journal
+from .support import ScriptedAdapter, make_repo, read_journal, valid_report
 from .pages import repository_root
 
 ROOT = repository_root(Path(__file__))
@@ -140,6 +141,22 @@ def test_the_reference_lists_the_continuation_events_of_a_real_journal_with_each
         for field in event:
             if field not in ("seq", "time", "event"):
                 assert f"`{field}`" in row, (event["event"], field)
+
+
+@outside_the_package
+def test_the_reference_names_the_trigger_of_a_continuation_for_a_report_that_is_not_valid(tmp_path, capsys):
+    # The specialist commits its work, and each run writes a report with a field of the wrong type.
+    scripted = ScriptedAdapter(report_text=lambda request, head: json.dumps(valid_report("a", "b", head, gates_green="yes")))
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path)
+        delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    triggers = {e["trigger"] for e in read_journal(capsys.readouterr().out) if e["event"] in ("continuation", "continuation-limit")}
+    assert triggers == {"report-invalid"}
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    assert "`report-invalid`" in rows["`continuation`"]
 
 
 @outside_the_package

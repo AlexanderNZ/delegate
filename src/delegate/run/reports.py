@@ -93,7 +93,16 @@ def verifier_example(mode: str) -> dict[str, object]:
 
 
 class ReportError(Exception):
-    """A report is missing or invalid. The message names the path or the field."""
+    """A report is missing or invalid. The message names the path or the field.
+
+    `problems` holds each problem of the check as one text, so a brief can name
+    each one. A report that is missing or is no JSON object has one problem: the
+    message.
+    """
+
+    def __init__(self, message: str, problems: Sequence[str] = ()) -> None:
+        super().__init__(message)
+        self.problems: tuple[str, ...] = tuple(problems) or (message,)
 
 
 @dataclass(frozen=True)
@@ -169,7 +178,7 @@ def read_specialist_report(path: Path, ticket: str) -> SpecialistReport:
         if data["ticket"] != ticket:
             problems.append(f"ticket: the report is for ticket {data['ticket']!r}, but this step builds ticket {ticket!r}")
     if problems:
-        raise ReportError(f"report at {path} is invalid: " + "; ".join(problems))
+        raise ReportError(f"report at {path} is invalid: " + "; ".join(problems), problems)
     return SpecialistReport(
         data["ticket"], data["status"], data["branch"], data["head_sha"], data["commits"], data["gates_green"],
         data["summary"], data.get("blocked_reason"), data.get("judgement_calls"),
@@ -199,7 +208,7 @@ def read_verifier_report(path: Path, mode: str) -> VerifierReport:
         if data["verdict"] == "ACCEPT" and not data["criteria"]:
             problems.append("criteria: an ACCEPT needs evidence for at least one criterion")
     if problems:
-        raise ReportError(f"report at {path} is invalid: " + "; ".join(problems))
+        raise ReportError(f"report at {path} is invalid: " + "; ".join(problems), problems)
     return VerifierReport(
         data["mode"], data["verdict"], data["criteria"], data["gate_output"], data["findings"], data["unverified"]
     )

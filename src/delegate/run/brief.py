@@ -387,6 +387,18 @@ def fixup_brief(
     return _sections(*pairs)
 
 
+def _specialist_report_shape(ticket: str, worktree: str | Path, report_path: str | Path) -> str:
+    """The text of the `## Report` section of a specialist: the fields, their types, and one example object."""
+    return _report_shape(
+        report_path,
+        _field_list(SPECIALIST_REQUIRED, {"status": SPECIALIST_STATUSES}),
+        _field_list(SPECIALIST_OPTIONAL, {}),
+        "`gates_green` states whether the gates passed in your run. "
+        "A string field holds one string. To give more than one item in a string field, join the items with \"; \".",
+        specialist_example(ticket, str(worktree)),
+    )
+
+
 def specialist_brief(
     ticket: str,
     text: str,
@@ -419,14 +431,7 @@ def specialist_brief(
         f"{reserved}\n\n"
         "Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit."
     )
-    report = _report_shape(
-        report_path,
-        _field_list(SPECIALIST_REQUIRED, {"status": SPECIALIST_STATUSES}),
-        _field_list(SPECIALIST_OPTIONAL, {}),
-        "`gates_green` states whether the gates passed in your run. "
-        "A string field holds one string. To give more than one item in a string field, join the items with \"; \".",
-        specialist_example(ticket, str(worktree)),
-    )
+    report = _specialist_report_shape(ticket, worktree, report_path)
     pairs = [("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}")]
     if rejected is not None and findings is not None:
         pairs.append(("## Findings to fix", findings.rstrip("\n")))
@@ -486,6 +491,41 @@ def continuation_brief(
     if resumed:
         return section
     return specialist_brief(ticket, text, worktree, hotspots, gates, report_path) + "\n" + section
+
+
+def report_correction_brief(
+    ticket: str,
+    worktree: str | Path,
+    report_path: str | Path,
+    commits: Sequence[str],
+    problems: Sequence[str],
+) -> str:
+    """The brief the engine sends a specialist that committed work but wrote a report that is not valid.
+
+    It asks only for a corrected report. It holds the ticket id, the commits on
+    the branch, each problem of the report check, the report rule, and the shape
+    of the report. It does not give the task again, so a resumed session and a
+    new agent get the same brief.
+    """
+    lines = [
+        f"Ticket {ticket}",
+        "",
+        f"The last run of the specialist on this ticket committed work in the worktree `{worktree}`, "
+        f"but the report at `{report_path}` is not valid. The engine found these problems:",
+        "",
+        *(f"- {problem}" for problem in problems),
+        "",
+        "The branch holds these commits:",
+        "",
+        *(f"- {commit}" for commit in commits),
+        "",
+        "Write only a corrected report. Do not change a file in the worktree, and do not add a commit. "
+        + _report_rule("worktree", report_path),
+    ]
+    return _sections(
+        ("## Continuation", "\n".join(lines)),
+        ("## Report", _specialist_report_shape(ticket, worktree, report_path)),
+    )
 
 
 def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:

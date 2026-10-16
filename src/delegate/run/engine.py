@@ -78,8 +78,8 @@ from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
-    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, specialist_brief,
-    verifier_run_brief, verifier_run_sections,
+    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, report_correction_brief,
+    specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
@@ -107,6 +107,9 @@ ROLE_VERIFIER: str = "verifier"
 PHASE_BUILD: str = "build"
 PHASE_REBASE: str = "rebase"
 PHASE_FIXUP: str = "fixup"
+
+# The `trigger` of a `continuation` whose report check failed on a branch with work: it asks only for a corrected report.
+TRIGGER_REPORT_INVALID: str = "report-invalid"
 
 
 class EngineError(Exception):
@@ -575,11 +578,14 @@ def _build_with_continuations(
     the stop. It sets `interrupted` for a step that a stop left open: when the
     branch holds commits already, the first prompt is a continuation brief.
 
-    The specialist continues when it ends capped or failed. Return None when
-    the report is valid and the branch holds green work, or the reason the step
-    fails. A report that is missing, is invalid, or does not say committed
-    fails the step with no continuation. After `CONTINUATION_LIMIT` continuations
-    the step fails, and the journal records the count.
+    The specialist continues when it ends capped or failed, or when its gates
+    are red. A report that is there but not valid, on a branch that holds a
+    commit, gets a continuation that asks only for a corrected report and names
+    each problem of the check. Return None when the report is valid and the
+    branch holds green work, or the reason the step fails. A report that is
+    missing, that is not valid on a branch with no commit, or that does not say
+    committed fails the step with no continuation. After `CONTINUATION_LIMIT`
+    continuations the step fails, and the journal records the count.
     """
     stack = workflow.stacks[ticket.stack]
     limit = domain.continuation_limit(workflow.mode)
@@ -604,10 +610,11 @@ def _build_with_continuations(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream),
             )
+        gate_output: str | None = None
+        problems: tuple[str, ...] = ()
         if result is not None and not _session_done(result, report_valid):
             trigger = harness.CAPPED if result.end_state == harness.CAPPED else harness.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
-            gate_output = None
         else:
             try:
                 report = read_specialist_report(report_path, ticket.id)
@@ -616,26 +623,30 @@ def _build_with_continuations(
                     "report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error),
                     status=None, blocked_reason=None,
                 )
-                return str(error)
-            journal.append(
-                "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
-                status=report.status, blocked_reason=report.blocked_reason,
-            )
-            unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the specialist")
-            if unfinished:
-                return unfinished
-            if not _commit_lines(vcs, repo, since, branch):
-                return f"branch {branch} holds no commit beyond {since}, though the report says committed"
-            stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
-            if stop:
-                return stop
-            outcomes = [(gate, *_run_gate_with_output(gates, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
-            red = [(gate, output) for gate, green, output in outcomes if not green]
-            if not red:
-                return None
-            trigger = "gates-red"
-            reason = "gates red: " + "; ".join(gate for gate, _ in red)
-            gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
+                # A report that is there but not valid, on a branch with work, gets a continuation for the report only.
+                if not report_path.is_file() or not _commit_lines(vcs, repo, since, branch):
+                    return str(error)
+                trigger, reason, problems = TRIGGER_REPORT_INVALID, str(error), error.problems
+            else:
+                journal.append(
+                    "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
+                    status=report.status, blocked_reason=report.blocked_reason,
+                )
+                unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the specialist")
+                if unfinished:
+                    return unfinished
+                if not _commit_lines(vcs, repo, since, branch):
+                    return f"branch {branch} holds no commit beyond {since}, though the report says committed"
+                stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
+                if stop:
+                    return stop
+                outcomes = [(gate, *_run_gate_with_output(gates, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
+                red = [(gate, output) for gate, green, output in outcomes if not green]
+                if not red:
+                    return None
+                trigger = "gates-red"
+                reason = "gates red: " + "; ".join(gate for gate, _ in red)
+                gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
         if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -647,10 +658,13 @@ def _build_with_continuations(
             "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
         )
-        prompt = continuation_brief(
-            ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
-            resumed=resume_session is not None, gate_output=gate_output,
-        )
+        if trigger == TRIGGER_REPORT_INVALID:
+            prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems)
+        else:
+            prompt = continuation_brief(
+                ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
+                resumed=resume_session is not None, gate_output=gate_output,
+            )
 
 
 def _hotspot_stop(

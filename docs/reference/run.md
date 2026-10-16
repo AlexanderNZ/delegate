@@ -6,7 +6,7 @@ synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--break-lo
 
 # Reference: `delegate run`
 
-`delegate run <workflow>` builds the [**tickets**](../glossary.md#ticket) of a [**workflow**](../glossary.md#workflow). For each ticket, the [**engine**](../glossary.md#engine) makes a [**worktree**](../glossary.md#worktree), spawns the [**specialist**](../glossary.md#specialist) of the [**stack**](../glossary.md#stack) through a [**harness**](../glossary.md#harness) [**adapter**](../glossary.md#adapter), checks the specialist report, runs the [**gates**](../glossary.md#gate) itself, and records each event in a [**journal**](../glossary.md#journal). In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode), the engine then verifies the branch with a [**blind**](../glossary.md#blind) [**verifier**](../glossary.md#verifier), and moves the [**run branch**](../glossary.md#run-branch) to the branch only on [**ACCEPT**](../glossary.md#accept). A [**REJECT**](../glossary.md#reject) starts a [**fix-up**](../glossary.md#fix-up) round, up to two rounds. In [**`economy`**](../glossary.md#economy) mode, the engine builds a [**chain**](../glossary.md#chain) of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, or whose gates are red, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
+`delegate run <workflow>` builds the [**tickets**](../glossary.md#ticket) of a [**workflow**](../glossary.md#workflow). For each ticket, the [**engine**](../glossary.md#engine) makes a [**worktree**](../glossary.md#worktree), spawns the [**specialist**](../glossary.md#specialist) of the [**stack**](../glossary.md#stack) through a [**harness**](../glossary.md#harness) [**adapter**](../glossary.md#adapter), checks the specialist report, runs the [**gates**](../glossary.md#gate) itself, and records each event in a [**journal**](../glossary.md#journal). In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode), the engine then verifies the branch with a [**blind**](../glossary.md#blind) [**verifier**](../glossary.md#verifier), and moves the [**run branch**](../glossary.md#run-branch) to the branch only on [**ACCEPT**](../glossary.md#accept). A [**REJECT**](../glossary.md#reject) starts a [**fix-up**](../glossary.md#fix-up) round, up to two rounds. In [**`economy`**](../glossary.md#economy) mode, the engine builds a [**chain**](../glossary.md#chain) of branches and verifies once for each stack at the end. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, whose gates are red, or whose report is not valid after it committed work, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
 A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
 
@@ -50,7 +50,7 @@ A step has these parts:
 3. Read the [**report**](../glossary.md#report) from the report path and check it against the schema.
 4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, or the tip of the previous ticket in `economy` mode).
 5. Compare the changed paths with the [**hotspot**](../glossary.md#hotspot) patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
-6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, and a red gate, start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
+6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, a red gate, and a report that is not valid on a branch with a commit start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
 8. In `assure` mode, verify the branch. See [the verifier step](#the-verifier-step).
 
@@ -62,18 +62,19 @@ The engine sets `core.fsmonitor` to false in the configuration of each worktree 
 
 ## The continuation
 
-A specialist that ends `capped` or `failed`, or whose gates are red, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
+A specialist that ends `capped` or `failed`, whose gates are red, or whose report is not valid after it committed work, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
 
 - A specialist ends `capped` or `failed` when the adapter result has the [**end state**](../glossary.md#end-state) `capped` or `failed`. The engine does not read the report of that run. A result `finished` with an exit status other than 0 and no valid report also counts as `failed`. See [the end of an agent session](#the-end-of-an-agent-session).
 - A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0.
-- A report that is missing, is not valid, or has a status other than `committed` fails the step. It does not start a continuation.
-- The continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. It also holds the report rule with the absolute report path, as the first brief does. The specialist continues from these commits, and adds each change as a new commit.
+- **A report that is not valid, on a branch with work, gets a continuation for the report only.** The report file is there, but the check of the report fails: the text is not JSON, a field is missing, a field has the wrong type, or a value is not permitted. The branch holds at least one commit beyond the point where it started. The code can then be correct, so the engine does not fail the step. It sends a continuation that asks only for a corrected report, with the trigger `report-invalid`. This prompt has a `## Continuation` section and a `## Report` section. It holds the ticket id, the report path, each problem of the check on its own line, the commits on the branch, and the shape of the report. It tells the specialist to write only the report, and to change no file and add no commit. It does not give the task again, so the prompt is the same when the engine resumes and when it starts a new agent. The engine then reads the report again, and the step goes on from the check of the report.
+- A report that is missing fails the step. A report that is not valid on a branch with no commit beyond its start fails the step. A valid report with a status other than `committed` fails the step. None of these starts a continuation.
+- For the other triggers, the continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. It also holds the report rule with the absolute report path, as the first brief does. The specialist continues from these commits, and adds each change as a new commit.
 - If the adapter has `supports_resume` set to true, and the last result has a `session_id`, the engine resumes that [**session**](../glossary.md#session). It sets `resume_session` in the request to the `session_id` of the last result, so each continuation resumes the newest session. The session keeps the context of the first brief, so the prompt holds only the continuation brief. The journal records the mode `resume`.
 - Otherwise the engine starts a new agent, with `resume_session` set to `None`. A new agent has no context, so its prompt is the full specialist brief with the continuation section added. The journal records the mode `brief`. This is also the mode when the adapter supports resume but the harness gave no session id.
 - The [**tier**](../glossary.md#tier) and the model are those of the first specialist run.
 - The engine journals `continuation` before each continuation, with the count, the trigger, the commits, and the reason.
 
-One count covers the three triggers. Each mode has a continuation limit:
+One count covers the four triggers. Each mode has a continuation limit:
 
 | Mode | Limit |
 |---|---|
@@ -290,13 +291,13 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 |---|---|
 | `the specialist ended <state> with exit status <n>` | The adapter result is `failed` or `capped`, and the engine does not read the report. Or the result is `finished` with a bad exit status, and the report is not valid. See [the end of an agent session](#the-end-of-an-agent-session). |
 | `report missing: ...` | The specialist wrote no file at the report path. |
-| `report ... is not valid JSON`, `must be a JSON object`, `invalid: <field>: ...` | The report does not match the schema. The message names the field. |
+| `report ... is not valid JSON`, `must be a JSON object`, `invalid: <field>: ...` | The report does not match the schema, and the branch holds no commit beyond its start. The message names the field. On a branch with a commit, the specialist continues for the report first. See [the continuation](#the-continuation). |
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
 | `hotspot finding: <path> matches the hotspot '<pattern>'` | A changed path matches a hotspot pattern. See [the hotspot guard](#the-hotspot-guard). |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
 | `crashed: <exception type>: <message>` | An exception from the adapter or from git ended the step. See [a crash in a step](#a-crash-in-a-step). |
-| `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, or its gates were still red. `<reason>` is the reason of the last run. |
+| `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, its gates were still red, or its report was still not valid. `<reason>` is the reason of the last run. |
 | `rebase onto <run branch> stopped with a conflict in <files>` | The rebase of the ticket branch onto the run branch had a conflict. The engine aborted the rebase. |
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
 | `branch ... holds no commit beyond <run branch> after the rebase; ...` | The run branch holds the work of the ticket already, so no commit is left. |
@@ -401,7 +402,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `report-validation` | `ticket`, `valid`, `path`, `reason` (`null` when valid), `status` (the `status` of the report, `null` when not valid), `blocked_reason` (the `blocked_reason` of the report, or `null`) |
 | `hotspot-finding` | `ticket`, `phase` (`build` or `fixup`), `round` (0 for the first build, else the fix-up round), `matches` (a list of objects, each with the changed `path` and the `pattern` it matches) |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`), `command`, `exit_status`, `green`, `output_tail` (the last 4000 characters) |
-| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, or `gates-red`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
+| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, or `report-invalid`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock `--break-lock` removed) |
