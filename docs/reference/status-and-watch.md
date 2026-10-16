@@ -58,7 +58,7 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 
 The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
 
-- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA.
+- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, 39k tokens`.
 - A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, 19k tokens, gate python3 -m pytest -q, gate log changed 30s ago`.
 - A pending ticket and a skipped ticket have no progress line.
 
@@ -81,6 +81,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. A ticket whose `tokens` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
+| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `verifier` or `fix-up`. See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in `assure` mode. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
@@ -149,16 +150,25 @@ The percentage:
 - A ticket that ended (`built`, `failed`, or `skipped`) counts 1.
 - A running ticket counts by its phase: `specialist` 0, `gates` 0.6, `verifier` 0.8, `fix-up` 0.8.
 - A pending ticket counts 0.
-- The percentage is the sum, divided by the number of tickets, times 100, rounded down.
+- The percentage is the sum, divided by the number of units, times 100, rounded down. A unit is a ticket. In `economy` mode, the verification of the chain is one more unit. See [the verification of an `economy` chain](#the-verification-of-an-economy-chain).
 
 The ETA:
 
 - Before the first ticket ends, the ETA is `null`.
-- After that, the ETA is `time` + M × N − R. M is the mean duration of the ended tickets. N is the number of tickets that did not end. R is the `elapsed_seconds` of the running ticket.
+- After that, the ETA is `time` + M × N − R. M is the mean duration of the ended tickets. N is the number of units that did not end. R is the `elapsed_seconds` of the running ticket, and the time that the verification of an `economy` chain used.
 - The mean uses the tickets that ended after a step (`built` or `failed`). A skipped ticket has no step and no duration, so it does not count in the mean. It counts as ended.
 - The ETA is never earlier than `time`. For a run that ended, it is the time of `run-end`.
 
-In `economy` mode the verification of the chain runs after the last ticket ends. The percentage is then 100, and the ETA is `time`, until the run ends. The last ticket of each stack shows the tokens and the `idle_seconds` of the verifier of its stack.
+### The verification of an `economy` chain
+
+In [**`economy`**](../glossary.md#economy) mode the verification of the [**chain**](../glossary.md#chain) runs after the last ticket ends. For the percentage and the ETA, the verification is one more unit of the run, as a ticket is:
+
+- The verification counts 0 until the journal holds `run-end`. After `run-end` it counts 1. Thus the percentage stays below 100 until the run ends.
+- The verification starts at the first `verify-start`. While it runs, `phase` of the snapshot follows the newest `verify-start` (`verifier`) or `fixup-start` (`fix-up`). The gates of a fix-up round stay in the phase `fix-up`.
+- The ETA estimates the verification as one mean ticket: M. R holds the time from the first `verify-start` to `time`.
+- The tickets of the chain stay `built`, with the `phase` `null`. The last ticket of each stack shows the tokens and the `idle_seconds` of the verifier of its stack.
+
+For example, two tickets of 600 and 300 seconds ended, and the verifier of the chain started 99 seconds ago. The percentage is 2 ÷ 3 × 100, rounded down: 66. The ETA is `time` + 450 × 1 − 99.
 
 ### The follow view
 
@@ -170,7 +180,7 @@ run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 52k
   b running specialist, 50s used, 26k tokens, last activity 12s ago
 ```
 
-- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA.
+- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
 - A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the plain lines do.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
 - The view cuts each line to the width of the terminal. It shows no tool call and no path.

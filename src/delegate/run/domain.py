@@ -225,6 +225,15 @@ PHASE_TENTHS: dict[str, int] = {PHASE_SPECIALIST: 0, PHASE_GATES: 6, PHASE_VERIF
 ENDED_TENTHS: int = 10
 
 
+def chain_units(mode: str) -> int:
+    """The units of the progress of a run that are not tickets: 1 for the verification of the chain in `economy` mode.
+
+    In `economy` mode the verifier of the chain runs after the last ticket ended. For the percentage and the ETA, the
+    verification of the chain is one more unit of the run, as a ticket is: it ends only when the run ends.
+    """
+    return 1 if mode == ECONOMY else 0
+
+
 def percent_complete(ended: int, running_phases: Sequence[str], total: int) -> int:
     """The percentage of a run that is complete, rounded down.
 

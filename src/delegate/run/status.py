@@ -5,7 +5,9 @@ that the journal names, through a reader that the command gives. It also reads
 the modification time of the log file of a gate that runs, with no reader. The reader is
 the `activity` method of the harness adapter of the run, so this module never
 imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
-the activity of each agent. When the command has no reader for the adapter of
+the activity of each agent. In `economy` mode it also gives the phase of the
+verification of the chain, which counts in the progress and the ETA as one more
+unit of the run. When the command has no reader for the adapter of
 the run, the snapshot has the progress and the ETA, and no tokens and no
 activity. A stream that the reader cannot read gives no tokens and no activity
 for its agent, and is not an error. It needs no workflow file, and no tool
@@ -106,6 +108,9 @@ PHASE_OF_EVENT: dict[str, str] = {
 # The phase of the agent that an `agent-start` event names, by its `role`.
 PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
 
+# The phase of the verification of an `economy` chain that an event starts. In `economy` mode only the chain verifies.
+PHASE_OF_CHAIN_EVENT: dict[str, str] = {"verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP}
+
 # The events that end an agent run.
 AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
 
@@ -143,6 +148,8 @@ class TicketSnapshot:
 class Snapshot:
     """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended.
 
+    `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
+
     `tokens` is None when the snapshot has no reader of the streams. Otherwise it is the sum of the tickets that have
     tokens: a ticket with a stream that cannot be read adds nothing.
     """
@@ -157,13 +164,14 @@ class Snapshot:
     eta: datetime | None
     tokens: int | None
     tickets: tuple[TicketSnapshot, ...]
+    phase: str | None = None
 
     def to_json(self) -> dict[str, object]:
         """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it."""
         return {
             "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
             "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
-            "eta": self.eta.isoformat() if self.eta else None, "tokens": self.tokens,
+            "eta": self.eta.isoformat() if self.eta else None, "tokens": self.tokens, "phase": self.phase,
             "tickets": [
                 {
                     "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens": t.tokens,
@@ -245,6 +253,20 @@ def _ticket(
     return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle, gate_command, gate_idle), duration
 
 
+def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
+    """The phase of the verification of an `economy` chain, and the seconds since it started. (None, 0) before it starts.
+
+    The verification starts at the first `verify-start`, and its phase follows the newest `verify-start` or `fixup-start`.
+    The gates of a fix-up round stay in the phase `fix-up`.
+    """
+    phase, started = None, None
+    for event in events:
+        kind = str(event["event"])
+        if kind in PHASE_OF_CHAIN_EVENT:
+            phase, started = PHASE_OF_CHAIN_EVENT[kind], started or _time(event)
+    return phase, _seconds(started, now) if started else 0
+
+
 def _log_idle_seconds(log: Path, now: datetime) -> int | None:
     """The seconds from the last change of a gate log to `now`, or None when the log cannot be read.
 
@@ -300,12 +322,17 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
             durations.append(duration)
     ended = sum(1 for t in tickets if t.state in ENDED)
     running = [t for t in tickets if t.state == RUNNING]
-    to_end = domain.seconds_to_end(durations, len(tickets) - ended, sum(t.elapsed_seconds for t in running))
+    # The verification of an `economy` chain is one more unit: it ends with the run, and while it runs it counts 0.
+    chain = domain.chain_units(str(start["mode"]))
+    chain_phase, chain_seconds = _chain(events, now) if chain and end is None else (None, 0)
+    units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
+    to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
     return Snapshot(
         run_id=str(start["run_id"]), state=str(end["result"]) if end else RUNNING, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
-        percent=domain.percent_complete(ended, [t.phase for t in running if t.phase], len(tickets)),
+        percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
         eta=None if to_end is None else now + timedelta(seconds=to_end), tokens=None if activity is None else sum(t.tokens or 0 for t in tickets), tickets=tuple(tickets),
+        phase=chain_phase,
     )
 
 
@@ -345,13 +372,15 @@ def _tokens(count: int) -> str:
 
 
 def _run_progress(snap: Snapshot) -> str:
-    """The progress of the run: the percentage, the tickets that ended, the time used, the ETA, and the tokens.
+    """The progress of the run: the phase of an `economy` chain, the percentage, the tickets that ended, the time used,
+    the ETA, and the tokens.
 
     The ETA shows only while the run runs: in the time from now, or `-` before the first ticket ends. The tokens show
     only when the snapshot has them.
     """
     eta = _duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
-    parts = [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{_duration(snap.elapsed_seconds)} used"]
+    parts = [snap.phase] if snap.phase else []
+    parts += [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{_duration(snap.elapsed_seconds)} used"]
     if snap.state == RUNNING:
         parts.append(f"ETA {eta}")
     if snap.tokens is not None:

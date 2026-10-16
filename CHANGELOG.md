@@ -18,6 +18,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Changed
 
+- In `economy` mode, `delegate status` counts the verification of the chain as one more unit of the run, in the percentage and in the ETA. The percentage stays below 100 until `run-end`. While the verification runs, each form of `status` shows its phase, `verifier` or `fix-up`, and the JSON has the new run field `phase`. Before, `status` showed 100% and an ETA of 0 seconds while the verifier of the chain ran.
 - The gate port changed, so a gate runner outside the kit must change too. `GateRunner.run` has the new argument `log`: the path of a log file that the engine makes for each gate run. The runner appends the output of the command to that file while the command runs.
 - A verifier run that ended with no verdict, for example one that the time limit of a harness killed, does not count against the fix-up limit. A resume runs that round again with the same round number. Before, the resume started the next round, and the step lost one of its fix-up rounds.
 - The harness port changed, so an adapter outside the kit must change too. `AdapterRequest` has the new field `event_stream`: the engine chooses the file of the stream, and the adapter writes the stream there. The helper `stream_path` of `delegate.adapters.streams` is gone. An adapter has the new method `activity(stream)`, which returns an `Activity` with the tokens so far and the time of the newest event. `read_events` raises `AdapterError` for a stream file that is missing.

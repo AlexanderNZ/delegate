@@ -36,13 +36,13 @@ def at(seconds: float) -> str:
 class Run:
     """The journal of one run, written line by line with the time of each event."""
 
-    def __init__(self, repo: Path, run_id: str, *tickets: str, adapter: str = "claude-code") -> None:
+    def __init__(self, repo: Path, run_id: str, *tickets: str, adapter: str = "claude-code", mode: str = "assure") -> None:
         self.path = journal_path(repo, run_id)
         self.path.parent.mkdir(parents=True)
         self.streams = self.path.parent / "reports"
         self.streams.mkdir()
         self.seq = 0
-        self.add(0, "run-start", run_id=run_id, workflow="/w/workflow.toml", mode="assure", adapter=adapter,
+        self.add(0, "run-start", run_id=run_id, workflow="/w/workflow.toml", mode=mode, adapter=adapter,
                  base_branch="main", run_branch="run/demo", tickets=list(tickets))
 
     def add(self, seconds: float, event: str, **fields: object) -> None:
@@ -180,6 +180,7 @@ def test_the_percentage_and_the_eta_follow_the_rules_of_the_reference_page(tmp_p
     assert snap["eta"] == at(1000 + 450 * 2 - 100)
     assert snap["tokens"] == 3 * 19326
     assert [t["state"] for t in snap["tickets"]] == ["built", "built", "skipped", "running", "pending"]
+    assert snap["phase"] is None  # only the chain of `economy` mode is a phase of the run
 
 
 def test_the_eta_is_never_earlier_than_now(tmp_path, capsys, monkeypatch):
@@ -268,6 +269,105 @@ def test_the_verifier_of_an_economy_chain_shows_its_activity_after_its_ticket_en
     a = ticket_of(snapshot(repo, capsys), "a")
 
     assert (a["state"], a["phase"], a["tokens"], a["idle_seconds"]) == ("built", None, 19326, 9)
+
+
+def an_economy_chain_after_its_last_ticket(repo: Path) -> Run:
+    """An `economy` run whose tickets a (0 to 600) and b (600 to 900) are built. The verification of the chain comes next."""
+    run = Run(repo, "r1", "a", "b", mode="economy")
+    finished = claude("finished.jsonl")
+    run.built(0, 600, "a", run.stream("a.stream.jsonl", finished))
+    run.built(600, 900, "b", run.stream("b.stream.jsonl", finished))
+    return run
+
+
+def chain_verifier_starts(run: Run, seconds: float, round_number: int) -> None:
+    """The verifier of the chain starts at `seconds`. The journal names it for b, the last ticket of the stack python."""
+    run.add(seconds, "verify-start", ticket="b", round=round_number, agent="v", tier="verifier", model="m", commit="3", copy="/c",
+            stack="python", tickets=["a", "b"])
+    run.agent_start(seconds, "b", "verifier", run.stream(f"chain.{round_number}.stream.jsonl", ""), round_number)
+
+
+def chain_fixup_starts(run: Run, seconds: float) -> None:
+    """The verifier of the chain rejects at `seconds`, and the fix-up specialist starts."""
+    run.add(seconds, "verify-result", ticket="b", round=0, exit_status=0, end_state="finished", session_id=None,
+            event_stream=str(run.streams / "chain.0.stream.jsonl"))
+    run.add(seconds, "verdict", ticket="b", round=0, mode="full", verdict="REJECT", findings=["a: x"], unverified=[], report="/r",
+            stack="python", tickets=["a", "b"], mapped={"a": ["a: x"]}, unmapped=[])
+    run.add(seconds, "fixup-start", ticket="b", round=1, rejected_commit="3", findings_file="/f", agent="s", tier="standard", model="m")
+    run.agent_start(seconds, "b", "fix-up", run.stream("chain.fixup.stream.jsonl", ""), 1)
+
+
+def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
+    """The lines of the first snapshot of `status --follow` to a pipe. The first wait ends the run."""
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(time, "sleep", lambda seconds: run.add(2000, "run-end", result="built", built=["a", "b"], failed=[], skipped=[]))
+    assert delegate.main(["status", "--repo", str(repo), "--follow"]) == 0
+    return out.getvalue().splitlines()
+
+
+# Two tickets ended (2 of 3 units, with the chain), and no ticket runs: floor(2 / 3 * 100) = 66. The mean of the
+# tickets is (600 + 300) / 2 = 450, and one unit, the chain, did not end. The tokens are 19326 for each ticket, and 0 for
+# a chain agent whose stream has no event yet.
+@pytest.mark.parametrize(
+    ("chain", "phase", "eta"),
+    [
+        pytest.param(lambda run: chain_verifier_starts(run, 901, 0), "verifier", 450 - 99, id="verifier"),
+        pytest.param(lambda run: (chain_verifier_starts(run, 901, 0), chain_fixup_starts(run, 950)), "fix-up", 450 - 99, id="fix-up"),
+        pytest.param(
+            lambda run: (chain_verifier_starts(run, 901, 0), chain_fixup_starts(run, 950), chain_verifier_starts(run, 990, 1)),
+            "verifier", 450 - 99, id="scoped-verifier",
+        ),
+        pytest.param(lambda run: None, None, 450, id="before-the-verifier-starts"),
+    ],
+)
+def test_the_verification_of_an_economy_chain_is_a_phase_of_the_run_and_keeps_the_percentage_below_100_in_each_form(
+    tmp_path, capsys, monkeypatch, chain, phase, eta
+):
+    repo = bare_repo(tmp_path)
+    run = an_economy_chain_after_its_last_ticket(repo)
+    chain(run)
+    frozen(monkeypatch, 1000)
+
+    snap = snapshot(repo, capsys)
+    lines = plain_status(repo, capsys)
+    view = follow_lines(repo, monkeypatch, run)
+
+    assert (snap["state"], snap["phase"], snap["percent"], snap["tickets_ended"], snap["eta"]) == ("running", phase, 66, 2, at(1000 + eta))
+    assert [(t["state"], t["phase"]) for t in snap["tickets"]] == [("built", None), ("built", None)]
+    shown = f"{phase}, " if phase else ""
+    eta_text = "5m51s" if eta == 450 - 99 else "7m30s"
+    assert lines[1] == f"progress: {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, 39k tokens"
+    assert view[0] == f"run r1 running {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, 39k tokens"
+
+
+def test_in_economy_mode_the_chain_counts_as_one_more_unit_while_a_ticket_runs(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = a_run_of_two_tickets(repo)
+    run.path.write_text(run.path.read_text().replace('"mode": "assure"', '"mode": "economy"', 1))
+    frozen(monkeypatch, 650)
+
+    snap = snapshot(repo, capsys)
+
+    # a ended, b is in the specialist phase, and the chain did not start: floor(1 / 3 * 100) = 33. The mean is 600, two
+    # units (b and the chain) did not end, and b used 50 seconds: now + 600 * 2 - 50.
+    assert (snap["phase"], snap["percent"], snap["eta"]) == (None, 33, at(650 + 600 * 2 - 50))
+
+
+def test_an_economy_run_is_complete_only_at_its_end(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = an_economy_chain_after_its_last_ticket(repo)
+    chain_verifier_starts(run, 901, 0)
+    run.add(1500, "verdict", ticket="b", round=0, mode="full", verdict="ACCEPT", findings=[], unverified=[], report="/r",
+            stack="python", tickets=["a", "b"], mapped={}, unmapped=[])
+    run.add(1501, "run-end", result="built", built=["a", "b"], failed=[], skipped=[])
+    frozen(monkeypatch, 9000)
+
+    snap = snapshot(repo, capsys)
+
+    assert (snap["state"], snap["phase"], snap["percent"], snap["eta"]) == ("built", None, 100, at(1501))
+    assert plain_status(repo, capsys)[1] == "progress: 100%, 2 of 2 ended, 25m01s used, 39k tokens"
 
 
 def test_an_agent_that_a_crash_stopped_shows_no_activity(tmp_path, capsys, monkeypatch):
