@@ -6,17 +6,22 @@ that a caller inherits, not from the working directory of the process, so the
 command names the directory.
 The prompt goes on standard input, never in argv, so a long brief meets no
 argument limit and shows in no process list. The harness writes one JSON event
-on each line of standard output. The adapter copies that stream to a file and
-reads the end state and the session id from it.
+on each line of standard output. The adapter copies that stream to the file
+that the request names, and reads the end state and the session id from it.
+
+The activity of a stream comes from the `step_finish` events and the
+`timestamp` field (epoch milliseconds). Each `step_finish` event carries
+`part.tokens.total`, the tokens of that step, so the adapter adds them.
 """
 
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
-from .streams import read_events, stream_path
+from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
+from .streams import read_events
 
 # The command that starts the harness.
 COMMAND: str = "opencode"
@@ -60,7 +65,7 @@ class OpenCodeAdapter:
         command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", request.agent, "--dir", str(request.cwd)]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
-        stream = stream_path(request.report_path)
+        stream = request.event_stream
         with stream.open("w") as out:
             process = subprocess.run(command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd)
         if not stream.read_text().strip():
@@ -79,3 +84,15 @@ class OpenCodeAdapter:
         if process.returncode != 0 and end_state == FINISHED:
             end_state = FAILED
         return AdapterResult(process.returncode, end_state, session_id, stream)
+
+    def activity(self, stream: Path) -> Activity:
+        tokens, last = 0, None
+        for event in read_events(stream):
+            if "timestamp" in event:
+                last = datetime.fromtimestamp(int(event["timestamp"]) / 1000, timezone.utc)  # type: ignore[call-overload]
+            if event.get("type") == "step_finish":
+                try:
+                    tokens += int(event["part"]["tokens"]["total"])  # type: ignore[index]
+                except (KeyError, TypeError):
+                    raise AdapterError(f"{stream}: a step_finish event has no part.tokens.total field") from None
+        return Activity(tokens, last)

@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from delegate import adapters
-from delegate.ports.harness import AdapterError, AdapterRequest
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
 from . import opencode_fake
 
@@ -22,9 +23,10 @@ from . import opencode_fake
 def request(tmp_path: Path, **changes) -> AdapterRequest:
     cwd = tmp_path / "work"
     cwd.mkdir(exist_ok=True)
+    (tmp_path / "streams").mkdir(exist_ok=True)  # the engine names a stream in a directory that exists
     fields = dict(
         agent="python-specialist", model="anthropic/claude-opus-5", prompt="## Task\nTicket a\n", cwd=cwd,
-        report_path=tmp_path / "reports" / "a.specialist.json",
+        report_path=tmp_path / "reports" / "a.specialist.json", event_stream=tmp_path / "streams" / "a.stream.jsonl",
     )
     fields.update(changes)
     return AdapterRequest(**fields)
@@ -161,15 +163,15 @@ def test_a_continuation_resumes_the_session_of_the_last_run(tmp_path, monkeypatc
     assert result.end_state == "finished"
 
 
-def test_a_second_run_with_the_same_report_path_keeps_the_stream_of_the_first(tmp_path, monkeypatch):
+def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):
     opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
-    adapter = adapters.get("opencode")
+    stream = tmp_path / "chosen" / "x.jsonl"
+    stream.parent.mkdir()
 
-    first = adapter.run(request(tmp_path))
-    second = adapter.run(request(tmp_path))
+    result = adapters.get("opencode").run(request(tmp_path, event_stream=stream))
 
-    assert first.event_stream != second.event_stream
-    assert first.event_stream.read_text() == second.event_stream.read_text() != ""
+    assert result.event_stream == stream
+    assert stream.read_text() == (opencode_fake.FIXTURES / "finished.jsonl").read_text()
 
 
 def test_a_line_that_is_not_json_before_the_end_of_the_stream_raises_and_names_the_line(tmp_path, monkeypatch):
@@ -222,3 +224,58 @@ def test_the_command_names_the_working_directory_because_the_harness_takes_its_p
     argv = call["argv"]
     assert argv[argv.index("--dir") + 1] == str(worktree)
     assert call["cwd"] == str(worktree.resolve())
+
+
+def fixture_lines(name: str) -> list[str]:
+    return (opencode_fake.FIXTURES / name).read_text().splitlines(keepends=True)
+
+
+def test_the_activity_of_a_finished_stream_gives_the_tokens_of_its_step_and_the_time_of_the_last_event():
+    activity = adapters.get("opencode").activity(opencode_fake.FIXTURES / "finished.jsonl")
+
+    # The timestamp is in epoch milliseconds: 1791490898675.
+    assert activity == Activity(84197, datetime(2026, 10, 8, 20, 21, 38, 675000, tzinfo=timezone.utc))
+
+
+def test_the_activity_of_a_stream_with_cache_reads_gives_the_total_that_the_step_reports():
+    # total 85755 = input 22342 + output 10 + reasoning 43 + cache read 63360
+    assert adapters.get("opencode").activity(opencode_fake.FIXTURES / "unknown-agent.jsonl").tokens == 85755
+
+
+def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_adds_the_steps_that_finished_and_reads_with_no_error(tmp_path):
+    first, second = fixture_lines("finished.jsonl"), fixture_lines("step-cap.jsonl")
+    live = tmp_path / "live.jsonl"
+    live.write_text("".join(first) + "".join(second[:2]) + second[2][:60])
+
+    activity = adapters.get("opencode").activity(live)
+
+    # The step of the first part finished (84197 tokens). The second step has no complete step_finish yet.
+    assert activity == Activity(84197, datetime(2026, 10, 8, 20, 22, 4, 475000, tzinfo=timezone.utc))
+
+
+def test_the_activity_of_two_finished_steps_adds_the_tokens_of_both(tmp_path):
+    both = tmp_path / "both.jsonl"
+    both.write_text("".join(fixture_lines("finished.jsonl") + fixture_lines("step-cap.jsonl")))
+
+    assert adapters.get("opencode").activity(both).tokens == 84197 + 84637
+
+
+def test_the_activity_of_an_empty_stream_has_no_tokens_and_no_time(tmp_path):
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("")
+
+    assert adapters.get("opencode").activity(empty) == Activity(0, None)
+
+
+def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_names_the_line(tmp_path):
+    lines = fixture_lines("finished.jsonl")
+    broken = tmp_path / "broken.jsonl"
+    broken.write_text(lines[0] + "this is not json\n" + "".join(lines[1:]))
+
+    with pytest.raises(AdapterError, match="line 2 is not JSON"):
+        adapters.get("opencode").activity(broken)
+
+
+def test_the_activity_of_a_stream_that_is_not_there_raises_and_names_the_path(tmp_path):
+    with pytest.raises(AdapterError, match="no-such.jsonl"):
+        adapters.get("opencode").activity(tmp_path / "no-such.jsonl")

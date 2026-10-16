@@ -51,7 +51,7 @@ The harness takes its project directory from the `PWD` variable that the caller 
 
 ## The event stream
 
-The adapter copies standard output to a file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure) and for the agent that the harness does not find.
+The adapter copies standard output to the file that the request names in `event_stream`. The [**engine**](../glossary.md#engine) chooses that file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path gets `<report name>.stream-2.jsonl`, then `-3`, and so on, so no run overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure) and for the agent that the harness does not find.
 
 The stream holds these events. The field `type` names the event.
 
@@ -88,6 +88,14 @@ The end state `capped` means that the model reached its output limit (`reason` `
 An agent file can set `steps`, the maximum number of steps. When the agent reaches it, the harness sends one more step that has no tools, and the model answers with text. That last step ends with `reason` `stop`, and the exit status is 0. Nothing in the stream or in the exit status marks the cap. Measured on OpenCode 1.15.10 on 2026-10-08, with `steps` set to 1: the stream has the fixture `step-cap.jsonl`, and the end state is `finished`.
 
 The [**engine**](../glossary.md#engine) then reads the report. A step that reached the cap before the agent wrote a valid report fails on the report check, and the engine starts no continuation. The adapter does not parse the text of the model to find the cap, because that text is not a contract of the harness. A repository that uses the adapter should not set `steps` on its agents.
+
+## The activity
+
+`delegate status --json` and `delegate status --follow` read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
+
+- The time is the `timestamp` field of the newest event (epoch milliseconds). Every event has it.
+- The tokens are the sum of the field `part.tokens.total` of each `step_finish` event. The total of a step holds its input, its output, its reasoning, and its cache reads and writes. A `step_finish` event with no `part.tokens.total` field raises an `AdapterError`.
+- Half a line at the end of the stream is ignored, as in the end state. A step that has not finished has no tokens yet.
 
 ## The resume
 

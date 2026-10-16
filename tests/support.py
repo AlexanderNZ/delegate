@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from delegate.ports.harness import AdapterRequest, AdapterResult
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult
 
 WORKFLOW = """\
 base-branch = "main"
@@ -130,6 +130,10 @@ class ScriptedAdapter:
     such call in the same way. `supports_resume` is the `supports_resume`
     attribute of the adapter.
 
+    Each call writes the line `{"type":"result"}` to the event stream that the
+    request names, and gives that path back in the result. `activity` reads
+    such a stream as no tokens and no time, and raises for a missing stream.
+
     `on_specialist` runs at the start of every specialist request, before the
     adapter touches the working directory. A test uses it to raise an error, to
     break the repository, or to start another command while the run holds its lock.
@@ -213,7 +217,7 @@ class ScriptedAdapter:
             request.report_path.parent.mkdir(parents=True, exist_ok=True)
             request.report_path.write_text(text)
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
-        stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
+        stream = request.event_stream
         stream.write_text('{"type":"result"}\n')
         if is_fixup:
             return AdapterResult(self.fixup_exit_status, self.fixup_end_state, self.session_id, stream)
@@ -222,6 +226,11 @@ class ScriptedAdapter:
         end_state, exit_status = self.outcomes[min(index, len(self.outcomes) - 1)] if self.outcomes else (self.end_state, self.exit_status)
         session = self.session_ids[min(index, len(self.session_ids) - 1)] if self.session_ids else self.session_id
         return AdapterResult(exit_status, end_state, session, stream)
+
+    def activity(self, stream: Path) -> Activity:
+        if not stream.is_file():
+            raise AdapterError(f"event stream {stream} not found")
+        return Activity(0, None)
 
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
         turn = len(self.verifier_calls)
@@ -240,7 +249,7 @@ class ScriptedAdapter:
                 mode = "fix-up" if request.prompt.startswith("## Findings under verification") else "full"
                 text = json.dumps(valid_verdict(verdict, self.verdict_findings, mode=mode))
             request.report_path.write_text(text)
-        stream = request.report_path.parent / f"{request.report_path.stem}.stream.jsonl"
+        stream = request.event_stream
         stream.write_text('{"type":"result"}\n')
         return AdapterResult(self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream)
 

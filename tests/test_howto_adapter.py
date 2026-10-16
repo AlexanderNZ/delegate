@@ -30,7 +30,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "src"
         *(field.name for field in dataclasses.fields(harness.AdapterResult)),  # the result
         *harness.END_STATES,
         "tier_column", "supports_resume", "run", "AdapterRequest", "AdapterResult", "AdapterError",
-        "register", "read_events", "stream_path",
+        "register", "read_events", "activity", "Activity", "tokens", "last_event",
     ],
 )
 def test_the_page_names_each_part_of_the_adapter_interface(part):

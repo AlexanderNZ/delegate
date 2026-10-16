@@ -1,8 +1,8 @@
 """The rules of a run: the domain module of the run context.
 
 The modes, the limits of fix-up rounds and continuations, the dependency order
-of the tickets, the skip rule, the start of a ticket in a chain, and the handling
-of a verdict are here. Each rule is a function of plain values: strings,
+of the tickets, the skip rule, the start of a ticket in a chain, the handling
+of a verdict, and the progress and the ETA of a run are here. Each rule is a function of plain values: strings,
 numbers and lists. The module imports nothing from the package and nothing that
 does I/O. It has no git, no harness, no file system and no subprocess, and
 `tests/test_architecture.py` checks that. The engine reads and writes the world,
@@ -187,3 +187,39 @@ def unfinished_reason(status: str, blocked_reason: str | None, who: str) -> str 
         return None
     detail = f": {blocked_reason}" if blocked_reason else ""
     return f"{who} reported status {status!r}{detail}"
+
+
+# The phases of a running ticket, and the part of one ticket that each phase counts for the progress of a run,
+# in tenths. A ticket that ended counts 10 tenths. Whole numbers keep the percentage exact.
+PHASE_SPECIALIST: str = "specialist"
+PHASE_GATES: str = "gates"
+PHASE_VERIFIER: str = "verifier"
+PHASE_FIXUP: str = "fix-up"
+PHASE_TENTHS: dict[str, int] = {PHASE_SPECIALIST: 0, PHASE_GATES: 6, PHASE_VERIFIER: 8, PHASE_FIXUP: 8}
+ENDED_TENTHS: int = 10
+
+
+def percent_complete(ended: int, running_phases: Sequence[str], total: int) -> int:
+    """The percentage of a run that is complete, rounded down.
+
+    A ticket that ended counts 1, and a running ticket counts the part of its
+    phase (see `PHASE_TENTHS`). The sum, divided by the ticket count, times 100.
+    A run with no ticket is complete.
+    """
+    if total == 0:
+        return 100
+    tenths = ended * ENDED_TENTHS + sum(PHASE_TENTHS[phase] for phase in running_phases)
+    return tenths * 100 // (total * ENDED_TENTHS)
+
+
+def seconds_to_end(durations: Sequence[float], not_ended: int, running_seconds: float) -> int | None:
+    """The seconds from now to the estimated end of a run, or None before the first ticket ends.
+
+    `durations` holds the seconds of each ticket that ended after a step.
+    The estimate is the mean of them, times the tickets that did not end, minus
+    the seconds that the running ticket used. It is never less than 0.
+    """
+    if not durations:
+        return None
+    mean = sum(durations) / len(durations)
+    return max(0, int(mean * not_ended - running_seconds))

@@ -97,6 +97,11 @@ BUILT: str = "built"
 FAILED: str = "failed"
 SKIPPED: str = "skipped"
 
+# The `role` of an `agent-start` event: the agent that the engine starts.
+ROLE_SPECIALIST: str = "specialist"
+ROLE_FIXUP: str = "fix-up"
+ROLE_VERIFIER: str = "verifier"
+
 # The `phase` of a gate result in the journal: the gates after the specialist
 # built the ticket, after the rebase onto the run branch, and after a fix-up.
 PHASE_BUILD: str = "build"
@@ -403,6 +408,24 @@ def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str
     return _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
 
 
+def _stream_path(report_path: Path) -> Path:
+    """The file for the event stream of an agent: beside its report, and never over an earlier stream. Make its directory."""
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    path = report_path.parent / f"{report_path.stem}.stream.jsonl"
+    number = 1
+    while path.exists():
+        number += 1
+        path = report_path.parent / f"{report_path.stem}.stream-{number}.jsonl"
+    return path
+
+
+def _start_agent(journal: Journal, ticket: str, role: str, round_number: int, report_path: Path) -> Path:
+    """Choose the event stream of the agent that starts now, and journal it before the agent starts. Return the stream."""
+    stream = _stream_path(report_path)
+    journal.append("agent-start", ticket=ticket, role=role, round=round_number, event_stream=str(stream))
+    return stream
+
+
 def _specialist_done(prior: list[dict[str, object]]) -> bool:
     """True when the journal shows a valid specialist report after the last time the specialist was spawned."""
     spawned = valid = -1
@@ -528,7 +551,8 @@ def _build_with_continuations(
         if spawned:
             spawned, result = False, None
         else:
-            result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, resume_session))
+            stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
+            result = adapter.run(AdapterRequest(stack.specialist, model, prompt, worktree, report_path, stream, resume_session))
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream),
@@ -748,7 +772,8 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     prompt = specialist_brief(
         ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text
     )
-    result = step.adapter.run(AdapterRequest(step.stack.specialist, model, prompt, step.worktree, report_path))
+    stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
+    result = step.adapter.run(AdapterRequest(step.stack.specialist, model, prompt, step.worktree, report_path, stream))
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream),
@@ -827,7 +852,9 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
             commit=verified, copy=str(copy), **step.chain_fields,
         )
         before = snapshot_worktree(step.vcs, step.worktree)
-        result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path))
+        # The stream goes in the evidence directory from the start, outside the copy, so it stays when the copy goes.
+        stream = _start_agent(step.journal, ticket.id, ROLE_VERIFIER, round_number, evidence / report_path.name)
+        result = step.adapter.run(AdapterRequest(step.stack.verifier, model, prompt, copy, report_path, stream))
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:
@@ -835,7 +862,7 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
         except InvariantViolation as found:
             violation = found
         # The copy goes; the verdict report and the event stream stay as evidence of the run.
-        evidence.mkdir(parents=True)
+        evidence.mkdir(parents=True, exist_ok=True)
         for entry in scratch.iterdir():
             if entry != copy:
                 shutil.move(str(entry), evidence / entry.name)

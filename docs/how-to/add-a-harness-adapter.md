@@ -2,6 +2,8 @@
 
 Use this page when you want the [**engine**](../glossary.md#engine) to drive a [**harness**](../glossary.md#harness) that has no [**adapter**](../glossary.md#adapter) yet. An adapter is a small Python object. It starts the [**headless**](../glossary.md#headless) command of a harness, and turns the [**event stream**](../glossary.md#event-stream) of the harness into a result that the engine understands.
 
+An adapter also reads a stream of its harness: it gives the tokens so far and the time of the newest event. `delegate status --json` uses them to show what an agent does while it runs.
+
 You do not read the engine for this. You need the interface below, one recorded stream for each [**end state**](../glossary.md#end-state), and the [**contract test**](../glossary.md#contract-test) of this page.
 
 ## The interface
@@ -15,6 +17,7 @@ The engine gives the adapter an `AdapterRequest`. It has these fields:
 - `prompt`: the [**brief**](../glossary.md#brief) for the agent.
 - `cwd`: the working directory, which is a [**worktree**](../glossary.md#worktree) or a [**temporary copy**](../glossary.md#temporary-copy).
 - `report_path`: where the agent writes its JSON report.
+- `event_stream`: the file where the adapter writes the event stream of the harness. The engine chooses it, and writes it to the [**journal**](../glossary.md#journal) before the agent starts, so `delegate status` can read the stream while the agent runs. Its directory exists.
 - `resume_session`: the [**session**](../glossary.md#session) id of an earlier run to resume, or `None`.
 
 The adapter gives back an `AdapterResult`. It has these fields:
@@ -22,15 +25,16 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `exit_status`: the exit status of the harness process.
 - `end_state`: `finished`, `failed`, or `capped`. Any other value is an error.
 - `session_id`: the session id that the harness gave, or `None`.
-- `event_stream`: the path of the captured stream.
+- `event_stream`: the path of the captured stream, which is the `event_stream` of the request.
 
-The adapter class has two attributes and one method:
+The adapter class has two attributes and two methods:
 
 - `tier_column`: the name of the column of the [**tier table**](../glossary.md#tier-table) that holds the models of this harness.
 - `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a [**continuation**](../glossary.md#continuation).
 - `run`: takes the request and returns the result.
+- `activity`: takes the path of a stream that the adapter wrote, and returns an `Activity`: `tokens`, the tokens that the agent used so far, and `last_event`, the time (UTC) of the newest event that has a time, or `None`. The stream can be the stream of an agent that still runs, so it can end in half a line.
 
-The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/streams.py` gives you two helpers. `stream_path` gives a file for the stream, beside the [**report**](../glossary.md#report). `read_events` reads a line-delimited JSON stream. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
+The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/streams.py` gives you the helper `read_events`. It reads a line-delimited JSON stream, and ignores half a line at the end. A missing file, or a bad line before the end, raises `AdapterError`. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
 ## Steps
 
@@ -47,7 +51,7 @@ Record one stream for each end state. Write the version of the harness and the d
 
 ### 2. Write the adapter
 
-This example drives a harness `myharness`. The prompt goes on standard input. The stream has one JSON event on each line.
+This example drives a harness `myharness`. The prompt goes on standard input. The stream has one JSON event on each line. Each event has a `time`, and a `usage` event gives the tokens of one model call.
 
 ```python title="myharness.py"
 """The MyHarness adapter: drive `myharness run --json`."""
@@ -55,9 +59,11 @@ This example drives a harness `myharness`. The prompt goes on standard input. Th
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
+from pathlib import Path
 
-from delegate.adapters.streams import read_events, stream_path
-from delegate.ports.harness import CAPPED, FAILED, FINISHED, AdapterError, AdapterRequest, AdapterResult
+from delegate.adapters.streams import read_events
+from delegate.ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
 
 # The command that starts the harness.
 COMMAND: str = "myharness"
@@ -76,7 +82,7 @@ class MyHarnessAdapter:
         command = [COMMAND, "run", "--json", "--model", request.model, "--agent", request.agent]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
-        stream = stream_path(request.report_path)
+        stream = request.event_stream
         with stream.open("w") as out:
             process = subprocess.run(
                 command, input=request.prompt, stdout=out, stderr=subprocess.PIPE, text=True, cwd=request.cwd
@@ -93,6 +99,12 @@ class MyHarnessAdapter:
         if process.returncode != 0 and end_state == FINISHED:
             end_state = FAILED
         return AdapterResult(process.returncode, end_state, session_id, stream)
+
+    def activity(self, stream: Path) -> Activity:
+        events = read_events(stream)
+        tokens = sum(int(event["tokens"]) for event in events if event.get("type") == "usage")
+        times = [datetime.fromisoformat(str(event["time"])) for event in events if "time" in event]
+        return Activity(tokens, times[-1] if times else None)
 ```
 
 The adapter fails loud. A harness that writes no event raises `AdapterError` with a message that names the agent. A stream with no `result` event ends `failed`. A harness that exits with an error cannot end `finished`.
@@ -104,15 +116,17 @@ A contract test turns a recorded stream into a result and checks the fields of t
 Keep the recorded streams in `tests/fixtures/`.
 
 ```json title="tests/fixtures/finished.jsonl"
-{"type": "session", "session": "ses-1"}
-{"type": "text", "text": "The work is done."}
-{"type": "result", "status": "done"}
+{"type": "session", "session": "ses-1", "time": "2026-10-08T19:55:10+00:00"}
+{"type": "text", "text": "The work is done.", "time": "2026-10-08T19:55:11+00:00"}
+{"type": "usage", "tokens": 1200, "time": "2026-10-08T19:55:11+00:00"}
+{"type": "result", "status": "done", "time": "2026-10-08T19:55:12+00:00"}
 ```
 
 ```json title="tests/fixtures/capped.jsonl"
-{"type": "session", "session": "ses-2"}
-{"type": "text", "text": "The work is not"}
-{"type": "result", "status": "length"}
+{"type": "session", "session": "ses-2", "time": "2026-10-08T19:56:00+00:00"}
+{"type": "text", "text": "The work is not", "time": "2026-10-08T19:56:01+00:00"}
+{"type": "usage", "tokens": 900, "time": "2026-10-08T19:56:01+00:00"}
+{"type": "result", "status": "length", "time": "2026-10-08T19:56:02+00:00"}
 ```
 
 The manifest holds the version of the harness and the date of the recording, so a reader knows when to measure again.
@@ -139,10 +153,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from delegate.ports.harness import AdapterError, AdapterRequest
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
 from myharness import MyHarnessAdapter
 
@@ -170,9 +185,10 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: Path, exit_
 def request(tmp_path: Path, **changes: object) -> AdapterRequest:
     cwd = tmp_path / "work"
     cwd.mkdir(exist_ok=True)
+    (tmp_path / "reports").mkdir(exist_ok=True)  # the engine names a stream in a directory that exists
     fields: dict[str, object] = dict(
         agent="python-specialist", model="gateway/large-model", prompt="## Task\nTicket a\n", cwd=cwd,
-        report_path=tmp_path / "reports" / "a.specialist.json",
+        report_path=tmp_path / "reports" / "a.specialist.json", event_stream=tmp_path / "reports" / "a.specialist.stream.jsonl",
     )
     fields.update(changes)
     return AdapterRequest(**fields)  # type: ignore[arg-type]
@@ -184,6 +200,7 @@ def test_a_finished_stream_gives_finished_and_the_session_id_and_the_captured_st
     result = MyHarnessAdapter().run(request(tmp_path))
 
     assert (result.exit_status, result.end_state, result.session_id) == (0, "finished", "ses-1")
+    assert result.event_stream == tmp_path / "reports" / "a.specialist.stream.jsonl"
     assert result.event_stream.read_text() == (FIXTURES / "finished.jsonl").read_text()
 
 
@@ -233,6 +250,20 @@ def test_a_harness_that_writes_no_event_raises_and_names_the_agent(tmp_path, mon
         MyHarnessAdapter().run(request(tmp_path))
 
 
+def test_the_activity_of_a_stream_gives_its_tokens_and_the_time_of_its_newest_event():
+    activity = MyHarnessAdapter().activity(FIXTURES / "finished.jsonl")
+
+    assert activity == Activity(1200, datetime(2026, 10, 8, 19, 55, 12, tzinfo=timezone.utc))
+
+
+def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_complete_lines(tmp_path):
+    lines = (FIXTURES / "finished.jsonl").read_text().splitlines(keepends=True)
+    live = tmp_path / "live.jsonl"
+    live.write_text("".join(lines[:3]) + lines[3][:20])
+
+    assert MyHarnessAdapter().activity(live) == Activity(1200, datetime(2026, 10, 8, 19, 55, 11, tzinfo=timezone.utc))
+
+
 def test_each_recording_is_in_the_manifest_with_the_harness_version_and_the_date():
     manifest = json.loads((FIXTURES / "manifest.json").read_text())
 
@@ -240,7 +271,7 @@ def test_each_recording_is_in_the_manifest_with_the_harness_version_and_the_date
     assert sorted(manifest["fixtures"]) == sorted(path.name for path in FIXTURES.glob("*.jsonl"))
 ```
 
-Three more cases belong in the file for a real harness. Give one case for a stream that is cut off before its last event. Give one for a line that is not JSON. Give one for the second run with one report path, which must not overwrite the first stream.
+Three more cases belong in the file for a real harness. Give one case for a stream that is cut off before its last event. Give one for a line that is not JSON. Give one for the activity of a stream that has no event with a time.
 
 ### 4. Connect the adapter to the kit
 
@@ -263,7 +294,7 @@ The recorded streams show that the adapter reads them. They do not show that the
 
 Each adapter has three kinds of test:
 
-1. **Contract tests** replay a recorded stream through a stand-in command and check the fields of the result. They also check the command: the model and the agent of the request, and the prompt on standard input.
+1. **Contract tests** replay a recorded stream through a stand-in command and check the fields of the result. They also check the command: the model and the agent of the request, and the prompt on standard input. And they check the activity of a recorded stream. They also check the activity of a part of a stream that ends in half a line, as a live stream can.
 2. **A model test** runs `delegate run` through `main(argv)` and checks that the model on the command comes from the tier column of the adapter.
 3. **A live run** on a real machine, noted once in the reference page.
 

@@ -37,7 +37,7 @@ When the harness does not know the agent, it exits with status 1 and writes no e
 
 ## The event stream
 
-The adapter copies standard output to a file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path writes `<report name>.stream-2.jsonl`, then `-3`, and so on. The adapter never overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure).
+The adapter copies standard output to the file that the request names in `event_stream`. The [**engine**](../glossary.md#engine) chooses that file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path gets `<report name>.stream-2.jsonl`, then `-3`, and so on, so no [**run**](../glossary.md#run) overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure).
 
 The adapter reads the last `result` event. The `session_id` field of that event is the session id of the result.
 
@@ -54,6 +54,16 @@ Two more rules apply:
 - A harness that is killed can leave half a line at the end of the stream. The adapter ignores that line. Any other line that is not JSON raises an `AdapterError` that names the stream and the line number.
 
 An API error (for example, a model that does not exist) gives `is_error` true with `subtype` `success`. The `is_error` field decides, not `subtype`.
+
+## The activity
+
+`delegate status --json` and `delegate status --follow` read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
+
+- The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system` and `result` events do not.
+- The tokens come from the `message.usage` field of the `assistant` events. The harness writes one event for each content block of a message, and each of these events repeats the usage of the message. The adapter therefore keeps the newest usage of each message id, and adds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens` of each message.
+- Half a line at the end of the stream is ignored, as in the end state. A stream with no `assistant` event gives 0 tokens.
+
+The usage of a message grows while the harness writes the message, and the `result` event holds the final count of the session. The token count of the stream is therefore a count of the work so far, not a bill.
 
 ## The resume
 

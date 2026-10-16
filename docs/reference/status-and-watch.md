@@ -2,20 +2,20 @@
 man: DELEGATE-STATUS(1)
 man_name: "delegate-status, delegate-watch — show the state of a run"
 synopsis:
-  - "delegate status [<run-id>] [--repo <repo>]"
+  - "delegate status [<run-id>] [--repo <repo>] [--json | --follow] [--interval <seconds>]"
   - "delegate watch [<run-id>] [--repo <repo>] [--until verdict] [--stall-minutes <n>] [--max-minutes <n>] [--from <position>] [--poll-seconds <n>]"
 ---
 
 # Reference: `delegate status` and `delegate watch`
 
-`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run and the event-stream files that the journal names. They need no [**adapter**](../glossary.md#adapter), no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`.
+`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run and the event-stream files that the journal names. They need no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`. Only `status --json` and `status --follow` need the [**adapter**](../glossary.md#adapter) of the run, because they read the [**event streams**](../glossary.md#event-stream) through it. The other forms need no adapter.
 
 Both commands find the journal in the state directory of the repository, in `runs/<run-id>/journal.jsonl`. See [the journal](run.md#the-journal).
 
 ## `delegate status`
 
 ```
-delegate status [run-id] [--repo <dir>]
+delegate status [run-id] [--repo <dir>] [--json | --follow] [--interval <seconds>]
 ```
 
 <!-- generated:begin status-options -->
@@ -25,6 +25,9 @@ delegate status [run-id] [--repo <dir>]
 |---|---|
 | `[<run-id>]` | The run to show; default is the newest run of the repository. |
 | `--repo <repo>` | The git repository that holds the run; default is the current directory. |
+| `--json` | Print one snapshot of the run as JSON: the progress, the ETA, the tokens, and the activity of each agent. |
+| `--follow` | Draw the snapshot in the terminal, draw it again after each interval, and exit when the run ends. |
+| `--interval <seconds>` | The seconds between two snapshots of --follow; default 2. |
 
 <!-- generated:end status-options -->
 
@@ -43,7 +46,77 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 
 A ticket that failed or was skipped has a second line, `  reason: <reason>`.
 
-`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. The message on stderr names the repository, the run id, or the journal.
+`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. With `--json` or `--follow`, it also exits 2 when the adapter of the run is not known, and when an event stream cannot be read. The message on stderr names the repository, the run id, the journal, the adapter, or the stream. `--json` and `--follow` together are a usage error.
+
+### The snapshot
+
+`status --json` prints one snapshot of the run as one JSON object. Two plugins read it, so the fields below are a contract. A new field can come in a later version. A field does not change its type or its meaning.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The id of the run. |
+| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. |
+| `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. |
+| `elapsed_seconds` | integer | The time that the run used: from `run-start` to `time`. |
+| `tickets_total` | integer | The number of [**tickets**](../glossary.md#ticket) of the run. |
+| `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
+| `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
+| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
+| `tokens` | integer | The tokens of the run: the sum of `tokens` of all tickets. |
+| `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
+
+| Ticket field | Type | Meaning |
+|---|---|---|
+| `id` | string | The id of the ticket. |
+| `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the lines of `status`. |
+| `phase` | string or `null` | For a running ticket, the phase of its [**step**](../glossary.md#step): [**`specialist`**](../glossary.md#specialist), [**`gates`**](../glossary.md#gate), [**`verifier`**](../glossary.md#verifier), or [**`fix-up`**](../glossary.md#fix-up). `null` for a ticket that does not run. |
+| `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
+| `tokens` | integer | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). |
+| `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. |
+
+The phase of a running ticket follows its newest event:
+
+| Event | Phase |
+|---|---|
+| `step-start`, [**`continuation`**](../glossary.md#continuation), or `agent-start` with the role `specialist` | `specialist` |
+| `report-validation` that is valid, `rebase`, or `gate-result` of the phase `build` or `rebase` | `gates` |
+| `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
+| `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round stay in the phase `fix-up`. |
+
+The tokens and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity). The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error.
+
+### The progress and the ETA
+
+The percentage:
+
+- A ticket that ended (`built`, `failed`, or `skipped`) counts 1.
+- A running ticket counts by its phase: `specialist` 0, `gates` 0.6, `verifier` 0.8, `fix-up` 0.8.
+- A pending ticket counts 0.
+- The percentage is the sum, divided by the number of tickets, times 100, rounded down.
+
+The ETA:
+
+- Before the first ticket ends, the ETA is `null`.
+- After that, the ETA is `time` + M × N − R. M is the mean duration of the ended tickets. N is the number of tickets that did not end. R is the `elapsed_seconds` of the running ticket.
+- The mean uses the tickets that ended after a step (`built` or `failed`). A skipped ticket has no step and no duration, so it does not count in the mean. It counts as ended.
+- The ETA is never earlier than `time`. For a run that ended, it is the time of `run-end`.
+
+In `economy` mode the verification of the chain runs after the last ticket ends. The percentage is then 100, and the ETA is `time`, until the run ends. The last ticket of each stack shows the tokens and the `idle_seconds` of the verifier of its stack.
+
+### The follow view
+
+`status --follow` draws the snapshot in the terminal: one line for the run, and one line for each ticket. After each interval (`--interval`, 2 seconds by default) it reads the journal and the streams again, and draws the lines again in place. It exits 0 when the run ends, after it draws the last snapshot.
+
+```
+run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 52k tokens
+  a built, 10m00s used, 26k tokens
+  b running specialist, 50s used, 26k tokens, last activity 12s ago
+```
+
+- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA.
+- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity.
+- The view cuts each line to the width of the terminal. It shows no tool call and no path.
+- When standard output is not a terminal, the view prints each snapshot as plain lines, one snapshot after the other, with no cursor control.
 
 ## `delegate watch`
 
@@ -112,7 +185,7 @@ With `--until verdict`, `watch` exits at the first `verdict` event. The line is 
 
 `--stall-minutes N` compares the time now with the newest modification time of the journal and of the event-stream files that the events name (`event_stream`). If the difference is N minutes or more, `watch` exits. The line is `watch: stall: the journal and the event streams have not changed for N minutes; last event: <the line of the last event>`. A run that has ended is not a stall.
 
-The journal names the [**event stream**](../glossary.md#event-stream) of an agent when the agent has ended. While an agent runs, only the journal and the streams of earlier agents show a change. Set N to more than the longest time of one agent run.
+The journal names the [**event stream**](../glossary.md#event-stream) of an agent in `agent-start`, before the agent starts. While an agent runs, its own stream therefore shows a change too. A journal of an earlier version names a stream only when the agent has ended: for such a run, set N to more than the longest time of one agent run.
 
 ### The position
 

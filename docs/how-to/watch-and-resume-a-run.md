@@ -54,7 +54,15 @@ delegate watch --stall-minutes 30 --max-minutes 50
 
 `status` prints one line for each ticket. It shows the state, the [**verdict**](../glossary.md#verdict), and the branch. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
 
-`watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. Set the stall time to more than the longest time of one agent run.
+`watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. The journal names the [**event stream**](../glossary.md#event-stream) of each agent when the agent starts, so an agent that writes its stream is not a stall.
+
+To see how much of the run is complete, when it will end, and whether each agent works now, draw the live view:
+
+```bash
+delegate status --follow
+```
+
+It shows one line for the run, with the percentage, the ETA, and the tokens. Each ticket has one line, with the phase, the tokens, and the time since the last activity of its agent. The view draws the lines again every 2 seconds, and exits when the run ends. A program can read the same snapshot with `delegate status --json`. See [the snapshot](../reference/status-and-watch.md#the-snapshot).
 
 ### 3. Act on the exit code
 
