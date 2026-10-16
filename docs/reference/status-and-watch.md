@@ -83,7 +83,14 @@ The phase of a running ticket follows its newest event:
 | `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
 | `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round stay in the phase `fix-up`. |
 
-The tokens and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity). The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error.
+The tokens and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity).
+
+The token count of a `claude-code` stream:
+
+- The count of one turn or one session adds the input tokens, the cache-read tokens, the cache-creation tokens, and the output tokens.
+- When the stream holds a `result` event, the count of that session is the `usage` of the `result` event. The `usage` of an `assistant` event is partial, so it is not the count of a session that ended.
+- For a session that has no `result` event yet (an agent that runs now), the count is the sum of its turns: one turn for each `message.id`, with the newest usage of that message.
+- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error.
 
 ### The progress and the ETA
 
