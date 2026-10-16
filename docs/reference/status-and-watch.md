@@ -64,7 +64,7 @@ The progress comes from [the snapshot](#the-snapshot), and follows [the rules of
 
 A ticket that failed or was skipped has the line `  reason: <reason>`, after its progress line.
 
-`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, when the journal is not valid, or when an event stream cannot be read. The message on stderr names the repository, the run id, the journal, or the stream. `--json` and `--follow` together are a usage error.
+`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. The message on stderr names the repository, the run id, or the journal. An event stream that cannot be read is not an error: see [a stream that cannot be read](#a-stream-that-cannot-be-read). `--json` and `--follow` together are a usage error.
 
 ### The snapshot
 
@@ -80,7 +80,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
+| `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. A ticket whose `tokens` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
@@ -89,8 +89,8 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the lines of `status`. |
 | `phase` | string or `null` | For a running ticket, the phase of its [**step**](../glossary.md#step): [**`specialist`**](../glossary.md#specialist), [**`gates`**](../glossary.md#gate), [**`verifier`**](../glossary.md#verifier), or [**`fix-up`**](../glossary.md#fix-up). `null` for a ticket that does not run. |
 | `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
-| `tokens` | integer or `null` | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). |
-| `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
+| `tokens` | integer or `null` | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a ticket with [a stream that cannot be read](#a-stream-that-cannot-be-read). |
+| `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and when the stream of the agent that runs [cannot be read](#a-stream-that-cannot-be-read). |
 
 The phase of a running ticket follows its newest event:
 
@@ -108,7 +108,7 @@ The token count of a `claude-code` stream:
 - The count of one turn or one [**session**](../glossary.md#session) adds the input tokens, the cache-read tokens, the cache-creation tokens, and the output tokens.
 - When the stream holds a `result` event, the count of that session is the `usage` of the `result` event. The `usage` of an `assistant` event is partial, so it is not the count of a session that ended.
 - For a session that has no `result` event yet (an agent that runs now), the count is the sum of its turns: one turn for each `message.id`, with the newest usage of that message.
-- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error, in each form of `status`.
+- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is [a stream that cannot be read](#a-stream-that-cannot-be-read).
 
 ### A run with no stream reader
 
@@ -118,6 +118,25 @@ The `status` process can have no reader of the streams of a run:
 - The adapter has no method `activity`. For example, an adapter of an earlier version.
 
 Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens` and `idle_seconds` are `null`, and the lines of `status` and `status --follow` have no tokens and no last activity. `status` does not read the streams of such a run.
+
+### A stream that cannot be read
+
+Each form of `status` works, and exits 0, when an event stream of the run cannot be read. A stream cannot be read when:
+
+- The file is missing. The stream of an agent that runs now is the exception: before the harness opens it, it has 0 tokens.
+- The process cannot read the file, for example because the file has no read permission.
+- The path is a directory.
+- The file is not UTF-8 text.
+- The method `activity` of the adapter raises an `AdapterError` for the stream. For example, a line before the last one is not JSON, or a `step_finish` event of an `opencode` stream has no `part.tokens.total` field.
+
+`status` then shows no tokens and no activity for that agent:
+
+- In the JSON, the `tokens` of its ticket is `null`. The count of the other agents of the ticket would not be the count of the ticket.
+- When the agent runs now, the `idle_seconds` of its ticket is `null`.
+- The `tokens` of the run is the sum of the other tickets.
+- The lines of `status` and `status --follow` show no tokens for the ticket. While the agent runs, they show no last activity for it.
+
+Only `status` treats such a stream as no data. `delegate run` reads the stream of an agent for its [**end state**](../glossary.md#end-state), and a stream that it cannot read stays an error there.
 
 ### The progress and the ETA
 

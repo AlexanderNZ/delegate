@@ -6,8 +6,9 @@ the `activity` method of the harness adapter of the run, so this module never
 imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
 the activity of each agent. When the command has no reader for the adapter of
 the run, the snapshot has the progress and the ETA, and no tokens and no
-activity. It needs no workflow file, and no tool beyond git, which finds the
-state directory.
+activity. A stream that the reader cannot read gives no tokens and no activity
+for its agent, and is not an error. It needs no workflow file, and no tool
+beyond git, which finds the state directory.
 
 The report (`report`) gives the lines of `delegate status`: the state, the
 verdict and the branch of each ticket from the journal, with the progress of
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ..ports.harness import Activity
+from ..ports.harness import Activity, AdapterError
 from ..ports.vcs import VersionControl
 from . import domain
 from .journal import JournalError, read_new_events
@@ -119,7 +120,8 @@ ReaderOf = Callable[[str], StreamReader | None]
 class TicketSnapshot:
     """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs.
 
-    `tokens` and `idle_seconds` are None when the snapshot has no reader of the streams.
+    `tokens` and `idle_seconds` are None when the snapshot has no reader of the streams. `tokens` is None also when a
+    stream of the ticket cannot be read, and `idle_seconds` when the stream of the agent that runs now cannot be read.
     """
 
     id: str
@@ -134,7 +136,8 @@ class TicketSnapshot:
 class Snapshot:
     """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended.
 
-    `tokens` is None when the snapshot has no reader of the streams.
+    `tokens` is None when the snapshot has no reader of the streams. Otherwise it is the sum of the tickets that have
+    tokens: a ticket with a stream that cannot be read adds nothing.
     """
 
     run_id: str
@@ -209,17 +212,34 @@ def _ticket(
     duration = elapsed if started and ended else None
     if activity is None:
         return TicketSnapshot(ticket, state, phase, elapsed, None, None), duration
-    tokens, idle = 0, None
+    tokens: int | None = 0
+    idle = None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
         if is_live and not Path(stream).exists():
-            found = Activity(0, None)  # the harness has not opened the stream yet
+            found: Activity | None = Activity(0, None)  # the harness has not opened the stream yet
         else:
-            found = activity(Path(stream))
-        tokens += found.tokens
+            found = _read(activity, Path(stream))
+        if found is None:
+            tokens = None  # a count without this agent is not the count of the ticket
+            continue
+        if tokens is not None:
+            tokens += found.tokens
         if is_live:
             idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type]
     return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle), duration
+
+
+def _read(activity: StreamReader, stream: Path) -> Activity | None:
+    """The activity in a stream, or None when the stream cannot be read.
+
+    The stream can be missing, a file that the process cannot read, a directory, not text, or not an event stream of the
+    harness. The status then shows no tokens and no activity for that agent, and does not fail.
+    """
+    try:
+        return activity(stream)
+    except (AdapterError, OSError, UnicodeDecodeError):
+        return None
 
 
 def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime) -> Snapshot:
@@ -257,11 +277,11 @@ def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: Rea
     """The snapshot of a run of the repository: the run with that id, or the newest run when `run_id` is None.
 
     A run in progress appends to its journal, so a last line with no newline is
-    left for the next snapshot. Raise RunsError when there is no such run,
-    JournalError when its journal is not valid, and the error of the reader when
-    a stream cannot be read.
-    The stream of an agent that runs now can be missing: the harness has not
-    opened it yet.
+    left for the next snapshot. Raise RunsError when there is no such run, and
+    JournalError when its journal is not valid. A stream that cannot be read is
+    not an error: the ticket of that stream has no tokens, and no activity when
+    its agent runs now. The stream of an agent that runs now can be missing: the
+    harness has not opened it yet, so the agent has 0 tokens.
     """
     journal = journal_of(repo, run_id, vcs)
     events, _ = read_new_events(journal, 0, 1)

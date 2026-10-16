@@ -102,7 +102,9 @@ class Adapter(Protocol):
 
     `activity` reads a stream that this adapter captured. A live stream can end
     in half a line, which it ignores. It raises AdapterError when the file is
-    missing or a line before the last one is not JSON.
+    missing or a line before the last one is not JSON, and the error of the file
+    system when the file cannot be read. `delegate status` shows no tokens and no
+    activity for a stream that raises one of these errors.
     """
 
     tier_column: str
