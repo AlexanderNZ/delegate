@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..shared.tiers import Tiers
 from . import domain
-from .domain import MODES
+from .domain import ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
 
 # The built-in harness adapters. A workflow can name these, and any adapter
 # that the caller of `load_workflow` reports as registered (a test registers a scripted one).
@@ -56,6 +56,7 @@ class Workflow:
     stacks: dict[str, Stack]
     tickets: list[Ticket]
     tier_overrides: dict[str, str]
+    ticket_start: str = START_BASE_BRANCH
 
 
 class WorkflowError(Exception):
@@ -194,7 +195,9 @@ class _Reader:
         return list(value)
 
 
-TOP_LEVEL_FIELDS: tuple[str, ...] = ("base-branch", "run-branch", "mode", "adapter", "tier-overrides", "stacks", "tickets")
+TOP_LEVEL_FIELDS: tuple[str, ...] = (
+    "base-branch", "run-branch", "mode", "adapter", "ticket-start", "tier-overrides", "stacks", "tickets",
+)
 STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
 
@@ -283,6 +286,15 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
         reader.problems.append(f"run-branch: {run_branch!r} is the base-branch; the run needs its own branch")
     if mode is not None and mode not in MODES:
         reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
+    ticket_start = reader.string(data, "ticket-start", "ticket-start") if "ticket-start" in data else START_BASE_BRANCH
+    if ticket_start is not None and ticket_start not in TICKET_STARTS:
+        reader.problems.append(
+            f"ticket-start: {ticket_start!r} is not a ticket start; known values: {', '.join(TICKET_STARTS)}"
+        )
+    elif ticket_start == START_RUN_BRANCH and mode == ECONOMY:
+        reader.problems.append(
+            f"ticket-start: {ticket_start!r} works only in assure mode; in economy mode each ticket starts from the previous ticket"
+        )
     known_adapters = sorted({*ADAPTERS, *registered_adapters})
     if adapter is not None and adapter not in known_adapters:
         reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(known_adapters)}")
@@ -307,7 +319,7 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
         reader.problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))
     if reader.problems:
         raise WorkflowError(reader.problems)
-    return Workflow(base_branch, run_branch, mode, adapter, stacks, tickets, overrides)  # type: ignore[arg-type]
+    return Workflow(base_branch, run_branch, mode, adapter, stacks, tickets, overrides, ticket_start)  # type: ignore[arg-type]
 
 
 def plan_order(workflow: Workflow) -> list[Ticket]:

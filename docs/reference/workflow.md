@@ -67,11 +67,12 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 | `run-branch` | string | The branch that the engine owns and accepted work lands on. It must differ from `base-branch`. |
 | [**`mode`**](../glossary.md#mode) | string | [**`assure`**](../glossary.md#assure) or [**`economy`**](../glossary.md#economy). |
 | [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. See [the run reference](run.md#the-adapter-interface). |
+| `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
 | `stacks` | table | One sub-table for each stack. See [Stacks](#stacks). |
 | `tickets` | array of tables | At least one `[[tickets]]` table. See [Tickets](#tickets). |
 
-All fields except `tier-overrides` are required. A field that this reference does not list is an error. This catches a misspelled field.
+All fields except `ticket-start` and `tier-overrides` are required. A field that this reference does not list is an error. This catches a misspelled field.
 
 ## Modes
 
@@ -79,6 +80,25 @@ All fields except `tier-overrides` are required. A field that this reference doe
 |---|---|
 | `assure` | The engine verifies each branch at once, after the [**specialist**](../glossary.md#specialist) finishes it. |
 | `economy` | The engine builds a [**chain**](../glossary.md#chain), and verifies once for each stack at the end. Each ticket branch starts from the previous ticket. The specialists run on `standard`. Each [**REJECT**](../glossary.md#reject) gets one [**fix-up**](../glossary.md#fix-up) round. See [the run reference](run.md#the-economy-chain). |
+
+## Ticket start
+
+The field `ticket-start` sets the branch that each ticket branch starts from in `assure` mode.
+
+| Value | Meaning |
+|---|---|
+| `base-branch` | Each ticket branch starts from `base-branch`. This is the default. |
+| `run-branch` | Each ticket branch starts from the tip of `run-branch` at the start of its [**step**](../glossary.md#step). The branch then holds the accepted work of each ticket before it. |
+
+Use `run-branch` for a sequential chain of tickets that change the same files. With `base-branch`, a ticket that changes a file that an accepted ticket changed has a conflict at [the rebase onto the run branch](run.md#the-rebase-onto-the-run-branch), and its step fails. Such tickets must then go in separate runs. With `run-branch`, the rebase has no conflict, because the ticket branch holds the run branch already. The engine still verifies each ticket at once, after its specialist finishes it.
+
+With `run-branch`, the commits of a ticket are the commits beyond the start commit, which `step-start` records in `base_commit`. The check for a commit, the [**hotspot**](../glossary.md#hotspot) guard and the continuation brief use this commit, so the commits of earlier tickets do not count for the ticket.
+
+A ticket that failed or was skipped did not move the run branch, so the next ticket does not hold its work. Use `blocked-by` when a ticket needs the work of another ticket: a ticket whose blocker failed is skipped.
+
+In `economy` mode, each ticket branch starts from the previous ticket. `ticket-start = "run-branch"` in `economy` mode is an error. `ticket-start = "base-branch"` is permitted in every mode.
+
+`delegate run --dry-run` prints the line `each ticket starts from the run branch <run-branch>` when the value is `run-branch`.
 
 ## Adapters
 
@@ -137,6 +157,8 @@ Ticket text is about behaviour and holds no file paths. The engine adds the [**f
 | A field is missing, has the wrong type, or is empty. | The field, for example `stacks.python.gates`. |
 | A field is not in this reference. | The field. |
 | `mode` or `adapter` has an unknown name. | The field, the value, and the valid names. |
+| `ticket-start` has an unknown value. | The field, the value, and the valid values. |
+| `ticket-start` is `run-branch` in `economy` mode. | The field and the value. |
 | A tier override is not a tier name. | The field `tier-overrides.<role>`, the value, and the valid tier names. |
 | A ticket names a stack that does not exist. | The ticket and the stack. |
 | A ticket is blocked by an id that no ticket has. | The ticket and the [**blocker**](../glossary.md#blocker). |

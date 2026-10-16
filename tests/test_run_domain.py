@@ -162,6 +162,20 @@ def test_in_economy_mode_the_work_of_a_ticket_is_counted_from_where_its_branch_s
     assert domain.work_starts_at("economy", "main", "abc123") == "abc123"
 
 
+def test_in_assure_mode_a_ticket_starts_from_the_run_branch_only_with_ticket_start_run_branch():
+    assert domain.starts_from_run_branch("assure", domain.START_RUN_BRANCH) is True
+    assert domain.starts_from_run_branch("assure", domain.START_BASE_BRANCH) is False
+
+
+def test_in_economy_mode_no_ticket_starts_from_the_run_branch():
+    assert domain.starts_from_run_branch("economy", domain.START_RUN_BRANCH) is False
+
+
+def test_in_assure_mode_with_ticket_start_run_branch_the_work_of_a_ticket_is_counted_from_where_its_branch_started():
+    assert domain.work_starts_at("assure", "main", "abc123", domain.START_RUN_BRANCH) == "abc123"
+    assert domain.work_starts_at("assure", "main", "abc123", domain.START_BASE_BRANCH) == "main"
+
+
 # The verdict
 
 

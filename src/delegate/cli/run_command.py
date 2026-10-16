@@ -17,6 +17,7 @@ from pathlib import Path
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
+from ..run.domain import START_RUN_BRANCH
 from ..run.engine import EngineError, run_workflow, workflow_of_run
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
@@ -133,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.ok else 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")
+    if workflow.ticket_start == START_RUN_BRANCH:
+        print(f"each ticket starts from the run branch {workflow.run_branch}")
     for number, ticket in enumerate(plan_order(workflow), start=1):
         blocked = ", ".join(ticket.blocked_by) or "none"
         print(f"ticket {ticket.id} ({number}/{len(workflow.tickets)}): stack {ticket.stack}, blocked by {blocked}")

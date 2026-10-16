@@ -46,10 +46,10 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 
 A step has these parts:
 
-1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the [**push guard**](../glossary.md#push-guard) in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain).
+1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the [**push guard**](../glossary.md#push-guard) in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain). In `assure` mode with `ticket-start = "run-branch"`, the branch starts from the tip of the run branch. See [the ticket start](workflow.md#ticket-start).
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the [**report**](../glossary.md#report) from the report path and check it against the schema.
-4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, or the tip of the previous ticket in `economy` mode).
+4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, the tip of the previous ticket in `economy` mode, or the tip of the run branch with `ticket-start = "run-branch"`).
 5. Compare the changed paths with the [**hotspot**](../glossary.md#hotspot) patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
 6. Run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A specialist that ends `failed` or `capped`, a red gate, and a report that is not valid on a branch with a commit start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
@@ -210,7 +210,7 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 
 ## The rebase onto the run branch
 
-In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
+In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. A ticket branch that starts from the run branch (`ticket-start = "run-branch"`) holds the run branch already, so its rebase has no conflict. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. So the journal shows a gate result before and after the rebase for each ticket.
 
 - The engine writes `rebase` with the run branch tip (`onto_commit`) and the branch tip before (`from_commit`) and after (`to_commit`) the rebase.
 - A rebase that stops with a conflict fails the step. The engine aborts the rebase, so the branch keeps its commits and the worktree is clean. The journal records `rebase` with the result `conflict` and the conflicting files in `files`. The independent tickets go on.

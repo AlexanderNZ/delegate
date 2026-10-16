@@ -1,6 +1,7 @@
 """The workflow engine: build each ticket through a harness adapter.
 
-For each ticket the engine makes a worktree from the base branch, installs the
+For each ticket the engine makes a worktree from the base branch (or from the
+run branch, when the workflow sets `ticket-start = "run-branch"`), installs the
 push guard in it (see `guards.py`), spawns the stack's specialist through the adapter, checks the specialist's report, runs
 the stack's gates itself, and records each event in the journal. After the
 specialist reports `committed`, and before any gate runs, the engine compares
@@ -522,10 +523,15 @@ def _execute(
 
 
 def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str:
-    """The branch that the next ticket starts from: the branch of its predecessor in a chain (see `domain.chain_predecessor`), or the base branch."""
+    """The branch that the next ticket starts from.
+
+    It is the branch of its predecessor in a chain (see `domain.chain_predecessor`),
+    the run branch when the workflow says so (see `domain.starts_from_run_branch`),
+    or the base branch.
+    """
     predecessor = domain.chain_predecessor(workflow.mode, [ticket.id for ticket in order], built)
     if predecessor is None:
-        return workflow.base_branch
+        return workflow.run_branch if domain.starts_from_run_branch(workflow.mode, workflow.ticket_start) else workflow.base_branch
     return _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
 
 
@@ -629,7 +635,8 @@ def _build_ticket(
     """Build one ticket. Return None when it is built, or the reason it failed.
 
     The branch of the ticket starts from `start_ref`, which is the base branch
-    unless the mode chains the tickets (see `_start_ref`).
+    unless the mode chains the tickets or the workflow starts each ticket from
+    the run branch (see `_start_ref`).
 
     In `assure` mode a ticket is built only when its verifier accepts it.
 
@@ -667,8 +674,9 @@ def _build_ticket(
         # A verifier run that ended with no verdict does not count against the fix-up limit.
         verify_rounds = sum(1 for e in prior if e["event"] == "verdict")
     # The commits of a ticket are the commits beyond the point where its branch started. In a chain that
-    # point is the tip of the previous ticket, so the commits of earlier tickets are not counted.
-    since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit)
+    # point is the tip of the previous ticket, and with `ticket-start = "run-branch"` it is the tip of the
+    # run branch, so the commits of earlier tickets are not counted.
+    since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit, workflow.ticket_start)
     reason = _build_with_continuations(
         workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,

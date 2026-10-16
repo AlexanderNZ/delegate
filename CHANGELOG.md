@@ -13,6 +13,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - The journal event `agent-start` names the event stream of each agent before the agent starts: the specialist, each continuation, the fix-up specialist, and each verifier.
 - `delegate run --resume <run-id> --retry <ticket>` goes on with one failed step of `assure` mode, also in a run that ended. It spawns no specialist. It uses the worktree and the commits of the step again, and goes on at the first phase that did not complete: the gates, the verifier, or the scoped verifier. The journal records `retry`. A built step, an unknown ticket, and a step that needs a new specialist make the command exit 1 with a message.
 
+- The workflow field `ticket-start` sets the branch that each ticket branch of `assure` mode starts from. With `run-branch`, a ticket branch starts from the tip of the run branch, so a run can hold a sequential chain of tickets that change the same files, and the engine still verifies each ticket at once. The default, `base-branch`, keeps the earlier behaviour. `run-branch` in `economy` mode is an error.
+
 ### Changed
 
 - A verifier run that ended with no verdict, for example one that the time limit of a harness killed, does not count against the fix-up limit. A resume runs that round again with the same round number. Before, the resume started the next round, and the step lost one of its fix-up rounds.

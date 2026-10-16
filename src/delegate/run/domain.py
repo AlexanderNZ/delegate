@@ -19,6 +19,13 @@ ECONOMY: str = "economy"
 # The two modes of a run.
 MODES: tuple[str, ...] = (ASSURE, ECONOMY)
 
+# The values of the workflow field `ticket-start`: the branch that each ticket branch of `assure` mode starts from.
+# `base-branch` is the default. With `run-branch`, a ticket branch starts from the tip of the run branch at the start
+# of its step, so it holds the accepted work of the tickets before it.
+START_BASE_BRANCH: str = "base-branch"
+START_RUN_BRANCH: str = "run-branch"
+TICKET_STARTS: tuple[str, ...] = (START_BASE_BRANCH, START_RUN_BRANCH)
+
 # The tier of the specialist role in each mode, before a workflow override.
 SPECIALIST_TIER: dict[str, str] = {ASSURE: "strong", ECONOMY: "standard"}
 
@@ -116,9 +123,9 @@ def unreached_reason(ticket_id: str, halted: bool) -> str:
 
 
 def chain_predecessor(mode: str, order: Sequence[str], built: Collection[str]) -> str | None:
-    """The ticket that the next ticket starts from, or None when it starts from the base branch.
+    """The ticket that the next ticket starts from, or None when it starts from a branch of the run (see `starts_from_run_branch`).
 
-    In `assure` mode every ticket starts from the base branch. In `economy`
+    In `assure` mode no ticket starts from another ticket. In `economy`
     mode the tickets form a chain: a ticket starts from the last ticket before
     it, in the order of the plan, that was built. A ticket that failed or was
     skipped is not part of the chain.
@@ -130,14 +137,26 @@ def chain_predecessor(mode: str, order: Sequence[str], built: Collection[str]) -
     return None
 
 
-def work_starts_at(mode: str, base_branch: str, base_commit: str) -> str:
+def starts_from_run_branch(mode: str, ticket_start: str) -> bool:
+    """Tell whether a ticket branch starts from the tip of the run branch, and not from the base branch.
+
+    That is so in `assure` mode with the workflow field `ticket-start` set to
+    `run-branch`. In `economy` mode the chain sets the start of a ticket.
+    """
+    return mode == ASSURE and ticket_start == START_RUN_BRANCH
+
+
+def work_starts_at(mode: str, base_branch: str, base_commit: str, ticket_start: str = START_BASE_BRANCH) -> str:
     """The commit or branch from which the commits of a ticket are its own work.
 
     In a chain the branch of a ticket starts at the tip of the previous ticket,
-    so the commits of earlier tickets are not counted. Otherwise the work
-    starts at the base branch.
+    and a ticket that starts from the run branch starts at the tip of the run
+    branch. In both cases the work starts at that commit, so the commits of
+    earlier tickets are not counted. Otherwise the work starts at the base branch.
     """
-    return base_commit if mode == ECONOMY else base_branch
+    if mode == ECONOMY or starts_from_run_branch(mode, ticket_start):
+        return base_commit
+    return base_branch
 
 
 def is_accepted(verdict: str) -> bool:
