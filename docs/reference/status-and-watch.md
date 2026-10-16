@@ -8,7 +8,7 @@ synopsis:
 
 # Reference: `delegate status` and `delegate watch`
 
-`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run and the event-stream files that the journal names. They need no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`. Only `status --json` and `status --follow` need the [**adapter**](../glossary.md#adapter) of the run, because they read the [**event streams**](../glossary.md#event-stream) through it. The other forms need no adapter.
+`delegate status` and `delegate watch` show the state of a [**run**](../glossary.md#run). They read only the [**journal**](../glossary.md#journal) of the run and the event-stream files that the journal names. They need no [**workflow**](../glossary.md#workflow) file, and no tool beyond git, which finds the [**state directory**](../glossary.md#state-directory). They do not need `jq`. `status` reads the [**event streams**](../glossary.md#event-stream) through the [**adapter**](../glossary.md#adapter) of the run, for the tokens and the activity of each agent. It does not need the adapter: see [a run with no stream reader](#a-run-with-no-stream-reader). `watch` needs no adapter.
 
 Both commands find the journal in the state directory of the repository, in `runs/<run-id>/journal.jsonl`. See [the journal](run.md#the-journal).
 
@@ -31,7 +31,19 @@ delegate status [run-id] [--repo <dir>] [--json | --follow] [--interval <seconds
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. The second line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+
+```
+run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
+progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 45k tokens
+journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
+ticket a: state built, verdict ACCEPT, branch run/demo-a, last event 2026-10-16T03:10:00+00:00
+  progress: 10m00s used, 19k tokens
+ticket b: state running, verdict -, branch run/demo-b, last event 2026-10-16T03:10:00+00:00
+  progress: specialist, 50s used, 26k tokens, last activity 12s ago
+```
+
+The line of a ticket has this form:
 
 ```
 ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time>
@@ -44,9 +56,15 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 | `branch` | The branch of the ticket, from `step-start`, or `-` when the ticket has no [**step**](../glossary.md#step). |
 | `last event` | The time of the newest event of the ticket, or `-` when there is none. |
 
-A ticket that failed or was skipped has a second line, `  reason: <reason>`.
+The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
 
-`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. With `--json` or `--follow`, it also exits 2 when the adapter of the run is not known, and when an event stream cannot be read. The message on stderr names the repository, the run id, the journal, the adapter, or the stream. `--json` and `--follow` together are a usage error.
+- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA.
+- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent.
+- A pending ticket and a skipped ticket have no progress line.
+
+A ticket that failed or was skipped has the line `  reason: <reason>`, after its progress line.
+
+`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, when the journal is not valid, or when an event stream cannot be read. The message on stderr names the repository, the run id, the journal, or the stream. `--json` and `--follow` together are a usage error.
 
 ### The snapshot
 
@@ -62,7 +80,7 @@ A ticket that failed or was skipped has a second line, `  reason: <reason>`.
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `tokens` | integer | The tokens of the run: the sum of `tokens` of all tickets. |
+| `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
@@ -71,8 +89,8 @@ A ticket that failed or was skipped has a second line, `  reason: <reason>`.
 | `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the lines of `status`. |
 | `phase` | string or `null` | For a running ticket, the phase of its [**step**](../glossary.md#step): [**`specialist`**](../glossary.md#specialist), [**`gates`**](../glossary.md#gate), [**`verifier`**](../glossary.md#verifier), or [**`fix-up`**](../glossary.md#fix-up). `null` for a ticket that does not run. |
 | `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
-| `tokens` | integer | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). |
-| `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. |
+| `tokens` | integer or `null` | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). |
+| `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 
 The phase of a running ticket follows its newest event:
 
@@ -90,7 +108,16 @@ The token count of a `claude-code` stream:
 - The count of one turn or one session adds the input tokens, the cache-read tokens, the cache-creation tokens, and the output tokens.
 - When the stream holds a `result` event, the count of that session is the `usage` of the `result` event. The `usage` of an `assistant` event is partial, so it is not the count of a session that ended.
 - For a session that has no `result` event yet (an agent that runs now), the count is the sum of its turns: one turn for each `message.id`, with the newest usage of that message.
-- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error.
+- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is an error, in each form of `status`.
+
+### A run with no stream reader
+
+The `status` process can have no reader of the streams of a run:
+
+- The adapter of the run is not known to the process. For example, a script registered the adapter in its own process.
+- The adapter has no method `activity`. For example, an adapter of an earlier version.
+
+Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens` and `idle_seconds` are `null`, and the lines of `status` and `status --follow` have no tokens and no last activity. `status` does not read the streams of such a run.
 
 ### The progress and the ETA
 
@@ -122,6 +149,7 @@ run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 52k
 
 - The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA.
 - A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity.
+- For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
 - The view cuts each line to the width of the terminal. It shows no tool call and no path.
 - When standard output is not a terminal, the view prints each snapshot as plain lines, one snapshot after the other, with no cursor control.
 

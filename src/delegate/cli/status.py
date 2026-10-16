@@ -1,8 +1,9 @@
 """The `delegate status` command: parse the arguments, build the git backend, call the report of the run context and print it.
 
 The use case lives in `delegate.run.status`, which never imports an adapter. This module is the composition point
-of the command: it makes the git backend of the version-control port and hands it to the use case. For `--json` and
-`--follow` it also looks up the harness adapter of the run, and hands its stream reader to the use case.
+of the command: it makes the git backend of the version-control port and hands it to the use case. It also looks up
+the harness adapter of the run, and hands its stream reader to the use case. An adapter that this process does not
+know, or that has no stream reader, gives no reader: the output then has the progress and no tokens.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from ..run.journal import JournalError
 from ..run.runs import RunsError
 
 # The exit status of an input that cannot be read: no run, an unknown run id, a journal that is not valid,
-# an adapter that is not known, or an event stream that cannot be read.
+# or an event stream that cannot be read.
 EXIT_ERROR: int = 2
 
 # The seconds between two snapshots of `--follow`, when `--interval` does not set them.
@@ -47,7 +48,7 @@ def _positive(text: str) -> float:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate status", description="Print the state of each ticket of a run, from its journal.")
+    parser = argparse.ArgumentParser(prog="delegate status", description="Print the state and the progress of each ticket of a run, from its journal and its event streams.")
     parser.add_argument("run_id", nargs="?", help="the run to show; default is the newest run of the repository")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
     view = parser.add_mutually_exclusive_group()
@@ -66,12 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _reader_of(adapter: str) -> Callable[[Path], Activity]:
-    """The stream reader of the harness adapter that the run names. Raise AdapterError when no adapter has the name."""
+def _reader_of(adapter: str) -> Callable[[Path], Activity] | None:
+    """The stream reader of the harness adapter that the run names, or None when no adapter has the name or it has no reader."""
     try:
-        return adapters.get(adapter).activity
+        found = adapters.get(adapter)
     except KeyError:
-        raise AdapterError(f"adapter {adapter!r} of the run is not known, so its event streams cannot be read") from None
+        return None
+    return getattr(found, "activity", None)
 
 
 def _now() -> datetime:
@@ -108,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             snap = status.snapshot(args.repo, args.run_id, GitVersionControl(), _reader_of, _now())
             print(json.dumps(snap.to_json(), indent=2))
             return 0
-        lines = status.report(args.repo, args.run_id, GitVersionControl())
+        lines = status.report(args.repo, args.run_id, GitVersionControl(), _reader_of, _now())
     except (RunsError, JournalError, AdapterError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR

@@ -1,14 +1,18 @@
 """The state of each ticket of a run, for `delegate status` (the command is in `delegate.cli.status`).
 
-The report (`report`) reads the journal of the run and nothing else. It needs no
-adapter, no workflow file, and no tool beyond git, which finds the state
-directory.
+The snapshot (`snapshot`) reads the journal of the run and the event streams
+that the journal names, through a reader that the command gives. The reader is
+the `activity` method of the harness adapter of the run, so this module never
+imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
+the activity of each agent. When the command has no reader for the adapter of
+the run, the snapshot has the progress and the ETA, and no tokens and no
+activity. It needs no workflow file, and no tool beyond git, which finds the
+state directory.
 
-The snapshot (`snapshot`) also reads the event streams that the journal names,
-through a reader that the command gives. The reader is the `activity` method of
-the harness adapter of the run, so this module never imports an adapter. The
-snapshot gives the progress, the ETA, the tokens, and the activity of each
-agent. `view_lines` draws it as one line for the run and one for each ticket.
+The report (`report`) gives the lines of `delegate status`: the state, the
+verdict and the branch of each ticket from the journal, with the progress of
+the snapshot. `view_lines` draws the snapshot as one line for the run and one
+for each ticket.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain
-from .journal import JournalError, read_events, read_new_events
+from .journal import JournalError, read_new_events
 from .runs import journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
@@ -37,13 +41,17 @@ SKIPPED: str = "skipped"
 NONE: str = "-"
 
 
-def render(events: list[dict[str, object]], journal: Path) -> list[str]:
-    """The lines of the report for a run, from its journal events."""
+def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
+    """The lines of the report for a run, from its journal events and its snapshot."""
     start = events[0]
     if start["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
     end = next((e for e in reversed(events) if e["event"] == "run-end"), None)
-    lines = [f"run {start['run_id']}: {end['result'] if end else RUNNING} (mode {start['mode']}, adapter {start['adapter']})", f"journal {journal}"]
+    lines = [
+        f"run {start['run_id']}: {end['result'] if end else RUNNING} (mode {start['mode']}, adapter {start['adapter']})",
+        f"progress: {_run_progress(snap)}", f"journal {journal}",
+    ]
+    progress = {t.id: t for t in snap.tickets}
     tickets = [str(t) for t in start["tickets"]]  # type: ignore[union-attr]
     for ticket in tickets:
         own = [e for e in events if e.get("ticket") == ticket]
@@ -64,21 +72,24 @@ def render(events: list[dict[str, object]], journal: Path) -> list[str]:
         branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), NONE)
         last = str(own[-1]["time"]) if own else NONE
         lines.append(f"ticket {ticket}: state {state}, verdict {verdicts[-1] if verdicts else NONE}, branch {branch}, last event {last}")
+        if branch != NONE:  # a ticket with a step has a time used
+            found = progress[ticket]
+            lines.append("  progress: " + (f"{found.phase}, " if found.phase else "") + _ticket_progress(found))
         if reason:
             lines.append(f"  reason: {reason}")
     return lines
 
 
-def report(repo: Path, run_id: str | None, vcs: VersionControl) -> list[str]:
+def report(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> list[str]:
     """The lines of the report for a run of the repository: the run with that id, or the newest run when `run_id` is None.
 
-    Raise RunsError when there is no such run, and JournalError when its journal is not valid.
+    The errors are the errors of `snapshot`.
     """
     journal = journal_of(repo, run_id, vcs)
-    events = read_events(journal)
+    events, _ = read_new_events(journal, 0, 1)
     if not events:
         raise JournalError(f"journal {journal} holds no event")
-    return render(events, journal)
+    return render(events, journal, snapshot_of(events, journal, reader_of, now))
 
 
 # The states of a ticket that ended.
@@ -99,25 +110,32 @@ AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "ve
 # A reader of an event stream: the path of the stream gives the activity of the agent.
 StreamReader = Callable[[Path], Activity]
 
-# The reader of the streams of a run, from the adapter name of the run. It raises when it knows no such adapter.
-ReaderOf = Callable[[str], StreamReader]
+# The reader of the streams of a run, from the adapter name of the run. It gives None when the command knows no such
+# adapter, or the adapter has no reader: the snapshot then has no tokens and no activity.
+ReaderOf = Callable[[str], StreamReader | None]
 
 
 @dataclass(frozen=True)
 class TicketSnapshot:
-    """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs."""
+    """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs.
+
+    `tokens` and `idle_seconds` are None when the snapshot has no reader of the streams.
+    """
 
     id: str
     state: str
     phase: str | None
     elapsed_seconds: int
-    tokens: int
+    tokens: int | None
     idle_seconds: int | None
 
 
 @dataclass(frozen=True)
 class Snapshot:
-    """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended."""
+    """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended.
+
+    `tokens` is None when the snapshot has no reader of the streams.
+    """
 
     run_id: str
     state: str
@@ -127,7 +145,7 @@ class Snapshot:
     tickets_ended: int
     percent: int
     eta: datetime | None
-    tokens: int
+    tokens: int | None
     tickets: tuple[TicketSnapshot, ...]
 
     def to_json(self) -> dict[str, object]:
@@ -152,9 +170,11 @@ def _seconds(start: datetime, end: datetime) -> int:
 
 
 def _ticket(
-    ticket: str, own: list[dict[str, object]], activity: StreamReader, now: datetime, run_ended: bool
+    ticket: str, own: list[dict[str, object]], activity: StreamReader | None, now: datetime, run_ended: bool
 ) -> tuple[TicketSnapshot, int | None]:
     """The snapshot of one ticket from its own events, and the seconds of its step when it ended after one.
+
+    With no reader (`activity` is None), the ticket has no tokens and no idle time, and its streams are not read.
 
     An agent runs from its `agent-start` until its result event, a `step-end` (a crash), or the end of the run. The
     verifier of an `economy` chain starts after its ticket ended, so a ticket that ended can have an agent that runs.
@@ -185,6 +205,10 @@ def _ticket(
         phase = None
     if run_ended:
         live = None
+    elapsed = _seconds(started, ended or now) if started else 0
+    duration = elapsed if started and ended else None
+    if activity is None:
+        return TicketSnapshot(ticket, state, phase, elapsed, None, None), duration
     tokens, idle = 0, None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
@@ -195,16 +219,13 @@ def _ticket(
         tokens += found.tokens
         if is_live:
             idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type]
-    elapsed = _seconds(started, ended or now) if started else 0
-    duration = elapsed if started and ended else None
     return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle), duration
 
 
 def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime) -> Snapshot:
     """The snapshot of a run from its journal events. `now` is the time of the clock, in UTC.
 
-    The reader of the streams comes from `reader_of` at once, so an adapter that is not known fails the snapshot also
-    when no stream exists yet.
+    The reader of the streams comes from `reader_of` once. When it gives None, the snapshot has no tokens and no activity.
     """
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
@@ -228,7 +249,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
         run_id=str(start["run_id"]), state=str(end["result"]) if end else RUNNING, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(ended, [t.phase for t in running if t.phase], len(tickets)),
-        eta=None if to_end is None else now + timedelta(seconds=to_end), tokens=sum(t.tokens for t in tickets), tickets=tuple(tickets),
+        eta=None if to_end is None else now + timedelta(seconds=to_end), tokens=None if activity is None else sum(t.tokens or 0 for t in tickets), tickets=tuple(tickets),
     )
 
 
@@ -237,8 +258,8 @@ def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: Rea
 
     A run in progress appends to its journal, so a last line with no newline is
     left for the next snapshot. Raise RunsError when there is no such run,
-    JournalError when its journal is not valid, and the error of `reader_of` or
-    of its reader when the adapter is not known or a stream cannot be read.
+    JournalError when its journal is not valid, and the error of the reader when
+    a stream cannot be read.
     The stream of an agent that runs now can be missing: the harness has not
     opened it yet.
     """
@@ -267,21 +288,37 @@ def _tokens(count: int) -> str:
     return f"{count / 1_000_000:.1f}M"
 
 
+def _run_progress(snap: Snapshot) -> str:
+    """The progress of the run: the percentage, the tickets that ended, the time used, the ETA, and the tokens.
+
+    The ETA shows only while the run runs: in the time from now, or `-` before the first ticket ends. The tokens show
+    only when the snapshot has them.
+    """
+    eta = _duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
+    parts = [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{_duration(snap.elapsed_seconds)} used"]
+    if snap.state == RUNNING:
+        parts.append(f"ETA {eta}")
+    if snap.tokens is not None:
+        parts.append(f"{_tokens(snap.tokens)} tokens")
+    return ", ".join(parts)
+
+
+def _ticket_progress(ticket: TicketSnapshot) -> str:
+    """The progress of a ticket: the time used, the tokens when the snapshot has them, and the time since the last activity."""
+    parts = [f"{_duration(ticket.elapsed_seconds)} used"]
+    if ticket.tokens is not None:
+        parts.append(f"{_tokens(ticket.tokens)} tokens")
+    if ticket.idle_seconds is not None:
+        parts.append(f"last activity {_duration(ticket.idle_seconds)} ago")
+    return ", ".join(parts)
+
+
 def view_lines(snap: Snapshot, width: int) -> list[str]:
     """The lines of the terminal view of a snapshot: one for the run, then one for each ticket, each cut to `width`.
 
     The view names only the run id, the ticket ids, the states, the phases, and the numbers. It shows no path and no tool call.
-    The ETA shows only while the run runs: in the time from now, or `-` before the first ticket ends.
     """
-    eta = _duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
-    lines = [
-        f"run {snap.run_id} {snap.state} {snap.percent}%, {snap.tickets_ended} of {snap.tickets_total} ended, "
-        f"{_duration(snap.elapsed_seconds)} used, " + (f"ETA {eta}, " if snap.state == RUNNING else "") + f"{_tokens(snap.tokens)} tokens"
-    ]
+    lines = [f"run {snap.run_id} {snap.state} {_run_progress(snap)}"]
     for ticket in snap.tickets:
-        line = f"  {ticket.id} {ticket.state}" + (f" {ticket.phase}" if ticket.phase else "")
-        line += f", {_duration(ticket.elapsed_seconds)} used, {_tokens(ticket.tokens)} tokens"
-        if ticket.idle_seconds is not None:
-            line += f", last activity {_duration(ticket.idle_seconds)} ago"
-        lines.append(line)
+        lines.append(f"  {ticket.id} {ticket.state}" + (f" {ticket.phase}" if ticket.phase else "") + f", {_ticket_progress(ticket)}")
     return [line[: max(width, 1)] for line in lines]

@@ -140,8 +140,10 @@ The output looks like this. Your run id and your times are different.
 
 ```text
 run 20261009T031500Z-a1b2: built (mode assure, adapter claude-code)
+progress: 100%, 1 of 1 ended, 4m03s used, 96k tokens
 journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
 ticket 1: state built, verdict ACCEPT, branch run/sample-1, last event 2026-10-09T03:19:02.512384+00:00
+  progress: 4m01s used, 96k tokens
 ```
 
 The state `built` and the verdict `ACCEPT` mean that the ticket is done and checked.

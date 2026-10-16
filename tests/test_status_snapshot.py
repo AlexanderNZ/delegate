@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
@@ -271,24 +272,136 @@ def test_an_agent_that_a_crash_stopped_shows_no_activity(tmp_path, capsys, monke
     assert ticket_of(snapshot(repo, capsys), "a")["idle_seconds"] is None
 
 
-def test_json_on_a_run_whose_adapter_is_not_known_exits_2_and_names_the_adapter(tmp_path, capsys):
-    repo = bare_repo(tmp_path)
-    Run(repo, "r1", "a", adapter="no-such-harness")
+def a_run_of_two_tickets(repo: Path, adapter: str = "claude-code") -> Run:
+    """Ticket a ended built after 600 seconds. The specialist of ticket b runs now, from 600, and writes its eighth line."""
+    run = Run(repo, "r1", "a", "b", adapter=adapter)
+    run.built(0, 600, "a", run.stream("a.stream.jsonl", claude("finished.jsonl")))
+    lines = claude("capped.jsonl").splitlines(keepends=True)
+    run.step_start(600, "b")
+    run.agent_start(600, "b", "specialist", run.stream("b.stream.jsonl", "".join(lines[:7]) + lines[7][:120]))
+    return run
 
-    code = delegate.main(["status", "--repo", str(repo), "--json"])
 
+def plain_status(repo: Path, capsys) -> list[str]:
+    code = delegate.main(["status", "--repo", str(repo)])
     captured = capsys.readouterr()
-    assert (code, captured.out) == (2, "")
-    assert "no-such-harness" in captured.err
+    assert (code, captured.err) == (0, ""), captured.err
+    return captured.out.splitlines()
 
 
-def test_json_on_a_run_whose_ended_agent_has_lost_its_stream_exits_2_and_names_the_stream(tmp_path, capsys, monkeypatch):
+def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activity_of_each_running_agent(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = a_run_of_two_tickets(repo)
+    frozen(monkeypatch, 650)
+
+    lines = plain_status(repo, capsys)
+
+    # The mean of the ended tickets is 600, and b used 50 seconds: the ETA is 550 seconds from now.
+    # The tokens: 19326 for a, and 25794 for the one turn of b so far. b had its last activity on 2026-10-08.
+    assert lines == [
+        "run r1: running (mode assure, adapter claude-code)",
+        "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 45k tokens",
+        f"journal {run.path}",
+        f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
+        "  progress: 10m00s used, 19k tokens",
+        f"ticket b: state running, verdict -, branch run/demo-b, last event {at(600)}",
+        "  progress: specialist, 50s used, 26k tokens, last activity 7d07h ago",
+    ]
+
+
+def test_plain_status_of_a_run_that_ended_shows_its_progress_with_no_eta(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a", "b")
+    run.built(0, 600, "a", run.stream("a.stream.jsonl", claude("finished.jsonl")))
+    run.add(601, "skip", ticket="b", blockers=["x"], reason="blocked by x")
+    run.add(610, "run-end", result="built", built=["a"], failed=[], skipped=["b"])
+    frozen(monkeypatch, 9000)
+
+    lines = plain_status(repo, capsys)
+
+    assert lines[:2] == ["run r1: built (mode assure, adapter claude-code)", "progress: 100%, 2 of 2 ended, 10m10s used, 19k tokens"]
+    assert lines[3:] == [
+        f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
+        "  progress: 10m00s used, 19k tokens",
+        f"ticket b: state skipped, verdict -, branch -, last event {at(601)}",
+        "  reason: blocked by x",
+    ]
+
+
+class AdapterOfAnEarlierVersion:
+    """An adapter that a script registered in its own process, before adapters had a stream reader."""
+
+    tier_column = "claude-code"
+    supports_resume = False
+
+    def run(self, request):
+        raise AssertionError("delegate status must not run an agent")
+
+
+@pytest.fixture
+def earlier_adapter():
+    adapters.register("earlier", AdapterOfAnEarlierVersion())
+    yield "earlier"
+    adapters.unregister("earlier")
+
+
+@pytest.fixture(params=["not-known", "no-reader"])
+def adapter_with_no_reader(request) -> str:
+    """The name of an adapter whose streams the status process cannot read."""
+    return request.getfixturevalue("earlier_adapter") if request.param == "no-reader" else "no-such-harness"
+
+
+def test_json_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
+    tmp_path, capsys, monkeypatch, adapter_with_no_reader
+):
+    repo = bare_repo(tmp_path)
+    a_run_of_two_tickets(repo, adapter_with_no_reader)
+    frozen(monkeypatch, 650)
+
+    snap = snapshot(repo, capsys)
+
+    assert (snap["percent"], snap["tickets_ended"], snap["eta"], snap["tokens"]) == (50, 1, at(650 + 550), None)
+    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": None, "idle_seconds": None}
+    assert ticket_of(snap, "b") == {"id": "b", "state": "running", "phase": "specialist", "elapsed_seconds": 50, "tokens": None, "idle_seconds": None}
+
+
+def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
+    tmp_path, capsys, monkeypatch, adapter_with_no_reader
+):
+    repo = bare_repo(tmp_path)
+    a_run_of_two_tickets(repo, adapter_with_no_reader)
+    frozen(monkeypatch, 650)
+
+    lines = plain_status(repo, capsys)
+
+    assert lines[1] == "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s"
+    assert [line for line in lines if line.startswith("  progress: ")] == ["  progress: 10m00s used", "  progress: specialist, 50s used"]
+
+
+def test_follow_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
+    tmp_path, monkeypatch, adapter_with_no_reader
+):
+    repo = bare_repo(tmp_path)
+    run = a_run_of_two_tickets(repo, adapter_with_no_reader)
+
+    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+
+    assert code == 0
+    assert out.splitlines()[:3] == [
+        "run r1 running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s",
+        "  a built, 10m00s used",
+        "  b running specialist, 50s used",
+    ]
+
+
+@pytest.mark.parametrize("form", [pytest.param([], id="plain"), pytest.param(["--json"], id="json")])
+def test_status_on_a_run_whose_ended_agent_has_lost_its_stream_exits_2_and_names_the_stream(tmp_path, capsys, monkeypatch, form):
     repo = bare_repo(tmp_path)
     run = Run(repo, "r1", "a")
     run.built(0, 60, "a", str(run.streams / "gone.jsonl"))
     frozen(monkeypatch, 61)
 
-    code = delegate.main(["status", "--repo", str(repo), "--json"])
+    code = delegate.main(["status", "--repo", str(repo), *form])
 
     captured = capsys.readouterr()
     assert (code, captured.out) == (2, "")

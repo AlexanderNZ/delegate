@@ -6,6 +6,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Added
 
+- `delegate status` shows the progress of a run: under the run line, the percentage, the tickets that ended, the time used, the ETA, and the tokens. Under the line of each ticket with a step, it shows the phase, the time used, the tokens, and the time since the last activity of its agent. Each form of `status` also works for a run whose adapter the process does not know, or whose adapter has no stream reader: it then shows no tokens and no activity, and the JSON gives `null` for them.
+- The token count of a Claude Code stream uses the `usage` of each `result` event. For a session that has no `result` event yet, it adds the usage of each turn, one for each message id. The reference page of `status` documents the rule.
 - `delegate status --json` prints one snapshot of a run as JSON. It gives the state, the time used, the tickets that ended, the percentage, the ETA, and the tokens of the run. For each ticket it gives the state, the phase, the time used, the tokens, and the seconds since the last activity of its agent. The reference page of `status` documents each field, and the rules of the percentage and the ETA.
 - `delegate status --follow` draws the same snapshot in the terminal: one line for the run, and one for each ticket. It draws the lines again in place after each interval (`--interval`, 2 seconds by default). It exits when the run ends. When standard output is not a terminal, it prints each snapshot as plain lines.
 - The journal event `agent-start` names the event stream of each agent before the agent starts: the specialist, each continuation, the fix-up specialist, and each verifier.
