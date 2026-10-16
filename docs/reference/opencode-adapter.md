@@ -91,7 +91,7 @@ The [**engine**](../glossary.md#engine) then reads the report. A step that reach
 
 ## The activity
 
-`delegate status --json` and `delegate status --follow` read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
+Each form of `delegate status` reads each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
 
 - The time is the `timestamp` field of the newest event (epoch milliseconds). Every event has it.
 - The tokens are the sum of the field `part.tokens.total` of each `step_finish` event. The total of a step holds its input, its output, its reasoning, and its cache reads and writes. A `step_finish` event with no `part.tokens.total` field raises an `AdapterError`.

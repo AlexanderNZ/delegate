@@ -57,7 +57,7 @@ An API error (for example, a model that does not exist) gives `is_error` true wi
 
 ## The activity
 
-`delegate status --json` and `delegate status --follow` read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
+Each form of `delegate status` reads each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
 
 - The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system` and `result` events do not.
 - The token count of a `usage` object adds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens`.

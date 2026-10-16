@@ -2,7 +2,7 @@
 
 Use this page when you want the [**engine**](../glossary.md#engine) to drive a [**harness**](../glossary.md#harness) that has no [**adapter**](../glossary.md#adapter) yet. An adapter is a small Python object. It starts the [**headless**](../glossary.md#headless) command of a harness, and turns the [**event stream**](../glossary.md#event-stream) of the harness into a result that the engine understands.
 
-An adapter also reads a stream of its harness: it gives the tokens so far and the time of the newest event. `delegate status --json` uses them to show what an agent does while it runs.
+An adapter also reads a stream of its harness: it gives the tokens so far and the time of the newest event. `delegate status` uses them to show what an agent does while it runs.
 
 You do not read the engine for this. You need the interface below, one recorded stream for each [**end state**](../glossary.md#end-state), and the [**contract test**](../glossary.md#contract-test) of this page.
 

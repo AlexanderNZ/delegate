@@ -331,7 +331,7 @@ The adapter has the method `run(request)`.
 | `session_id` | The session id, or `None` when the harness gives none. |
 | `event_stream` | The path of the captured event stream: the `event_stream` of the request. |
 
-The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with two fields. The stream can be the partial stream of an agent that still runs. `delegate status --json` and `delegate status --follow` use it. See [the snapshot](status-and-watch.md#the-snapshot).
+The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with two fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
 
 | `Activity` field | Meaning |
 |---|---|

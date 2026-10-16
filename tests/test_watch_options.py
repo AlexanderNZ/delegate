@@ -131,6 +131,26 @@ def test_an_event_stream_that_changed_inside_the_window_keeps_a_run_with_an_old_
     assert "watch: stall" not in out
 
 
+def agent_start(ticket, stream):
+    return "agent-start", {"ticket": ticket, "role": "specialist", "round": 0, "event_stream": str(stream)}
+
+
+@pytest.mark.parametrize(("stream_minutes", "code"), [pytest.param(1, 6, id="the-stream-changes"), pytest.param(10, 5, id="the-stream-is-old")])
+def test_an_agent_that_writes_to_its_stream_is_not_a_stall_while_the_journal_has_no_new_event(tmp_path, capsys, stream_minutes, code):
+    # The journal names the stream at the start of the agent, and the agent has no result event yet.
+    repo = bare_repo(tmp_path)
+    stream = tmp_path / "specialist.stream.jsonl"
+    stream.write_text('{"type":"assistant"}\n')
+    path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), agent_start("a", stream))
+    age(path, 10)
+    age(stream, stream_minutes)
+
+    exit_code, out, _ = watch(repo, capsys, "--stall-minutes", "5", "--max-minutes", "0.01")
+
+    assert exit_code == code
+    assert ("watch: stall" in out) == (code == 5)
+
+
 def test_a_run_that_ended_is_not_a_stall_whatever_the_age_of_its_journal(tmp_path, capsys):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), step_end("a"), run_end("built", ["a"]))
