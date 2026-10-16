@@ -164,11 +164,12 @@ def capped_lines() -> list[str]:
     return (claude_fake.FIXTURES / "capped.jsonl").read_text().splitlines(keepends=True)
 
 
-def test_the_activity_of_a_finished_stream_gives_the_tokens_of_each_message_and_the_time_of_the_last_event():
+def test_the_activity_of_a_finished_stream_gives_the_tokens_of_its_result_event_and_the_time_of_the_last_event():
     activity = adapters.get("claude-code").activity(claude_fake.FIXTURES / "finished.jsonl")
 
-    # One message: input 10 + cache creation 19176 + cache read 0 + output 6. Two events repeat its usage.
-    assert activity == Activity(19192, datetime(2026, 10, 8, 19, 55, 11, 654000, tzinfo=timezone.utc))
+    # The `result` event: input 10 + cache creation 19176 + cache read 0 + output 140. The assistant events of the
+    # message give only a partial output count (6), so their sum (19192) is not the count.
+    assert activity == Activity(19326, datetime(2026, 10, 8, 19, 55, 11, 654000, tzinfo=timezone.utc))
 
 
 def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_complete_lines_with_no_error(tmp_path):
@@ -189,12 +190,22 @@ def test_the_activity_of_a_stream_with_no_timed_event_has_no_tokens_and_no_time(
     assert adapters.get("claude-code").activity(live) == Activity(0, None)
 
 
-def test_the_activity_of_two_messages_adds_the_tokens_of_both(tmp_path):
+def test_the_activity_of_a_resumed_session_adds_the_result_event_of_each_part(tmp_path):
     finished, capped = (claude_fake.FIXTURES / "finished.jsonl").read_text(), "".join(capped_lines())
     both = tmp_path / "both.jsonl"
     both.write_text(finished + capped)
 
-    assert adapters.get("claude-code").activity(both).tokens == 19192 + 25794
+    # The result of the first part (19326), and the result of the second part: 10 + 11808 + 13970 + 234 = 26022.
+    assert adapters.get("claude-code").activity(both).tokens == 19326 + 26022
+
+
+def test_the_activity_of_a_resumed_session_that_runs_now_adds_the_turns_after_the_last_result_event(tmp_path):
+    lines = capped_lines()
+    live = tmp_path / "live.jsonl"
+    live.write_text((claude_fake.FIXTURES / "finished.jsonl").read_text() + "".join(lines[:7]) + lines[7][:120])
+
+    # The result of the first part (19326), and one turn of the part that has no result yet (25794).
+    assert adapters.get("claude-code").activity(live).tokens == 19326 + 25794
 
 
 def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_names_the_line(tmp_path):

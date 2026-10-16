@@ -176,7 +176,7 @@ def test_the_percentage_and_the_eta_follow_the_rules_of_the_reference_page(tmp_p
     # The mean of the tickets that ended after a step is (600 + 300) / 2 = 450. Two tickets (d, e) did not end,
     # and d used 100 seconds: now + 450 * 2 - 100.
     assert snap["eta"] == at(1000 + 450 * 2 - 100)
-    assert snap["tokens"] == 3 * 19192
+    assert snap["tokens"] == 3 * 19326
     assert [t["state"] for t in snap["tickets"]] == ["built", "built", "skipped", "running", "pending"]
 
 
@@ -232,7 +232,7 @@ def test_a_run_that_ended_stops_its_clock_at_the_end_and_has_no_running_agent(tm
     snap = snapshot(repo, capsys)
 
     assert (snap["state"], snap["elapsed_seconds"], snap["percent"], snap["eta"], snap["time"]) == ("built", 610, 100, at(610), at(610))
-    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": 19192, "idle_seconds": None}
+    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": 19326, "idle_seconds": None}
 
 
 def test_the_tokens_of_a_ticket_add_every_agent_that_it_ran(tmp_path, capsys, monkeypatch):
@@ -257,7 +257,7 @@ def test_the_verifier_of_an_economy_chain_shows_its_activity_after_its_ticket_en
 
     a = ticket_of(snapshot(repo, capsys), "a")
 
-    assert (a["state"], a["phase"], a["tokens"], a["idle_seconds"]) == ("built", None, 19192, 9)
+    assert (a["state"], a["phase"], a["tokens"], a["idle_seconds"]) == ("built", None, 19326, 9)
 
 
 def test_an_agent_that_a_crash_stopped_shows_no_activity(tmp_path, capsys, monkeypatch):

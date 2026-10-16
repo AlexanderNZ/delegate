@@ -60,10 +60,12 @@ An API error (for example, a model that does not exist) gives `is_error` true wi
 `delegate status --json` and `delegate status --follow` read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
 
 - The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system` and `result` events do not.
-- The tokens come from the `message.usage` field of the `assistant` events. The harness writes one event for each content block of a message, and each of these events repeats the usage of the message. The adapter therefore keeps the newest usage of each message id, and adds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens` of each message.
-- Half a line at the end of the stream is ignored, as in the end state. A stream with no `assistant` event gives 0 tokens.
+- The token count of a `usage` object adds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens`.
+- The harness writes one `result` event at the end of each session. Its `usage` holds the true count of the session, so the adapter uses it. A resumed session writes a second `result` event in the same stream: the adapter adds the count of each `result` event.
+- The `message.usage` of an `assistant` event is partial: its `output_tokens` is not final. For the part of the stream after the last `result` event (a session that runs now), the adapter adds the turns: one turn for each message id. The harness writes one event for each content block of a message, and each of these events repeats the usage of the message, so the adapter keeps the newest usage of each message id.
+- Half a line at the end of the stream is ignored, as in the end state. A stream with no `result` event and no `assistant` event gives 0 tokens.
 
-The usage of a message grows while the harness writes the message, and the `result` event holds the final count of the session. The token count of the stream is therefore a count of the work so far, not a bill.
+For example, the recorded stream of a session that finished has one message with the partial usage 10 + 19176 + 0 + 6 = 19192, and a `result` event with the usage 10 + 19176 + 0 + 140 = 19326. The count of the stream is 19326. While a session runs, its count is therefore lower than its final count.
 
 ## The resume
 
