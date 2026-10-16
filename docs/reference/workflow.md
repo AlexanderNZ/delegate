@@ -90,11 +90,11 @@ The field `ticket-start` sets the branch that each ticket branch starts from in 
 | `base-branch` | Each ticket branch starts from `base-branch`. This is the default. |
 | `run-branch` | Each ticket branch starts from the tip of `run-branch` at the start of its [**step**](../glossary.md#step). The branch then holds the accepted work of each ticket before it. |
 
-Use `run-branch` for a sequential chain of tickets that change the same files. With `base-branch`, a ticket that changes a file that an accepted ticket changed has a conflict at [the rebase onto the run branch](run.md#the-rebase-onto-the-run-branch), and its step fails. Such tickets must then go in separate runs. With `run-branch`, the rebase has no conflict, because the ticket branch holds the run branch already. The engine still verifies each ticket at once, after its specialist finishes it.
+Use `run-branch` for a sequential chain of tickets that change the same files. With `base-branch`, a ticket that changes a file that an accepted ticket changed has a conflict at [the rebase onto the run branch](run.md#the-rebase-onto-the-run-branch), and its step fails. Such tickets must then go in separate runs. With `run-branch`, the rebase has no conflict, because the ticket branch holds the [**run branch**](../glossary.md#run-branch) already. The engine still verifies each ticket at once, after its specialist finishes it.
 
-With `run-branch`, the commits of a ticket are the commits beyond the start commit, which `step-start` records in `base_commit`. The check for a commit, the [**hotspot**](../glossary.md#hotspot) guard and the continuation brief use this commit, so the commits of earlier tickets do not count for the ticket.
+With `run-branch`, the commits of a ticket are the commits beyond the start commit, which `step-start` records in `base_commit`. The check for a commit, the [**hotspot**](../glossary.md#hotspot) guard and the [**continuation**](../glossary.md#continuation) brief use this commit, so the commits of earlier tickets do not count for the ticket.
 
-A ticket that failed or was skipped did not move the run branch, so the next ticket does not hold its work. Use `blocked-by` when a ticket needs the work of another ticket: a ticket whose blocker failed is skipped.
+A ticket that failed or was skipped did not move the run branch, so the next ticket does not hold its work. Use `blocked-by` when a ticket needs the work of another ticket: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped.
 
 In `economy` mode, each ticket branch starts from the previous ticket. `ticket-start = "run-branch"` in `economy` mode is an error. `ticket-start = "base-branch"` is permitted in every mode.
 
@@ -161,7 +161,7 @@ Ticket text is about behaviour and holds no file paths. The engine adds the [**f
 | `ticket-start` is `run-branch` in `economy` mode. | The field and the value. |
 | A tier override is not a tier name. | The field `tier-overrides.<role>`, the value, and the valid tier names. |
 | A ticket names a stack that does not exist. | The ticket and the stack. |
-| A ticket is blocked by an id that no ticket has. | The ticket and the [**blocker**](../glossary.md#blocker). |
+| A ticket is blocked by an id that no ticket has. | The ticket and the blocker. |
 | Tickets wait on each other. | Every ticket in the cycle. A ticket that blocks itself is a cycle. |
 | Two tickets have one id. | The id. |
 | A `text-file` does not exist. | The ticket and the path. |
