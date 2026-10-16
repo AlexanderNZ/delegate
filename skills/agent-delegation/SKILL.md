@@ -590,6 +590,33 @@ same worktree. The commits that it already made stay.
 - The engine never starts the task again in a new worktree. This is the same
   rule as for a capped specialist that you run by hand.
 
+### Report a run to the person
+The person who asks for a run cannot see the agents. You report the run with
+the commands of the kit. These rules apply from the start of the run to its
+end.
+
+1. **Start the run detached.** Start `delegate run` in a new session, so that
+   the harness cannot stop it with your shell. A harness can stop a background
+   task at a time limit. Use `setsid -f` on Linux. Where `setsid` is absent
+   (macOS), use `subprocess.Popen(..., start_new_session=True)`. A run that
+   only has `nohup` and `&` can stay in the process group of your shell.
+2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
+   background task, with `--stall-minutes` and `--max-minutes`. The harness
+   then tells you when it exits. When it exits at a limit, start it again with
+   `--from <position>`, the position that its last line gives.
+3. **Show `delegate status` as it is.** At each report to the person, show the
+   output of `delegate status`, as it is. The coordinator does not write its
+   own script to read the journal or an event stream. If the output does not
+   show a fact that the person needs, tell the person.
+4. **Report a stall at once.** A stalled agent is an agent with no activity
+   for the stall limit, the time that `--stall-minutes` sets. `delegate watch`
+   then exits 5, with the reason `stall`. Tell the person at once, and give
+   the output of `delegate status`.
+5. **Resume a stopped run.** When the run process stops before the run ends,
+   go on with `delegate run --resume <run-id>`. If the lock belongs to a
+   process that no longer exists, add `--break-lock`. First make sure that no
+   other run uses the run branch.
+
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a
 deploy target, a prod DB, an external service) must be serialized to the

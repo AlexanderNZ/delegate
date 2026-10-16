@@ -103,3 +103,20 @@ delegate run --resume <run-id> --break-lock
 The option does not remove the lock of a process that still exists. See [the run lock](../reference/run.md#the-run-lock).
 
 A run that the [**invariant**](../glossary.md#invariant) check halted, or that has a `run-end`, cannot be resumed.
+
+## Report a run as a coordinator agent
+
+A [**coordinator**](../glossary.md#coordinator) agent can start a run for a person. The person cannot see the agents, so the coordinator reports the run. This example starts the run detached from the tool shell, and writes its output to a log file. The first line is for Linux, and the second line is for macOS, which has no `setsid`.
+
+```sh
+setsid -f delegate run workflow.toml >"${TMPDIR:-/tmp}/delegate-run.log" 2>&1 </dev/null
+python3 -c 'import subprocess, sys; subprocess.Popen(sys.argv[1:], start_new_session=True)' delegate run workflow.toml >"${TMPDIR:-/tmp}/delegate-run.log" 2>&1 </dev/null
+```
+
+The log file holds the run id. `delegate status` and `delegate watch` with no run id read the newest run. The coordinator obeys these rules from the start of the run to its end.
+
+1. **Start the run detached.** Start `delegate run` with `setsid -f` on Linux, or with `subprocess.Popen(..., start_new_session=True)` on macOS, as in the example. The run is then outside the process group of the tool shell. A harness can stop a background task at a time limit, and it can stop the processes of its tool shell. A run that only has `nohup` and `&` can stay in the process group of the tool shell.
+2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).
+3. **Show `delegate status` as it is.** Each time the coordinator tells the person the state, it shows the output of `delegate status`, as it is. The coordinator does not write its own script to read the journal or an event stream.
+4. **Report a stall at once.** A stalled agent is an agent with no activity for the stall limit, the time that `--stall-minutes` sets. `watch` then exits with the reason `stall`, as [the stall](../reference/status-and-watch.md#the-stall) tells. The coordinator tells the person at once, and gives the output of `delegate status`.
+5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --resume <run-id>`. If the lock belongs to a process that no longer exists, it adds `--break-lock`, as in [the resume after a kill](#2-resume-after-a-kill).
