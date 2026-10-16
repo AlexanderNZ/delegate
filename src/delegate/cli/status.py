@@ -19,13 +19,13 @@ from pathlib import Path
 
 from .. import adapters
 from ..adapters.git import GitVersionControl
-from ..ports.harness import Activity, AdapterError
+from ..ports.harness import Activity
 from ..run import status
 from ..run.journal import JournalError
 from ..run.runs import RunsError
 
-# The exit status of an input that cannot be read: no run, an unknown run id, a journal that is not valid,
-# or an event stream that cannot be read.
+# The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid.
+# An event stream that cannot be read is not an error: the output shows no tokens and no activity for its agent.
 EXIT_ERROR: int = 2
 
 # The seconds between two snapshots of `--follow`, when `--interval` does not set them.
@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(snap.to_json(), indent=2))
             return 0
         lines = status.report(args.repo, args.run_id, GitVersionControl(), _reader_of, _now())
-    except (RunsError, JournalError, AdapterError) as error:
+    except (RunsError, JournalError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR
     print("\n".join(lines))

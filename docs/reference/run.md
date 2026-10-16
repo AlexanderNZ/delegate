@@ -338,7 +338,7 @@ The adapter also has the method `activity(stream)`. It reads an event stream tha
 | `tokens` | The tokens that the agent used so far, as a whole number. |
 | `last_event` | The time (UTC) of the newest event of the stream that has a time, or `None` when the stream has no such event. |
 
-Half a line at the end of a stream is not an error, because a live harness writes it now. A missing file, or a line before the last one that is not JSON, raises an `AdapterError`.
+Half a line at the end of a stream is not an error, because a live harness writes it now. A missing file, or a line before the last one that is not JSON, raises an `AdapterError`. A file that the process cannot read raises the error of the file system. `delegate status` shows no tokens and no activity for a stream that raises one of these errors. See [a stream that cannot be read](status-and-watch.md#a-stream-that-cannot-be-read).
 
 ## The specialist brief
 

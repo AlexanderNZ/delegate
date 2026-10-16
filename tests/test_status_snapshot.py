@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -394,20 +395,6 @@ def test_follow_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_
     ]
 
 
-@pytest.mark.parametrize("form", [pytest.param([], id="plain"), pytest.param(["--json"], id="json")])
-def test_status_on_a_run_whose_ended_agent_has_lost_its_stream_exits_2_and_names_the_stream(tmp_path, capsys, monkeypatch, form):
-    repo = bare_repo(tmp_path)
-    run = Run(repo, "r1", "a")
-    run.built(0, 60, "a", str(run.streams / "gone.jsonl"))
-    frozen(monkeypatch, 61)
-
-    code = delegate.main(["status", "--repo", str(repo), *form])
-
-    captured = capsys.readouterr()
-    assert (code, captured.out) == (2, "")
-    assert "gone.jsonl" in captured.err
-
-
 class Terminal(io.StringIO):
     """The terminal of a person: the system boundary of `--follow`."""
 
@@ -510,3 +497,124 @@ def test_json_and_follow_together_are_a_usage_error(tmp_path, capsys):
 
     assert stopped.value.code == 2
     assert "--follow" in capsys.readouterr().err
+
+
+# The streams that `delegate status` cannot read. Each is the stream of one agent; the kind names why it cannot be read.
+OPENCODE_STEP_WITH_NO_TOKENS = '{"type":"step_finish","timestamp":1791490924475,"sessionID":"s","part":{"reason":"stop"}}\n'
+BAD_STREAMS = ["missing", "unreadable", "directory", "first-line-not-json", "opencode-step-finish-with-no-tokens", "not-utf-8"]
+
+
+@pytest.fixture
+def bad_stream(request, tmp_path):
+    """Make a stream that cannot be read, of the kind that the case names. Give its path and the adapter of its harness."""
+    made: list[Path] = []
+
+    def make(run: Run, kind: str) -> str:
+        path = run.streams / f"{kind}.stream.jsonl"
+        if kind == "unreadable":
+            if os.geteuid() == 0:
+                pytest.skip("the root user can read a file that has no read permission")
+            path.write_text(claude("finished.jsonl"))
+            path.chmod(0)
+            made.append(path)
+        elif kind == "directory":
+            path.mkdir()
+        elif kind == "first-line-not-json":
+            path.write_text("this is not JSON\n" + claude("finished.jsonl"))
+        elif kind == "opencode-step-finish-with-no-tokens":
+            path.write_text(OPENCODE_STEP_WITH_NO_TOKENS)
+        elif kind == "not-utf-8":
+            path.write_bytes(b"\xff\xfe\x00 not text\n")
+        return str(path)
+
+    yield make
+    for path in made:
+        path.chmod(0o600)
+
+
+def adapter_of(kind: str) -> str:
+    return "opencode" if kind.startswith("opencode") else "claude-code"
+
+
+# The tokens of the one good stream of the run (the stream of ticket a), in full and in the short form of the lines.
+GOOD_TOKENS = {"claude-code": (19326, "19k"), "opencode": (84197, "84k")}
+
+
+def a_run_with_a_bad_stream(repo: Path, make, kind: str, where: str) -> tuple[Run, str]:
+    """Ticket a ended built after 600 seconds with a good stream. Ticket b has the bad stream. Ticket c is pending.
+
+    `where` is `ended`: the agent of b ended, and b ended built at 630. `where` is `live`: the agent of b runs now, from 600.
+    """
+    adapter = adapter_of(kind)
+    run = Run(repo, "r1", "a", "b", "c", adapter=adapter)
+    good = claude("finished.jsonl") if adapter == "claude-code" else opencode("finished.jsonl")
+    run.built(0, 600, "a", run.stream("a.stream.jsonl", good))
+    stream = make(run, kind)
+    if where == "ended":
+        run.built(600, 630, "b", stream)
+    else:
+        run.step_start(600, "b")
+        run.agent_start(600, "b", "specialist", stream)
+    return run, adapter
+
+
+# The stream of a live agent that is missing is a stream that the harness has not opened yet: the existing case
+# `test_an_agent_whose_stream_has_no_event_yet_is_idle_since_the_journal_started_it` covers it.
+BAD_STREAM_CASES = [
+    pytest.param(kind, where, id=f"{where}-{kind}")
+    for where in ("ended", "live") for kind in BAD_STREAMS if not (where == "live" and kind == "missing")
+]
+
+
+@pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
+def test_json_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
+    tmp_path, capsys, monkeypatch, bad_stream, kind, where
+):
+    repo = bare_repo(tmp_path)
+    _, adapter = a_run_with_a_bad_stream(repo, bad_stream, kind, where)
+    frozen(monkeypatch, 650)
+
+    snap = snapshot(repo, capsys)
+
+    good = GOOD_TOKENS[adapter][0]
+    b = {"ended": ("built", None, 30), "live": ("running", "specialist", 50)}[where]
+    assert ticket_of(snap, "b") == {"id": "b", "state": b[0], "phase": b[1], "elapsed_seconds": b[2], "tokens": None, "idle_seconds": None}
+    assert (ticket_of(snap, "a")["tokens"], snap["tokens"]) == (good, good)
+
+
+@pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
+def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
+    tmp_path, capsys, monkeypatch, bad_stream, kind, where
+):
+    repo = bare_repo(tmp_path)
+    _, adapter = a_run_with_a_bad_stream(repo, bad_stream, kind, where)
+    frozen(monkeypatch, 650)
+
+    lines = plain_status(repo, capsys)
+
+    good = GOOD_TOKENS[adapter][1]
+    # Ended: a (600 s) and b (30 s) ended, so the ETA of c is their mean, 315 s. Live: a ended (600 s), and b used 50 s.
+    expected = {
+        "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good} tokens", "  progress: 30s used"),
+        "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  progress: specialist, 50s used"),
+    }[where]
+    progress = [line for line in lines if line.startswith("  progress: ")]
+    assert (lines[1], progress) == (expected[0], [f"  progress: 10m00s used, {good} tokens", expected[1]])
+
+
+@pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
+def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
+    tmp_path, monkeypatch, bad_stream, kind, where
+):
+    repo = bare_repo(tmp_path)
+    run, adapter = a_run_with_a_bad_stream(repo, bad_stream, kind, where)
+
+    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+
+    good = GOOD_TOKENS[adapter][1]
+    expected = {
+        "ended": (f"run r1 running 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good} tokens", "  b built, 30s used"),
+        "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  b running specialist, 50s used"),
+    }[where]
+    assert code == 0
+    assert out.splitlines()[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]
