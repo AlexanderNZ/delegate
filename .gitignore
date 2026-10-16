@@ -7,3 +7,5 @@ build/
 .direnv/
 .envrc.local
 site/
+.codegraph/
+.claude/worktrees/
