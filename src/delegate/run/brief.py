@@ -265,12 +265,19 @@ FOREGROUND_RULE = (
 )
 
 
-# The first sentence of the `## Gates` section of a specialist brief.
-GATES_AFTER_YOU = "The engine runs these gates itself after you finish."
+# The text of the `## Gates` section of a specialist brief, before the gate commands. The engine runs the gates
+# after the report. A specialist that runs them too runs the full suite twice for each ticket.
+GATES_RULE = "Do not run a gate command yourself. Run only the tests of the code that you change."
+GATES_AFTER_YOU = "The engine runs these gates after your report, and their result decides the step. " + GATES_RULE
 GATES_AT_CHAIN_END = (
-    "The engine runs these gates itself once, on the tip of the chain, after the last ticket. "
-    "It does not run them after this ticket. Run the tests of what you change."
+    "The engine runs these gates once, on the tip of the chain, after the last ticket, and their result decides the chain. "
+    "It does not run them after this ticket. " + GATES_RULE
 )
+
+
+def _specialist_gates(gates: Sequence[str], gates_at_chain_end: bool) -> str:
+    """The text of the `## Gates` section of a specialist brief: the rule and each gate command of the stack."""
+    return (GATES_AT_CHAIN_END if gates_at_chain_end else GATES_AFTER_YOU) + "\n\n" + _bash("\n".join(gates))
 
 
 def _sections(*pairs: tuple[str, str]) -> str:
@@ -458,7 +465,8 @@ def _specialist_report_shape(ticket: str, worktree: str | Path, report_path: str
         report_path,
         _field_list(SPECIALIST_REQUIRED, {"status": SPECIALIST_STATUSES}),
         _field_list(SPECIALIST_OPTIONAL, {}),
-        "`gates_green` states whether the gates passed in your run. "
+        "`gates_green` states whether the tests that you ran pass. "
+        "The engine does not trust this field: the result of the gates that the engine runs decides. "
         "A string field holds one string. To give more than one item in a string field, join the items with \"; \".",
         specialist_example(ticket, str(worktree)),
     )
@@ -521,7 +529,7 @@ def specialist_brief(
     pairs += [
         ("## File boundary", boundary),
         ("## Commands", FOREGROUND_RULE),
-        ("## Gates", (GATES_AT_CHAIN_END if gates_at_chain_end else GATES_AFTER_YOU) + "\n\n" + _bash("\n".join(gates))),
+        ("## Gates", _specialist_gates(gates, gates_at_chain_end)),
         ("## Report", report),
     ]
     return _sections(*pairs)
@@ -546,8 +554,9 @@ def continuation_brief(
     branch so far, and the output of the red gates when a gate was the reason.
 
     A resumed session keeps the context of its first brief, so a resumed
-    brief holds only the continuation. A new agent has no context, so its brief
-    is the full specialist brief with the continuation added.
+    brief holds only the continuation and the gates again: the rule not to run
+    a gate command must be near the output of red gates. A new agent has no
+    context, so its brief is the full specialist brief with the continuation added.
     """
     lines = [
         f"Ticket {ticket}",
@@ -564,9 +573,10 @@ def continuation_brief(
     if gate_output:
         lines += ["", "The engine ran the gates after the last run. This is the output of the red gates:", "", "```", gate_output.rstrip("\n"), "```"]
     lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]
-    section = _sections(("## Continuation", "\n".join(lines)))
+    continuation = ("## Continuation", "\n".join(lines))
     if resumed:
-        return section
+        return _sections(continuation, ("## Gates", _specialist_gates(gates, gates_at_chain_end)))
+    section = _sections(continuation)
     return specialist_brief(ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end) + "\n" + section
 
 

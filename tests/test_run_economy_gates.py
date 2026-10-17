@@ -207,4 +207,4 @@ def test_an_assure_run_runs_the_gates_of_each_ticket_after_its_build_and_its_reb
     assert phases == [("a", "build"), ("a", "rebase"), ("b", "build"), ("b", "rebase")]
     assert len(scripted.verifier_calls) == 2
     for call in scripted.calls:
-        assert "The engine runs these gates itself after you finish." in call.prompt and "tip of the chain" not in call.prompt
+        assert "The engine runs these gates after your report" in call.prompt and "tip of the chain" not in call.prompt
