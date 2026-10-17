@@ -106,7 +106,7 @@ The port speaks the language of the domain. It names no git command and no flag,
 | `is_ancestor`, `fast_forward_branch` | Ask whether a commit holds another, and move the run branch to a verified commit by fast-forward only. |
 | `make_verifier_copy`, `stop_file_watcher` | Make the [**verifier copy**](../glossary.md#verifier-copy), and stop the background watcher of the file system before a directory goes. |
 
-The git backend keeps one rule for every worktree and every copy that it makes: `core.fsmonitor` is off. With the setting on, git starts a daemon for each repository it touches, and the daemon outlives its directory. A worktree gets the setting in its own configuration, and a copy gets it in its own repository, so the configuration of the user and of the main checkout stays as it was.
+The git backend keeps one rule for every worktree and every copy that it makes: `core.fsmonitor` is off. With the setting on, git starts a daemon for each repository it touches, and the daemon outlives its directory. A worktree gets the setting in its own include file, which the configuration of the repository includes for that worktree only, and a copy gets it in its own repository. So the configuration of the user and of the main checkout stays as it was, and the backend sets no `extensions.worktreeConfig`. See [the push guard](run.md#the-push-guard).
 
 ## The gate port
 

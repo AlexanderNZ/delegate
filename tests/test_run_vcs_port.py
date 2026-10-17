@@ -5,6 +5,8 @@ case hands `run_workflow` a spy around the real git backend, on a real temporary
 repository, and checks what the engine asked of the port and what came of it.
 """
 
+import subprocess
+
 import pytest
 
 from delegate import adapters
@@ -79,7 +81,10 @@ def test_the_worktree_of_the_ticket_keeps_the_file_watcher_off(tmp_path, scripte
     start_run(repo, vcs, scripted_adapter)
 
     worktree = next(args[1] for name, args in vcs.calls if name == "ensure_worktree")
-    assert git(worktree, "config", "--worktree", "core.fsmonitor").strip() == "false"
+    # The suite sets the value for every command in the environment, so the case reads the configuration of the repository alone.
+    assert git(worktree, "config", "--local", "--includes", "--get", "core.fsmonitor").strip() == "false"
+    main = subprocess.run(["git", "-C", str(repo), "config", "--local", "--includes", "--get", "core.fsmonitor"], capture_output=True)
+    assert main.returncode == 1
 
 
 def test_a_port_that_cannot_make_the_run_branch_stops_the_run_with_an_engine_error(tmp_path, scripted_adapter):

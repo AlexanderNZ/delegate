@@ -59,7 +59,7 @@ The engine does not trust the report for the gates. A gate that is red is record
 
 The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step.
 
-The engine sets `core.fsmonitor` to false in the configuration of each worktree and each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
+The engine sets `core.fsmonitor` to false for each worktree (see [the push guard](#the-push-guard)) and in the configuration of each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
 
 ### The base of the run
 
@@ -212,7 +212,9 @@ The guards use git only, so they hold in every harness, also in a [**headless**]
 
 The engine installs the push guard in each worktree that it makes, also in a worktree that a resume uses again.
 
-- The engine sets `extensions.worktreeConfig` in the repository, and sets `core.hooksPath` in the configuration of that one worktree. The main checkout and the other worktrees keep their own hooks.
+- The engine sets `core.hooksPath` for that one worktree only. It writes the setting, with `core.fsmonitor=false`, to the file `delegate.config` in the git directory of the worktree (`.git/worktrees/<name>/`). The configuration of the repository includes that file with an `includeIf "gitdir:<git directory of the worktree>"` section, so git reads the file in that worktree and in no other checkout. The main checkout and the other worktrees keep their own hooks, and a `pre-push` hook of the repository still runs for a push from the main checkout.
+- The engine does not set `extensions.worktreeConfig`, because tools that use go-git, such as `tea`, refuse a repository with that extension. Git ignores an include whose file is missing, so the settings of a worktree go with its git directory. The engine removes the `includeIf` section of a worktree that it removes, and of each worktree whose `delegate.config` file is gone, when it makes the next worktree.
+- An earlier version of the engine set `extensions.worktreeConfig`, and kept the settings in the `config.worktree` file of each worktree. When the engine makes a worktree, it moves those settings of each of its earlier worktrees to the include file, so the push guard of an earlier worktree still holds. Then it removes the extension when no `config.worktree` file holds another setting, and the repository holds `hooks/` in the [**state directory**](../glossary.md#state-directory) from an earlier run. An extension that a setting of a person needs stays, and so does an extension in a repository with no earlier run.
 - The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the [**state directory**](../glossary.md#state-directory). It holds a `pre-push` hook that prints `delegate: push refused` on stderr and exits 1, so every push from the worktree fails.
 - The directory also holds a wrapper for each other hook of the repository (or of the host, when the host sets `core.hooksPath`). The wrapper runs the original hook with the same arguments and the same input, so those hooks still run for the commits of the specialist.
 - The guard does not stop a push with the `--no-verify` option, because git skips every `pre-push` hook then. It also does not stop a push from a clone or from another directory. It holds against the plain push command of a specialist in the worktree.

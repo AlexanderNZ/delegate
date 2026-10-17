@@ -805,6 +805,70 @@ def test_a_hook_in_the_directory_that_was_set_runs_in_the_worktree(tmp_path, vcs
     assert refused.returncode != 0
 
 
+def test_the_settings_of_a_worktree_hold_for_it_alone_when_the_path_of_the_repository_holds_a_wildcard(tmp_path, vcs):
+    repo = make_repo(tmp_path / "odd[1]*?")
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    git(repo, "worktree", "add", "-q", "-b", "other", str(tmp_path / "other"), "main")
+    mine = tmp_path / "my-hooks"
+    mine.mkdir()
+
+    vcs.use_hooks_directory(repo, worktree, mine)
+
+    assert vcs.hooks_directory(worktree).resolve() == mine.resolve()
+    assert vcs.hooks_directory(tmp_path / "other").resolve() == (repo / ".git" / "hooks").resolve()
+    assert vcs.hooks_directory(repo).resolve() == (repo / ".git" / "hooks").resolve()
+
+
+def test_the_settings_of_a_worktree_need_no_extension_of_the_repository(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    hooks = tmp_path / "my-hooks"
+    hooks.mkdir()
+
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    vcs.use_hooks_directory(repo, worktree, hooks)
+
+    assert git_status(repo, "config", "--get-regexp", r"^extensions\.").stdout == ""
+    assert git(repo, "config", "--get", "core.repositoryformatversion").strip() == "0"
+
+
+def test_remove_worktree_leaves_the_configuration_of_the_repository_as_it_was(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    before = (repo / ".git" / "config").read_text()
+    worktree = tmp_path / "wt"
+    hooks = tmp_path / "my-hooks"
+    hooks.mkdir()
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    vcs.use_hooks_directory(repo, worktree, hooks)
+    assert (repo / ".git" / "config").read_text() != before
+
+    vcs.remove_worktree(repo, worktree)
+
+    assert (repo / ".git" / "config").read_text() == before
+
+
+def test_ensure_worktree_drops_the_settings_of_a_worktree_that_git_removed_and_keeps_an_include_of_a_person(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    person = tmp_path / "person.config"
+    person.write_text("[person]\n\tsetting = kept\n")
+    git(repo, "config", "includeIf.gitdir:/no/such/place/.path", str(person))
+    git(repo, "config", "include.path", str(tmp_path / "missing.config"))
+    gone = tmp_path / "gone"
+    vcs.ensure_worktree(repo, gone, "gone", "main")
+    git(repo, "worktree", "remove", "--force", str(gone))
+    worktree = tmp_path / "wt"
+
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+
+    includes = git(repo, "config", "--local", "--name-only", "--get-regexp", r"^include").split()
+    assert len(includes) == 3
+    assert "includeif.gitdir:/no/such/place/.path" in includes
+    assert "include.path" in includes
+    assert not any(name.endswith("/gone.path") for name in includes)
+    assert git(worktree, "config", "core.fsmonitor").strip() == "false"
+
+
 def test_setting_the_hooks_directory_of_a_path_that_is_no_worktree_is_an_error(tmp_path, vcs, monkeypatch):
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     repo = make_repo(tmp_path)

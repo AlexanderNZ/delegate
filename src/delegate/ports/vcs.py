@@ -132,7 +132,7 @@ class VersionControl(Protocol):
         ...
 
     def remove_worktree(self, repo: Path, worktree: Path) -> None:
-        """Remove the worktree and its directory, whatever it holds. The branch stays."""
+        """Remove the worktree, its directory whatever it holds, and the settings that the port made for it. The branch stays."""
         ...
 
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:

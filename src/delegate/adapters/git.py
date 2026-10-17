@@ -7,9 +7,27 @@ fails raises `VcsError` with the command and the message of git.
 Every worktree and every copy that this backend makes runs with
 `core.fsmonitor=false`, whatever the user sets. With the setting on, git starts a
 `git fsmonitor--daemon` for each repository it touches, and the daemon outlives
-its directory (issue #30). The worktree gets the setting in its own
-configuration. The copy gets it in its own repository, which no other directory
-shares.
+its directory (issue #30). The copy gets the setting in its own repository,
+which no other directory shares.
+
+A worktree gets its settings (`core.fsmonitor=false`, and the `core.hooksPath`
+of the push guard) in a file of its own, `delegate.config` in the git directory
+of the worktree (`.git/worktrees/<name>/`). The configuration of the repository
+includes that file with an `includeIf "gitdir:<git directory of the worktree>"`
+section, so git reads the file in that worktree only. The backend does not set
+`extensions.worktreeConfig`, because tools that use go-git, such as `tea`,
+refuse a repository with that extension (issue #84). Git ignores an include
+whose file is missing, so the settings go when the worktree goes. The backend
+removes the section of a worktree in `remove_worktree`, and the section of each
+worktree whose file is gone in `ensure_worktree`.
+
+An earlier version set `extensions.worktreeConfig` and wrote the settings to
+the `config.worktree` file of each worktree. `ensure_worktree` moves the
+settings of such a worktree to its include file. It then removes the extension
+when no `config.worktree` file of the repository holds a setting, and when the
+repository holds the hooks of an earlier run (`delegate/hooks/` in the shared
+data directory) or a moved file. So an extension that a person set for a
+setting of their own stays.
 """
 
 from __future__ import annotations
@@ -41,6 +59,85 @@ def _git_raw(directory: Path, *args: str) -> str:
 def _git(directory: Path, *args: str) -> str:
     """Run git in `directory` and return its output without the surrounding white space. Raise VcsError when git fails."""
     return _git_raw(directory, *args).strip()
+
+
+# The file in the git directory of a worktree that holds the settings of that worktree alone.
+_INCLUDE_NAME: str = "delegate.config"
+
+# The settings that an earlier version wrote to the `config.worktree` file of its worktrees.
+_LEGACY_KEYS: frozenset[str] = frozenset({"core.fsmonitor", "core.hookspath"})
+
+
+def _gitdir_pattern(git_dir: Path) -> str:
+    """The `includeIf` condition that holds for the git directory `git_dir` only: no wildcard, no trailing `/`."""
+    escaped = "".join("\\" + c if c in "*?[\\" else c for c in str(git_dir))
+    return f"gitdir:{escaped}"
+
+
+def _worktree_git_dir(worktree: Path) -> Path:
+    """The real path of the git directory of a checkout: `.git/worktrees/<name>` for a linked worktree."""
+    return Path(_git(worktree, "rev-parse", "--absolute-git-dir")).resolve()
+
+
+def _set_worktree_setting(repo: Path, git_dir: Path, key: str, value: str) -> None:
+    """Set `key` for the checkout of `git_dir` alone, through its include file, and leave every other checkout as it was."""
+    include = git_dir / _INCLUDE_NAME
+    _git(repo, "config", "--file", str(include), key, value)
+    _git(repo, "config", "--local", f"includeIf.{_gitdir_pattern(git_dir)}.path", str(include))
+
+
+def _entries(file: Path) -> list[tuple[str, str]]:
+    """The entries of a git configuration file, as (key, value) pairs. The keys are in lower case, as git gives them."""
+    out = _git_raw(file.parent, "config", "--file", str(file), "--null", "--list")
+    return [(key, value) for key, _, value in (entry.partition("\n") for entry in out.split("\0") if entry)]
+
+
+def _drop_stale_includes(repo: Path, common: Path) -> None:
+    """Remove each `includeIf` section of this backend whose include file went with its worktree."""
+    out = _run(repo, "config", "--local", "--null", "--get-regexp", r"^includeif\..*\.path$").stdout
+    for entry in filter(None, out.split("\0")):
+        key, _, value = entry.partition("\n")
+        include = Path(value)
+        if include.name == _INCLUDE_NAME and include.parent.parent == common / "worktrees" and not include.exists():
+            # The key is `includeif.<condition>.path`, and git keeps the condition as it was written.
+            _git(repo, "config", "--local", "--remove-section", "includeIf." + key[len("includeif."):-len(".path")])
+
+
+def _retire_worktree_extension(repo: Path, common: Path) -> None:
+    """Move the settings that an earlier version kept in `config.worktree` files, and remove the extension that they needed.
+
+    A `config.worktree` file of a linked worktree that holds `core.fsmonitor=false`
+    and, as its only other setting, a `core.hooksPath` below `delegate/hooks/`
+    of the shared data directory is a file of this backend. Its settings go to
+    the include file of the worktree, and the file goes. A file with any other
+    setting stays, and so does the extension.
+    """
+    if _run(repo, "config", "--local", "--type=bool", "--get", "extensions.worktreeConfig").stdout.strip() != "true":
+        return
+    hooks_root = common / "delegate" / "hooks"
+    admins = sorted((common / "worktrees").iterdir()) if (common / "worktrees").is_dir() else []
+    moved, needed = False, False
+    for file in [common / "config.worktree", *(admin / "config.worktree" for admin in admins)]:
+        entries = _entries(file) if file.is_file() else []
+        if not entries:
+            continue
+        keys = [key for key, _ in entries]
+        ours = (
+            file.parent.parent == common / "worktrees"
+            and set(keys) <= _LEGACY_KEYS
+            and len(set(keys)) == len(keys)
+            and ("core.fsmonitor", "false") in entries
+            and all(Path(value).is_relative_to(hooks_root) for key, value in entries if key == "core.hookspath")
+        )
+        if not ours:
+            needed = True
+            continue
+        for key, value in entries:
+            _set_worktree_setting(repo, file.parent, "core.hooksPath" if key == "core.hookspath" else key, value)
+        file.unlink()
+        moved = True
+    if not needed and (moved or hooks_root.is_dir()):
+        _git(repo, "config", "--local", "--unset", "extensions.worktreeConfig")
 
 
 def _rebase_in_progress(worktree: Path) -> bool:
@@ -89,14 +186,16 @@ class GitVersionControl:
                 _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", str(worktree), branch)
             else:
                 _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", "-b", branch, str(worktree), start)
-        # Without this extension `--worktree` writes to the configuration that every worktree shares.
-        _git(repo, "config", "extensions.worktreeConfig", "true")
-        _git(worktree, "config", "--worktree", "core.fsmonitor", "false")
+        _set_worktree_setting(repo, _worktree_git_dir(worktree), "core.fsmonitor", "false")
+        common = self.shared_data_directory(repo)
+        _retire_worktree_extension(repo, common)
+        _drop_stale_includes(repo, common)
 
     def remove_worktree(self, repo: Path, worktree: Path) -> None:
         worktree = worktree.absolute()
         self.stop_file_watcher(worktree)
         _git(repo, "worktree", "remove", "--force", str(worktree))
+        _drop_stale_includes(repo, self.shared_data_directory(repo))
 
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         rebase = _run(worktree, "rebase", onto)
@@ -139,9 +238,7 @@ class GitVersionControl:
         return Path(_git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
 
     def use_hooks_directory(self, repo: Path, worktree: Path, hooks: Path) -> None:
-        # Without this extension `--worktree` writes to the configuration that every worktree shares.
-        _git(repo, "config", "extensions.worktreeConfig", "true")
-        _git(worktree, "config", "--worktree", "core.hooksPath", str(hooks))
+        _set_worktree_setting(repo, _worktree_git_dir(worktree), "core.hooksPath", str(hooks))
 
     def is_ancestor(self, repo: Path, ancestor: str, descendant: str) -> bool:
         # Exit status 1 means no. Any other failure, such as a name that is no commit, is an error.
