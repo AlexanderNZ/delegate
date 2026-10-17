@@ -12,6 +12,8 @@ import pytest
 
 from delegate.cli import delegate
 
+from .support import TEMPLATE_GIT, copy_of
+
 VALID = """\
 base-branch = "main"
 run-branch = "run/demo"
@@ -63,14 +65,16 @@ def git(repo: Path, *args: str) -> str:
 
 def make_repo(tmp_path: Path, workflow: str) -> Path:
     """A real git repository on `main` that holds `workflow.toml` and one ticket file."""
-    repo = tmp_path / "repo"
-    (repo / "tickets").mkdir(parents=True)
-    (repo / "tickets" / "b.md").write_text("Second ticket, from a file.\n")
-    (repo / "workflow.toml").write_text(workflow)
-    git(repo, "init", "-q", "-b", "main")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "seed")
-    return repo
+
+    def build(repo: Path) -> None:
+        (repo / "tickets").mkdir()
+        (repo / "tickets" / "b.md").write_text("Second ticket, from a file.\n")
+        (repo / "workflow.toml").write_text(workflow)
+        git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+        git(repo, *TEMPLATE_GIT, "add", "-A")
+        git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", "seed")
+
+    return copy_of(tmp_path / "repo", ("dry-run", workflow), build)
 
 
 def state(repo: Path) -> tuple[str, str, str, list[str]]:

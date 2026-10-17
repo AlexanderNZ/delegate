@@ -7,10 +7,13 @@ no model.
 
 from __future__ import annotations
 
+import atexit
 import io
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,16 +51,51 @@ def git(repo: Path, *args: str) -> str:
     return r.stdout
 
 
+# The repositories that `copy_of` made in this process, by key. Each process of the suite (each worker of
+# `pytest -n`) has its own. The directory of the templates is in the temporary directory at import, because a
+# test can point `tempfile` at a directory that it removes.
+_templates: dict[tuple[object, ...], Path] = {}
+_TEMPLATE_BASE: str = tempfile.gettempdir()
+
+# The git options of a template: no fsmonitor daemon for a template, also in a test that turns the setting on.
+TEMPLATE_GIT: tuple[str, ...] = ("-c", "core.fsmonitor=false")
+
+
+def copy_of(dest: Path, key: tuple[object, ...], build: Callable[[Path], None]) -> Path:
+    """Copy to `dest` the repository that `build` makes in an empty directory, and return `dest`.
+
+    Each git command is one process start, and a process start is slow on a
+    machine with endpoint security. Many tests need the same small repository,
+    so the first call with a `key` builds it once in a temporary directory of
+    the process, and each call copies that template. Two calls with the same
+    key get the same files and the same commits. `dest` must not exist.
+    """
+    template = _templates.get(key)
+    if template is None:
+        root = Path(tempfile.mkdtemp(prefix="delegate-template-", dir=_TEMPLATE_BASE))
+        atexit.register(shutil.rmtree, root, True)
+        template = root / "repo"
+        template.mkdir()
+        build(template)
+        _templates[key] = template
+    shutil.copytree(template, dest, symlinks=True)
+    return dest
+
+
+def _seeded(workflow: str) -> Callable[[Path], None]:
+    def build(repo: Path) -> None:
+        (repo / "seed.txt").write_text("seed\n")
+        (repo / "workflow.toml").write_text(workflow)
+        git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+        git(repo, *TEMPLATE_GIT, "add", "-A")
+        git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", "seed")
+
+    return build
+
+
 def make_repo(tmp_path: Path, workflow: str = WORKFLOW) -> Path:
     """A real git repository on `main` that holds `workflow.toml` and one seed file."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "seed.txt").write_text("seed\n")
-    (repo / "workflow.toml").write_text(workflow)
-    git(repo, "init", "-q", "-b", "main")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "seed")
-    return repo
+    return copy_of(tmp_path / "repo", ("make_repo", workflow), _seeded(workflow))
 
 
 def valid_report(ticket: str, branch: str, head_sha: str, **changes: object) -> dict[str, object]:
@@ -211,7 +249,6 @@ class ScriptedAdapter:
         index = len(self.calls) + len(self.continuation_calls)
         continuation = len(self.continuation_calls)
         (self.fixup_calls if is_fixup else self.continuation_calls if is_continuation else self.calls).append(request)
-        head = git(request.cwd, "rev-parse", "HEAD").strip()
         ticket = re.search(r"^Ticket (\S+)", request.prompt, re.MULTILINE).group(1)
         files = self.files_by_ticket.get(ticket, self.files)
         if is_fixup:
@@ -224,14 +261,12 @@ class ScriptedAdapter:
             git(request.cwd, "add", "-A")
         if is_fixup and self.fixup_amend:
             git(request.cwd, "commit", "-q", "--amend", "-m", "amended work")
-            head = git(request.cwd, "rev-parse", "HEAD").strip()
         elif (self.fixup_commit if is_fixup else self.commit) and files:
             git(request.cwd, "commit", "-q", "-m", f"scripted work ({request.agent})")
-            head = git(request.cwd, "rev-parse", "HEAD").strip()
+        head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()  # one process for both
         before = self._report_check(request)
         role = "fix-up" if is_fixup else "specialist"
         if (self.fixup_write_report if is_fixup else self.write_report):
-            branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
             if is_fixup and callable(self.fixup_report_text):
                 text = self.fixup_report_text(request, head)
             elif is_fixup and self.fixup_report_text is not None:
@@ -412,12 +447,13 @@ def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
         journal.append(name, **fields)
 
 
+def _empty(repo: Path) -> None:
+    git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+
+
 def bare_repo(tmp_path: Path) -> Path:
     """A git repository with no commit and no run. `delegate status` and `delegate watch` need only the state directory."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "main")
-    return repo
+    return copy_of(tmp_path / "repo", ("bare_repo",), _empty)
 
 
 def run_start(run_id: str, *tickets: str, mode: str = "assure") -> tuple[str, dict[str, object]]:

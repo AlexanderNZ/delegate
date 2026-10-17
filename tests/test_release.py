@@ -14,7 +14,7 @@ import pytest
 
 from . import test_changelog
 from .pages import ROOT, outside_the_package
-from .support import git
+from .support import TEMPLATE_GIT, copy_of, git
 
 pytestmark = outside_the_package
 
@@ -34,14 +34,15 @@ The first release.
 
 def make_repo(tmp_path: Path, version: str = "0.1.0", unreleased: str = "") -> Path:
     """A real git repository on `main` with a minimal `pyproject.toml` and `CHANGELOG.md`, and one commit."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "pyproject.toml").write_text(PYPROJECT.format(version=version))
-    (repo / "CHANGELOG.md").write_text(CHANGELOG.format(unreleased=unreleased))
-    git(repo, "init", "-q", "-b", "main")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "chore: seed")
-    return repo
+
+    def build(repo: Path) -> None:
+        (repo / "pyproject.toml").write_text(PYPROJECT.format(version=version))
+        (repo / "CHANGELOG.md").write_text(CHANGELOG.format(unreleased=unreleased))
+        git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+        git(repo, *TEMPLATE_GIT, "add", "-A")
+        git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", "chore: seed")
+
+    return copy_of(tmp_path / "repo", ("release", version, unreleased), build)
 
 
 def commit(repo: Path, subject: str) -> str:
