@@ -392,7 +392,7 @@ A stack is one technology of a repository, for example a Python package or a web
 
 ## State directory
 
-The state directory is the directory `delegate/` in the git directory of the repository. The engine writes the journals, the reports, the worktrees and the locks there, and the working tree stays clean. See [where the engine writes](reference/run.md#where-the-engine-writes).
+The state directory is the directory `delegate/` in the git directory of the repository, or a directory under `DELEGATE_STATE_ROOT` when the host sets it. The engine writes the journals, the reports, the worktrees and the locks there, and the working tree stays clean. See [where the engine writes](reference/run.md#where-the-engine-writes).
 
 ## STE
 

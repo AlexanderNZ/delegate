@@ -304,7 +304,15 @@ Each round spawns a new verifier with a new session. The engine never resumes a 
 
 ## Where the engine writes
 
-All files are in `<git common dir>/delegate/`. The working tree of the repository stays clean.
+All files are in the [**state directory**](../glossary.md#state-directory). By default it is `<git common dir>/delegate/`. The working tree of the repository stays clean.
+
+### The state root of a host
+
+A host can move the state directory of every repository out of the git directory with the environment variable `DELEGATE_STATE_ROOT`. Its value must be an absolute path. The state directory of a repository is then `<root>/<name>-<key>/`: `<name>` is the name of the top level of the repository, and `<key>` is the first 12 hex digits of the SHA-256 of the absolute git common directory. So one root serves every repository of the host, two repositories get two directories, and every worktree of one repository finds the same directory. `delegate run`, `status`, `watch` and `--resume` all use it. A value that is not an absolute path is an error. With no value, the state directory is `<git common dir>/delegate/`, as in 1.2.0.
+
+A host needs the state root when its agents run in a permission mode that refuses a write on a path with a `.git` component. Measured on the agent host on 2026-10-18: Claude Code in `dontAsk` mode refused `Edit` and `Write` in `.git/delegate/...`, also with an allow rule for them, and permitted them in the same layout without `.git`. With the default state directory, the specialist on that host could write neither in its worktree nor its report. Such a host also gives its agents a settings file that allows the tools they need.
+
+The paths below are relative to the state directory.
 
 | Path | Content |
 |---|---|

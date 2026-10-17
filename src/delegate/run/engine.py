@@ -80,6 +80,8 @@ the run context imports `subprocess`.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import secrets
 import shutil
 import tempfile
@@ -243,14 +245,35 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
     return f"{workflow.run_branch}-{ticket.id}"
 
 
+# The environment variable of a host that moves the state of every repository out of its git directory. Claude Code
+# in `dontAsk` mode refuses `Edit` and `Write` on a path with a `.git` component, also with an allow rule, so on such
+# a host a specialist can write neither in a worktree nor its report under `<git common dir>/delegate` (#97).
+STATE_ROOT_VARIABLE: str = "DELEGATE_STATE_ROOT"
+
+
 def state_directory(repo: Path, vcs: VersionControl) -> tuple[Path, Path]:
     """The top level of the repository and the directory where the engine keeps its state.
 
-    Raise EngineError when `repo` is not inside a repository.
+    The state is in `<git common dir>/delegate`. When the host sets
+    `DELEGATE_STATE_ROOT`, it is in `<root>/<name>-<key>` instead: `<name>` is
+    the name of the top level, and `<key>` the first 12 hex digits of the
+    SHA-256 of the absolute git common directory. So one root serves every
+    repository of a host, each repository gets its own directory, and every
+    worktree of a repository finds the same one.
+
+    Raise EngineError when `repo` is not inside a repository, or when the root
+    is not an absolute path.
     """
     with _vcs_errors():
         top = vcs.repository_root(repo)
-        return top, vcs.shared_data_directory(top) / "delegate"
+        shared = vcs.shared_data_directory(top)
+    root = os.environ.get(STATE_ROOT_VARIABLE)
+    if not root:
+        return top, shared / "delegate"
+    if not Path(root).is_absolute():
+        raise EngineError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
+    key = hashlib.sha256(str(shared).encode()).hexdigest()[:12]
+    return top, Path(root) / f"{top.name}-{key}"
 
 
 def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:

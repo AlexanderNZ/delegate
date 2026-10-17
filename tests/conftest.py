@@ -101,3 +101,15 @@ def scripted(git_identity):
     adapters.register("scripted", adapter)
     yield adapter
     adapters.unregister("scripted")
+
+
+# The environment variables of a host that change where the engine keeps its state and what each agent gets (#96,
+# #97). A host that sets them for its own runs must not change what a test sees, so each test starts without them.
+HOST_VARIABLES: tuple[str, ...] = ("DELEGATE_STATE_ROOT", "DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE")
+
+
+@pytest.fixture(autouse=True)
+def no_host_settings(monkeypatch):
+    """Remove the host variables of the engine from the environment of every test."""
+    for name in HOST_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
