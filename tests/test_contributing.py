@@ -66,7 +66,8 @@ def test_every_setup_command_of_contributing_is_a_command_that_ci_runs_and_both_
 def test_the_setup_installs_with_pip_and_runs_pytest_and_names_no_nix_command():
     setup = bash_commands("Set up")
 
-    assert any(command.startswith("pip install ") and command.endswith(" pytest") for command in setup)
+    # The install gives pytest: by name, or through the `test` extra of pyproject.toml, which holds pytest and pytest-xdist.
+    assert any(command.startswith("pip install ") and (command.endswith(" pytest") or command.endswith("'.[test]'")) for command in setup)
     assert any(command.startswith("python -m pytest") for command in setup)
     assert [command for command in setup if re.search(r"\bnix\b", command)] == []
     assert "Nix" in section("Set up"), "the page must say that Nix is optional"
