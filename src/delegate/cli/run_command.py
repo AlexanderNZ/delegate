@@ -5,11 +5,18 @@ creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
 with a run that stopped, from its journal. `--retry <ticket>` with it goes on
 with one failed step of that run, also when the run ended.
+
+`--detach` starts the run in a new process with the setsid system call, with its
+output in the log file of the run, then prints the run id and the log path and
+exits 0. A harness that stops its tool shell, or a background task at a time
+limit, then does not stop the run.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -18,11 +25,24 @@ from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
 from ..run.domain import START_RUN_BRANCH
-from ..run.engine import EngineError, run_workflow, workflow_of_run
+from ..run.engine import EngineError, new_run_id, run_workflow, state_directory, workflow_of_run
+from ..run.runs import RunsError, journal_of
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .title import SEPARATOR, Title, short_run_id
+
+# The name of the log file of a detached run, in the directory of the run.
+LOG_NAME: str = "run.log"
+
+# The program of a detached run process: it imports the package from the import path of the command that started it
+# (argv[1]), then runs `delegate` with the rest of its arguments. A Nix wrapper puts the package on the import path of
+# its own process only, so `python -m delegate...` can fail to find it. The path goes as an argument, not in the
+# environment, so the agents and the gates of the run do not get it.
+DETACHED_PROGRAM: str = (
+    "import json, sys; sys.path[:0] = json.loads(sys.argv[1]); "
+    "from delegate.cli.delegate import main; sys.exit(main(sys.argv[2:]))"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--break-lock", action="store_true",
         help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
     )
+    parser.add_argument(
+        "--detach", action="store_true",
+        help="start the run in a new process with setsid, outside the process group of the shell; write its output to the file "
+        "run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run",
+    )
+    # The run id that a detached start gives to the run process. The run process then runs in the foreground.
+    parser.add_argument("--detached-run-id", help=argparse.SUPPRESS)
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository to build in; default is the current directory")
     parser.add_argument("--tiers", type=Path, help="path to a tiers.toml; default is the bundled table")
     add_opencode_override_flags(parser)
@@ -81,7 +108,37 @@ def _override_tiers(tiers: Tiers, args: argparse.Namespace) -> Tiers:
     return overridden
 
 
+def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVersionControl) -> int:
+    """Start `delegate run <argv>` for the run `run_id` in a new session, print the run id and the log path, and return 0.
+
+    The run process writes its standard output and its standard error to the log file of the run. A resume appends
+    to the log of its run. Return 1, and start nothing, when `repo` is not a repository or the run to resume is unknown.
+    """
+    try:
+        if resume:
+            run_dir = journal_of(repo, run_id, vcs).parent
+        else:
+            _, state = state_directory(repo, vcs)
+            run_dir = state / "runs" / run_id
+    except (EngineError, RunsError) as error:
+        print(f"delegate run: {error}", file=sys.stderr)
+        return 1
+    run_dir.mkdir(parents=True, exist_ok=True)
+    log = run_dir / LOG_NAME
+    with log.open("a") as out:
+        # start_new_session makes the setsid system call in the new process, also where the setsid program is absent.
+        # -u writes each line to the log at once, so the log shows the run while it works.
+        subprocess.Popen(
+            [sys.executable, "-u", "-c", DETACHED_PROGRAM, json.dumps(sys.path), "run", *argv, "--detached-run-id", run_id],
+            stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+    print(f"run {run_id}")
+    print(f"log {log}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     # The composition point also makes the version-control backend and the gate runner that the engine drives.
@@ -92,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--resume and --dry-run cannot go together")
     if args.retry is not None and args.resume is None:
         parser.error("--retry needs --resume RUN_ID")
+    if args.detach and args.dry_run:
+        parser.error("--detach and --dry-run cannot go together")
     if args.workflow is None:
         try:
             args.workflow = workflow_of_run(args.repo, args.resume, vcs)
@@ -116,11 +175,15 @@ def main(argv: list[str] | None = None) -> int:
             registered = ", ".join(adapters.registered_names()) or "none"
             print(f"delegate run: adapter {workflow.adapter!r} has no implementation yet; registered: {registered}", file=sys.stderr)
             return 1
+        if args.detach and args.detached_run_id is None:
+            run_id = args.resume if args.resume is not None else new_run_id()
+            return _detach(argv, run_id, args.repo, args.resume is not None, vcs)
         title = Title(sys.stdout)
         try:
             result = run_workflow(
                 workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                 break_lock=args.break_lock, on_start=lambda run_id: title.set(f"delegate run{SEPARATOR}{short_run_id(run_id)}"),
+                run_id=args.detached_run_id,
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

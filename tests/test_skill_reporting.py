@@ -1,9 +1,10 @@
 """The protocol skill and the watch and resume how-to page tell a coordinator agent how to report a run to the person.
 
 Issue #63 and its comments give the rules. Both documents hold them as one
-numbered list, in the same order, so the skill and the page cannot drift. The
-skill is outside the package source, as are the docs, so a Nix build that
-copies only the package skips these cases with a reason.
+numbered list, in the same order, so the skill and the page cannot drift. Issue
+#76 adds `delegate run --detach`, which both documents use to start and to
+resume a run. The skill is outside the package source, as are the docs, so a
+Nix build that copies only the package skips these cases with a reason.
 """
 
 import re
@@ -15,12 +16,12 @@ PAGE = HOW_TO / "watch-and-resume-a-run.md"
 
 # Each rule, in its order, and the words that one list item must hold to state it.
 RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("start the run detached, in a new session", ("detached", "`setsid -f`", "start_new_session=True")),
+    ("start the run detached, in a new session", ("detached", "`delegate run --detach`", "`setsid`")),
     ("follow the run with watch as a background task, and go on from a position", ("`delegate watch`", "background task", "`--from")),
     ("show the output of status as it is, and write no script to read the journal or an event stream",
      ("`delegate status`", "as it is", "does not write its own script", "journal", "event stream")),
     ("report a stalled agent at once", ("stalled agent", "`--stall-minutes", "at once")),
-    ("resume a stopped run, and break the lock of a process that no longer exists", ("--resume <run-id>", "`--break-lock`", "no longer exists")),
+    ("resume a stopped run, and break the lock of a process that no longer exists", ("`delegate run --detach --resume <run-id>`", "`--break-lock`", "no longer exists")),
 ]
 
 

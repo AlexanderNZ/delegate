@@ -2,7 +2,7 @@
 
 The harness process is the system boundary of an adapter. The stand-in is a
 real executable on PATH: it records its arguments, its standard input, its
-working directory and its environment, then replays a recorded stream and exits with a status that
+working directory, its environment and its session id, then replays a recorded stream and exits with a status that
 the test sets. The adapter starts it as a subprocess, as it starts the real
 command.
 
@@ -27,7 +27,7 @@ SCRIPT = """\
 import json, os, sys, time
 time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
-    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ)}}) + "\\n")
+    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0)}}) + "\\n")
 drip = float(os.environ.get("FAKE_HARNESS_DRIP", "0"))
 with open(os.environ["FAKE_HARNESS_STREAM"]) as stream:
     for line in stream:

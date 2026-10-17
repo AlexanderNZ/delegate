@@ -1,7 +1,7 @@
 ---
 man: DELEGATE-RUN(1)
 man_name: "delegate-run — build the tickets of a workflow"
-synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--retry <ticket>] [--break-lock] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--retry <ticket>] [--break-lock] [--detach] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
 ---
 
 # Reference: `delegate run`
@@ -13,6 +13,8 @@ A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
 To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md).
+
+To start a run that the shell or the harness cannot stop, add `--detach`. See [the detached run](#the-detached-run).
 
 ## Options
 
@@ -26,6 +28,7 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |
+| `--detach` | Start the run in a new process with setsid, outside the process group of the shell; write its output to the file run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run. |
 | `--repo <repo>` | The git repository to build in; default is the current directory. |
 | `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |
 | `--opencode-model <tier=model>` | Use MODEL for TIER in the OpenCode column; repeat it. |
@@ -349,6 +352,7 @@ The paths below are relative to the state directory.
 | Path | Content |
 |---|---|
 | `runs/<run id>/journal.jsonl` | The journal of the run. |
+| `runs/<run id>/run.log` | The standard output and the standard error of a detached run process. See [the detached run](#the-detached-run). |
 | `runs/<run id>/reports/<ticket id>.specialist.json` | The report path that the brief gives the specialist. |
 | `runs/<run id>/findings/<ticket id>.fixup-<round>.md` | The findings that start a fix-up round. |
 | `runs/<run id>/reports/<ticket id>.fixup-<round>.specialist.json` | The report path that the fix-up brief gives the specialist. |
@@ -362,9 +366,24 @@ The paths below are relative to the state directory.
 
 The run id is the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`.
 
+## The detached run
+
+With `--detach`, the command checks the options and the workflow first. A problem exits 1 or 2, as without `--detach`, and starts no run. Then the command starts the run in a new process with the `setsid` system call, and exits 0. The new process has no terminal, and it is outside the process group of the shell that started the command. A harness that stops its tool shell, or a background task at a time limit, does not stop the run.
+
+The command prints two lines:
+
+- `run <run id>`: the id of the run. Give it to `delegate status`, `delegate watch` and `--resume`.
+- `log <path>`: the file `runs/<run id>/run.log` in the state directory. The run process writes its standard output and its standard error to this file, so the log holds the lines of [the output](#output-and-exit-codes) of a run in the foreground.
+
+The command makes the directory of the run and the log before the run starts. A problem after the start, for example a lock that another run holds, goes to the log, and the run has no journal.
+
+`--detach` also works with `--resume <run-id>` and with `--retry <ticket>`. The run id is the id of the resumed run, and the run process appends to the same log. An unknown run id exits 1 and starts nothing. `--detach` cannot go with `--dry-run`.
+
 ## Output and exit codes
 
 On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket.
+
+With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. See [the detached run](#the-detached-run).
 
 When stdout is a terminal, the command also sets the title of the terminal. The title is `delegate run` when the command starts, and `delegate run · <short run id>` when the run holds its lock. The short run id is the four hexadecimal characters at the end of the run id, for example `e9dc`. With `--dry-run`, the title stays `delegate run`. When stdout is not a terminal, or when the environment variable `DELEGATE_NO_TITLE` is `1`, the command writes no title. See [the terminal title](status-and-watch.md#the-terminal-title).
 

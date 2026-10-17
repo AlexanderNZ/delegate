@@ -88,6 +88,8 @@ def options_table(parser: argparse.ArgumentParser) -> str:
     for action in parser._actions:  # noqa: SLF001
         if action.dest == "help" or isinstance(action.choices, dict):  # -h, and the action of the subcommands
             continue
+        if action.help == argparse.SUPPRESS:  # an internal option, which `--help` does not show either
+            continue
         if action.help is None:
             raise DocsError(f"argument {_invocation(action)} of {parser.prog} has no help text")
         meaning = _sentence(action.help.replace("|", "\\|").replace("<", "\\<"))  # a bare `<name>` would be read as a tag

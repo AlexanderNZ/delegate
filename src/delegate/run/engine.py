@@ -192,7 +192,8 @@ class RunResult:
         return not self.failed
 
 
-def _new_run_id() -> str:
+def new_run_id() -> str:
+    """A new run id: the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`."""
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
 
 
@@ -527,6 +528,7 @@ def _check_chain_start(
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False, on_start: Callable[[str], None] | None = None,
+    run_id: str | None = None,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -549,10 +551,13 @@ def run_workflow(
 
     `on_start` gets the run id when the run holds its lock, before the first step: `delegate run` puts the id in the
     title of the terminal.
+
+    `run_id` is the id of a new run. The default is a new id from `new_run_id`. `delegate run --detach` gives the id
+    that it printed before it started the run process. A resume uses the id `resume`, and ignores `run_id`.
     """
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
-    run_id = resume if resume is not None else _new_run_id()
+    run_id = resume if resume is not None else (run_id or new_run_id())
     try:
         # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
         check_free(state_dir, workflow.run_branch, run_id, break_stale=break_lock)

@@ -602,11 +602,12 @@ The person who asks for a run cannot see the agents. You report the run with
 the commands of the kit. These rules apply from the start of the run to its
 end.
 
-1. **Start the run detached.** Start `delegate run` in a new session, so that
-   the harness cannot stop it with your shell. A harness can stop a background
-   task at a time limit. Use `setsid -f` on Linux. Where `setsid` is absent
-   (macOS), use `subprocess.Popen(..., start_new_session=True)`. A run that
-   only has `nohup` and `&` can stay in the process group of your shell.
+1. **Start the run detached.** Start the run with `delegate run --detach`.
+   It starts the run process with the `setsid` system call, so that the
+   harness cannot stop it with your shell. It prints `run <run id>` and
+   `log <path>`, and exits at once.
+   A harness can stop a background task at a time limit. A run that only has
+   `nohup` and `&` can stay in the process group of your shell.
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
    background task, with `--stall-minutes` and `--max-minutes`. The harness
    then tells you when it exits. A background task has no terminal, so
@@ -622,7 +623,7 @@ end.
    then exits 5, with the reason `stall`. Tell the person at once, and give
    the output of `delegate status`.
 5. **Resume a stopped run.** When the run process stops before the run ends,
-   go on with `delegate run --resume <run-id>`. The resume takes over the
+   go on with `delegate run --detach --resume <run-id>`. The resume takes over the
    lock of the same run when its process no longer exists. If the lock belongs
    to another run and to a process that no longer exists, add `--break-lock`.
    First make sure that no other run uses the run branch.

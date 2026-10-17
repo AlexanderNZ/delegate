@@ -21,6 +21,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Added
 
+- `delegate run --detach` starts the run in a new process with the `setsid` system call, outside the process group of the shell, and writes the output of that process to the file `run.log` in the directory of the run. The command prints `run <run id>` and `log <path>`, and exits 0. A harness that stops its tool shell, or a background task at a time limit, then does not stop the run. `--detach` also works with `--resume` and `--retry`, and the resumed run appends to the same log (#76). The protocol skill and the how-to page on watch and resume start and resume a run with `--detach`.
 - On a terminal, `delegate` sets the title of the terminal with the OSC 2 sequence, so the tab shows the command and not the name of the Python process (#80). `delegate watch` shows `delegate watch · <short run id> · <percent>% · ETA <HH:MM>` while it follows the run, and the result when it ends. `delegate run` shows `delegate run · <short run id>`, and each other subcommand shows `delegate <subcommand>`. When standard output is not a terminal, or when `DELEGATE_NO_TITLE` is `1`, `delegate` writes no title.
 
 ## [1.3.0] - 2026-10-18
