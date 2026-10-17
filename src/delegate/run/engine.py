@@ -1189,7 +1189,8 @@ def _verify_round(
     # ends its final message with the verdict object, as the brief asks. The engine writes that object to the report
     # path and checks it as it checks a file (#98).
     source: dict[str, object] = {}
-    recovered = verdict_in_text(result.final_text) if not report_path.exists() and result.final_text else None
+    ended = result.end_state == harness.FINISHED
+    recovered = verdict_in_text(result.final_text) if ended and not report_path.exists() and result.final_text else None
     if recovered is not None:
         report_path.write_text(json.dumps(recovered, indent=2) + "\n")
         source = {"source": "final-text"}

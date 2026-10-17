@@ -18,7 +18,7 @@ import pytest
 from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
-from . import opencode_fake
+from . import harness_fake, opencode_fake
 from .harness_fake import wrote
 
 
@@ -312,9 +312,16 @@ def test_a_host_setting_of_the_claude_code_adapter_gives_a_warning_and_changes_n
 
 
 def test_the_last_text_part_of_the_session_is_the_final_text_of_the_result(tmp_path, monkeypatch):
-    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
-    texts = [event["part"]["text"] for event in map(json.loads, (opencode_fake.FIXTURES / "finished.jsonl").read_text().splitlines()) if event.get("type") == "text"]
+    # The recorded stream with one more text part before its end: the adapter takes the last part, not the first.
+    lines = (opencode_fake.FIXTURES / "finished.jsonl").read_text().splitlines()
+    (index,) = [i for i, line in enumerate(lines) if json.loads(line).get("type") == "text"]
+    later = json.loads(lines[index])
+    later["part"] = {**later["part"], "id": "prt_later", "text": "THE-LAST-TEXT"}
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "two-texts.jsonl").write_text("\n".join([*lines[: index + 1], json.dumps(later), *lines[index + 1 :]]) + "\n")
+    harness_fake.install(tmp_path, monkeypatch, "opencode", fixtures, "two-texts.jsonl")
 
     result = adapters.get("opencode").run(request(tmp_path))
 
-    assert texts and result.final_text == texts[-1]
+    assert result.final_text == "THE-LAST-TEXT"
