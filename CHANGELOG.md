@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-17
+
 ### Added
 
 - `delegate status` shows the progress of a run: under the run line, the percentage, the tickets that ended, the time used, the ETA, and the tokens. Under the line of each ticket with a step, it shows the phase, the time used, the tokens, and the time since the last activity of its agent. Each form of `status` also works for a run whose adapter the process does not know, or whose adapter has no stream reader: it then shows no tokens and no activity, and the JSON gives `null` for them.
