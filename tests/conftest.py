@@ -41,8 +41,10 @@ def isolated_git_config(monkeypatch, empty_git_config):
     The same fixture turns `core.fsmonitor` off for every git command of the
     suite. With the setting on, git starts a `git fsmonitor--daemon` for each of
     the hundreds of temporary repositories, and each daemon outlives its
-    directory. The entry goes in the git configuration environment, after any
-    entry that is already there, so a test can still set its own value after it.
+    directory. The fixture also turns `maintenance.auto` off: with it on, each
+    commit, merge and rebase starts one more process, `git maintenance run
+    --auto`. The entries go in the git configuration environment, after any
+    entry that is already there, so a test can still set its own value after them.
     """
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_git_config))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_git_config))
@@ -51,9 +53,11 @@ def isolated_git_config(monkeypatch, empty_git_config):
         monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
         monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
     count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
-    monkeypatch.setenv(f"GIT_CONFIG_KEY_{count}", "core.fsmonitor")
-    monkeypatch.setenv(f"GIT_CONFIG_VALUE_{count}", "false")
-    monkeypatch.setenv("GIT_CONFIG_COUNT", str(count + 1))
+    for key in ("core.fsmonitor", "maintenance.auto"):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{count}", key)
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{count}", "false")
+        count += 1
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(count))
 
 
 @pytest.fixture(scope="session")
