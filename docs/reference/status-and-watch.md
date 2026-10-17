@@ -81,7 +81,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. A ticket whose `tokens` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
-| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `verifier` or `fix-up`. See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in `assure` mode. |
+| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in [**`assure`**](../glossary.md#assure) mode. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
