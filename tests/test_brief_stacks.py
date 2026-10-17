@@ -17,6 +17,8 @@ import pytest
 
 from delegate.cli import brief
 
+from .support import copy_of
+
 GIT_ENV = {
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_SYSTEM": "/dev/null",
@@ -102,10 +104,7 @@ NO_CLAIM = (
 )
 
 
-@pytest.fixture
-def monorepo(tmp_path):
-    r = tmp_path / "monorepo"
-    r.mkdir()
+def _build_monorepo(r):
     _git(r, "init", "-b", "main")
     _git(r, "config", "user.name", "Scratch Agent")
     _git(r, "config", "user.email", "scratch@example.invalid")
@@ -114,7 +113,12 @@ def monorepo(tmp_path):
     _write(r, "api/Main.java", "class Main {}\n")
     _write(r, "app/main.ts", "export {};\n")
     _git(r, "commit", "-m", "base")
-    return r
+
+
+@pytest.fixture
+def monorepo(tmp_path):
+    """A copy of the monorepo. The process builds it once (see `copy_of`)."""
+    return copy_of(tmp_path / "monorepo", ("brief-monorepo",), _build_monorepo)
 
 
 def _gates(out):

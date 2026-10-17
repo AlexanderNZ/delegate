@@ -12,6 +12,8 @@ import pytest
 
 from delegate.cli import brief
 
+from .support import copy_of
+
 # The scratch repository must not read the user's git configuration. A global
 # hook, a signing key, or a different default branch name would change what
 # the test measures.
@@ -64,9 +66,11 @@ class Scratch:
         self.amended = amended
 
 
-@pytest.fixture
-def scratch(tmp_path):
-    r = tmp_path / "scratch"
+# The commits of the scratch template of this process, by name. `_build_scratch` fills it once.
+_SCRATCH_COMMITS: dict[str, str] = {}
+
+
+def _build_scratch(r):
     (r / "docs" / "agents").mkdir(parents=True)
     _git(r, "init", "-b", "main")
     _git(r, "config", "user.name", "Scratch Agent")
@@ -91,7 +95,14 @@ def scratch(tmp_path):
     # as a removal; a three-dot diff does not.
     _git(r, "checkout", "main")
     _commit(r, "unrelated.py", "def other():\n    return 0\n", "unrelated work on main")
-    return Scratch(r, base, rejected, fixup, amended)
+    _SCRATCH_COMMITS.update(base=base, rejected=rejected, fixup=fixup, amended=amended)
+
+
+@pytest.fixture
+def scratch(tmp_path):
+    """A copy of the scratch repository. The process builds it once (see `copy_of`)."""
+    r = copy_of(tmp_path / "scratch", ("brief-scratch",), _build_scratch)
+    return Scratch(r, **_SCRATCH_COMMITS)
 
 
 def _run(capsys, argv):
