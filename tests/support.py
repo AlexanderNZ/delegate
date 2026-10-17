@@ -7,6 +7,7 @@ no model.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import subprocess
@@ -439,3 +440,23 @@ def step_end(ticket: str, state: str = "built", reason: str | None = None) -> tu
 
 def run_end(result: str = "built", built: list[str] | None = None, failed: list[str] | None = None) -> tuple[str, dict[str, object]]:
     return "run-end", {"result": result, "built": built or [], "failed": failed or [], "skipped": []}
+
+
+class Terminal(io.StringIO):
+    """The terminal of a person: a standard output whose `isatty` is true. It is the system boundary of the live view of `watch`."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+# A control sequence of the terminal: the live view moves the cursor and clears lines with them.
+CONTROL = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# The sequences that start and end one frame of the live view: the cursor goes home, and the screen is cleared below the frame.
+FRAME_START = "\x1b[H"
+FRAME_END = "\x1b[J"
+
+
+def frames(out: str) -> list[list[str]]:
+    """The frames that the live view of `watch` drew, in order, each as its lines with no control sequence."""
+    return [CONTROL.sub("", chunk.split(FRAME_END)[0]).splitlines() for chunk in out.split(FRAME_START)[1:]]

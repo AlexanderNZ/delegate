@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -28,47 +27,23 @@ from ..run.runs import RunsError
 # An event stream that cannot be read is not an error: the output shows no tokens and no activity for its agent.
 EXIT_ERROR: int = 2
 
-# The seconds between two snapshots of `--follow`, when `--interval` does not set them.
-DEFAULT_INTERVAL: float = 2.0
-
-# The terminal control sequences of `--follow`: move the cursor up the lines of the last snapshot, and clear to the end of the screen.
-CURSOR_UP: str = "\x1b[{lines}A"
-CLEAR_DOWN: str = "\x1b[J"
-
-
-def _positive(text: str) -> float:
-    """An option value that is a number greater than 0."""
-    try:
-        value = float(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
-    if value <= 0:
-        raise argparse.ArgumentTypeError(f"must be greater than 0, not {text}")
-    return value
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="delegate status", description="Print the state and the progress of each ticket of a run, from its journal and its event streams.")
     parser.add_argument("run_id", nargs="?", help="the run to show; default is the newest run of the repository")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
-    view = parser.add_mutually_exclusive_group()
-    view.add_argument(
+    parser.add_argument(
         "--json", action="store_true",
         help="print one snapshot of the run as JSON: the progress, the ETA, the tokens, and the activity of each agent",
-    )
-    view.add_argument(
-        "--follow", action="store_true",
-        help="draw the snapshot in the terminal, draw it again after each interval, and exit when the run ends",
-    )
-    parser.add_argument(
-        "--interval", type=_positive, default=DEFAULT_INTERVAL, metavar="SECONDS",
-        help=f"the seconds between two snapshots of --follow; default {DEFAULT_INTERVAL:g}",
     )
     return parser
 
 
-def _reader_of(adapter: str) -> Callable[[Path], Activity] | None:
-    """The stream reader of the harness adapter that the run names, or None when no adapter has the name or it has no reader."""
+def stream_reader_of(adapter: str) -> Callable[[Path], Activity] | None:
+    """The stream reader of the harness adapter that the run names, or None when no adapter has the name or it has no reader.
+
+    `delegate watch` uses the same reader for its live view.
+    """
     try:
         found = adapters.get(adapter)
     except KeyError:
@@ -76,41 +51,19 @@ def _reader_of(adapter: str) -> Callable[[Path], Activity] | None:
     return getattr(found, "activity", None)
 
 
-def _now() -> datetime:
+def utc_now() -> datetime:
+    """The time of the clock, in UTC."""
     return datetime.fromtimestamp(time.time(), timezone.utc)
-
-
-def _follow(repo: Path, run_id: str | None, interval: float) -> int:
-    """Draw a snapshot, then draw it again after each interval until the run ends.
-
-    On a terminal each snapshot replaces the last one in place. Otherwise each snapshot is printed as plain lines.
-    """
-    terminal = sys.stdout.isatty()
-    drawn = 0
-    while True:
-        snap = status.snapshot(repo, run_id, GitVersionControl(), _reader_of, _now())
-        run_id = snap.run_id  # follow this run, also when a newer run starts
-        lines = status.view_lines(snap, shutil.get_terminal_size().columns)
-        if terminal and drawn:
-            sys.stdout.write(CURSOR_UP.format(lines=drawn) + CLEAR_DOWN)
-        sys.stdout.write("".join(f"{line}\n" for line in lines))
-        sys.stdout.flush()
-        drawn = len(lines)
-        if snap.state != status.RUNNING:
-            return 0
-        time.sleep(interval)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.follow:
-            return _follow(args.repo, args.run_id, args.interval)
         if args.json:
-            snap = status.snapshot(args.repo, args.run_id, GitVersionControl(), _reader_of, _now())
+            snap = status.snapshot(args.repo, args.run_id, GitVersionControl(), stream_reader_of, utc_now())
             print(json.dumps(snap.to_json(), indent=2))
             return 0
-        lines = status.report(args.repo, args.run_id, GitVersionControl(), _reader_of, _now())
+        lines = status.report(args.repo, args.run_id, GitVersionControl(), stream_reader_of, utc_now())
     except (RunsError, JournalError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR

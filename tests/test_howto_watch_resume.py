@@ -82,16 +82,18 @@ def test_the_page_shows_the_state_of_a_finished_run_and_follows_its_journal_to_t
 
     started = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
     watched = follow(PAGE, repo, monkeypatch, only=containing("delegate status"))
+    raw = follow(PAGE, repo, monkeypatch, only=containing("delegate watch --raw"))
     from_position = follow(PAGE, repo, monkeypatch, only=containing("--from"), replace={"<position>": "2"})
 
-    assert [(step.code, step.err) for step in started + watched + from_position] == [(0, "")] * (len(started + watched + from_position))
+    steps = started + watched + raw + from_position
+    assert [(step.code, step.err) for step in steps] == [(0, "")] * len(steps)
     status = next(step for step in watched if step.command == "delegate status")
     assert "ticket 1: state built, verdict ACCEPT" in status.out and "ticket 2: state built, verdict ACCEPT" in status.out
     watch = next(step for step in watched if step.command.startswith("delegate watch"))
     assert watch.out.splitlines()[0].startswith("1 ") and " run-start " in watch.out.splitlines()[0]
     assert watch.out.splitlines()[-2].endswith("run-end result=built") and watch.out.splitlines()[-1] == "position 33"  # each of the three gate runs adds gate-start
-    live = next(step for step in watched if step.command == "delegate status --follow")
-    assert live.out.splitlines()[0].startswith("run ") and " built 100%, 2 of 2 ended" in live.out.splitlines()[0]
+    assert [step.command for step in raw] == ["delegate watch --raw"]
+    assert raw[0].out.splitlines()[0].startswith("1 ") and raw[0].out.splitlines()[-1] == "position 33"
     # Going on from position 2 prints the events after it, and no event at or before it.
     printed = [line for line in from_position[0].out.splitlines() if line[:1].isdigit() and " " in line]
     assert printed[0].startswith("3 ") and printed[-1].endswith("run-end result=built")
@@ -108,14 +110,14 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
         follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
     run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
 
-    # The run has no end, so `status --follow` and `watch` would wait for it: they are not run here.
-    state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch", "delegate status --follow"))
+    # The run has no end, so `watch` would wait for it: it is not run here.
+    state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))
     resumed = follow(PAGE, repo, monkeypatch, only=lambda block: containing("--resume")(block) and not containing("--break-lock")(block), replace={"<run-id>": run_id})
 
     assert "running" in state[0].out.splitlines()[0]  # the run has no end, so it is still "running"
     assert [(step.code, step.err) for step in resumed] == [(0, "")]
     assert [call.cwd.name for call in adapter.calls] == ["1", "2"]  # ticket 1 once before the stop; ticket 2 once after it
-    assert "ticket 2: state built, verdict ACCEPT" in follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch", "delegate status --follow"))[0].out
+    assert "ticket 2: state built, verdict ACCEPT" in follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0].out
 
 
 KILL = """\

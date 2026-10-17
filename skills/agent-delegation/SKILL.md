@@ -602,8 +602,10 @@ end.
    only has `nohup` and `&` can stay in the process group of your shell.
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
    background task, with `--stall-minutes` and `--max-minutes`. The harness
-   then tells you when it exits. When it exits at a limit, start it again with
-   `--from <position>`, the position that its last line gives.
+   then tells you when it exits. A background task has no terminal, so
+   `watch` prints one raw line for each event, as with `--raw`. On a terminal,
+   `watch` shows a live view for a person. When it exits at a limit, start it
+   again with `--from <position>`, the position that its last line gives.
 3. **Show `delegate status` as it is.** At each report to the person, show the
    output of `delegate status`, as it is. The coordinator does not write its
    own script to read the journal or an event stream. If the output does not

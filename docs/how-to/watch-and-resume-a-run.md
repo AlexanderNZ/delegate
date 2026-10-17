@@ -52,17 +52,19 @@ delegate status
 delegate watch --stall-minutes 30 --max-minutes 50
 ```
 
-`status` prints the progress of the run: the percentage, the ETA, and the tokens. Then it prints one line for each ticket, with the state, the [**verdict**](../glossary.md#verdict), and the branch. Under the line of a ticket with a [**step**](../glossary.md#step), it prints the time used and the tokens. While an agent runs, it also prints the time since its last activity. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line.
+`status` prints the state of the run once, and exits. It prints the progress of the run: the percentage, the ETA, and the tokens. Then it prints one line for each ticket, with the state, the [**verdict**](../glossary.md#verdict), and the branch. Under the line of a ticket with a [**step**](../glossary.md#step), it prints the time used and the tokens. While an agent runs, it also prints the time since its last activity. See [the status reference](../reference/status-and-watch.md#delegate-status) for the parts of a line. A program can read the same snapshot with `delegate status --json`. See [the snapshot](../reference/status-and-watch.md#the-snapshot).
 
-`watch` prints each event as it happens and exits when the run ends. The option `--stall-minutes` makes it exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. The journal names the [**event stream**](../glossary.md#event-stream) of each agent when the agent starts, so an agent that writes its stream is not a stall. The journal also names the log file of each [**gate**](../glossary.md#gate) when the gate starts, so a long gate that writes output is not a stall.
+`watch` follows the run until it ends. In a terminal, it shows the live view. At the top, the live block shows the same progress as `status`. The run has one line, with the percentage, the time used, the ETA, and the tokens. Each ticket has one line, with the state, the phase, the tokens, and the time since the last activity of its agent. Below the block, the feed shows one short line for each event that matters: the local time, the ticket, and what happened. For example, `10:51  #64 specialist finished · 36m · 3.3M tok · report ok`. A problem and a stall are lines that start with `✗`. `watch` draws the frame again at each poll. See [the live view](../reference/status-and-watch.md#the-live-view).
 
-To see the same progress update while the run goes on, draw the live view:
+The option `--stall-minutes` makes `watch` exit when nothing changes for 30 minutes. The option `--max-minutes` makes it exit before a [**harness**](../glossary.md#harness) time limit. The journal names the [**event stream**](../glossary.md#event-stream) of each agent when the agent starts, so an agent that writes its stream is not a stall. The journal also names the log file of each [**gate**](../glossary.md#gate) when the gate starts, so a long gate that writes output is not a stall.
+
+When standard output is not a terminal, `watch` prints one raw line for each event, for a script or a harness. To see the raw lines in a terminal, add `--raw`:
 
 ```bash
-delegate status --follow
+delegate watch --raw
 ```
 
-It shows one line for the run, with the percentage, the ETA, and the tokens. Each ticket has one line, with the phase, the tokens, and the time since the last activity of its agent. The view draws the lines again every 2 seconds, and exits when the run ends. A program can read the same snapshot with `delegate status --json`. See [the snapshot](../reference/status-and-watch.md#the-snapshot).
+See [the raw lines](../reference/status-and-watch.md#the-raw-lines).
 
 ### 3. Act on the exit code
 
@@ -116,7 +118,7 @@ python3 -c 'import subprocess, sys; subprocess.Popen(sys.argv[1:], start_new_ses
 The log file holds the run id. `delegate status` and `delegate watch` with no run id read the newest run. The coordinator obeys these rules from the start of the run to its end.
 
 1. **Start the run detached.** Start `delegate run` with `setsid -f` on Linux, or with `subprocess.Popen(..., start_new_session=True)` on macOS, as in the example. The run is then outside the process group of the tool shell. A harness can stop a background task at a time limit, and it can stop the processes of its tool shell. A run that only has `nohup` and `&` can stay in the process group of the tool shell.
-2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).
+2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. A background task has no terminal, so `watch` prints the raw lines, as with `--raw`. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).
 3. **Show `delegate status` as it is.** Each time the coordinator tells the person the state, it shows the output of `delegate status`, as it is. The coordinator does not write its own script to read the journal or an event stream.
 4. **Report a stall at once.** A stalled agent is an agent with no activity for the stall limit, the time that `--stall-minutes` sets. `watch` then exits with the reason `stall`, as [the stall](../reference/status-and-watch.md#the-stall) tells. The coordinator tells the person at once, and gives the output of `delegate status`.
 5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --resume <run-id>`. If the lock belongs to a process that no longer exists, it adds `--break-lock`, as in [the resume after a kill](#2-resume-after-a-kill).

@@ -1,15 +1,15 @@
-"""`delegate status --json` and `delegate status --follow`: one snapshot of a run, with progress, ETA, tokens, and agent activity.
+"""`delegate status --json`, and the live block of `delegate watch` on a terminal: one snapshot of a run, with progress, ETA, tokens, and agent activity.
 
 A case writes the journal of a run in the state directory of a real temporary
 git repository, with the time of each event, as the engine writes it. The event
 streams are the recorded fixtures of the harness adapters, or a part of one for
 an agent that still runs. The clock (`time.time`) is the system boundary, so a
-case fixes it, and `--follow` waits with `time.sleep`, which a case replaces.
+case fixes it. `watch` waits between two polls with `time.sleep`, which a case
+replaces, and a case gives it a terminal: a standard output whose `isatty` is true.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
@@ -24,7 +24,7 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
-from .support import bare_repo, journal_path
+from .support import Terminal, bare_repo, frames, journal_path
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -297,14 +297,19 @@ def chain_fixup_starts(run: Run, seconds: float) -> None:
     run.agent_start(seconds, "b", "fix-up", run.stream("chain.fixup.stream.jsonl", ""), 1)
 
 
+def block_of(frame: list[str]) -> list[str]:
+    """The live block of a frame of `watch`: the lines above the first blank line."""
+    return frame[: frame.index("")] if "" in frame else frame
+
+
 def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
-    """The lines of the first snapshot of `status --follow` to a pipe. The first wait ends the run."""
-    out = io.StringIO()
+    """The live block of the first frame of `watch` on a terminal. The first wait ends the run."""
+    out = Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.setattr(time, "sleep", lambda seconds: run.add(2000, "run-end", result="built", built=["a", "b"], failed=[], skipped=[]))
-    assert delegate.main(["status", "--repo", str(repo), "--follow"]) == 0
-    return out.getvalue().splitlines()
+    assert delegate.main(["watch", "--repo", str(repo)]) == 0
+    return block_of(frames(out.getvalue())[0])
 
 
 # Two tickets ended (2 of 3 units, with the chain), and no ticket runs: floor(2 / 3 * 100) = 66. The mean of the
@@ -487,27 +492,20 @@ def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_an
     assert [line for line in lines if line.startswith("  progress: ")] == ["  progress: 10m00s used", "  progress: specialist, 50s used"]
 
 
-def test_follow_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
+def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
     tmp_path, monkeypatch, adapter_with_no_reader
 ):
     repo = bare_repo(tmp_path)
     run = a_run_of_two_tickets(repo, adapter_with_no_reader)
 
-    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+    code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert out.splitlines()[:3] == [
+    assert block_of(drawn[0]) == [
         "run r1 running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s",
         "  a built, 10m00s used",
         "  b running specialist, 50s used",
     ]
-
-
-class Terminal(io.StringIO):
-    """The terminal of a person: the system boundary of `--follow`."""
-
-    def isatty(self) -> bool:
-        return True
 
 
 def a_live_run(repo: Path) -> Run:
@@ -519,92 +517,84 @@ def a_live_run(repo: Path) -> Run:
     return run
 
 
-def follow(repo: Path, monkeypatch, run: Run, *extra: str, terminal: bool, columns: int = 60) -> tuple[int, str, list[float]]:
-    """Run `status --follow` while the run goes on. The first wait ends the ticket b and the run; a later wait fails the case."""
-    out = Terminal() if terminal else io.StringIO()
+def follow(repo: Path, monkeypatch, run: Run, *extra: str, columns: int = 60) -> tuple[int, list[list[str]], list[float]]:
+    """Run `watch` on a terminal while the run goes on, and return its exit code, its frames, and its waits.
+
+    The first wait ends the ticket b and the run; a later wait fails the case.
+    """
+    out = Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", str(columns))
     waits: list[float] = []
 
     def sleep(seconds: float) -> None:
-        assert not waits, "status --follow did not exit when the run ended"
+        assert not waits, "watch did not exit when the run ended"
         waits.append(seconds)
         run.add(700, "step-end", ticket="b", state="built", reason=None)
         run.add(701, "run-end", result="built", built=["first-ticket-with-a-long-id", "b"], failed=[], skipped=[])
 
     monkeypatch.setattr(time, "sleep", sleep)
     frozen(monkeypatch, 650)
-    code = delegate.main(["status", "--repo", str(repo), "--follow", *extra])
-    return code, out.getvalue(), waits
+    code = delegate.main(["watch", "--repo", str(repo), *extra])
+    return code, frames(out.getvalue()), waits
 
 
 TOOL_NAMES = ("Bash", "tool_use", "echo one")
-CURSOR = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
-def test_follow_on_a_terminal_draws_a_line_for_the_run_and_one_for_each_ticket_and_redraws_them_in_place(tmp_path, monkeypatch):
+def test_the_live_block_has_a_line_for_the_run_and_one_for_each_ticket_and_watch_draws_it_again_at_each_poll(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
 
-    code, out, waits = follow(repo, monkeypatch, run, "--interval", "3", terminal=True)
+    code, drawn, waits = follow(repo, monkeypatch, run, "--poll-seconds", "3")
 
     assert (code, waits) == (0, [3.0])
-    first, second = out.split("\x1b[3A")  # the cursor goes up the three lines of the first snapshot
-    first_lines, second_lines = first.splitlines(), CURSOR.sub("", second).splitlines()
-    assert len(first_lines) == len(second_lines) == 3
-    assert first_lines[0].startswith("run 20261016T030000Z-abcd running 50%")
-    assert second_lines[0].startswith("run 20261016T030000Z-abcd built 100%")
-    assert "b" in second_lines[2] and "built" in second_lines[2]
+    first, second = (block_of(frame) for frame in drawn)
+    assert len(first) == len(second) == 3
+    assert first[0].startswith("run 20261016T030000Z-abcd running 50%")
+    assert second[0].startswith("run 20261016T030000Z-abcd built 100%")
+    assert "b" in second[2] and "built" in second[2]
 
 
 @pytest.mark.parametrize("columns", [30, 60, 200])
-def test_follow_draws_no_line_wider_than_the_terminal_no_tool_call_and_no_absolute_path(tmp_path, monkeypatch, columns):
+def test_the_live_view_has_no_line_wider_than_the_terminal_no_tool_call_and_no_absolute_path(tmp_path, monkeypatch, columns):
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
 
-    code, out, _ = follow(repo, monkeypatch, run, terminal=True, columns=columns)
+    code, drawn, _ = follow(repo, monkeypatch, run, columns=columns)
 
     assert code == 0
-    for line in CURSOR.sub("", out).splitlines():
+    for line in (line for frame in drawn for line in frame):
         assert len(line) <= columns, line
         assert not any(name in line for name in TOOL_NAMES), line
         assert not re.search(r"(^|\s)/", line), line
-    assert str(tmp_path) not in out
+        assert str(tmp_path) not in line
 
 
-def test_follow_to_a_pipe_prints_each_snapshot_as_plain_lines_with_no_cursor_control(tmp_path, monkeypatch):
+def test_watch_of_a_run_that_ended_draws_it_once_and_exits_with_no_wait(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
+    run.add(640, "step-end", ticket="b", state="built", reason=None)
+    run.add(641, "run-end", result="built", built=["first-ticket-with-a-long-id", "b"], failed=[], skipped=[])
 
-    code, out, _ = follow(repo, monkeypatch, run, terminal=False)
+    code, drawn, waits = follow(repo, monkeypatch, run)
 
-    assert code == 0
-    assert "\x1b" not in out
-    lines = out.splitlines()
-    assert [line.split()[2] for line in lines if line.startswith("run ")] == ["running", "built"]
-    assert len(lines) == 6
-
-
-def test_follow_of_a_run_that_ended_draws_it_once_and_exits_with_no_wait(tmp_path, monkeypatch):
-    repo = bare_repo(tmp_path)
-    run = a_live_run(repo)
-    run.add(640, "step-end", ticket="b", state="failed", reason="r")
-    run.add(641, "run-end", result="failed", built=["first-ticket-with-a-long-id"], failed=["b"], skipped=[])
-
-    code, out, waits = follow(repo, monkeypatch, run, terminal=False)
-
-    assert (code, waits) == (0, [])
-    assert out.splitlines()[0].startswith("run 20261016T030000Z-abcd failed 100%")
+    assert (code, waits, len(drawn)) == (0, [], 1)
+    assert drawn[0][0].startswith("run 20261016T030000Z-abcd built 100%")
 
 
-def test_json_and_follow_together_are_a_usage_error(tmp_path, capsys):
+@pytest.mark.parametrize(
+    ("option", "refused"),
+    [(["--follow"], "--follow"), (["--interval", "3"], "--interval"), (["--json", "--follow"], "--follow")],
+)
+def test_status_has_no_follow_and_no_interval_any_more(tmp_path, capsys, option, refused):
     repo = bare_repo(tmp_path)
 
     with pytest.raises(SystemExit) as stopped:
-        delegate.main(["status", "--repo", str(repo), "--json", "--follow"])
+        delegate.main(["status", "--repo", str(repo), *option])
 
     assert stopped.value.code == 2
-    assert "--follow" in capsys.readouterr().err
+    assert f"unrecognized arguments: {refused}" in capsys.readouterr().err
 
 
 # The streams that `delegate status` cannot read. Each is the stream of one agent; the kind names why it cannot be read.
@@ -733,13 +723,13 @@ def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens
 
 
 @pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
-def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
+def test_the_live_block_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_activity_for_that_agent(
     tmp_path, capsys, monkeypatch, bad_stream, kind, where
 ):
     repo = bare_repo(tmp_path)
     run, adapter = a_run_with_a_bad_stream(repo, bad_stream, kind, where)
 
-    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+    code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     good = GOOD_TOKENS[adapter][1]
     expected = {
@@ -747,7 +737,7 @@ def test_follow_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_n
         "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  b running specialist, 50s used"),
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
-    assert out.splitlines()[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]
+    assert block_of(drawn[0])[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]
 
 
 # The running gate. The engine writes `gate-start` with the log of the gate, and the gate runner appends to the log.
@@ -848,16 +838,16 @@ def test_plain_status_shows_the_running_gate_and_the_time_since_its_log_changed(
     ]
 
 
-def test_follow_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, monkeypatch):
+def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run, log = a_run_with_a_running_gate(repo)
     changed = (START + timedelta(seconds=590)).timestamp()
     os.utime(log, (changed, changed))
 
-    code, out, _ = follow(repo, monkeypatch, run, terminal=False, columns=200)
+    code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert out.splitlines()[1] == f"  a running gates, 10m50s used, 19k tokens, gate {GATE}, gate log changed 1m00s ago"
+    assert block_of(drawn[0])[1] == f"  a running gates, 10m50s used, 19k tokens, gate {GATE}, gate log changed 1m00s ago"
 
 
 def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):

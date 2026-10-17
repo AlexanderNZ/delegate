@@ -5,6 +5,11 @@ workflow file, and no tool beyond git, which finds the state directory.
 
 Each reason to exit has its own exit code (see `EXIT_CODES`), so a coordinator
 in any harness can run `watch` as a background task and act on the code.
+
+`follow` gives each event, and the reason to end, to a sink (`Sink`). The raw
+sink (`RawSink`) prints the raw line of each event: the form for a script and
+for a standard output that is not a terminal. The live view of a terminal is
+the sink in `delegate.run.live`.
 """
 
 from __future__ import annotations
@@ -13,10 +18,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
-from ..ports.vcs import VersionControl
 from .journal import JournalError, read_new_events
-from .runs import journal_of
 
 # One exit code for each reason that `watch` exits. Code 2 is also the exit code of a usage error.
 EXIT_SUCCEEDED: int = 0
@@ -153,16 +157,80 @@ def _last_change(journal: Path, files: set[Path]) -> float:
     return max(times)
 
 
-def follow(repo: Path, run_id: str | None, options: WatchOptions, vcs: VersionControl, emit: Callable[[str], None]) -> WatchResult:
-    """Follow the journal of a run of the repository: the run with that id, or the newest run when `run_id` is None.
+class Sink(Protocol):
+    """What `follow` tells as it follows a journal: each event, the reason to end, and each poll."""
 
-    Each event, and the line that gives the reason to end, goes to `emit` as it happens.
-    Raise RunsError when there is no such run, and JournalError when its journal is not valid or `from_position` is beyond its end.
+    def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
+        """An event of the journal, in order. `reported` is false for an event at or before `--from`, which the sink
+        only reads. `problem` is the reason that a reported event is a problem, or None. A problem ends the watch."""
+
+    def verdict(self, event: dict[str, object]) -> None:
+        """`--until verdict` ends the watch at this verdict event, which `event` gave first."""
+
+    def stall(self, minutes: float, last_event: dict[str, object] | None) -> None:
+        """`--stall-minutes` ends the watch: nothing changed for `minutes`. `last_event` is the newest event, or None."""
+
+    def time_limit(self, minutes: float) -> None:
+        """`--max-minutes` ends the watch: `minutes` are used, and the run is not at its end."""
+
+    def poll(self) -> None:
+        """The events of one read of the journal are told, and the watch goes on."""
+
+    def end(self) -> None:
+        """The watch ends. It comes after the reason to end, or after the `run-end` event."""
+
+
+class RawSink:
+    """The raw lines of `watch`: one line for each reported event (`format_event`), and a line `watch: <reason>: ...`
+    for each reason to end other than the end of the run."""
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+
+    def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
+        if not reported:
+            return
+        self._emit(format_event(event))
+        if problem is not None:
+            self._emit(f"watch: problem: ticket {event.get('ticket')}: {problem}")
+
+    def verdict(self, event: dict[str, object]) -> None:
+        findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
+        # The verdict of a chain names a stack and its tickets, not one ticket.
+        subject = (
+            f"stack {event['stack']} (tickets {', '.join(str(t) for t in event['tickets'])})"  # type: ignore[attr-defined]
+            if "tickets" in event else f"ticket {event['ticket']}"
+        )
+        self._emit(f"watch: verdict: {subject} round {event['round']}: {event['verdict']}" + (f": {findings}" if findings else ""))
+
+    def stall(self, minutes: float, last_event: dict[str, object] | None) -> None:
+        self._emit(
+            f"watch: stall: the journal, the event streams and the gate logs have not changed for {minutes:g} minutes; "
+            f"last event: {format_event(last_event) if last_event else 'none'}"
+        )
+
+    def time_limit(self, minutes: float) -> None:
+        self._emit(f"watch: time limit: {minutes:g} minutes are used; the run is not at its end")
+
+    def poll(self) -> None:
+        return None
+
+    def end(self) -> None:
+        return None
+
+
+def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
+    """Follow a journal: tell each event, and the reason to end, to `sink` as it happens.
+
+    `delegate.run.runs.journal_of` finds the journal of a run. Raise JournalError when the journal is not valid or
+    `from_position` is beyond its end. Return the exit code and the `seq` of the last event that was reported.
     """
-    return _follow(options, journal_of(repo, run_id, vcs), emit)
+    result = _follow(options, journal, sink)
+    sink.end()
+    return result
 
 
-def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -> WatchResult:
+def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
     started = time.monotonic()
     offset, next_seq, position = 0, 1, options.from_position
@@ -182,32 +250,24 @@ def _follow(options: WatchOptions, journal: Path, emit: Callable[[str], None]) -
             files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
             if seq <= options.from_position:
+                sink.event(event, False, None)
                 if event["event"] == "run-end":
                     return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
                 continue
             position = seq
-            emit(format_event(event))
+            sink.event(event, True, problem)
             if problem is not None:
-                emit(f"watch: problem: ticket {event.get('ticket')}: {problem}")
                 return WatchResult(EXIT_PROBLEM, position)
             if options.until == UNTIL_VERDICT and event["event"] == "verdict":
-                findings = "; ".join(str(f) for f in event["findings"])  # type: ignore[union-attr]
-                # The verdict of a chain names a stack and its tickets, not one ticket.
-                subject = (
-                    f"stack {event['stack']} (tickets {', '.join(str(t) for t in event['tickets'])})"  # type: ignore[attr-defined]
-                    if "tickets" in event else f"ticket {event['ticket']}"
-                )
-                emit(f"watch: verdict: {subject} round {event['round']}: {event['verdict']}" + (f": {findings}" if findings else ""))
+                sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
             if event["event"] == "run-end":
                 return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
         if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
-            emit(
-                f"watch: stall: the journal, the event streams and the gate logs have not changed for {options.stall_minutes:g} minutes; "
-                f"last event: {format_event(last_event) if last_event else 'none'}"
-            )
+            sink.stall(options.stall_minutes, last_event)
             return WatchResult(EXIT_STALL, position)
         if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:
-            emit(f"watch: time limit: {options.max_minutes:g} minutes are used; the run is not at its end")
+            sink.time_limit(options.max_minutes)
             return WatchResult(EXIT_TIME_LIMIT, position)
+        sink.poll()
         time.sleep(options.poll_seconds)

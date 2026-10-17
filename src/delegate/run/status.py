@@ -362,7 +362,7 @@ def _duration(seconds: int) -> str:
     return f"{seconds // 86400}d{seconds % 86400 // 3600:02d}h"
 
 
-def _tokens(count: int) -> str:
+def format_tokens(count: int) -> str:
     """A token count in a short form: `950`, `26k`, or `1.2M`."""
     if count < 1000:
         return str(count)
@@ -384,7 +384,7 @@ def _run_progress(snap: Snapshot) -> str:
     if snap.state == RUNNING:
         parts.append(f"ETA {eta}")
     if snap.tokens is not None:
-        parts.append(f"{_tokens(snap.tokens)} tokens")
+        parts.append(f"{format_tokens(snap.tokens)} tokens")
     return ", ".join(parts)
 
 
@@ -395,7 +395,7 @@ def _ticket_progress(ticket: TicketSnapshot) -> str:
     """
     parts = [f"{_duration(ticket.elapsed_seconds)} used"]
     if ticket.tokens is not None:
-        parts.append(f"{_tokens(ticket.tokens)} tokens")
+        parts.append(f"{format_tokens(ticket.tokens)} tokens")
     if ticket.idle_seconds is not None:
         parts.append(f"last activity {_duration(ticket.idle_seconds)} ago")
     if ticket.gate is not None:
