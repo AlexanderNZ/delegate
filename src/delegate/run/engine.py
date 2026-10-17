@@ -63,13 +63,18 @@ engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again. A verifier run that ended with no verdict does not
 count against the fix-up limit: the resume runs that round again.
 
-A resume with `retry` goes on with one failed step of `assure` mode, also in a
-run that ended (see `_retry_plan`). It uses the worktree and the commits of the
-step again, spawns no specialist, and goes on at the first phase that did not
-complete: the gates, the verifier, or the scoped verifier. When the run branch
-moved after the step failed, the retry rebases, runs the gates, and verifies
-the whole branch. The journal records `retry`, and then a new `step-end` and a
-new `run-end`. The newest of each wins.
+A resume with `retry` goes on with one failed step, also in a run that ended
+(see `_retry_plan`). It uses the worktree and the commits of the step again,
+and goes on at the first phase that did not complete. In `assure` mode it
+spawns no specialist, and that phase is the gates, the verifier, or the scoped
+verifier. When the run branch moved after the step failed, the retry rebases,
+runs the gates, and verifies the whole branch. In `economy` mode the phase is
+the specialist, which continues with the continuation limit of the mode again,
+or the check of its report. The tickets after the step that the run skipped are
+checked again, and the chain then goes on: the verification of the chain
+covers the built tickets whose work the run branch does not hold. The journal
+records `retry`, and then a new `step-end` and a new `run-end`. The newest of
+each wins.
 
 The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
 start of a ticket in a chain, and the handling of a verdict. The engine reads
@@ -142,9 +147,13 @@ TRIGGER_GATES_RED: str = "gates-red"
 TRIGGER_REJECT: str = "reject"
 
 # The `trigger` of a `continuation` whose report check failed on a branch with work: it asks only for a corrected report.
+# The report file is there but not valid, or there is no report file.
 TRIGGER_REPORT_INVALID: str = "report-invalid"
+TRIGGER_REPORT_MISSING: str = "report-missing"
 
 # The `phase` of a `retry` event: the first phase of the failed step that did not complete.
+# `specialist` is only in `economy` mode, where the specialist of the step continues.
+RETRY_SPECIALIST: str = "specialist"
 RETRY_GATES: str = "gates"
 RETRY_VERIFIER: str = "verifier"
 RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
@@ -335,6 +344,8 @@ def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = Fals
             raise EngineError(f"run {run_id!r} has ended with the result {event['result']!r}; it cannot be resumed")
         if kind == "step-start":
             started = ticket
+            # An `economy` retry checks a skipped ticket again, and can build it.
+            progress.skipped.pop(ticket, None)
         elif kind == "step-end":
             # The newest step-end of a ticket wins: the verification at the end of an
             # `economy` chain can fail a ticket that was built.
@@ -399,16 +410,14 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     - The last verdict is a REJECT, and the fix-up specialist of the next round
       reported committed work: the gates of that fix-up, then its scoped verifier.
 
-    A retry spawns no specialist. So a step whose specialist, or whose fix-up
-    specialist, gave no valid report that says committed is refused. So is a
-    step that the verifier accepted, or rejected after the last fix-up round.
-    Only a failed step of `assure` mode can be retried.
+    A retry of `assure` mode spawns no specialist. So a step whose specialist,
+    or whose fix-up specialist, gave no valid report that says committed is
+    refused. So is a step that the verifier accepted, or rejected after the
+    last fix-up round. For `economy` mode, see `_economy_retry_plan`.
     """
-    refused = f"ticket {ticket_id!r} of run {run_id!r} cannot be retried"
+    refused = _refused(ticket_id, run_id)
     if ticket_id not in {ticket.id for ticket in workflow.tickets}:
         raise EngineError(f"{refused}: it is not a ticket of the run")
-    if workflow.mode != domain.ASSURE:
-        raise EngineError(f"{refused}: --retry works only in assure mode, and the run is in {workflow.mode} mode")
     if ticket_id in progress.built:
         raise EngineError(f"{refused}: it is built; --retry goes on only with a step that failed")
     if ticket_id in progress.skipped:
@@ -418,8 +427,9 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     if ticket_id not in progress.failed:
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that failed")
     prior = tuple(e for e in progress.events if e.get("ticket") == ticket_id)
-    validations = [e for e in prior if e["event"] == "report-validation"]
-    if not _specialist_done(list(prior)) or validations[-1]["status"] != domain.COMMITTED:
+    if workflow.mode == domain.ECONOMY:
+        return _economy_retry_plan(workflow, progress, refused, ticket_id, prior)
+    if not _specialist_committed(prior):
         raise EngineError(
             f"{refused}: its specialist gave no valid report that says committed; "
             "--retry goes on only at the gates, the verifier or the scoped verifier"
@@ -447,6 +457,71 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
             "--retry goes on only at the gates, the verifier or the scoped verifier"
         )
     return _RetryPlan(ticket_id, RETRY_GATES, round_number, prior, rejected, findings)
+
+
+def _refused(ticket_id: str, run_id: str) -> str:
+    return f"ticket {ticket_id!r} of run {run_id!r} cannot be retried"
+
+
+def _specialist_committed(prior: tuple[dict[str, object], ...]) -> bool:
+    """True when the journal shows a valid specialist report that says committed, after the last spawn of the specialist."""
+    validations = [e for e in prior if e["event"] == "report-validation"]
+    return _specialist_done(list(prior)) and validations[-1]["status"] == domain.COMMITTED
+
+
+def _economy_retry_plan(
+    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...]
+) -> _RetryPlan:
+    """The first phase of a failed step of `economy` mode that did not complete. Raise EngineError when it cannot be retried.
+
+    The phase is the gates when the journal shows a valid report of the
+    specialist that says committed: no specialist spawns, and the engine checks
+    the report, the commits and the hotspots again. The gates then run on the
+    tip of the chain. Otherwise the phase is the specialist, which continues.
+
+    A step that the verification of the chain failed is refused: the chain
+    failed as a whole. So is a step after which the run built a ticket: the
+    branch of that ticket does not hold the commits of this step. A step with
+    no `step-start` is refused too. `_check_chain_start` refuses a step whose
+    chain start moved.
+    """
+    if not any(e["event"] == "step-start" for e in prior):
+        raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that started")
+    if any(e["event"] == "step-end" and e["state"] == BUILT for e in prior):
+        raise EngineError(
+            f"{refused}: the verification of the chain failed it; "
+            "--retry in economy mode goes on only with a step that failed before the verification of the chain"
+        )
+    order = [ticket.id for ticket in plan_order(workflow)]
+    later = [other for other in order[order.index(ticket_id) + 1 :] if other in progress.built]
+    if later:
+        raise EngineError(
+            f"{refused}: ticket {later[0]!r} after it in the chain is built, "
+            "and its branch does not hold the commits of this step"
+        )
+    phase = RETRY_GATES if _specialist_committed(prior) else RETRY_SPECIALIST
+    return _RetryPlan(ticket_id, phase, 0, prior)
+
+
+def _check_chain_start(
+    workflow: Workflow, order: list[Ticket], built: list[str], plan: _RetryPlan, vcs: VersionControl, repo: Path, run_base: str,
+    run_id: str,
+) -> None:
+    """Refuse an `economy` retry whose step started from another commit than the chain gives it now.
+
+    The chain before the step can change after the step started: the
+    verification of the chain can add a fix-up commit to the tip, or fail the
+    tickets before it. The branch of the step then does not continue the chain.
+    """
+    ticket = next(ticket for ticket in order if ticket.id == plan.ticket)
+    started = str(next(e for e in plan.prior if e["event"] == "step-start")["base_commit"])
+    with _vcs_errors():
+        now = vcs.commit_of(repo, _start_ref(workflow, order, built, ticket, run_base))
+    if started != now:
+        raise EngineError(
+            f"{_refused(plan.ticket, run_id)}: its branch starts at commit {started}, "
+            f"but the chain before it now ends at commit {now}; the verification of the chain changed or failed the tickets before it"
+        )
 
 
 def run_workflow(
@@ -517,6 +592,8 @@ def _execute(
         run_base = _run_base(vcs, repo, workflow, events)
         # A step that cannot be retried is refused before the journal changes.
         plan = _retry_plan(workflow, progress, run_id, retry) if retry is not None else None
+        if plan is not None and workflow.mode == domain.ECONOMY:
+            _check_chain_start(workflow, order, progress.built, plan, vcs, repo, run_base, run_id)
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket,
@@ -528,6 +605,10 @@ def _execute(
     if plan is not None:
         failed.remove(plan.ticket)
         retried_reason = failures.pop(plan.ticket)
+        if workflow.mode == domain.ECONOMY:
+            # The chain goes on after the step: the skip rule applies again to each ticket after it that was skipped.
+            for later in order[[t.id for t in order].index(plan.ticket) + 1 :]:
+                skipped.pop(later.id, None)
     complete = {*built, *failed, *skipped}
     ended_early = False
     for position, ticket in enumerate(order):
@@ -706,6 +787,7 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
 def _build_ticket(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, roles: dict[str, tuple[str, str]],
     repo: Path, state_dir: Path, run_id: str, journal: Journal, start_ref: str, prior: list[dict[str, object]] | None = None,
+    retried: str | None = None,
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed.
 
@@ -716,6 +798,12 @@ def _build_ticket(
 
     `prior` holds the journal events of this ticket when the step was open in a
     run that stopped. The step then goes on in its own worktree.
+
+    `retried` is the reason a step of `economy` mode failed, when a retry goes
+    on with it (see `_economy_retry_plan`). The step then goes on in its own
+    worktree with the events of the failed step in `prior`. The specialist
+    continues unless its report was valid and said committed, and it has the
+    continuation limit of the mode again.
     """
     tier, model = roles["specialist"]
     stack = workflow.stacks[ticket.stack]
@@ -743,8 +831,11 @@ def _build_ticket(
             return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
         _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
-        specialist_done = _specialist_done(prior)
-        continuations = sum(1 for e in prior if e["event"] == "continuation")
+        if retried is None:
+            specialist_done = _specialist_done(prior)
+            continuations = sum(1 for e in prior if e["event"] == "continuation")
+        else:
+            specialist_done, continuations = _specialist_committed(tuple(prior)), 0
         # A verifier run that ended with no verdict does not count against the fix-up limit.
         verify_rounds = sum(1 for e in prior if e["event"] == "verdict")
         rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
@@ -757,6 +848,7 @@ def _build_ticket(
     reason = _build_with_continuations(
         workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
+        stop_reason="the run was interrupted" if retried is None else f"the step failed: {retried}",
     )
     if reason:
         return reason
@@ -770,6 +862,7 @@ def _build_ticket(
 def _build_with_continuations(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, model: str, repo: Path,
     worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
+    stop_reason: str = "the run was interrupted",
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
 
@@ -780,17 +873,18 @@ def _build_with_continuations(
     with a valid report, so the first pass does not spawn it again. It sets
     `continuations` to the number the journal holds, so the limit counts across
     the stop. It sets `interrupted` for a step that a stop left open: when the
-    branch holds commits already, the first prompt is a continuation brief.
+    branch holds commits already, the first prompt is a continuation brief,
+    with `stop_reason` as the reason that the last run stopped.
 
     The specialist continues when it ends capped or failed, or when its gates
     are red. In `economy` mode the engine runs no gate here: a valid report that
     says committed, on a branch with a commit, builds the step. A report that
-    is there but not valid, on a branch that holds a commit, gets a
+    is missing or not valid, on a branch that holds a commit, gets a
     continuation that asks only for a corrected report and names each problem
     of the check. Return None when the report is valid and the
     branch holds green work, or the reason the step fails. A report that is
-    missing, that is not valid on a branch with no commit, or that does not say
-    committed fails the step with no continuation. After `CONTINUATION_LIMIT`
+    missing or not valid on a branch with no commit, or that does not say
+    committed, fails the step with no continuation. After `CONTINUATION_LIMIT`
     continuations the step fails, and the journal records the count.
     """
     stack = workflow.stacks[ticket.stack]
@@ -804,7 +898,7 @@ def _build_with_continuations(
         if so_far:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
-                "the run was interrupted", resumed=False, gates_at_chain_end=not each_ticket,
+                stop_reason, resumed=False, gates_at_chain_end=not each_ticket,
             )
     resume_session: str | None = None
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -832,10 +926,11 @@ def _build_with_continuations(
                     "report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error),
                     status=None, blocked_reason=None,
                 )
-                # A report that is there but not valid, on a branch with work, gets a continuation for the report only.
-                if not report_path.is_file() or not _commit_lines(vcs, repo, since, branch):
+                # A report that is missing or not valid, on a branch with work, gets a continuation for the report only.
+                if not _commit_lines(vcs, repo, since, branch):
                     return str(error)
-                trigger, reason, problems = TRIGGER_REPORT_INVALID, str(error), error.problems
+                trigger = TRIGGER_REPORT_INVALID if report_path.is_file() else TRIGGER_REPORT_MISSING
+                reason, problems = str(error), error.problems
             else:
                 journal.append(
                     "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
@@ -869,7 +964,7 @@ def _build_with_continuations(
             "continuation", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger,
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
         )
-        if trigger == TRIGGER_REPORT_INVALID:
+        if trigger in (TRIGGER_REPORT_INVALID, TRIGGER_REPORT_MISSING):
             prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems)
         else:
             prompt = continuation_brief(
@@ -1285,8 +1380,17 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
       scoped verifier of the fix-up round.
     - The gates of a fix-up check the fix-up commit and run the gates, then the
       scoped verifier starts.
+
+    In `economy` mode the step goes on as an open step does after a stop, at
+    the specialist or at the check of its report (see `_build_ticket`).
     """
     workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
+    if workflow.mode == domain.ECONOMY:
+        step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure)
+        return _build_ticket(
+            workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
+            start_ref, list(plan.prior), retried=failure,
+        )
     if plan.phase == RETRY_GATES and plan.rejected is None:
         step.journal.append("retry", ticket=ticket.id, phase=RETRY_GATES, round=plan.round, reason=failure)
         return _build_ticket(
@@ -1341,6 +1445,11 @@ class _ChainRun:
 
     When every stack is accepted, the engine moves the run branch to the chain
     tip by fast-forward.
+
+    The verification covers only the built tickets whose work the run branch
+    does not hold yet, and reads only the journal events after the last
+    `retry`. So after a retry, the chain verification of the run before it
+    does not count, and the tickets that it accepted are not verified again.
     """
 
     def __init__(
@@ -1356,6 +1465,13 @@ class _ChainRun:
     def verify(self) -> list[str]:
         """Verify every stack of the chain and move the run branch. Return the findings that map to no ticket."""
         try:
+            run_branch = f"refs/heads/{self.workflow.run_branch}"
+            self.chain = [
+                ticket for ticket in self.chain
+                if not _holds(self.vcs, self.repo, f"refs/heads/{_ticket_branch(self.workflow, ticket)}", run_branch)
+            ]
+            if not self.chain:
+                return []  # the run branch holds the work of every built ticket
             return self._verify_stacks()
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             halted = isinstance(error, InvariantViolation)
@@ -1371,14 +1487,16 @@ class _ChainRun:
             self.failed.append(ticket_id)
             self.failures[ticket_id] = reason
 
-    def _segments(self, events: list[dict[str, object]]) -> dict[str, ChainSegment]:
+    def _segments(self, events: list[dict[str, object]], since_retry: list[dict[str, object]]) -> dict[str, ChainSegment]:
         """For each ticket of the chain, the commits that it added: from where its branch started to its tip.
 
-        The tip is the tip of the branch now. For the last ticket of the chain,
-        a resume after a fix-up takes the commit that the first fix-up of the
-        chain started from, so the diff of the ticket holds no fix-up commit.
+        The start is the `base_commit` of the newest `step-start` of the ticket in
+        `events`. The tip is the tip of the branch now. For the last ticket of the
+        chain, a resume after a fix-up takes the commit that the first fix-up of
+        the chain since the last retry (in `since_retry`) started from, so the
+        diff of the ticket holds no fix-up commit.
         """
-        fixups = [e for e in events if e["event"] == "fixup-start" and "stack" in e]
+        fixups = [e for e in since_retry if e["event"] == "fixup-start" and "stack" in e]
         segments: dict[str, ChainSegment] = {}
         for ticket in self.chain:
             base = [str(e["base_commit"]) for e in events if e["event"] == "step-start" and e["ticket"] == ticket.id][-1]
@@ -1389,11 +1507,13 @@ class _ChainRun:
         return segments
 
     def _verify_stacks(self) -> list[str]:
-        events = read_events(self.journal.path)
+        every_event = read_events(self.journal.path)
+        retries = [index for index, e in enumerate(every_event) if e["event"] == "retry"]
+        events = every_event[retries[-1] + 1 :] if retries else every_event  # the verification of the chain since the last retry
         if any(e["event"] == "run-branch-advance" for e in events):
             return []  # a resume after the run branch moved: nothing is left to verify
         tip_ticket = self.chain[-1]
-        segments = self._segments(events)
+        segments = self._segments(every_event, events)
         stacks = list(dict.fromkeys(ticket.stack for ticket in self.chain))
         last: _Step | None = None
         for position, name in enumerate(stacks):

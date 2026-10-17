@@ -136,7 +136,9 @@ class ScriptedAdapter:
     other requests are specialist runs.
 
     On a specialist call it writes `files` to the working directory, commits
-    them, and writes the report (valid, or the `report` text you give, or none).
+    them, and writes the report (valid, or the `report_text` you give, or none).
+    A `report_text` function of the request and the head that gives None
+    writes no report for that call.
     `calls` holds every specialist request it received.
 
     On a verifier call it writes `verifier_files` to the working directory (a
@@ -200,7 +202,7 @@ class ScriptedAdapter:
     failing_tickets: set[str] = field(default_factory=set)
     commit: bool = True
     write_report: bool = True
-    report_text: str | Callable[[AdapterRequest, str], str] | None = None
+    report_text: str | Callable[[AdapterRequest, str], str | None] | None = None
     end_state: str = "finished"
     exit_status: int = 0
     session_id: str | None = "session-1"
@@ -286,8 +288,9 @@ class ScriptedAdapter:
                 text = self.report_text
             else:
                 text = json.dumps(valid_report(ticket, branch, head))
-            request.report_path.parent.mkdir(parents=True, exist_ok=True)
-            request.report_path.write_text(text)
+            if text is not None:  # a `report_text` function that gives None writes no report
+                request.report_path.parent.mkdir(parents=True, exist_ok=True)
+                request.report_path.write_text(text)
         request.report_path.parent.mkdir(parents=True, exist_ok=True)
         stream = request.event_stream
         stream.write_text('{"type":"result"}\n')

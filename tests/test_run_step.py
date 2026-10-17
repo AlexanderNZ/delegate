@@ -91,7 +91,8 @@ def test_a_valid_report_is_recorded_as_valid_after_the_adapter_result(tmp_path, 
     assert (validation["ticket"], validation["valid"], validation["reason"]) == ("a", True, None)
 
 
-def test_a_missing_report_fails_the_step_and_exits_1_without_a_traceback(tmp_path, capsys, scripted):
+def test_a_missing_report_on_a_branch_with_no_commit_fails_the_step_and_exits_1_without_a_traceback(tmp_path, capsys, scripted):
+    scripted.files = {}  # with a commit, the specialist continues for the report first (see test_run_continue.py)
     scripted.write_report = False
     repo = make_repo(tmp_path)
 

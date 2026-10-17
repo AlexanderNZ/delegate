@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retry", metavar="TICKET",
         help="with --resume, go on with the failed step of TICKET, also in a run that ended; "
-        "use its worktree and its commits again, and go on at the gates, the verifier or the scoped verifier",
+        "use its worktree and its commits again, and go on at the first phase that did not complete",
     )
     parser.add_argument(
         "--break-lock", action="store_true",

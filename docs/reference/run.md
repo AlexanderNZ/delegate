@@ -24,7 +24,7 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
 | `--dry-run` | Validate the workflow and print the plan; create nothing. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run. |
-| `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the gates, the verifier or the scoped verifier. |
+| `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |
 | `--repo <repo>` | The git repository to build in; default is the current directory. |
 | `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |
@@ -72,19 +72,19 @@ A run has one base: the commit of `base-branch` at the start of the run. The jou
 
 ## The continuation
 
-A specialist that ends `capped` or `failed`, whose gates are red, or whose report is not valid after it committed work, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
+A specialist that ends `capped` or `failed`, whose gates are red, or whose report is missing or not valid after it committed work, continues in the same worktree. The commits that it made stay on the branch. The engine does not make a new worktree or a new branch.
 
 - A specialist ends `capped` or `failed` when the adapter result has the [**end state**](../glossary.md#end-state) `capped` or `failed`. The engine does not read the report of that run. A result `finished` with an exit status other than 0 and no valid report also counts as `failed`. See [the end of an agent session](#the-end-of-an-agent-session).
 - A specialist whose gates are red has a valid report with the status `committed`, and at least one gate of the stack exits with a status other than 0. This trigger is only in `assure` mode. In `economy` mode, red gates on the tip of the chain start a fix-up round. See [the chain verification](#the-chain-verification).
-- **A report that is not valid, on a branch with work, gets a continuation for the report only.** The report file is there, but the check of the report fails: the text is not JSON, a field is missing, a field has the wrong type, or a value is not permitted. The branch holds at least one commit beyond the point where it started. The code can then be correct, so the engine does not fail the step. It sends a continuation that asks only for a corrected report, with the trigger `report-invalid`. This prompt has a `## Continuation` section, a `## Commands` section with the foreground rule of the specialist brief, and a `## Report` section. It holds the ticket id, the report path, each problem of the check on its own line, the commits on the branch, and the shape of the report. It tells the specialist to write only the report, and to change no file and add no commit. It does not give the task again, so the prompt is the same when the engine resumes and when it starts a new agent. The engine then reads the report again, and the step goes on from the check of the report.
-- A report that is missing fails the step. A report that is not valid on a branch with no commit beyond its start fails the step. A valid report with a status other than `committed` fails the step. None of these starts a continuation.
+- **A report that is missing or not valid, on a branch with work, gets a continuation for the report only.** The check of the report fails: there is no file at the report path, or the text is not JSON, a field is missing, a field has the wrong type, or a value is not permitted. The branch holds at least one commit beyond the point where it started. The code can then be correct, so the engine does not fail the step. It sends a continuation that asks only for a corrected report. The trigger is `report-missing` when there is no report file, and `report-invalid` when the file is there. This prompt has a `## Continuation` section, a `## Commands` section with the foreground rule of the specialist brief, and a `## Report` section. It holds the ticket id, the report path, each problem of the check on its own line, the commits on the branch, and the shape of the report. It tells the specialist to write only the report, and to change no file and add no commit. It does not give the task again, so the prompt is the same when the engine resumes and when it starts a new agent. The engine then reads the report again, and the step goes on from the check of the report.
+- A report that is missing or not valid, on a branch with no commit beyond its start, fails the step. A valid report with a status other than `committed` fails the step. None of these starts a continuation.
 - For the other triggers, the continuation brief (`## Continuation`) holds the ticket id, the reason that the last run stopped, the commits on the branch so far, and, for a red gate, the output of the red gates. It also holds the report rule with the absolute report path, as the first brief does. The specialist continues from these commits, and adds each change as a new commit.
 - If the adapter has `supports_resume` set to true, and the last result has a `session_id`, the engine resumes that [**session**](../glossary.md#session). It sets `resume_session` in the request to the `session_id` of the last result, so each continuation resumes the newest session. The session keeps the context of the first brief, so the prompt holds only the continuation brief and the `## Gates` section of the specialist brief. The journal records the mode `resume`.
 - Otherwise the engine starts a new agent, with `resume_session` set to `None`. A new agent has no context, so its prompt is the full specialist brief with the continuation section added. The journal records the mode `brief`. This is also the mode when the adapter supports resume but the harness gave no session id.
 - The [**tier**](../glossary.md#tier) and the model are those of the first specialist run.
 - The engine journals `continuation` before each continuation, with the count, the trigger, the commits, and the reason.
 
-One count covers the four triggers. Each mode has a continuation limit:
+One count covers the five triggers. Each mode has a continuation limit:
 
 | Mode | Limit |
 |---|---|
@@ -133,7 +133,7 @@ An open step goes on as follows:
 
 `delegate run --resume <run-id> --retry <ticket>` goes on with one failed step of a run. A failed step has a `step-end`, so a resume without `--retry` does not build it again. The retry also works in a run that has a `run-end`. It takes the [**run lock**](../glossary.md#run-lock), and it builds the steps that are not complete, as a resume does.
 
-The retry spawns no specialist. It uses the worktree and the commits of the step again, and goes on at the first phase that did not complete. The phase comes from the journal events of the step:
+The retry uses the worktree and the commits of the step again, and goes on at the first phase that did not complete. The phase comes from the journal events of the step. In `assure` mode the retry spawns no specialist:
 
 | Events of the failed step | Where the step goes on |
 |---|---|
@@ -146,16 +146,33 @@ The verifier round of the retry is the number of verdicts in the journal. A veri
 
 The run branch can move after the step failed, when the run built another ticket after it. The branch of the step then does not hold the tip of the run branch. The engine checks a fix-up commit, rebases the branch onto the run branch, runs the gates, and starts a full verifier at the round of the retry. The rejected commit is not on the rebased branch, so a scoped verifier cannot run.
 
-The engine writes `retry` before it goes on, then a new `step-end` and a new `run-end`. The newest `step-end` of a ticket wins, and so does the newest `run-end`. A ticket that the failed step made the engine skip stays skipped.
+The engine writes `retry` before it goes on, then a new `step-end` and a new `run-end`. The newest `step-end` of a ticket wins, and so does the newest `run-end`. In `assure` mode, a ticket that the failed step made the engine skip stays skipped.
+
+### The retry in economy mode
+
+In `economy` mode the engine runs no gate and no verifier for one ticket. So a failed step of `economy` mode goes on at the specialist or at the check of its report, as an open step does after a stop:
+
+| Events of the failed step | Where the step goes on |
+|---|---|
+| The last `report-validation` after the last spawn of the specialist is valid and says `committed` | The gates (`phase` `gates`). No specialist spawns. The engine checks the report, the commits and the hotspots again. The step is then built, and the gates run on the tip of the chain. |
+| Any other | The specialist (`phase` `specialist`). The specialist continues in the worktree of the step. If the branch holds commits beyond its start, the prompt is a continuation brief with the reason `the step failed: <reason>`. If it holds none, the prompt is the first brief. |
+
+The `round` of the `retry` event is 0. The retry gives the specialist the continuation limit of the mode again: the continuations of the failed step do not count, and the spawn of the retry is not a continuation, as the spawn of a resume is not.
+
+After the step, the chain goes on. The engine checks each ticket after the step that it skipped again, with [the skip rule](#the-skip-rule): a ticket whose blockers are now built is built, from the tip of the chain. Then the engine runs [the chain verification](#the-chain-verification). It covers only the built tickets whose work the run branch does not hold yet, and it counts only the gates, verdicts and fix-up rounds after the `retry` event. So a ticket that the run before accepted is not verified again, and the fix-up rounds of the run before do not count against the limit.
+
+### When a step cannot be retried
 
 The command exits 1, names the ticket, and changes nothing, when the step cannot be retried:
 
 - The ticket is not a ticket of the run.
-- The run is in `economy` mode.
 - The step is built, was skipped, did not start, or is open. Resume an open step without `--retry`.
-- The specialist, or the fix-up specialist of the next round, gave no valid report that says `committed`. A retry spawns no specialist.
-- The verifier accepted the branch, and the step failed after the verdict.
-- The verifier rejected the branch after the last fix-up round.
+- In `assure` mode: the specialist, or the fix-up specialist of the next round, gave no valid report that says `committed`. A retry of `assure` mode spawns no specialist.
+- In `assure` mode: the verifier accepted the branch, and the step failed after the verdict.
+- In `assure` mode: the verifier rejected the branch after the last fix-up round.
+- In `economy` mode: the verification of the chain failed the ticket. The chain failed as a whole.
+- In `economy` mode: a ticket after it in the chain is built. The branch of that ticket does not hold the commits of the step.
+- In `economy` mode: the step started from another commit than the chain gives it now. The verification of the chain added a fix-up commit to the ticket before it, or failed the tickets before it.
 
 `--retry` without `--resume` is a usage error, and the command exits 2.
 
@@ -358,14 +375,14 @@ On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it
 | Reason in the journal | Cause |
 |---|---|
 | `the specialist ended <state> with exit status <n>` | The adapter result is `failed` or `capped`, and the engine does not read the report. Or the result is `finished` with a bad exit status, and the report is not valid. See [the end of an agent session](#the-end-of-an-agent-session). |
-| `report missing: ...` | The specialist wrote no file at the report path. |
+| `report missing: ...` | The specialist wrote no file at the report path, and the branch holds no commit beyond its start. On a branch with a commit, the specialist continues for the report first. See [the continuation](#the-continuation). |
 | `report ... is not valid JSON`, `must be a JSON object`, `invalid: <field>: ...` | The report does not match the schema, and the branch holds no commit beyond its start. The message names the field. On a branch with a commit, the specialist continues for the report first. See [the continuation](#the-continuation). |
 | `the specialist reported status 'blocked'` (or `'partial'`) | The report is valid, but its `status` is not `committed`. |
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
 | `hotspot finding: <path> matches the hotspot '<pattern>'` | A changed path matches a hotspot pattern. See [the hotspot guard](#the-hotspot-guard). |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
 | `crashed: <exception type>: <message>` | An exception from the adapter or from git ended the step. See [a crash in a step](#a-crash-in-a-step). |
-| `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, its gates were still red, or its report was still not valid. `<reason>` is the reason of the last run. |
+| `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, its gates were still red, or its report was still missing or not valid. `<reason>` is the reason of the last run. |
 | `rebase onto <run branch> stopped with a conflict in <files>` | The rebase of the ticket branch onto the run branch had a conflict. The engine aborted the rebase. |
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
 | `branch ... holds no commit beyond <run branch> after the rebase; ...` | The run branch holds the work of the ticket already, so no commit is left. |
@@ -473,10 +490,10 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `gate-start` | `ticket`, `round`, `phase`, `command` (as in `gate-result`), `gate_log` (the path of the log file of this gate run). The engine makes the empty log file and writes this event just before the gate runs. The gate runner appends the output of the gate to the log while the gate runs. `gate-result` follows when the gate ends. A gate that does not run again has `gate-skip` and no `gate-start`. |
 | `gate-result` | `ticket`, `round` (0 for the first build, else the fix-up round), `phase` (`build`, `rebase`, or `fixup`; `chain` for the gates on the tip of an `economy` chain), `command`, `commit` (the commit that the worktree has checked out when the gate runs), `exit_status`, `green`, `output_tail` (the last 4000 characters) |
 | `gate-skip` | `ticket`, `round`, `phase`, `command` (as in `gate-result`), `commit` (the commit that the worktree has checked out), `green_seq` (the `seq` of the green `gate-result` of the same command on that commit), `reason`. The gate does not run again, and it counts as green. See [one green gate run for each commit](#one-green-gate-run-for-each-commit). |
-| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, or `report-invalid`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
+| `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, `report-invalid`, or `report-missing`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
-| `retry` | `ticket`, `phase` (`gates`, `verifier`, or `scoped-verifier`: where the step goes on), `round` (the verifier round of the retry), `reason` (the reason the step failed before). See [the retry](#the-retry). |
+| `retry` | `ticket`, `phase` (where the step goes on: `gates`, `verifier`, or `scoped-verifier` in `assure` mode; `specialist` or `gates` in `economy` mode), `round` (the verifier round of the retry; 0 in `economy` mode), `reason` (the reason the step failed before). See [the retry](#the-retry). |
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
@@ -496,9 +513,10 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 ## Limits of this version
 
 - In `assure` mode with `ticket-start = "base-branch"`, a ticket with no `blocked-by` starts from the base of the run, not from the accepted work of the tickets before it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see that work.
-- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run. `--retry` goes on with one failed step also after `run-end`, but only in `assure` mode, and the tickets that the engine skipped for that step stay skipped.
+- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run. `--retry` goes on with one failed step also after `run-end`. In `assure` mode, the tickets that the engine skipped for that step stay skipped.
 - During a retry of a run that ended, `delegate status` and `delegate watch` read the old `run-end` until the retry writes a new one.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
 - In `economy` mode, a defect shows only at the end of the chain. That is also true for a defect that the gates find. The stack of a rejected chain fails as a whole when no finding names a ticket.
 - In `economy` mode, a fix-up commit goes on the chain tip. A stack that the engine verified before it does not see that commit. The verifier of the fix-up sees only the delta.
+- In `economy` mode, `--retry` cannot go on with a step that a later built ticket went past, or whose chain start moved. The engine does not rebase in `economy` mode, so the branch of the step cannot join the chain again.
 - A gate has no time limit.

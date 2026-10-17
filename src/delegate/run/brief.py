@@ -587,7 +587,7 @@ def report_correction_brief(
     commits: Sequence[str],
     problems: Sequence[str],
 ) -> str:
-    """The brief the engine sends a specialist that committed work but wrote a report that is not valid.
+    """The brief the engine sends a specialist that committed work but wrote a report that is missing or not valid.
 
     It asks only for a corrected report. It holds the ticket id, the commits on
     the branch, each problem of the report check, the report rule, the foreground
@@ -598,7 +598,7 @@ def report_correction_brief(
         f"Ticket {ticket}",
         "",
         f"The last run of the specialist on this ticket committed work in the worktree `{worktree}`, "
-        f"but the report at `{report_path}` is not valid. The engine found these problems:",
+        f"but the report at `{report_path}` is missing or not valid. The check of the report found these problems:",
         "",
         *(f"- {problem}" for problem in problems),
         "",

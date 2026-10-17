@@ -8,7 +8,9 @@ at the verifier, or at the scoped verifier of the fix-up round. Each case calls
 adapter in the place of the harness.
 """
 
-from .support import event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, tree
+from .support import (
+    event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
+)
 from .test_run_multi import HEAD, ticket
 
 FINDING = "FINDING-5120 a.txt holds no header row"
@@ -218,3 +220,144 @@ def test_retry_without_resume_is_a_usage_error(tmp_path, capsys):
 
     assert code == 2 and "--retry" in capsys.readouterr().err
     assert not (repo / ".git" / "delegate").exists()
+
+
+# `economy` mode: the retry goes on with the specialist of the step, or with its check, and then the chain goes on.
+
+
+def economy(*tickets):
+    return HEAD.replace('mode = "assure"', 'mode = "economy"') + "".join(tickets)
+
+
+def step_events(events, ticket_id, kind):
+    return [e for e in events if e["event"] == kind and e.get("ticket") == ticket_id]
+
+
+def test_an_economy_retry_continues_the_failed_specialist_in_its_worktree_then_builds_the_rest_of_the_chain(tmp_path, capsys, scripted):
+    # The specialist of a commits its work but ends capped twice, so the step fails at the continuation limit of 1.
+    # Ticket b waits on a, so the first run skips it, and no ticket is built.
+    scripted.outcomes = [("capped", 0)]
+    repo = make_repo(tmp_path, economy(ticket("a"), ticket("b", ("a",))))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1 and len(scripted.continuation_calls) == 1
+    work_of_a = git(repo, "rev-parse", "run/demo-a").strip()
+    worktree_of_a = scripted.calls[0].cwd
+    healthy(scripted, "ACCEPT")
+    scripted.outcomes = [("finished", 0)]
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, "")
+    # A continues in its own worktree from its commit; b gets its first brief; one verifier checks the chain.
+    (continued,) = scripted.continuation_calls
+    assert continued.cwd == worktree_of_a and work_of_a in continued.prompt and "Ticket a" in continued.prompt
+    assert [ticket_of(call) for call in scripted.calls] == ["b"]
+    assert len(scripted.verifier_calls) == 1
+    events = read_journal_file(repo, run_id)
+    retried = after_retry(events)
+    assert {k: retried[0][k] for k in ("ticket", "phase", "round")} == {"ticket": "a", "phase": "specialist", "round": 0}
+    assert "the continuation limit of 1 is reached" in retried[0]["reason"]
+    # The spawn of the retry is no continuation of the count, as the spawn of a resume is not, so the limit is not reached.
+    assert [e["role"] for e in step_events(retried, "a", "agent-start")] == ["specialist"]
+    assert step_events(retried, "a", "continuation") == [] and step_events(retried, "a", "continuation-limit") == []
+    assert [e["state"] for e in step_events(events, "a", "step-end")] == ["failed", "built"]
+    assert [e["state"] for e in step_events(retried, "b", "step-end")] == ["built"]
+    # B starts from the tip of a, so the chain holds both, and the run branch gets the commit of the first run of a.
+    (start_of_b,) = step_events(events, "b", "step-start")
+    assert start_of_b["base_commit"] == git(repo, "rev-parse", "run/demo-a").strip()
+    assert git(repo, "merge-base", "--is-ancestor", work_of_a, "run/demo") == ""
+    assert {"a.txt", "b.txt"} <= set(tree(repo, "run/demo"))
+    assert [e["phase"] for e in retried if e["event"] == "gate-result"] == ["chain"]
+    end = events[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"], end["skipped"]) == ("run-end", "built", ["a", "b"], [], [])
+
+
+def test_an_economy_retry_after_the_run_branch_moved_verifies_only_the_tickets_that_it_builds(tmp_path, capsys, scripted):
+    # Ticket a is built and accepted. The specialist of b commits and ends failed twice. Ticket c waits on b.
+    scripted.failing_tickets = {"b"}
+    repo = make_repo(tmp_path, economy(ticket("a"), ticket("b"), ticket("c", ("b",))))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1 and "a.txt" in tree(repo, "run/demo") and "b.txt" not in tree(repo, "run/demo")
+    accepted = git(repo, "rev-parse", "run/demo").strip()
+    healthy(scripted, "ACCEPT")
+    scripted.failing_tickets = set()
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b")
+
+    assert (code, err) == (0, "")
+    assert [ticket_of(call) for call in scripted.continuation_calls] == ["b"]
+    assert [ticket_of(call) for call in scripted.calls] == ["c"]
+    # The verifier of the retry sees the tickets b and c, and not the accepted ticket a.
+    (verifier,) = scripted.verifier_calls
+    assert "Ticket b adds its file." in verifier.prompt and "Ticket c adds its file." in verifier.prompt
+    assert "Ticket a adds its file." not in verifier.prompt
+    events = read_journal_file(repo, run_id)
+    (advance,) = [e for e in after_retry(events) if e["event"] == "run-branch-advance"]
+    assert (advance["from_commit"], advance["to_commit"]) == (accepted, git(repo, "rev-parse", "run/demo-c").strip())
+    assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
+    assert (events[-1]["event"], events[-1]["result"], events[-1]["failed"]) == ("run-end", "built", [])
+    assert sorted(events[-1]["built"]) == ["a", "b", "c"]
+
+
+def refused(repo, capsys, run_id, scripted, ticket_id, *words):
+    """Retry `ticket_id` and check that the command exits 1, names the ticket and the words, and changes nothing."""
+    before = journal_path(repo, run_id).read_bytes()
+    tips = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", ticket_id)
+
+    assert code == 1 and "Traceback" not in err
+    assert f"ticket {ticket_id!r}" in err and all(word in err for word in words), err
+    assert journal_path(repo, run_id).read_bytes() == before
+    assert git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads") == tips
+    assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.verifier_calls == []
+
+
+def test_an_economy_retry_of_a_step_that_a_later_built_ticket_went_past_exits_one_and_changes_nothing(tmp_path, capsys, scripted):
+    # Ticket b does not wait on a, so it starts from the base of the run and is built without the commits of a.
+    scripted.failing_tickets = {"a"}
+    repo = make_repo(tmp_path, economy(ticket("a"), ticket("b")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+
+    refused(repo, capsys, run_id, scripted, "a", "ticket 'b'", "built")
+
+
+def test_an_economy_retry_of_a_ticket_that_the_chain_verification_failed_exits_one_and_changes_nothing(tmp_path, capsys, scripted):
+    scripted.verdict_sequence, scripted.verdict_findings = ["REJECT"], [FINDING]
+    repo = make_repo(tmp_path, economy(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+
+    refused(repo, capsys, run_id, scripted, "a", "verification of the chain")
+
+
+def test_an_economy_retry_of_a_step_whose_chain_start_moved_exits_one_and_changes_nothing(tmp_path, capsys, scripted):
+    # Ticket b starts from the tip of a. Then the verification of the chain adds a fix-up commit to the branch of a.
+    scripted.failing_tickets = {"b"}
+    scripted.verdict_sequence, scripted.verdict_findings = ["REJECT", "ACCEPT"], [FINDING]
+    repo = make_repo(tmp_path, economy(ticket("a"), ticket("b")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1 and "fixup-1.txt" in tree(repo, "run/demo")
+
+    refused(repo, capsys, run_id, scripted, "b", "starts at")
+
+
+def test_an_economy_retry_after_a_valid_committed_report_spawns_no_specialist_and_checks_the_step_again(tmp_path, capsys, scripted):
+    # The report is valid and says committed, but the commit changes a hotspot, so the check of the step fails.
+    scripted.files_by_ticket["a"] = {"a.txt": "a\n", "LICENSE": "changed\n"}
+    repo = make_repo(tmp_path, economy(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert code == 1 and "Traceback" not in err
+    assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.verifier_calls == []
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert {k: retried[0][k] for k in ("ticket", "phase", "round")} == {"ticket": "a", "phase": "gates", "round": 0}
+    assert "agent-start" not in event_names(retried)
+    (step_end,) = step_events(retried, "a", "step-end")
+    assert step_end["state"] == "failed" and step_end["reason"].startswith("hotspot finding: LICENSE")

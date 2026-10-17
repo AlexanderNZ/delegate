@@ -160,6 +160,22 @@ def test_the_reference_names_the_trigger_of_a_continuation_for_a_report_that_is_
 
 
 @outside_the_package
+def test_the_reference_names_the_trigger_of_a_continuation_for_a_missing_report(tmp_path, capsys):
+    # The specialist commits its work, and no run writes a report.
+    scripted = ScriptedAdapter(write_report=False)
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path)
+        delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    finally:
+        adapters.unregister("scripted")
+    triggers = {e["trigger"] for e in read_journal(capsys.readouterr().out) if e["event"] in ("continuation", "continuation-limit")}
+    assert triggers == {"report-missing"}
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    assert "`report-missing`" in rows["`continuation`"]
+
+
+@outside_the_package
 def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
     from .support import kill_a_run, read_journal_file, resume_main
 
