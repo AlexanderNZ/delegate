@@ -5,8 +5,8 @@ This module only dispatches. `render`, `validate` and `bootstrap` go to
 Each one receives the argument list it would receive from its standalone
 command (`agent-definitions` or `verifier-brief`), so the exit code, the output
 and the files written match by construction, and the two standalone parsers
-stay the single source of every option. Only the top-level help and the two
-usage errors of the umbrella itself are written here.
+stay the single source of every option. Only the top-level help, the two
+usage errors of the umbrella itself, and the title of the terminal (`delegate.cli.title`) are written here.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import argparse
 import sys
 
 from . import agent_definitions, brief, docs_command, run_command, status, watch
+from .title import Title
 
 # Subcommands that the `agent-definitions` command owns, with the line that
 # `delegate --help` shows for each.
@@ -81,6 +82,11 @@ def _subcommand_index(args: list[str]) -> int:
     return i
 
 
+def _set_title(command: str) -> None:
+    """Set the title of the terminal to `delegate <command>`. `watch` sets its own title when it found the run."""
+    Title(sys.stdout).set(f"delegate {command}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     parser = _help_parser()
@@ -93,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.parse_args(args)  # -h prints the help and exits 0; any other option is a usage error
         return 2
     if command in AGENT_DEFINITIONS_COMMANDS:
+        _set_title(command)
         return agent_definitions.main(args)
     if command == BRIEF_COMMAND:
         if at:
@@ -101,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        _set_title(command)
         return brief.main(args[at + 1 :])
     if command == RUN_COMMAND:
         if at:
@@ -109,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        _set_title(command)
         return run_command.main(args[at + 1 :])
     if command == STATUS_COMMAND:
         if at:
@@ -117,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        _set_title(command)
         return status.main(args[at + 1 :])
     if command == WATCH_COMMAND:
         if at:
@@ -133,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        _set_title(command)
         return docs_command.main(args[at + 1 :])
     known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND, WATCH_COMMAND, DOCS_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)

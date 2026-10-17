@@ -10,7 +10,7 @@ synopsis:
 
 # Reference: `delegate render`, `validate`, `bootstrap` and `brief`
 
-These four subcommands of `delegate` take the arguments of the standalone commands `agent-definitions` (`render`, `validate`, [**`bootstrap`**](../glossary.md#bootstrap)) and `verifier-brief` (`brief`). The exit code, the output and the files written are the same for the two spellings: `delegate render ...` is `agent-definitions render ...`, and `delegate brief ...` is `verifier-brief ...`. The tables of options on this page are generated from the argument parsers by `delegate docs`. See [`delegate docs`](docs.md).
+These four subcommands of `delegate` take the arguments of the standalone commands `agent-definitions` (`render`, `validate`, [**`bootstrap`**](../glossary.md#bootstrap)) and `verifier-brief` (`brief`). The exit code, the output and the files written are the same for the two spellings: `delegate render ...` is `agent-definitions render ...`, and `delegate brief ...` is `verifier-brief ...`. On a terminal, the `delegate` spelling also sets the title of the terminal to `delegate <subcommand>`, for example `delegate render`, and the standalone commands set no title. See [the terminal title](status-and-watch.md#the-terminal-title). The tables of options on this page are generated from the argument parsers by `delegate docs`. See [`delegate docs`](docs.md).
 
 The [**skill**](../glossary.md#skill) [`agent-definitions`](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md) holds the rules that the commands apply: the rendering rules, the [**tier table**](../glossary.md#tier-table), and the rules of the [**verifier**](../glossary.md#verifier)'s shell.
 

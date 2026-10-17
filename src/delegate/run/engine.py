@@ -526,7 +526,7 @@ def _check_chain_start(
 
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
-    resume: str | None = None, retry: str | None = None, break_lock: bool = False,
+    resume: str | None = None, retry: str | None = None, break_lock: bool = False, on_start: Callable[[str], None] | None = None,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -546,6 +546,9 @@ def run_workflow(
     a lock of its own run whose process no longer exists, and the result names
     that holder in `taken_over`. `break_lock` also removes a lock of another run
     whose process no longer exists. No lock whose process is alive is removed.
+
+    `on_start` gets the run id when the run holds its lock, before the first step: `delegate run` puts the id in the
+    title of the terminal.
     """
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
@@ -556,6 +559,8 @@ def run_workflow(
         if resume is None:
             _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
+            if on_start is not None:
+                on_start(run_id)
             result = _execute(
                 workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry
             )

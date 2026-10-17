@@ -5,6 +5,9 @@ of the command: it makes the git backend of the version-control port, finds the 
 When standard output is a terminal, the sink is the live view of `delegate.run.live`, with the stream reader of the
 adapter of the run, as for `delegate status`, and this module draws its frames in place. Otherwise, and with `--raw`,
 the sink prints the raw line of each event.
+
+When standard output is a terminal, this module also sets the title of the terminal (`delegate.cli.title`): the short
+run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
 """
 
 from __future__ import annotations
@@ -16,10 +19,11 @@ from pathlib import Path
 from typing import TextIO
 
 from ..adapters.git import GitVersionControl
-from ..run import live, watch
+from ..run import live, status, watch
 from ..run.journal import JournalError
 from ..run.runs import RunsError, journal_of
 from .status import stream_reader_of, utc_now
+from .title import SEPARATOR, Title, short_run_id
 
 # The terminal control sequences of the live view: clear the screen, move the cursor to the top left, clear to the end
 # of the line, and clear the screen below the cursor.
@@ -102,6 +106,59 @@ class _Screen:
         self._out.flush()
 
 
+class _Titled:
+    """A sink that sets the title of the terminal, then tells each call to the sink that it wraps.
+
+    At each poll the title gives the percentage and the local time of the ETA of the snapshot of the events so far. The
+    title is set before the sink draws, so a frame of the live view holds no title. At the end the title gives the
+    result of the run, or the reason that the watch ended before the run: `problem`, `verdict`, `stall` or `time limit`.
+    """
+
+    def __init__(self, sink: watch.Sink, journal: Path, title: Title) -> None:
+        self._sink, self._journal, self._title = sink, journal, title
+        self._name = f"delegate watch{SEPARATOR}{short_run_id(journal.parent.name)}"
+        self._events: list[dict[str, object]] = []
+        self._result: str | None = None
+
+    def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
+        self._events.append(event)
+        if event["event"] == "run-end":
+            self._result = str(event["result"])
+        elif problem is not None:
+            self._result = "problem"
+        self._sink.event(event, reported, problem)
+
+    def verdict(self, event: dict[str, object]) -> None:
+        self._result = "verdict"
+        self._sink.verdict(event)
+
+    def stall(self, minutes: float, last_event: dict[str, object] | None) -> None:
+        self._result = "stall"
+        self._sink.stall(minutes, last_event)
+
+    def time_limit(self, minutes: float) -> None:
+        self._result = "time limit"
+        self._sink.time_limit(minutes)
+
+    def poll(self) -> None:
+        self._title.set(self._progress())
+        self._sink.poll()
+
+    def end(self) -> None:
+        self._title.set(self._progress() if self._result is None else f"{self._name}{SEPARATOR}{self._result}")
+        self._sink.end()
+
+    def _progress(self) -> str:
+        """The title of a watch that goes on: the percentage and the local ETA, or only the run when the journal has no `run-start`."""
+        try:
+            # The title needs no tokens, so the snapshot reads no event stream.
+            snap = status.snapshot_of(self._events, self._journal, lambda adapter: None, utc_now())
+        except JournalError:
+            return self._name
+        eta = live.local_time(snap.eta) if snap.eta else "-"
+        return f"{self._name}{SEPARATOR}{snap.percent}%{SEPARATOR}ETA {eta}"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, args.from_position, args.poll_seconds)
@@ -111,6 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         if not args.raw and sys.stdout.isatty():
             screen = _Screen(sys.stdout)
             sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw)
+        title = Title(sys.stdout)
+        if title.enabled:
+            sink = _Titled(sink, journal, title)
         result = watch.follow(journal, options, sink)
     except (RunsError, JournalError) as error:
         print(f"delegate watch: {error}", file=sys.stderr)

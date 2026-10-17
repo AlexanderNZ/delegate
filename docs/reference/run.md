@@ -366,6 +366,8 @@ The run id is the UTC time and four hexadecimal characters, for example `2026100
 
 On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket.
 
+When stdout is a terminal, the command also sets the title of the terminal. The title is `delegate run` when the command starts, and `delegate run · <short run id>` when the run holds its lock. The short run id is the four hexadecimal characters at the end of the run id, for example `e9dc`. With `--dry-run`, the title stays `delegate run`. When stdout is not a terminal, or when the environment variable `DELEGATE_NO_TITLE` is `1`, the command writes no title. See [the terminal title](status-and-watch.md#the-terminal-title).
+
 | Code | Meaning |
 |---|---|
 | 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |

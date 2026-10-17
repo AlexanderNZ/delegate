@@ -22,6 +22,7 @@ from ..run.engine import EngineError, run_workflow, workflow_of_run
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
+from .title import SEPARATOR, Title, short_run_id
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,10 +116,11 @@ def main(argv: list[str] | None = None) -> int:
             registered = ", ".join(adapters.registered_names()) or "none"
             print(f"delegate run: adapter {workflow.adapter!r} has no implementation yet; registered: {registered}", file=sys.stderr)
             return 1
+        title = Title(sys.stdout)
         try:
             result = run_workflow(
                 workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
-                break_lock=args.break_lock,
+                break_lock=args.break_lock, on_start=lambda run_id: title.set(f"delegate run{SEPARATOR}{short_run_id(run_id)}"),
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

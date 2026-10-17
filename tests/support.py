@@ -508,6 +508,15 @@ FRAME_START = "\x1b[H"
 FRAME_END = "\x1b[J"
 
 
+# The OSC 2 sequence that sets the title of the terminal (ESC ] 2 ; <title> BEL). `delegate` writes it on a terminal.
+TITLE = re.compile("\x1b\\]2;([^\x07]*)\x07")
+
+
+def without_titles(out: str) -> str:
+    """The output with no title sequence: the text that the terminal shows."""
+    return TITLE.sub("", out)
+
+
 def frames(out: str) -> list[list[str]]:
     """The frames that the live view of `watch` drew, in order, each as its lines with no control sequence."""
     return [CONTROL.sub("", chunk.split(FRAME_END)[0]).splitlines() for chunk in out.split(FRAME_START)[1:]]

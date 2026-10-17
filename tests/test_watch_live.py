@@ -28,7 +28,7 @@ import pytest
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import Terminal, bare_repo, frames, journal_path
+from .support import TITLE, Terminal, bare_repo, frames, journal_path, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 PYTEST = "nix develop -c python3 -m pytest -q"
@@ -381,7 +381,9 @@ def test_watch_to_a_pipe_or_with_raw_prints_the_raw_lines_of_before(tmp_path, mo
     code, out = watch(repo, monkeypatch, *extra, terminal=terminal)
 
     assert code == 0
-    assert out == RAW_OF_THE_WHOLE_RUN.format(dir=run.dir)
+    # On a terminal the output also sets the title of the terminal, which the terminal does not show as text.
+    assert without_titles(out) == RAW_OF_THE_WHOLE_RUN.format(dir=run.dir)
+    assert (TITLE.search(out) is not None) == terminal
 
 
 RAW_OF_A_PROBLEM = """\

@@ -19,6 +19,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - A specialist that commits its work and writes no report does not fail the step at once. The engine sends a continuation that asks only for the report, as for a report that is not valid. The journal records the trigger `report-missing`, and the continuation counts against the continuation limit of the mode. A missing report on a branch with no commit of the ticket still fails the step (#85).
 - `delegate run --resume <run-id> --retry <ticket>` also goes on with a failed step of `economy` mode. It uses the worktree and the commits of the step again. The specialist continues, with the continuation limit of the mode again, or, after a valid report that says `committed`, the engine checks the step again. The journal records the `retry` phase `specialist` or `gates`. The skipped tickets after the step are checked again, and the chain then goes on to the chain verification, which covers only the built tickets whose work the run branch does not hold. A step that the chain verification failed, a step that a later built ticket went past, and a step whose chain start moved cannot be retried (#85).
 
+### Added
+
+- On a terminal, `delegate` sets the title of the terminal with the OSC 2 sequence, so the tab shows the command and not the name of the Python process (#80). `delegate watch` shows `delegate watch · <short run id> · <percent>% · ETA <HH:MM>` while it follows the run, and the result when it ends. `delegate run` shows `delegate run · <short run id>`, and each other subcommand shows `delegate <subcommand>`. When standard output is not a terminal, or when `DELEGATE_NO_TITLE` is `1`, `delegate` writes no title.
+
 ## [1.3.0] - 2026-10-18
 
 ### Added
