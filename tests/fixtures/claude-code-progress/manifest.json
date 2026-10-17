@@ -1,0 +1,12 @@
+{
+  "harness": "Claude Code",
+  "harness_version": "2.1.287",
+  "recorded": "2026-10-16",
+  "recorded_note": "UTC date of the timestamps of the events next to these lines in the full stream.",
+  "command": "claude --print --output-format stream-json --verbose --model <model> --agent <name> --disallowedTools Monitor,TaskStop",
+  "source": "Lines copied with no change from the stream of the specialist of one ticket of a delegate run. These events have no timestamp field, so each file holds only a part of a stream. A test puts a part after the timed events of a recorded stream in tests/fixtures/claude-code.",
+  "excerpts": {
+    "heartbeats.jsonl": {"how": "four tool_progress events with \"heartbeat\": true, which the harness wrote each 30 seconds while a Bash command ran in the foreground"},
+    "thinking.jsonl": {"how": "two system events with the subtype thinking_tokens, which the harness wrote while the model thought"}
+  }
+}

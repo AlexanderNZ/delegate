@@ -87,7 +87,9 @@ An API error (for example, a model that does not exist) gives `is_error` true wi
 
 Each form of `delegate status` reads each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far and the time of the newest event:
 
-- The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system` and `result` events do not.
+- The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system`, `rate_limit_event`, `tool_progress` and `result` events do not.
+- Some events with no `timestamp` show that the agent works now. While a tool runs, the harness writes a `tool_progress` event with `"heartbeat": true` every 30 seconds. While the model thinks, it writes `system` events with the subtype `thinking_tokens`. When the newest event of the stream is one of these, the time is the modification time of the stream file: the time that the harness last wrote to it. Measured on Claude Code 2.1.287 on 2026-10-16.
+- When the newest event is another event with no `timestamp` (`init`, `rate_limit_event`, or `result`), the time stays the `timestamp` of the newest event that has one. A stream with no event that has a `timestamp` and no event of work gives no time.
 - The token count of a `usage` object adds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens`.
 - The harness writes one `result` event at the end of each session. Its `usage` holds the true count of the session, so the adapter uses it. A resumed session writes a second `result` event in the same stream: the adapter adds the count of each `result` event.
 - The `message.usage` of an `assistant` event is partial: its `output_tokens` is not final. For the part of the stream after the last `result` event (a session that runs now), the adapter adds the turns: one turn for each message id. The harness writes one event for each content block of a message, and each of these events repeats the usage of the message, so the adapter keeps the newest usage of each message id.
@@ -120,6 +122,8 @@ The directory `tests/fixtures/claude-code/` holds one recorded stream for each e
 | `failed.jsonl` | `failed` | Model `no-such-model-xyz`, which the API refuses with a 404. | 1 |
 
 Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC).
+
+The directory `tests/fixtures/claude-code-progress/` holds parts of a stream of a real run, with their own `manifest.json`: `heartbeats.jsonl` holds four `tool_progress` heartbeat events, and `thinking.jsonl` holds two `thinking_tokens` events. These events have no `timestamp`. A test puts a part after the timed events of a recorded stream, to check [the activity](#the-activity) of a stream that ends with them. Version: Claude Code 2.1.287. Recorded: 2026-10-16 (UTC).
 
 The [**contract tests**](../glossary.md#contract-test) replay these streams through a stand-in `claude` command and check the result fields. A test also checks that each fixture names the version of the manifest.
 

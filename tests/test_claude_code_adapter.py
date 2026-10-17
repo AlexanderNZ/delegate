@@ -9,6 +9,7 @@ date of each recording).
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -230,6 +231,17 @@ def test_each_recorded_stream_names_the_harness_version_and_the_date_and_gives_t
         assert result.end_state == facts["end_state"]
 
 
+# The recorded events of work that have no time: tool heartbeats and the token counts of a thought.
+PROGRESS: Path = claude_fake.FIXTURES.parent / "claude-code-progress"
+
+# A time after the newest timed event of each recorded stream, for the time that the harness last wrote to a stream.
+CHANGED: datetime = datetime(2026, 10, 8, 19, 58, 30, tzinfo=timezone.utc)
+
+
+def written_at(stream: Path, when: datetime) -> None:
+    os.utime(stream, (when.timestamp(), when.timestamp()))
+
+
 def capped_lines() -> list[str]:
     return (claude_fake.FIXTURES / "capped.jsonl").read_text().splitlines(keepends=True)
 
@@ -253,11 +265,45 @@ def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_comple
     assert activity == Activity(25794, datetime(2026, 10, 8, 19, 55, 53, 245000, tzinfo=timezone.utc))
 
 
-def test_the_activity_of_a_stream_with_no_timed_event_has_no_tokens_and_no_time(tmp_path):
+def test_the_activity_of_a_stream_with_only_its_init_event_has_no_tokens_and_no_time(tmp_path):
     live = tmp_path / "live.jsonl"
-    live.write_text("".join(capped_lines()[:3]))
+    live.write_text(capped_lines()[0])
+    written_at(live, CHANGED)
 
     assert adapters.get("claude-code").activity(live) == Activity(0, None)
+
+
+@pytest.mark.parametrize("excerpt", [pytest.param("heartbeats.jsonl", id="tool-heartbeats"), pytest.param("thinking.jsonl", id="thinking-tokens")])
+def test_the_activity_of_a_live_stream_that_ends_with_events_of_work_with_no_time_has_the_time_that_the_stream_changed(tmp_path, excerpt):
+    live = tmp_path / "live.jsonl"
+    live.write_text("".join(capped_lines()[:7]) + (PROGRESS / excerpt).read_text())
+    written_at(live, CHANGED)
+
+    # The seventh line, at 19:55:53.245, is the newest event with a time. The events after it have none, so the time
+    # is the time that the harness last wrote to the stream.
+    assert adapters.get("claude-code").activity(live) == Activity(25794, CHANGED)
+
+
+def test_the_activity_of_a_stream_whose_newest_event_has_a_time_after_heartbeats_has_the_time_of_that_event(tmp_path):
+    lines = capped_lines()
+    live = tmp_path / "live.jsonl"
+    live.write_text("".join(lines[:7]) + (PROGRESS / "heartbeats.jsonl").read_text() + lines[7])
+    written_at(live, CHANGED)
+
+    # The eighth line (the result of the tool) has the time 19:55:53.255.
+    assert adapters.get("claude-code").activity(live) == Activity(25794, datetime(2026, 10, 8, 19, 55, 53, 255000, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize("fixture", ["finished.jsonl", "capped.jsonl"])
+def test_the_activity_of_a_stream_that_ends_with_its_result_has_the_time_of_the_last_timed_event_not_the_time_of_the_file(tmp_path, fixture):
+    stream = tmp_path / fixture
+    stream.write_text((claude_fake.FIXTURES / fixture).read_text())
+    written_at(stream, CHANGED)
+
+    # The `rate_limit_event` and `result` events at the end have no time, and they are not work that goes on.
+    expected = {"finished.jsonl": datetime(2026, 10, 8, 19, 55, 11, 654000, tzinfo=timezone.utc),
+                "capped.jsonl": datetime(2026, 10, 8, 19, 55, 53, 255000, tzinfo=timezone.utc)}
+    assert adapters.get("claude-code").activity(stream).last_event == expected[fixture]
 
 
 def test_the_activity_of_a_resumed_session_adds_the_result_event_of_each_part(tmp_path):

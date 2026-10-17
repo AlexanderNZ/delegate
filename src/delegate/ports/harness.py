@@ -107,7 +107,9 @@ class Activity:
 
     `tokens` is the count of tokens that the agent used so far. `last_event` is
     the time (UTC) of the newest event that has a time, or `None` when the
-    stream holds no such event yet.
+    stream holds no such event yet. When the newest event has no time and shows
+    that the agent works (for example, a tool heartbeat), an adapter can give
+    the modification time of the stream file.
     """
 
     tokens: int

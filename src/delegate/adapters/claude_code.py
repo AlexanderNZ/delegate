@@ -17,8 +17,13 @@ adapter ends a session that writes no event for the idle timeout of the request
 (see `process.py`).
 
 The activity of a stream comes from the `result` events, the `assistant`
-events, and the `timestamp` field. The harness writes one `result` event at the
-end of each session, and its `usage` holds the true count of the session. The
+events, and the `timestamp` field. Some events of an agent that works have no
+`timestamp`: a `tool_progress` heartbeat while a tool runs, and a `system`
+event with the subtype `thinking_tokens` while the model thinks. When the newest
+event of the stream is one of these, the time is the modification time of the
+stream file: the time that the harness last wrote to it. The harness writes
+one `result` event at the end of each session, and its `usage` holds the true
+count of the session. The
 `usage` of an `assistant` event is partial: its output count is not final. The
 harness writes one event for each content block of a message, and each event of
 a message repeats the usage of that message. So the token count adds the
@@ -31,7 +36,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
@@ -66,6 +71,18 @@ REFUSAL = re.compile(r"Permission to use (\S+) has been denied because Claude Co
 
 # The fields of a `usage` object that its token count adds: the input, the cache, and the output.
 USAGE_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+
+
+def _is_work_with_no_time(event: dict[str, object]) -> bool:
+    """True for an event that the harness writes while the agent works, with no `timestamp`.
+
+    The harness writes a `tool_progress` heartbeat every 30 seconds while a tool
+    runs, and a `system` event with the subtype `thinking_tokens` while the model
+    thinks. Other events with no `timestamp` (`init`, `rate_limit_event`, `result`)
+    are not work that goes on.
+    """
+    kind = event.get("type")
+    return kind == "tool_progress" or (kind == "system" and event.get("subtype") == "thinking_tokens")
 
 
 def _tokens_of(usage: dict[str, object]) -> int:
@@ -169,7 +186,8 @@ class ClaudeCodeAdapter:
         tokens = 0
         usage_of: dict[str, dict[str, object]] = {}  # the turns of the session after the last `result` event
         last: datetime | None = None
-        for event in read_events(stream):
+        events = read_events(stream)
+        for event in events:
             if "timestamp" in event:
                 last = datetime.fromisoformat(str(event["timestamp"]))
             message = event.get("message")
@@ -178,4 +196,6 @@ class ClaudeCodeAdapter:
                 usage_of = {}
             elif event.get("type") == "assistant" and isinstance(message, dict) and isinstance(message.get("usage"), dict):
                 usage_of[str(message.get("id"))] = message["usage"]
+        if events and "timestamp" not in events[-1] and _is_work_with_no_time(events[-1]):
+            last = datetime.fromtimestamp(stream.stat().st_mtime, timezone.utc)
         return Activity(tokens + sum(_tokens_of(usage) for usage in usage_of.values()), last)

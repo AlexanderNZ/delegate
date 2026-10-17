@@ -116,6 +116,22 @@ def test_a_live_claude_code_stream_gives_the_tokens_and_the_seconds_since_the_la
     assert (snap["tickets_total"], snap["tickets_ended"], snap["percent"]) == (2, 0, 0)
 
 
+def test_an_agent_whose_stream_ends_with_tool_heartbeats_is_idle_since_the_harness_last_wrote_to_its_stream(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a")
+    heartbeats = (claude_fake.FIXTURES.parent / "claude-code-progress" / "heartbeats.jsonl").read_text()
+    live = run.stream("a.specialist.stream.jsonl", "".join(claude("capped.jsonl").splitlines(keepends=True)[:7]) + heartbeats)
+    written = (START + timedelta(seconds=100)).timestamp()
+    os.utime(live, (written, written))  # the newest heartbeat; the heartbeats have no time of their own
+    run.step_start(0, "a")
+    run.agent_start(0, "a", "specialist", live)
+    frozen(monkeypatch, 120)
+
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["tokens"], a["idle_seconds"]) == (25794, 20)
+
+
 def test_a_live_opencode_stream_gives_the_tokens_and_the_seconds_since_the_last_activity_of_the_running_agent(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     run = Run(repo, "r1", "a", adapter="opencode")
