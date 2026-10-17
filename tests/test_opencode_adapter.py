@@ -250,12 +250,42 @@ def test_the_activity_of_a_finished_stream_gives_the_tokens_of_its_step_and_the_
     activity = adapters.get("opencode").activity(opencode_fake.FIXTURES / "finished.jsonl")
 
     # The timestamp is in epoch milliseconds: 1791490898675.
-    assert activity == Activity(84197, datetime(2026, 10, 8, 20, 21, 38, 675000, tzinfo=timezone.utc))
+    # new = input 83801 + output 21 + reasoning 375 + cache write 0; cache = cache read 0.
+    assert activity == Activity(84197, 0, datetime(2026, 10, 8, 20, 21, 38, 675000, tzinfo=timezone.utc))
 
 
-def test_the_activity_of_a_stream_with_cache_reads_gives_the_total_that_the_step_reports():
-    # total 85755 = input 22342 + output 10 + reasoning 43 + cache read 63360
-    assert adapters.get("opencode").activity(opencode_fake.FIXTURES / "unknown-agent.jsonl").tokens == 85755
+def test_the_activity_of_a_stream_with_cache_reads_gives_the_new_tokens_and_the_cache_reads_as_two_counts():
+    activity = adapters.get("opencode").activity(opencode_fake.FIXTURES / "unknown-agent.jsonl")
+
+    # new = input 22342 + output 10 + reasoning 43 + cache write 0 = 22395; cache = cache read 63360.
+    assert (activity.tokens_new, activity.tokens_cache) == (22395, 63360)
+
+
+def test_the_cache_writes_of_a_step_count_as_new_tokens(tmp_path):
+    written = tmp_path / "written.jsonl"
+    written.write_text(opencode_fake.FIXTURES.joinpath("unknown-agent.jsonl").read_text().replace('"write":0', '"write":500'))
+
+    activity = adapters.get("opencode").activity(written)
+
+    assert (activity.tokens_new, activity.tokens_cache) == (22395 + 500, 63360)
+
+
+def test_a_step_with_no_cache_field_gives_no_cache_tokens(tmp_path):
+    no_cache = tmp_path / "no-cache.jsonl"
+    no_cache.write_text(opencode_fake.FIXTURES.joinpath("unknown-agent.jsonl").read_text().replace(',"cache":{"write":0,"read":63360}', ""))
+    assert '"cache"' not in no_cache.read_text()
+
+    activity = adapters.get("opencode").activity(no_cache)
+
+    assert (activity.tokens_new, activity.tokens_cache) == (22395, 0)
+
+
+def test_a_step_finish_event_with_no_input_count_raises_and_names_the_stream(tmp_path):
+    broken = tmp_path / "broken.jsonl"
+    broken.write_text(opencode_fake.FIXTURES.joinpath("finished.jsonl").read_text().replace('"input":83801,', ""))
+
+    with pytest.raises(AdapterError, match="broken.jsonl.*part.tokens.input"):
+        adapters.get("opencode").activity(broken)
 
 
 def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_adds_the_steps_that_finished_and_reads_with_no_error(tmp_path):
@@ -265,22 +295,23 @@ def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_adds_the_steps_t
 
     activity = adapters.get("opencode").activity(live)
 
-    # The step of the first part finished (84197 tokens). The second step has no complete step_finish yet.
-    assert activity == Activity(84197, datetime(2026, 10, 8, 20, 22, 4, 475000, tzinfo=timezone.utc))
+    # The step of the first part finished (84197 new tokens). The second step has no complete step_finish yet.
+    assert activity == Activity(84197, 0, datetime(2026, 10, 8, 20, 22, 4, 475000, tzinfo=timezone.utc))
 
 
 def test_the_activity_of_two_finished_steps_adds_the_tokens_of_both(tmp_path):
     both = tmp_path / "both.jsonl"
     both.write_text("".join(fixture_lines("finished.jsonl") + fixture_lines("step-cap.jsonl")))
 
-    assert adapters.get("opencode").activity(both).tokens == 84197 + 84637
+    activity = adapters.get("opencode").activity(both)
+    assert (activity.tokens_new, activity.tokens_cache) == (84197 + 84637, 0)
 
 
 def test_the_activity_of_an_empty_stream_has_no_tokens_and_no_time(tmp_path):
     empty = tmp_path / "empty.jsonl"
     empty.write_text("")
 
-    assert adapters.get("opencode").activity(empty) == Activity(0, None)
+    assert adapters.get("opencode").activity(empty) == Activity(0, 0, None)
 
 
 def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_names_the_line(tmp_path):

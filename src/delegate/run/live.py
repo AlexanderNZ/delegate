@@ -217,7 +217,8 @@ class LiveView:
         if self._reader is None or stream is None:
             return None
         try:
-            return f"{status.format_tokens(self._reader(Path(str(stream))).tokens)} tok"
+            found = self._reader(Path(str(stream)))
+            return status.format_token_counts(found.tokens_new, found.tokens_cache)
         except Exception:  # noqa: BLE001 - the view only shows data, as `delegate status` does
             return None
 
@@ -307,8 +308,8 @@ class LiveView:
         start = datetime.fromisoformat(str(self._events[0]["time"])) if self._events and self._events[0]["event"] == "run-start" else when
         parts = [f"run {event['result']}", duration((when - start).total_seconds())]
         snap = self._snapshot()
-        if snap is not None and snap.tokens is not None:
-            parts.append(f"{status.format_tokens(snap.tokens)} tok")
+        if snap is not None and snap.tokens_new is not None and snap.tokens_cache is not None:
+            parts.append(status.format_token_counts(snap.tokens_new, snap.tokens_cache))
         text = SEPARATOR.join(parts)
         if newest is None:
             self._add(when, "", text)

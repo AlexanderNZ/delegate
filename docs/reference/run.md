@@ -433,11 +433,12 @@ The adapter has the method `run(request)`.
 | `event_stream` | The path of the captured event stream: the `event_stream` of the request. |
 | `ended_idle` | True when the adapter ended the session at the idle timeout. Then `report_valid` gave true, and the harness wrote no event for `idle_timeout` seconds. Otherwise false. An adapter that cannot end a session ignores `idle_timeout` and `report_valid`, and gives false. |
 
-The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with two fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
+The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with three fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
 
 | `Activity` field | Meaning |
 |---|---|
-| `tokens` | The tokens that the agent used so far, as a whole number. |
+| `tokens_new` | The new tokens that the agent used so far, as a whole number: the input, the cache writes, and the output, with the thinking tokens. |
+| `tokens_cache` | The cache reads of the agent so far, as a whole number. Each turn reads the context again from the cache, so this count grows with the turns times the size of the context. |
 | `last_event` | The time (UTC) of the newest event of the stream that has a time, or `None` when the stream has no such event. When the newest event has no time and shows that the agent works, an adapter can give the modification time of the stream file. The `claude-code` adapter does this: see [its activity](claude-code-adapter.md#the-activity). |
 
 Half a line at the end of a stream is not an error, because a live harness writes it now. A missing file, or a line before the last one that is not JSON, raises an `AdapterError`. A file that the process cannot read raises the error of the file system. `delegate status` shows no tokens and no activity for a stream that raises one of these errors. See [a stream that cannot be read](status-and-watch.md#a-stream-that-cannot-be-read).

@@ -171,18 +171,18 @@ def watch(
 FEED = [
     "16:00  run r1 started · assure · 2 tickets",
     "16:00  #a started · python-specialist",
-    "16:36  #a specialist finished · 36m · 19k tok · report ok",
+    "16:36  #a specialist finished · 36m · tokens 19k new, 0 cache · report ok",
     "16:52  #a gates green (pytest 16m, zensical 1s)",
     "16:52  #a verifier started",
-    "17:00  #a verifier finished · 7m · 19k tok · report ok",
+    "17:00  #a verifier finished · 7m · tokens 19k new, 0 cache · report ok",
     "17:00  #a ✓ ACCEPT · built",
     "17:00  #b started · python-specialist",
 ]
 
 FEED_AFTER_THE_END = [
-    "17:06  #b specialist finished · 6m · 26k tok · report ok",
+    "17:06  #b specialist finished · 6m · tokens 12k new, 14k cache · report ok",
     "17:06  #b built",
-    "17:06  run built · 1h06m · 64k tok",
+    "17:06  run built · 1h06m · tokens 50k new, 14k cache",
 ]
 
 
@@ -199,16 +199,16 @@ def test_watch_on_a_terminal_draws_the_live_block_at_the_top_and_the_feed_below_
     assert code == 0
     first, last = frames(out)
     assert first == [
-        "run r1 running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, 64k tokens",
-        "  a built, 1h00m used, 39k tokens",
-        "  b running specialist, 50s used, 26k tokens, last activity 7d08h ago",
+        "run r1 running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, tokens 50k new, 14k cache",
+        "  a built, 1h00m used, tokens 39k new, 0 cache",
+        "  b running specialist, 50s used, tokens 12k new, 14k cache, last activity 7d08h ago",
         "",
         *FEED,
     ]
     assert last == [
-        "run r1 built 100%, 2 of 2 ended, 1h06m used, 64k tokens",
-        "  a built, 1h00m used, 39k tokens",
-        "  b built, 6m40s used, 26k tokens",
+        "run r1 built 100%, 2 of 2 ended, 1h06m used, tokens 50k new, 14k cache",
+        "  a built, 1h00m used, tokens 39k new, 0 cache",
+        "  b built, 6m40s used, tokens 12k new, 14k cache",
         "",
         *FEED,
         *FEED_AFTER_THE_END,
@@ -276,7 +276,7 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
     assert code == 3
     (last,) = frames(out)
     assert last[-2:] == [
-        "16:36  #a specialist finished · 36m · 19k tok",
+        "16:36  #a specialist finished · 36m · tokens 19k new, 0 cache",
         "16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json",
     ]
     assert out.splitlines()[-1] == "position 5"
@@ -302,11 +302,11 @@ def test_the_verdict_of_an_economy_chain_names_its_stack_and_joins_the_end_of_th
     assert last[last.index("") + 1:] == [
         "16:00  run r1 started · economy · 1 ticket",
         "16:00  #a started · python-specialist",
-        "16:10  #a specialist finished · 10m · 19k tok · report ok",
+        "16:10  #a specialist finished · 10m · tokens 19k new, 0 cache · report ok",
         "16:11  #a gates green (pytest 1m) · built",
         "16:11  stack python verifier started (#a)",
-        "16:16  stack python verifier finished · 5m · 19k tok · report ok",
-        "16:16  stack python ✓ ACCEPT · run built · 16m · 39k tok",
+        "16:16  stack python verifier finished · 5m · tokens 19k new, 0 cache · report ok",
+        "16:16  stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 0 cache",
     ]
 
 
@@ -332,9 +332,9 @@ def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_t
     assert last[last.index("") + 1:] == [
         "16:00  run r1 started · assure · 1 ticket",
         "16:00  #a started · python-specialist",
-        "16:36  #a specialist capped · 36m · 19k tok",
+        "16:36  #a specialist capped · 36m · tokens 19k new, 0 cache",
         "16:36  #a continuation 1 of 2 · capped",
-        "16:40  #a specialist finished · 4m · 19k tok · report ok",
+        "16:40  #a specialist finished · 4m · tokens 19k new, 0 cache · report ok",
         "16:41  #a gates red (pytest 1m red)",
         "16:41  ✗ #a the step continued 2 times (limit 2, trigger gates-red)",
     ]
@@ -442,8 +442,8 @@ def a_run_that_goes_on(run: Run) -> None:
 # Each reason to end, the journal that gives it, the options, the exit code of `watch` before the live view, the raw
 # lines of before (None when the case does not fix them), and the line that the feed of the live view ends with.
 END_REASONS = [
-    pytest.param(ended_built, (), 0, None, r"16:00  run built · 1s · 0 tok", id="run-succeeded"),
-    pytest.param(ended_failed, (), 1, None, r"16:00  run failed · 1s · 0 tok", id="run-failed"),
+    pytest.param(ended_built, (), 0, None, r"16:00  run built · 1s · tokens 0 new, 0 cache", id="run-succeeded"),
+    pytest.param(ended_failed, (), 1, None, r"16:00  run failed · 1s · tokens 0 new, 0 cache", id="run-failed"),
     pytest.param(a_problem, (), 3, RAW_OF_A_PROBLEM, r"16:00  ✗ #a the step failed: crashed: OSError: disk full", id="problem"),
     pytest.param(a_problem_with_no_reason, (), 3, None, r"16:00  ✗ #a the step failed", id="problem-with-no-reason"),
     pytest.param(a_verdict, ("--until", "verdict"), 4, RAW_OF_A_VERDICT, r"17:00  #a REJECT · 1 finding", id="verdict"),

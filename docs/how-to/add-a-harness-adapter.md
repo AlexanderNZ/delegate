@@ -2,7 +2,7 @@
 
 Use this page when you want the [**engine**](../glossary.md#engine) to drive a [**harness**](../glossary.md#harness) that has no [**adapter**](../glossary.md#adapter) yet. An adapter is a small Python object. It starts the [**headless**](../glossary.md#headless) command of a harness, and turns the [**event stream**](../glossary.md#event-stream) of the harness into a result that the engine understands.
 
-An adapter also reads a stream of its harness: it gives the tokens so far and the time of the newest event. `delegate status` uses them to show what an agent does while it runs.
+An adapter also reads a stream of its harness: it gives the tokens so far, as two counts, and the time of the newest event. `delegate status` uses them to show what an agent does while it runs.
 
 You do not read the engine for this. You need the interface below, one recorded stream for each [**end state**](../glossary.md#end-state), and the [**contract test**](../glossary.md#contract-test) of this page.
 
@@ -36,7 +36,7 @@ The adapter class has two attributes and two methods:
 - `tier_column`: the name of the column of the [**tier table**](../glossary.md#tier-table) that holds the models of this harness.
 - `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a [**continuation**](../glossary.md#continuation).
 - `run`: takes the request and returns the result.
-- `activity`: takes the path of a stream that the adapter wrote, and returns an `Activity`: `tokens`, the tokens that the agent used so far, and `last_event`, the time (UTC) of the newest event that has a time, or `None`. The stream can be the stream of an agent that still runs, so it can end in half a line.
+- `activity`: takes the path of a stream that the adapter wrote, and returns an `Activity` with three fields. `tokens_new` is the new tokens that the agent used so far: the input, the cache writes, and the output. `tokens_cache` is the cache reads so far. `last_event` is the time (UTC) of the newest event that has a time, or `None`. The stream can be the stream of an agent that still runs, so it can end in half a line.
 
 The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/process.py` gives you the helper `run_harness`. It starts the command with the prompt on standard input, and writes the standard output to the event stream of the request. It also ends an idle session after a valid report. It returns the exit status, the standard error, and `ended_idle`. The module `delegate/adapters/streams.py` gives you the helper `read_events`. It reads a line-delimited JSON stream, and ignores half a line at the end. A missing file, or a bad line before the end, raises `AdapterError`. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
@@ -55,7 +55,7 @@ Record one stream for each end state. Write the version of the harness and the d
 
 ### 2. Write the adapter
 
-This example drives a harness `myharness`. The prompt goes on standard input. The stream has one JSON event on each line. Each event has a `time`, and a `usage` event gives the tokens of one model call.
+This example drives a harness `myharness`. The prompt goes on standard input. The stream has one JSON event on each line. Each event has a `time`, and a `usage` event gives the tokens of one model call: `new` for the new tokens, and `cache` for the cache reads.
 
 ```python title="myharness.py"
 """The MyHarness adapter: drive `myharness run --json`."""
@@ -101,9 +101,11 @@ class MyHarnessAdapter:
 
     def activity(self, stream: Path) -> Activity:
         events = read_events(stream)
-        tokens = sum(int(event["tokens"]) for event in events if event.get("type") == "usage")
+        usages = [event for event in events if event.get("type") == "usage"]
+        new = sum(int(event["new"]) for event in usages)
+        cache = sum(int(event["cache"]) for event in usages)
         times = [datetime.fromisoformat(str(event["time"])) for event in events if "time" in event]
-        return Activity(tokens, times[-1] if times else None)
+        return Activity(new, cache, times[-1] if times else None)
 ```
 
 The adapter fails loud. A harness that writes no event raises `AdapterError` with a message that names the agent. A stream with no `result` event ends `failed`. The exit status stays beside the end state and does not change it: the engine weighs the exit status itself.
@@ -117,14 +119,14 @@ Keep the recorded streams in `tests/fixtures/`.
 ```json title="tests/fixtures/finished.jsonl"
 {"type": "session", "session": "ses-1", "time": "2026-10-08T19:55:10+00:00"}
 {"type": "text", "text": "The work is done.", "time": "2026-10-08T19:55:11+00:00"}
-{"type": "usage", "tokens": 1200, "time": "2026-10-08T19:55:11+00:00"}
+{"type": "usage", "new": 1200, "cache": 3400, "time": "2026-10-08T19:55:11+00:00"}
 {"type": "result", "status": "done", "time": "2026-10-08T19:55:12+00:00"}
 ```
 
 ```json title="tests/fixtures/capped.jsonl"
 {"type": "session", "session": "ses-2", "time": "2026-10-08T19:56:00+00:00"}
 {"type": "text", "text": "The work is not", "time": "2026-10-08T19:56:01+00:00"}
-{"type": "usage", "tokens": 900, "time": "2026-10-08T19:56:01+00:00"}
+{"type": "usage", "new": 900, "cache": 0, "time": "2026-10-08T19:56:01+00:00"}
 {"type": "result", "status": "length", "time": "2026-10-08T19:56:02+00:00"}
 ```
 
@@ -252,7 +254,7 @@ def test_a_harness_that_writes_no_event_raises_and_names_the_agent(tmp_path, mon
 def test_the_activity_of_a_stream_gives_its_tokens_and_the_time_of_its_newest_event():
     activity = MyHarnessAdapter().activity(FIXTURES / "finished.jsonl")
 
-    assert activity == Activity(1200, datetime(2026, 10, 8, 19, 55, 12, tzinfo=timezone.utc))
+    assert activity == Activity(1200, 3400, datetime(2026, 10, 8, 19, 55, 12, tzinfo=timezone.utc))
 
 
 def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_complete_lines(tmp_path):
@@ -260,7 +262,7 @@ def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_comple
     live = tmp_path / "live.jsonl"
     live.write_text("".join(lines[:3]) + lines[3][:20])
 
-    assert MyHarnessAdapter().activity(live) == Activity(1200, datetime(2026, 10, 8, 19, 55, 11, tzinfo=timezone.utc))
+    assert MyHarnessAdapter().activity(live) == Activity(1200, 3400, datetime(2026, 10, 8, 19, 55, 11, tzinfo=timezone.utc))
 
 
 def test_each_recording_is_in_the_manifest_with_the_harness_version_and_the_date():

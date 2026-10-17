@@ -26,10 +26,11 @@ one `result` event at the end of each session, and its `usage` holds the true
 count of the session. The
 `usage` of an `assistant` event is partial: its output count is not final. The
 harness writes one event for each content block of a message, and each event of
-a message repeats the usage of that message. So the token count adds the
+a message repeats the usage of that message. So the token counts add the
 `usage` of each `result` event. For the part of the stream after the last
-`result` event (a session that runs now), it adds the newest usage of each
-message id once.
+`result` event (a session that runs now), they add the newest usage of each
+message id once. A `usage` object gives two counts: the new tokens (the input,
+the cache writes, and the output) and the cache reads.
 """
 
 from __future__ import annotations
@@ -69,8 +70,11 @@ PERMISSION_MODE_VARIABLE: str = "DELEGATE_PERMISSION_MODE"
 # The text of a tool result when a permission mode refused the tool, as Claude Code wrote it on 2026-10-18.
 REFUSAL = re.compile(r"Permission to use (\S+) has been denied because Claude Code is running in (.+?) mode")
 
-# The fields of a `usage` object that its token count adds: the input, the cache, and the output.
-USAGE_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+# The fields of a `usage` object that its count of new tokens adds: the input, the cache writes, and the output.
+NEW_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
+
+# The fields of a `usage` object that its count of cache tokens adds: the cache reads.
+CACHE_FIELDS: tuple[str, ...] = ("cache_read_input_tokens",)
 
 
 def _is_work_with_no_time(event: dict[str, object]) -> bool:
@@ -85,9 +89,12 @@ def _is_work_with_no_time(event: dict[str, object]) -> bool:
     return kind == "tool_progress" or (kind == "system" and event.get("subtype") == "thinking_tokens")
 
 
-def _tokens_of(usage: dict[str, object]) -> int:
-    """The token count of a `usage` object: the input, the cache, and the output."""
-    return sum(int(usage.get(name) or 0) for name in USAGE_FIELDS)  # type: ignore[call-overload]
+def _tokens_of(usage: dict[str, object]) -> tuple[int, int]:
+    """The two token counts of a `usage` object: the new tokens, and the cache reads."""
+    def count(fields: tuple[str, ...]) -> int:
+        return sum(int(usage.get(name) or 0) for name in fields)  # type: ignore[call-overload]
+
+    return count(NEW_FIELDS), count(CACHE_FIELDS)
 
 
 def _host_permissions() -> list[str]:
@@ -183,7 +190,7 @@ class ClaudeCodeAdapter:
         )
 
     def activity(self, stream: Path) -> Activity:
-        tokens = 0
+        new = cache = 0
         usage_of: dict[str, dict[str, object]] = {}  # the turns of the session after the last `result` event
         last: datetime | None = None
         events = read_events(stream)
@@ -192,10 +199,14 @@ class ClaudeCodeAdapter:
                 last = datetime.fromisoformat(str(event["timestamp"]))
             message = event.get("message")
             if event.get("type") == "result" and isinstance(event.get("usage"), dict):
-                tokens += _tokens_of(event["usage"])  # type: ignore[arg-type]
+                more, read = _tokens_of(event["usage"])  # type: ignore[arg-type]
+                new, cache = new + more, cache + read
                 usage_of = {}
             elif event.get("type") == "assistant" and isinstance(message, dict) and isinstance(message.get("usage"), dict):
                 usage_of[str(message.get("id"))] = message["usage"]
         if events and "timestamp" not in events[-1] and _is_work_with_no_time(events[-1]):
             last = datetime.fromtimestamp(stream.stat().st_mtime, timezone.utc)
-        return Activity(tokens + sum(_tokens_of(usage) for usage in usage_of.values()), last)
+        for usage in usage_of.values():
+            more, read = _tokens_of(usage)
+            new, cache = new + more, cache + read
+        return Activity(new, cache, last)

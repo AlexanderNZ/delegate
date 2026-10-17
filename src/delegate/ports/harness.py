@@ -105,14 +105,19 @@ class AdapterResult:
 class Activity:
     """What an event stream shows of the work of its agent, in a form that no harness owns.
 
-    `tokens` is the count of tokens that the agent used so far. `last_event` is
+    The agent used two kinds of tokens so far. `tokens_new` counts the input,
+    the cache writes, and the output (with the thinking tokens): the tokens
+    that the model read or wrote for the first time. `tokens_cache` counts the
+    cache reads: each turn reads the context again from the cache, so this
+    count grows with the turns times the size of the context. `last_event` is
     the time (UTC) of the newest event that has a time, or `None` when the
     stream holds no such event yet. When the newest event has no time and shows
     that the agent works (for example, a tool heartbeat), an adapter can give
     the modification time of the stream file.
     """
 
-    tokens: int
+    tokens_new: int
+    tokens_cache: int
     last_event: datetime | None
 
 

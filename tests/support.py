@@ -305,7 +305,7 @@ class ScriptedAdapter:
     def activity(self, stream: Path) -> Activity:
         if not stream.is_file():
             raise AdapterError(f"event stream {stream} not found")
-        return Activity(0, None)
+        return Activity(0, 0, None)
 
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
         turn = len(self.verifier_calls)

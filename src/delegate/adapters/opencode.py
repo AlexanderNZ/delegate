@@ -14,7 +14,10 @@ timeout of the request (see `process.py`).
 
 The activity of a stream comes from the `step_finish` events and the
 `timestamp` field (epoch milliseconds). Each `step_finish` event carries
-`part.tokens.total`, the tokens of that step, so the adapter adds them.
+`part.tokens`, the tokens of that step, so the adapter adds them in two counts.
+The cache reads (`cache.read`) are the cache tokens. The input, the output, the
+reasoning, and the cache writes (`cache.write`) are the new tokens. A step with
+no `cache` field has no cache reads and no cache writes.
 """
 
 from __future__ import annotations
@@ -38,6 +41,20 @@ TIER_COLUMN: str = "opencode"
 # `stop` is a normal end. `length` is the model reaching its output limit. Any
 # other reason (for example `tool-calls`) means the stream ended inside the work.
 STEP_REASON_END_STATE: dict[str, str] = {"stop": FINISHED, "length": CAPPED}
+
+# The fields of `part.tokens` of a `step_finish` event that the count of new tokens adds. Each step has them.
+NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
+
+
+def _tokens_of(event: dict[str, object], stream: Path) -> tuple[int, int]:
+    """The two token counts of a `step_finish` event: the new tokens, and the cache reads."""
+    tokens = event.get("part", {}).get("tokens")  # type: ignore[union-attr]
+    missing = [name for name in NEW_FIELDS if not isinstance(tokens, dict) or name not in tokens]
+    if missing:
+        raise AdapterError(f"{stream}: a step_finish event has no part.tokens.{missing[0]} field")
+    cache = tokens.get("cache") or {}  # type: ignore[union-attr]
+    new = sum(int(tokens[name]) for name in NEW_FIELDS) + int(cache.get("write") or 0)  # type: ignore[index]
+    return new, int(cache.get("read") or 0)
 
 
 def _end_state(events: list[dict[str, object]], stream: Path) -> str:
@@ -111,13 +128,12 @@ class OpenCodeAdapter:
         return AdapterResult(process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle, final_text=final_text)
 
     def activity(self, stream: Path) -> Activity:
-        tokens, last = 0, None
+        new = cache = 0
+        last = None
         for event in read_events(stream):
             if "timestamp" in event:
                 last = datetime.fromtimestamp(int(event["timestamp"]) / 1000, timezone.utc)  # type: ignore[call-overload]
             if event.get("type") == "step_finish":
-                try:
-                    tokens += int(event["part"]["tokens"]["total"])  # type: ignore[index]
-                except (KeyError, TypeError):
-                    raise AdapterError(f"{stream}: a step_finish event has no part.tokens.total field") from None
-        return Activity(tokens, last)
+                more, read = _tokens_of(event, stream)
+                new, cache = new + more, cache + read
+        return Activity(new, cache, last)

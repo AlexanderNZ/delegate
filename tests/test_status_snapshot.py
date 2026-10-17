@@ -108,11 +108,12 @@ def test_a_live_claude_code_stream_gives_the_tokens_and_the_seconds_since_the_la
     snap = snapshot(repo, capsys)
 
     assert ticket_of(snap, "a") == {
-        "id": "a", "state": "running", "phase": "specialist", "elapsed_seconds": 120, "tokens": 25794,
+        "id": "a", "state": "running", "phase": "specialist", "elapsed_seconds": 120, "tokens_new": 11824, "tokens_cache": 13970,
         "idle_seconds": int((now - last_line).total_seconds()), "gate": None, "gate_idle_seconds": None,
     }
-    assert ticket_of(snap, "b") == {"id": "b", "state": "pending", "phase": None, "elapsed_seconds": 0, "tokens": 0, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
-    assert (snap["run_id"], snap["state"], snap["elapsed_seconds"], snap["tokens"]) == ("r1", "running", 120, 25794)
+    assert ticket_of(snap, "b") == {"id": "b", "state": "pending", "phase": None, "elapsed_seconds": 0, "tokens_new": 0, "tokens_cache": 0, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
+    assert (snap["run_id"], snap["state"], snap["elapsed_seconds"], snap["tokens_new"], snap["tokens_cache"]) == ("r1", "running", 120, 11824, 13970)
+    assert "tokens" not in snap and "tokens" not in ticket_of(snap, "a")
     assert (snap["tickets_total"], snap["tickets_ended"], snap["percent"]) == (2, 0, 0)
 
 
@@ -129,7 +130,7 @@ def test_an_agent_whose_stream_ends_with_tool_heartbeats_is_idle_since_the_harne
 
     a = ticket_of(snapshot(repo, capsys), "a")
 
-    assert (a["tokens"], a["idle_seconds"]) == (25794, 20)
+    assert (a["tokens_new"], a["tokens_cache"], a["idle_seconds"]) == (11824, 13970, 20)
 
 
 def test_a_live_opencode_stream_gives_the_tokens_and_the_seconds_since_the_last_activity_of_the_running_agent(tmp_path, capsys, monkeypatch):
@@ -145,7 +146,7 @@ def test_a_live_opencode_stream_gives_the_tokens_and_the_seconds_since_the_last_
 
     snap = snapshot(repo, capsys)
 
-    assert ticket_of(snap, "a")["tokens"] == snap["tokens"] == 84197
+    assert (ticket_of(snap, "a")["tokens_new"], ticket_of(snap, "a")["tokens_cache"]) == (snap["tokens_new"], snap["tokens_cache"]) == (84197, 0)
     assert ticket_of(snap, "a")["idle_seconds"] == int((START + timedelta(seconds=300) - last_line).total_seconds())
 
 
@@ -158,7 +159,7 @@ def test_an_agent_whose_stream_has_no_event_yet_is_idle_since_the_journal_starte
 
     a = ticket_of(snapshot(repo, capsys), "a")
 
-    assert (a["tokens"], a["idle_seconds"]) == (0, 15)
+    assert (a["tokens_new"], a["tokens_cache"], a["idle_seconds"]) == (0, 0, 15)
 
 
 def test_the_eta_is_null_before_the_first_ticket_ends(tmp_path, capsys, monkeypatch):
@@ -194,7 +195,7 @@ def test_the_percentage_and_the_eta_follow_the_rules_of_the_reference_page(tmp_p
     # The mean of the tickets that ended after a step is (600 + 300) / 2 = 450. Two tickets (d, e) did not end,
     # and d used 100 seconds: now + 450 * 2 - 100.
     assert snap["eta"] == at(1000 + 450 * 2 - 100)
-    assert snap["tokens"] == 3 * 19326
+    assert (snap["tokens_new"], snap["tokens_cache"]) == (3 * 19326, 0)
     assert [t["state"] for t in snap["tickets"]] == ["built", "built", "skipped", "running", "pending"]
     assert snap["phase"] is None  # only the chain of `economy` mode is a phase of the run
 
@@ -259,7 +260,7 @@ def test_a_run_that_ended_stops_its_clock_at_the_end_and_has_no_running_agent(tm
     snap = snapshot(repo, capsys)
 
     assert (snap["state"], snap["elapsed_seconds"], snap["percent"], snap["eta"], snap["time"]) == ("built", 610, 100, at(610), at(610))
-    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": 19326, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
+    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens_new": 19326, "tokens_cache": 0, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
 
 
 def test_the_tokens_of_a_ticket_add_every_agent_that_it_ran(tmp_path, capsys, monkeypatch):
@@ -271,7 +272,9 @@ def test_the_tokens_of_a_ticket_add_every_agent_that_it_ran(tmp_path, capsys, mo
     run.agent_start(20, "a", "fix-up", run.stream("a.3.jsonl", opencode("capped.jsonl")), 1)
     frozen(monkeypatch, 30)
 
-    assert ticket_of(snapshot(repo, capsys), "a")["tokens"] == 84197 + 84637 + 83892
+    a = ticket_of(snapshot(repo, capsys), "a")
+
+    assert (a["tokens_new"], a["tokens_cache"]) == (84197 + 84637 + 83892, 0)
 
 
 def test_the_verifier_of_an_economy_chain_shows_its_activity_after_its_ticket_ended(tmp_path, capsys, monkeypatch):
@@ -284,7 +287,7 @@ def test_the_verifier_of_an_economy_chain_shows_its_activity_after_its_ticket_en
 
     a = ticket_of(snapshot(repo, capsys), "a")
 
-    assert (a["state"], a["phase"], a["tokens"], a["idle_seconds"]) == ("built", None, 19326, 9)
+    assert (a["state"], a["phase"], a["tokens_new"], a["tokens_cache"], a["idle_seconds"]) == ("built", None, 19326, 0, 9)
 
 
 def an_economy_chain_after_its_last_ticket(repo: Path) -> Run:
@@ -334,8 +337,8 @@ def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
 
 
 # Two tickets ended (2 of 3 units, with the chain), and no ticket runs: floor(2 / 3 * 100) = 66. The mean of the
-# tickets is (600 + 300) / 2 = 450, and one unit, the chain, did not end. The tokens are 19326 for each ticket, and 0 for
-# a chain agent whose stream has no event yet.
+# tickets is (600 + 300) / 2 = 450, and one unit, the chain, did not end. The new tokens are 19326 for each ticket, and 0
+# for a chain agent whose stream has no event yet. The streams have no cache reads.
 @pytest.mark.parametrize(
     ("chain", "phase", "eta"),
     [
@@ -372,8 +375,8 @@ def test_the_verification_of_an_economy_chain_is_a_phase_of_the_run_and_keeps_th
     assert [(t["state"], t["phase"]) for t in snap["tickets"]] == [("built", None), ("built", None)]
     shown = f"{phase}, " if phase else ""
     eta_text = "5m51s" if eta == 450 - 99 else "7m30s"
-    assert lines[1] == f"progress: {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, 39k tokens"
-    assert view[0] == f"run r1 running {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, 39k tokens"
+    assert lines[1] == f"progress: {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
+    assert view[0] == f"run r1 running {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
 
 
 def test_in_economy_mode_the_chain_counts_as_one_more_unit_while_a_ticket_runs(tmp_path, capsys, monkeypatch):
@@ -401,7 +404,7 @@ def test_an_economy_run_is_complete_only_at_its_end(tmp_path, capsys, monkeypatc
     snap = snapshot(repo, capsys)
 
     assert (snap["state"], snap["phase"], snap["percent"], snap["eta"]) == ("built", None, 100, at(1501))
-    assert plain_status(repo, capsys)[1] == "progress: 100%, 2 of 2 ended, 25m01s used, 39k tokens"
+    assert plain_status(repo, capsys)[1] == "progress: 100%, 2 of 2 ended, 25m01s used, tokens 39k new, 0 cache"
 
 
 def test_an_agent_that_a_crash_stopped_shows_no_activity(tmp_path, capsys, monkeypatch):
@@ -440,15 +443,41 @@ def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activ
     lines = plain_status(repo, capsys)
 
     # The mean of the ended tickets is 600, and b used 50 seconds: the ETA is 550 seconds from now.
-    # The tokens: 19326 for a, and 25794 for the one turn of b so far. b had its last activity on 2026-10-08.
+    # The tokens: new 19326 and cache 0 for a, and new 11824 and cache 13970 for the one turn of b so far. The run:
+    # new 31150 and cache 13970. b had its last activity on 2026-10-08.
     assert lines == [
         "run r1: running (mode assure, adapter claude-code)",
-        "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 45k tokens",
+        "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
         f"journal {run.path}",
         f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
-        "  progress: 10m00s used, 19k tokens",
+        "  progress: 10m00s used, tokens 19k new, 0 cache",
         f"ticket b: state running, verdict -, branch run/demo-b, last event {at(600)}",
-        "  progress: specialist, 50s used, 26k tokens, last activity 7d07h ago",
+        "  progress: specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
+    ]
+
+
+def test_each_form_of_status_shows_the_new_tokens_and_the_cache_tokens_of_the_run_and_of_each_ticket(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = a_run_of_two_tickets(repo)
+    frozen(monkeypatch, 650)
+
+    snap = snapshot(repo, capsys)
+    lines = plain_status(repo, capsys)
+    block = follow_lines(repo, monkeypatch, run)
+
+    # a: the `result` event of finished.jsonl, new 10 + 19176 + 140, cache 0. b: one turn of capped.jsonl so far,
+    # new 10 + 11808 + 6, cache 13970. The run adds the two tickets.
+    assert (snap["tokens_new"], snap["tokens_cache"]) == (19326 + 11824, 13970)
+    assert [(t["id"], t["tokens_new"], t["tokens_cache"]) for t in snap["tickets"]] == [("a", 19326, 0), ("b", 11824, 13970)]
+    assert lines[1].endswith(", tokens 31k new, 14k cache")
+    assert [line for line in lines if line.startswith("  progress: ")] == [
+        "  progress: 10m00s used, tokens 19k new, 0 cache",
+        "  progress: specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
+    ]
+    assert block == [
+        "run r1 running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
+        "  a built, 10m00s used, tokens 19k new, 0 cache",
+        "  b running specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
     ]
 
 
@@ -462,10 +491,10 @@ def test_plain_status_of_a_run_that_ended_shows_its_progress_with_no_eta(tmp_pat
 
     lines = plain_status(repo, capsys)
 
-    assert lines[:2] == ["run r1: built (mode assure, adapter claude-code)", "progress: 100%, 2 of 2 ended, 10m10s used, 19k tokens"]
+    assert lines[:2] == ["run r1: built (mode assure, adapter claude-code)", "progress: 100%, 2 of 2 ended, 10m10s used, tokens 19k new, 0 cache"]
     assert lines[3:] == [
         f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
-        "  progress: 10m00s used, 19k tokens",
+        "  progress: 10m00s used, tokens 19k new, 0 cache",
         f"ticket b: state skipped, verdict -, branch -, last event {at(601)}",
         "  reason: blocked by x",
     ]
@@ -503,9 +532,15 @@ def test_json_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_et
 
     snap = snapshot(repo, capsys)
 
-    assert (snap["percent"], snap["tickets_ended"], snap["eta"], snap["tokens"]) == (50, 1, at(650 + 550), None)
-    assert ticket_of(snap, "a") == {"id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
-    assert ticket_of(snap, "b") == {"id": "b", "state": "running", "phase": "specialist", "elapsed_seconds": 50, "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
+    assert (snap["percent"], snap["tickets_ended"], snap["eta"], snap["tokens_new"], snap["tokens_cache"]) == (50, 1, at(650 + 550), None, None)
+    assert ticket_of(snap, "a") == {
+        "id": "a", "state": "built", "phase": None, "elapsed_seconds": 600, "tokens_new": None, "tokens_cache": None, "idle_seconds": None,
+        "gate": None, "gate_idle_seconds": None,
+    }
+    assert ticket_of(snap, "b") == {
+        "id": "b", "state": "running", "phase": "specialist", "elapsed_seconds": 50, "tokens_new": None, "tokens_cache": None,
+        "idle_seconds": None, "gate": None, "gate_idle_seconds": None,
+    }
 
 
 def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
@@ -631,7 +666,8 @@ OPENCODE_STEP_WITH_NO_TOKENS = '{"type":"step_finish","timestamp":1791490924475,
 # A line that is JSON but that has a bad event shape makes the reader of the adapter raise an error that is not an
 # AdapterError: ValueError, TypeError, or AttributeError.
 BAD_SHAPES = {
-    "opencode-tokens-total-not-a-number": '{"type":"step_finish","timestamp":1791490924475,"part":{"tokens":{"total":"abc"}}}\n',
+    "opencode-tokens-input-not-a-number": '{"type":"step_finish","timestamp":1791490924475,"part":{"tokens":{"input":"abc","output":1,"reasoning":0}}}\n',
+    "opencode-cache-read-not-a-number": '{"type":"step_finish","timestamp":1791490924475,"part":{"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":"abc"}}}}\n',
     "opencode-timestamp-not-a-number": '{"type":"text","timestamp":"x"}\n',
     "opencode-line-is-a-number": "5\n",
     "claude-code-timestamp-not-a-time": '{"type":"assistant","timestamp":"not a time","message":{"id":"m","usage":{"output_tokens":1}}}\n',
@@ -686,7 +722,7 @@ def adapter_of(kind: str) -> str:
 
 
 # The tokens of the one good stream of the run (the stream of ticket a), in full and in the short form of the lines.
-GOOD_TOKENS = {"claude-code": (19326, "19k"), "opencode": (84197, "84k")}
+GOOD_TOKENS = {"claude-code": (19326, "tokens 19k new, 0 cache"), "opencode": (84197, "tokens 84k new, 0 cache")}
 
 
 def a_run_with_a_bad_stream(repo: Path, make, kind: str, where: str) -> tuple[Run, str]:
@@ -727,8 +763,11 @@ def test_json_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens_and_no_
 
     good = GOOD_TOKENS[adapter][0]
     b = {"ended": ("built", None, 30), "live": ("running", "specialist", 50)}[where]
-    assert ticket_of(snap, "b") == {"id": "b", "state": b[0], "phase": b[1], "elapsed_seconds": b[2], "tokens": None, "idle_seconds": None, "gate": None, "gate_idle_seconds": None}
-    assert (ticket_of(snap, "a")["tokens"], snap["tokens"]) == (good, good)
+    assert ticket_of(snap, "b") == {
+        "id": "b", "state": b[0], "phase": b[1], "elapsed_seconds": b[2], "tokens_new": None, "tokens_cache": None,
+        "idle_seconds": None, "gate": None, "gate_idle_seconds": None,
+    }
+    assert (ticket_of(snap, "a")["tokens_new"], ticket_of(snap, "a")["tokens_cache"], snap["tokens_new"], snap["tokens_cache"]) == (good, 0, good, 0)
 
 
 @pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
@@ -744,11 +783,11 @@ def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens
     good = GOOD_TOKENS[adapter][1]
     # Ended: a (600 s) and b (30 s) ended, so the ETA of c is their mean, 315 s. Live: a ended (600 s), and b used 50 s.
     expected = {
-        "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good} tokens", "  progress: 30s used"),
-        "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  progress: specialist, 50s used"),
+        "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", "  progress: 30s used"),
+        "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", "  progress: specialist, 50s used"),
     }[where]
     progress = [line for line in lines if line.startswith("  progress: ")]
-    assert (lines[1], progress) == (expected[0], [f"  progress: 10m00s used, {good} tokens", expected[1]])
+    assert (lines[1], progress) == (expected[0], [f"  progress: 10m00s used, {good}", expected[1]])
 
 
 @pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
@@ -762,11 +801,11 @@ def test_the_live_block_on_a_run_with_a_stream_that_cannot_be_read_shows_no_toke
 
     good = GOOD_TOKENS[adapter][1]
     expected = {
-        "ended": (f"run r1 running 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good} tokens", "  b built, 30s used"),
-        "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good} tokens", "  b running specialist, 50s used"),
+        "ended": (f"run r1 running 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", "  b built, 30s used"),
+        "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", "  b running specialist, 50s used"),
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
-    assert block_of(drawn[0])[:3] == [expected[0], f"  a built, 10m00s used, {good} tokens", expected[1]]
+    assert block_of(drawn[0])[:3] == [expected[0], f"  a built, 10m00s used, {good}", expected[1]]
 
 
 # The running gate. The engine writes `gate-start` with the log of the gate, and the gate runner appends to the log.
@@ -809,7 +848,7 @@ def test_json_gives_the_running_gate_and_the_seconds_since_its_log_changed(tmp_p
     snap = snapshot(repo, capsys)
 
     assert ticket_of(snap, "a") == {
-        "id": "a", "state": "running", "phase": shown, "elapsed_seconds": 230, "tokens": 19326, "idle_seconds": None,
+        "id": "a", "state": "running", "phase": shown, "elapsed_seconds": 230, "tokens_new": 19326, "tokens_cache": 0, "idle_seconds": None,
         "gate": GATE, "gate_idle_seconds": 30,
     }
     assert (ticket_of(snap, "b")["gate"], ticket_of(snap, "b")["gate_idle_seconds"]) == (None, None)
@@ -863,7 +902,7 @@ def test_plain_status_shows_the_running_gate_and_the_time_since_its_log_changed(
     lines = plain_status(repo, capsys)
 
     assert [line for line in lines if line.startswith("  progress: ")] == [
-        f"  progress: gates, 3m50s used, 19k tokens, gate {GATE}, gate log changed 30s ago",
+        f"  progress: gates, 3m50s used, tokens 19k new, 0 cache, gate {GATE}, gate log changed 30s ago",
     ]
 
 
@@ -876,7 +915,7 @@ def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_change
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert block_of(drawn[0])[1] == f"  a running gates, 10m50s used, 19k tokens, gate {GATE}, gate log changed 1m00s ago"
+    assert block_of(drawn[0])[1] == f"  a running gates, 10m50s used, tokens 19k new, 0 cache, gate {GATE}, gate log changed 1m00s ago"
 
 
 def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):
@@ -893,4 +932,4 @@ def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, 
 
     a = ticket_of(snapshot(repo, capsys), "a")
 
-    assert (a["phase"], a["tokens"], a["gate"], a["gate_idle_seconds"]) == ("gates", None, GATE, 30)
+    assert (a["phase"], a["tokens_new"], a["tokens_cache"], a["gate"], a["gate_idle_seconds"]) == ("gates", None, None, GATE, 30)

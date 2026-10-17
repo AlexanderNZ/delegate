@@ -4,8 +4,8 @@ The snapshot (`snapshot`) reads the journal of the run and the event streams
 that the journal names, through a reader that the command gives. It also reads
 the modification time of the log file of a gate that runs, with no reader. The reader is
 the `activity` method of the harness adapter of the run, so this module never
-imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
-the activity of each agent. In `economy` mode it also gives the phase of the
+imports an adapter. The snapshot gives the progress, the ETA, the tokens (two
+counts: the new tokens and the cache reads), and the activity of each agent. In `economy` mode it also gives the phase of the
 verification of the chain (its gates, its verifier, or a fix-up), which counts
 in the progress and the ETA as one more unit of the run. When the command has no reader for the adapter of
 the run, the snapshot has the progress and the ETA, and no tokens and no
@@ -130,8 +130,10 @@ ReaderOf = Callable[[str], StreamReader | None]
 class TicketSnapshot:
     """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs.
 
-    `tokens` and `idle_seconds` are None when the snapshot has no reader of the streams. `tokens` is None also when a
-    stream of the ticket cannot be read, and `idle_seconds` when the stream of the agent that runs now cannot be read.
+    `tokens_new` counts the input, the cache writes, and the output of the agents of the ticket. `tokens_cache` counts
+    their cache reads. The two counts and `idle_seconds` are None when the snapshot has no reader of the streams. The two
+    counts are None also when a stream of the ticket cannot be read, and `idle_seconds` when the stream of the agent that
+    runs now cannot be read.
 
     `gate` is the command of the gate that runs now, from its `gate-start`, and None when no gate of the ticket runs.
     `gate_idle_seconds` is the seconds since the log file of that gate last changed. It is None when no gate runs, or
@@ -142,7 +144,8 @@ class TicketSnapshot:
     state: str
     phase: str | None
     elapsed_seconds: int
-    tokens: int | None
+    tokens_new: int | None
+    tokens_cache: int | None
     idle_seconds: int | None
     gate: str | None = None
     gate_idle_seconds: int | None = None
@@ -154,8 +157,8 @@ class Snapshot:
 
     `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
 
-    `tokens` is None when the snapshot has no reader of the streams. Otherwise it is the sum of the tickets that have
-    tokens: a ticket with a stream that cannot be read adds nothing.
+    `tokens_new` and `tokens_cache` are None when the snapshot has no reader of the streams. Otherwise each is the sum of
+    the tickets that have tokens: a ticket with a stream that cannot be read adds nothing.
     """
 
     run_id: str
@@ -166,7 +169,8 @@ class Snapshot:
     tickets_ended: int
     percent: int
     eta: datetime | None
-    tokens: int | None
+    tokens_new: int | None
+    tokens_cache: int | None
     tickets: tuple[TicketSnapshot, ...]
     phase: str | None = None
 
@@ -175,11 +179,12 @@ class Snapshot:
         return {
             "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
             "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
-            "eta": self.eta.isoformat() if self.eta else None, "tokens": self.tokens, "phase": self.phase,
+            "eta": self.eta.isoformat() if self.eta else None, "tokens_new": self.tokens_new, "tokens_cache": self.tokens_cache,
+            "phase": self.phase,
             "tickets": [
                 {
-                    "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens": t.tokens,
-                    "idle_seconds": t.idle_seconds, "gate": t.gate, "gate_idle_seconds": t.gate_idle_seconds,
+                    "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens_new": t.tokens_new,
+                    "tokens_cache": t.tokens_cache, "idle_seconds": t.idle_seconds, "gate": t.gate, "gate_idle_seconds": t.gate_idle_seconds,
                 }
                 for t in self.tickets
             ],
@@ -241,8 +246,8 @@ def _ticket(
     gate_command = None if gate is None else str(gate["command"])
     gate_idle = None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now)
     if activity is None:
-        return TicketSnapshot(ticket, state, phase, elapsed, None, None, gate_command, gate_idle), duration
-    tokens: int | None = 0
+        return TicketSnapshot(ticket, state, phase, elapsed, None, None, None, gate_command, gate_idle), duration
+    tokens: tuple[int, int] | None = (0, 0)  # the new tokens and the cache reads
     idle = None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
@@ -251,10 +256,11 @@ def _ticket(
             tokens = None  # a count without this agent is not the count of the ticket
             continue
         if tokens is not None:
-            tokens += found.tokens
+            tokens = (tokens[0] + found.tokens_new, tokens[1] + found.tokens_cache)
         if is_live:
             idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type]
-    return TicketSnapshot(ticket, state, phase, elapsed, tokens, idle, gate_command, gate_idle), duration
+    new, cache = tokens if tokens is not None else (None, None)
+    return TicketSnapshot(ticket, state, phase, elapsed, new, cache, idle, gate_command, gate_idle), duration
 
 
 def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
@@ -301,7 +307,7 @@ def _read(activity: StreamReader, stream: Path, is_live: bool) -> Activity | Non
             try:
                 stream.stat()
             except (FileNotFoundError, NotADirectoryError):
-                return Activity(0, None)  # the harness has not opened the stream yet
+                return Activity(0, 0, None)  # the harness has not opened the stream yet
         return activity(stream)
     except Exception:  # noqa: BLE001 - any failure to read one stream is no data for that agent
         return None
@@ -338,7 +344,9 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
         run_id=str(start["run_id"]), state=str(end["result"]) if end else RUNNING, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
-        eta=None if to_end is None else now + timedelta(seconds=to_end), tokens=None if activity is None else sum(t.tokens or 0 for t in tickets), tickets=tuple(tickets),
+        eta=None if to_end is None else now + timedelta(seconds=to_end),
+        tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
+        tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase,
     )
 
@@ -378,6 +386,11 @@ def format_tokens(count: int) -> str:
     return f"{count / 1_000_000:.1f}M"
 
 
+def format_token_counts(new: int, cache: int) -> str:
+    """The two token counts in the short form of each line: `tokens 302k new, 9.7M cache`."""
+    return f"tokens {format_tokens(new)} new, {format_tokens(cache)} cache"
+
+
 def _run_progress(snap: Snapshot) -> str:
     """The progress of the run: the phase of an `economy` chain, the percentage, the tickets that ended, the time used,
     the ETA, and the tokens.
@@ -390,8 +403,8 @@ def _run_progress(snap: Snapshot) -> str:
     parts += [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{_duration(snap.elapsed_seconds)} used"]
     if snap.state == RUNNING:
         parts.append(f"ETA {eta}")
-    if snap.tokens is not None:
-        parts.append(f"{format_tokens(snap.tokens)} tokens")
+    if snap.tokens_new is not None and snap.tokens_cache is not None:
+        parts.append(format_token_counts(snap.tokens_new, snap.tokens_cache))
     return ", ".join(parts)
 
 
@@ -401,8 +414,8 @@ def _ticket_progress(ticket: TicketSnapshot) -> str:
     While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed.
     """
     parts = [f"{_duration(ticket.elapsed_seconds)} used"]
-    if ticket.tokens is not None:
-        parts.append(f"{format_tokens(ticket.tokens)} tokens")
+    if ticket.tokens_new is not None and ticket.tokens_cache is not None:
+        parts.append(format_token_counts(ticket.tokens_new, ticket.tokens_cache))
     if ticket.idle_seconds is not None:
         parts.append(f"last activity {_duration(ticket.idle_seconds)} ago")
     if ticket.gate is not None:

@@ -249,9 +249,16 @@ def capped_lines() -> list[str]:
 def test_the_activity_of_a_finished_stream_gives_the_tokens_of_its_result_event_and_the_time_of_the_last_event():
     activity = adapters.get("claude-code").activity(claude_fake.FIXTURES / "finished.jsonl")
 
-    # The `result` event: input 10 + cache creation 19176 + cache read 0 + output 140. The assistant events of the
-    # message give only a partial output count (6), so their sum (19192) is not the count.
-    assert activity == Activity(19326, datetime(2026, 10, 8, 19, 55, 11, 654000, tzinfo=timezone.utc))
+    # The `result` event: new = input 10 + cache creation 19176 + output 140; cache = cache read 0. The assistant events
+    # of the message give only a partial output count (6), so their sum (19192) is not the count.
+    assert activity == Activity(19326, 0, datetime(2026, 10, 8, 19, 55, 11, 654000, tzinfo=timezone.utc))
+
+
+def test_the_activity_of_a_stream_with_cache_reads_gives_the_new_tokens_and_the_cache_reads_as_two_counts():
+    activity = adapters.get("claude-code").activity(claude_fake.FIXTURES / "capped.jsonl")
+
+    # The `result` event: new = input 10 + cache creation 11808 + output 234 = 12052; cache = cache read 13970.
+    assert (activity.tokens_new, activity.tokens_cache) == (12052, 13970)
 
 
 def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_complete_lines_with_no_error(tmp_path):
@@ -261,8 +268,9 @@ def test_the_activity_of_a_live_stream_that_ends_in_half_a_line_reads_the_comple
 
     activity = adapters.get("claude-code").activity(live)
 
-    # One message (input 10 + cache creation 11808 + cache read 13970 + output 6), and the time of the seventh line.
-    assert activity == Activity(25794, datetime(2026, 10, 8, 19, 55, 53, 245000, tzinfo=timezone.utc))
+    # One message (new = input 10 + cache creation 11808 + output 6; cache = cache read 13970), and the time of the
+    # seventh line.
+    assert activity == Activity(11824, 13970, datetime(2026, 10, 8, 19, 55, 53, 245000, tzinfo=timezone.utc))
 
 
 def test_the_activity_of_a_stream_with_only_its_init_event_has_no_tokens_and_no_time(tmp_path):
@@ -270,7 +278,7 @@ def test_the_activity_of_a_stream_with_only_its_init_event_has_no_tokens_and_no_
     live.write_text(capped_lines()[0])
     written_at(live, CHANGED)
 
-    assert adapters.get("claude-code").activity(live) == Activity(0, None)
+    assert adapters.get("claude-code").activity(live) == Activity(0, 0, None)
 
 
 @pytest.mark.parametrize("excerpt", [pytest.param("heartbeats.jsonl", id="tool-heartbeats"), pytest.param("thinking.jsonl", id="thinking-tokens")])
@@ -281,7 +289,7 @@ def test_the_activity_of_a_live_stream_that_ends_with_events_of_work_with_no_tim
 
     # The seventh line, at 19:55:53.245, is the newest event with a time. The events after it have none, so the time
     # is the time that the harness last wrote to the stream.
-    assert adapters.get("claude-code").activity(live) == Activity(25794, CHANGED)
+    assert adapters.get("claude-code").activity(live) == Activity(11824, 13970, CHANGED)
 
 
 def test_the_activity_of_a_stream_whose_newest_event_has_a_time_after_heartbeats_has_the_time_of_that_event(tmp_path):
@@ -291,7 +299,7 @@ def test_the_activity_of_a_stream_whose_newest_event_has_a_time_after_heartbeats
     written_at(live, CHANGED)
 
     # The eighth line (the result of the tool) has the time 19:55:53.255.
-    assert adapters.get("claude-code").activity(live) == Activity(25794, datetime(2026, 10, 8, 19, 55, 53, 255000, tzinfo=timezone.utc))
+    assert adapters.get("claude-code").activity(live) == Activity(11824, 13970, datetime(2026, 10, 8, 19, 55, 53, 255000, tzinfo=timezone.utc))
 
 
 @pytest.mark.parametrize("fixture", ["finished.jsonl", "capped.jsonl"])
@@ -311,8 +319,10 @@ def test_the_activity_of_a_resumed_session_adds_the_result_event_of_each_part(tm
     both = tmp_path / "both.jsonl"
     both.write_text(finished + capped)
 
-    # The result of the first part (19326), and the result of the second part: 10 + 11808 + 13970 + 234 = 26022.
-    assert adapters.get("claude-code").activity(both).tokens == 19326 + 26022
+    # The result of the first part (new 19326, cache 0), and the result of the second part: new 10 + 11808 + 234 = 12052,
+    # cache 13970.
+    activity = adapters.get("claude-code").activity(both)
+    assert (activity.tokens_new, activity.tokens_cache) == (19326 + 12052, 13970)
 
 
 def test_the_activity_of_a_resumed_session_that_runs_now_adds_the_turns_after_the_last_result_event(tmp_path):
@@ -320,8 +330,10 @@ def test_the_activity_of_a_resumed_session_that_runs_now_adds_the_turns_after_th
     live = tmp_path / "live.jsonl"
     live.write_text((claude_fake.FIXTURES / "finished.jsonl").read_text() + "".join(lines[:7]) + lines[7][:120])
 
-    # The result of the first part (19326), and one turn of the part that has no result yet (25794).
-    assert adapters.get("claude-code").activity(live).tokens == 19326 + 25794
+    # The result of the first part (new 19326, cache 0), and one turn of the part that has no result yet (new 11824,
+    # cache 13970).
+    activity = adapters.get("claude-code").activity(live)
+    assert (activity.tokens_new, activity.tokens_cache) == (19326 + 11824, 13970)
 
 
 def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_names_the_line(tmp_path):

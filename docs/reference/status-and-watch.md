@@ -35,12 +35,12 @@ The first line gives the run id, the result, the [**mode**](../glossary.md#mode)
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
-progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, 45k tokens
+progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 302k new, 9.7M cache
 journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
 ticket a: state built, verdict ACCEPT, branch run/demo-a, last event 2026-10-16T03:10:00+00:00
-  progress: 10m00s used, 19k tokens
+  progress: 10m00s used, tokens 290k new, 9.5M cache
 ticket b: state running, verdict -, branch run/demo-b, last event 2026-10-16T03:10:00+00:00
-  progress: specialist, 50s used, 26k tokens, last activity 12s ago
+  progress: specialist, 50s used, tokens 12k new, 205k cache, last activity 12s ago
 ```
 
 The line of a ticket has this form:
@@ -58,8 +58,8 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 
 The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
 
-- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, 39k tokens`.
-- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, 19k tokens, gate python3 -m pytest -q, gate log changed 30s ago`.
+- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
+- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, tokens 19k new, 610k cache, gate python3 -m pytest -q, gate log changed 30s ago`.
 - A pending ticket and a skipped ticket have no progress line.
 
 A ticket that failed or was skipped has the line `  reason: <reason>`, after its progress line.
@@ -68,7 +68,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 
 ### The snapshot
 
-`status --json` prints one snapshot of the run as one JSON object. Two plugins read it, so the fields below are a contract. A new field can come in a later version. A field does not change its type or its meaning.
+`status --json` prints one snapshot of the run as one JSON object. Two plugins read it, so the fields below are a contract. A new field can come in a later version. A field does not change its type or its meaning. One exception is in the changelog: the fields `tokens_new` and `tokens_cache` replace the field `tokens` of version 1.2.0, for the run and for each ticket.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -80,7 +80,8 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. A ticket whose `tokens` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
+| `tokens_new` | integer or `null` | The new tokens of the run: the sum of `tokens_new` of all tickets. A ticket whose `tokens_new` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). See [the token counts](#the-token-counts). |
+| `tokens_cache` | integer or `null` | The cache tokens of the run: the sum of `tokens_cache` of all tickets. A ticket whose `tokens_cache` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in [**`assure`**](../glossary.md#assure) mode. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
@@ -90,7 +91,8 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the lines of `status`. |
 | `phase` | string or `null` | For a running ticket, the phase of its [**step**](../glossary.md#step): [**`specialist`**](../glossary.md#specialist), [**`gates`**](../glossary.md#gate), [**`verifier`**](../glossary.md#verifier), or [**`fix-up`**](../glossary.md#fix-up). `null` for a ticket that does not run. |
 | `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
-| `tokens` | integer or `null` | The tokens of all agents of the ticket: each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a ticket with [a stream that cannot be read](#a-stream-that-cannot-be-read). |
+| `tokens_new` | integer or `null` | The new tokens of all agents of the ticket: the input, the cache writes, and the output of each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a ticket with [a stream that cannot be read](#a-stream-that-cannot-be-read). See [the token counts](#the-token-counts). |
+| `tokens_cache` | integer or `null` | The cache reads of the same agents. It is `null` when `tokens_new` is `null`. |
 | `idle_seconds` | integer or `null` | While an agent of the ticket runs: the seconds from the newest event of its stream to `time`. The time of that event comes from the adapter. When the newest event has no time of its own and shows that the agent works (for example, a tool heartbeat of Claude Code), the time is the modification time of the stream file. See [the newest activity](#the-newest-activity). When the stream has no event with a time yet, the seconds from its `agent-start`. `null` when no agent of the ticket runs, for example in the `gates` phase. An agent runs from its `agent-start` until its result event, a `step-end`, or `run-end`. The verifier of a chain runs after its ticket ended, so a ticket that ended can show it. `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and when the stream of the agent that runs [cannot be read](#a-stream-that-cannot-be-read). |
 | `gate` | string or `null` | While a gate of the ticket runs: the gate command, from its `gate-start`. A gate runs from its `gate-start` until its `gate-result`, a `step-end`, or `run-end`. The gates of the phase `gates` and the gates of a fix-up round both show. `null` when no gate of the ticket runs. |
 | `gate_idle_seconds` | integer or `null` | While a gate of the ticket runs: the seconds from the last change of its log file (the `gate_log` of its `gate-start`) to `time`. The gate runner appends the output of the gate to the log while the gate runs. `null` when no gate of the ticket runs, and when the log file is missing or cannot be read. It needs no stream reader. |
@@ -104,14 +106,30 @@ The phase of a running ticket follows its newest event:
 | `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
 | `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round of [**`assure`**](../glossary.md#assure) mode stay in the phase `fix-up`. |
 
-The tokens and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity).
+The two token counts and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity).
 
-The token count of a `claude-code` stream:
+#### The token counts
 
-- The count of one turn or one [**session**](../glossary.md#session) adds the input tokens, the cache-read tokens, the cache-creation tokens, and the output tokens.
-- When the stream holds a `result` event, the count of that session is the `usage` of the `result` event. The `usage` of an `assistant` event is partial, so it is not the count of a session that ended.
-- For a session that has no `result` event yet (an agent that runs now), the count is the sum of its turns: one turn for each `message.id`, with the newest usage of that message.
-- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The count of the stream adds the count of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 tokens. Any other stream that is missing is [a stream that cannot be read](#a-stream-that-cannot-be-read).
+`status` shows two token counts, for the run and for each ticket, in each form: the lines of `status`, the JSON, and the live block and the feed of `watch`. It shows no cost.
+
+- **New** (`tokens_new`): the input tokens, the cache writes, and the output tokens, with the thinking tokens. These are the tokens that the model reads or writes for the first time.
+- **Cache** (`tokens_cache`): the cache reads. Each turn of an agent reads its whole context again from the cache, so this count grows with the number of turns times the size of the context. A long [**session**](../glossary.md#session) has many cache reads, and they do not mean that the run is expensive.
+
+The lines give the two counts in a short form: `tokens 302k new, 9.7M cache`. The feed of `watch` uses the same form. A count under 1000 shows as it is, a count under one million shows in thousands (`k`), and a larger count shows in millions (`M`) with one decimal.
+
+Each adapter splits the counts of its stream:
+
+| Adapter | New | Cache |
+|---|---|---|
+| `claude-code` | `input_tokens`, `cache_creation_input_tokens`, and `output_tokens` of a `usage` object | `cache_read_input_tokens` of a `usage` object |
+| `opencode` | `input`, `output`, `reasoning`, and `cache.write` of the `part.tokens` of a `step_finish` event | `cache.read` of the `part.tokens` of a `step_finish` event. A step with no `cache` field gives 0. |
+
+The token counts of a `claude-code` stream:
+
+- The counts of one turn or one session come from its `usage` object, as the table above gives.
+- When the stream holds a `result` event, the counts of that session are the `usage` of the `result` event. The `usage` of an `assistant` event is partial, so it does not give the counts of a session that ended.
+- For a session that has no `result` event yet (an agent that runs now), the counts are the sums of its turns: one turn for each `message.id`, with the newest usage of that message.
+- A resumed session writes its events in the same stream, after the `result` event of the earlier session. The counts of the stream add the counts of each session. The streams are the files that `agent-start` and the result events name. The stream of an agent that runs now can be missing for a short time, before the [**harness**](../glossary.md#harness) opens it: it then has 0 new tokens and 0 cache tokens. Any other stream that is missing is [a stream that cannot be read](#a-stream-that-cannot-be-read).
 
 #### The newest activity
 
@@ -124,7 +142,7 @@ The `status` process can have no reader of the streams of a run:
 - The adapter of the run is not known to the process. For example, a script registered the adapter in its own process.
 - The adapter has no method `activity`. For example, an adapter of an earlier version.
 
-Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens` and `idle_seconds` are `null`, and the lines of `status` and of the [live block](#the-live-view) of `watch` have no tokens and no last activity. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
+Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens_new`, `tokens_cache` and `idle_seconds` are `null`, and the lines of `status` and of the [live block](#the-live-view) of `watch` have no tokens and no last activity. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
 
 ### A stream that cannot be read
 
@@ -136,13 +154,13 @@ Each form of `status` then works, and exits 0. It shows the progress and the ETA
 - The path is a directory.
 - The file is not UTF-8 text.
 - A line before the last one is not JSON.
-- A line is JSON, but it is not an event that the adapter can use. For example, a line is a number or a list, a `timestamp` is not a time, a usage value of a `claude-code` stream is not a number, or a `step_finish` event of an `opencode` stream has no `part.tokens.total` number.
+- A line is JSON, but it is not an event that the adapter can use. For example, a line is a number or a list, a `timestamp` is not a time, a usage value of a `claude-code` stream is not a number, or a `step_finish` event of an `opencode` stream has no `part.tokens.input` number.
 
 `status` then shows no tokens and no activity for that agent:
 
-- In the JSON, the `tokens` of its ticket is `null`. The count of the other agents of the ticket would not be the count of the ticket.
+- In the JSON, the `tokens_new` and the `tokens_cache` of its ticket are `null`. The counts of the other agents of the ticket would not be the counts of the ticket.
 - When the agent runs now, the `idle_seconds` of its ticket is `null`.
-- The `tokens` of the run is the sum of the other tickets.
+- The `tokens_new` and the `tokens_cache` of the run are the sums of the other tickets.
 - The lines of `status` and of the live block of `watch` show no tokens for the ticket. While the agent runs, they show no last activity for it.
 
 Only `status` treats such a stream as no data. `delegate run` reads the stream of an agent for its [**end state**](../glossary.md#end-state), and a stream that it cannot read stays an error there.
@@ -208,35 +226,35 @@ The exit codes, the options, and the last line `position <seq>` are the same in 
 On a terminal, `watch` draws a frame at each poll, in place of the frame before it. The frame has the live block at the top, a blank line, and the feed below:
 
 ```
-run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, 64k tokens
-  a built, 1h00m used, 39k tokens
-  b running specialist, 50s used, 26k tokens, last activity 12s ago
+run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, tokens 50k new, 1.3M cache
+  a built, 1h00m used, tokens 39k new, 1.1M cache
+  b running specialist, 50s used, tokens 12k new, 205k cache, last activity 12s ago
 
 16:00  run 20261016T030000Z-abcd started · assure · 2 tickets
 16:00  #a started · python-specialist
-16:36  #a specialist finished · 36m · 19k tok · report ok
+16:36  #a specialist finished · 36m · tokens 19k new, 980k cache · report ok
 16:52  #a gates green (pytest 16m, zensical 1s)
 16:52  #a verifier started
-17:00  #a verifier finished · 7m · 19k tok · report ok
+17:00  #a verifier finished · 7m · tokens 19k new, 140k cache · report ok
 17:00  #a ✓ ACCEPT · built
 17:00  #b started · python-specialist
 ```
 
 The live block is the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
 
-- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the tokens. The ETA is the time from now, or `-`. A run that ended shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
-- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the lines of `status` do.
+- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-`. A run that ended shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
+- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the two token counts. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the lines of `status` do.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
 
 The feed has one short line for each event that matters. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
 
 | Line | The events |
 |---|---|
-| `#a specialist finished · 36m · 19k tok · report ok` | The result of an agent (`adapter-result`, `fixup-result` or `verify-result`) and the event of its [**report**](../glossary.md#report). It gives the role, the end state, the time from its `agent-start`, and the tokens of its stream. |
+| `#a specialist finished · 36m · tokens 19k new, 980k cache · report ok` | The result of an agent (`adapter-result`, `fixup-result` or `verify-result`) and the event of its [**report**](../glossary.md#report). It gives the role, the end state, the time from its `agent-start`, and the two token counts of its stream. |
 | `#a gates green (pytest 16m, zensical 1s)` | The `gate-result` and `gate-skip` events of one round of gates. Each gate has the short name of its command and its time. The name is the first word of the command that is not a launcher (such as `nix develop -c` or `python3 -m`), with no version. A red gate has the word `red`. |
 | `#a ✓ ACCEPT · built` | A verdict, or the gates, with the `step-end` that follows them. A [**REJECT**](../glossary.md#reject) gives the number of findings. |
-| `stack python ✓ ACCEPT · run built · 16m · 39k tok` | The verdict of the chain of a stack in `economy` mode, with the `run-end` that follows it. |
-| `run built · 1h06m · 64k tok` | The `run-end`: the result, the time of the run, and its tokens. |
+| `stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 1.1M cache` | The verdict of the chain of a stack in `economy` mode, with the `run-end` that follows it. |
+| `run built · 1h06m · tokens 50k new, 1.3M cache` | The `run-end`: the result, the time of the run, and its two token counts. |
 
 The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance` and `lock-broken` have no line of their own. Each other event has a short line.
 
