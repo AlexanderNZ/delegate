@@ -19,6 +19,7 @@ from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
 from . import opencode_fake
+from .harness_fake import wrote
 
 
 def request(tmp_path: Path, **changes) -> AdapterRequest:
@@ -87,10 +88,13 @@ def test_a_finished_stream_with_the_exit_status_of_sigterm_keeps_the_end_state_f
 
 
 def test_after_a_valid_report_a_session_that_writes_no_event_for_the_idle_timeout_ends(tmp_path, monkeypatch):
-    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)
+    # The session starts later than the idle timeout, as on a machine with a high load, and stays open after its result.
+    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=1.0, hold_seconds=120)
     started = time.monotonic()
+    stream = tmp_path / "streams" / "a.stream.jsonl"
+    req = request(tmp_path, idle_timeout=0.5, event_stream=stream, report_valid=wrote(stream, (opencode_fake.FIXTURES / "finished.jsonl").read_text()))
 
-    result = adapters.get("opencode").run(request(tmp_path, idle_timeout=0.5, report_valid=lambda: True))
+    result = adapters.get("opencode").run(req)
 
     assert time.monotonic() - started < 60
     assert (result.end_state, result.ended_idle, result.session_id) == ("finished", True, "ses_ee2d28a59ffevBJM22I2ZGtbFd")

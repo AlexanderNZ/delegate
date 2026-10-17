@@ -19,6 +19,7 @@ from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
 from . import claude_fake
+from .harness_fake import wrote
 
 
 def request(tmp_path: Path, **changes) -> AdapterRequest:
@@ -88,10 +89,13 @@ def test_a_finished_result_with_the_exit_status_of_sigterm_keeps_the_end_state_f
 
 
 def test_after_a_valid_report_a_session_that_writes_no_event_for_the_idle_timeout_ends_and_keeps_its_stream(tmp_path, monkeypatch):
-    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)  # the session stays open after its result
+    # The session starts later than the idle timeout, as on a machine with a high load, and stays open after its result.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=1.0, hold_seconds=120)
     started = time.monotonic()
+    stream = tmp_path / "streams" / "a.stream.jsonl"
+    req = request(tmp_path, idle_timeout=0.5, event_stream=stream, report_valid=wrote(stream, (claude_fake.FIXTURES / "finished.jsonl").read_text()))
 
-    result = adapters.get("claude-code").run(request(tmp_path, idle_timeout=0.5, report_valid=lambda: True))
+    result = adapters.get("claude-code").run(req)
 
     assert time.monotonic() - started < 60
     assert (result.end_state, result.ended_idle) == ("finished", True)
@@ -111,9 +115,14 @@ def test_a_session_whose_report_is_not_valid_is_not_ended_at_the_idle_timeout(tm
 
 
 def test_a_session_that_writes_events_more_often_than_the_idle_timeout_is_not_ended(tmp_path, monkeypatch):
-    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", drip_seconds=0.2)  # seven events, one each 0.2 seconds
+    # Seven events, one each 0.2 seconds, after a start that is longer than the idle timeout.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=1.5, drip_seconds=0.2)
 
-    result = adapters.get("claude-code").run(request(tmp_path, idle_timeout=1.0, report_valid=lambda: True))
+    first_event = (claude_fake.FIXTURES / "finished.jsonl").read_text().splitlines(keepends=True)[0]
+    stream = tmp_path / "streams" / "a.stream.jsonl"
+    req = request(tmp_path, idle_timeout=1.0, event_stream=stream, report_valid=wrote(stream, first_event))  # valid from the first event on
+
+    result = adapters.get("claude-code").run(req)
 
     assert (result.exit_status, result.end_state, result.ended_idle) == (0, "finished", False)
     assert result.event_stream.read_text() == (claude_fake.FIXTURES / "finished.jsonl").read_text()

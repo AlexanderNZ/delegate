@@ -8,7 +8,9 @@ command.
 
 A test can make the stand-in write one line of the stream each `drip_seconds`,
 as a harness that works writes its events, and stay alive for `hold_seconds`
-after the stream, as an idle session that does not exit does.
+after the stream, as an idle session that does not exit does. With
+`start_seconds`, the stand-in waits before it does anything, as a process that
+starts slowly on a machine with a high load does.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from pathlib import Path
 SCRIPT = """\
 #!{python}
 import json, os, sys, time
+time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
     log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ)}}) + "\\n")
 drip = float(os.environ.get("FAKE_HARNESS_DRIP", "0"))
@@ -35,6 +38,17 @@ sys.stderr.write(os.environ.get("FAKE_HARNESS_STDERR", ""))
 time.sleep(float(os.environ.get("FAKE_HARNESS_HOLD", "0")))
 sys.exit(int(os.environ.get("FAKE_HARNESS_EXIT", "0")))
 """
+
+
+def wrote(stream: Path, text: str):
+    """A report check that is true when the event stream starts with `text`.
+
+    A real session writes its report while it works, so its report becomes
+    valid after the session wrote events. A check that is true before the
+    process writes anything lets the idle timeout end a process that only
+    starts slowly.
+    """
+    return lambda: stream.is_file() and stream.read_text().startswith(text)
 
 
 @dataclass(frozen=True)
@@ -51,7 +65,7 @@ class FakeHarness:
 
 def install(
     tmp_path: Path, monkeypatch, command: str, fixtures: Path, fixture: str, *, exit_status: int = 0, stderr: str = "",
-    drip_seconds: float = 0, hold_seconds: float = 0,
+    drip_seconds: float = 0, hold_seconds: float = 0, start_seconds: float = 0,
 ) -> FakeHarness:
     """Put a `command` that replays `fixture` first on PATH. An empty `fixture` replays nothing."""
     bin_dir = tmp_path / "fake-bin"
@@ -67,4 +81,5 @@ def install(
     monkeypatch.setenv("FAKE_HARNESS_STDERR", stderr)
     monkeypatch.setenv("FAKE_HARNESS_DRIP", str(drip_seconds))
     monkeypatch.setenv("FAKE_HARNESS_HOLD", str(hold_seconds))
+    monkeypatch.setenv("FAKE_HARNESS_START", str(start_seconds))
     return FakeHarness(log)
