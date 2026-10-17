@@ -17,6 +17,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - The gate events on the tip of an `economy` chain have the phase `chain`. The `fixup-start` event of a chain also has `stack`, `tickets`, and `trigger` (`gates-red` or `reject`).
 - In `economy` mode, `delegate status` shows the phase `gates` for the run while the gates of the chain run. The percentage and the ETA count the gates as part of the verification of the chain.
 
+### Fixed
+
+- A verifier can write its verdict through the verifier guard. The guard refuses a heredoc and a here-string, and some characters of a command, also inside quotes, so a verifier that tried a heredoc, or a verdict with a backtick in its evidence, failed the step after all its work. The report section of each verifier brief (full, fix-up, and chain) now names the one form that the guard permits: `printf '%s\n' '<json>' > <report path>`, with the JSON on one line, and `$`, the backtick, the apostrophe, `<`, `>` and `&` written as JSON escapes.
+
 ## [1.2.0] - 2026-10-17
 
 ### Added

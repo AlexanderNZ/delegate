@@ -242,6 +242,20 @@ def _report_rule(place: str, report_path: str | Path) -> str:
     )
 
 
+# How a verifier writes its verdict (#98). The verifier has no Write tool, and the verifier guard refuses a heredoc
+# (it reads each line of the body as a command), a here-string, `tee` with no input, and each `$(` and backtick of a
+# command, also inside quotes. It reads a `<`, `>` or `&` in the text as a redirection or a divider. A JSON escape
+# keeps each of these characters out of the command text, and a JSON parser reads it back as the same character.
+VERDICT_WRITE_RULE = (
+    "Write the report with one Bash command of this form, with the whole JSON object on one line:\n\n"
+    "```bash\nprintf '%s\\n' '<the JSON object>' > <the absolute report path>\n```\n\n"
+    "Do not use a heredoc or a here-string: the verifier guard refuses them. "
+    "The guard also refuses some characters in the command text, also inside quotes. "
+    "So in the JSON text, write each `$` as `\\u0024`, each backtick as `\\u0060`, each apostrophe as `\\u0027`, "
+    "each `<` as `\\u003c`, each `>` as `\\u003e`, and each `&` as `\\u0026`. "
+    "A JSON parser reads each escape back as the same character, so the report keeps your text."
+)
+
 FOREGROUND_RULE = (
     "Run every command in the foreground. Do not use background tasks or a monitor tool. "
     "In a headless session, their notifications do not come to you, and a monitor that stays open "
@@ -617,6 +631,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         "`unverified` lists what you could not verify.",
         verifier_example(mode),
     )
+    report += "\n\n" + VERDICT_WRITE_RULE
     return "\n" + _sections(("## Working copy", working_copy), ("## Commands", FOREGROUND_RULE), ("## Report", report))
 
 
