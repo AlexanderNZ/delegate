@@ -138,7 +138,9 @@ class _Tracker:
             return f"the step continued {event['count']} times (limit {event['limit']}, trigger {event['trigger']})"
         elif kind == "step-end" and event["state"] == "failed":
             red = [command for command, green in self._gates.get(ticket, {}).items() if not green]
-            return f"the gates are not green: {'; '.join(red)}" if red else f"the step failed: {event['reason']}"
+            if red:
+                return f"the gates are not green: {'; '.join(red)}"
+            return f"the step failed: {event['reason']}" if event.get("reason") else "the step failed"
         return None
 
 

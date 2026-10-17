@@ -418,6 +418,12 @@ def a_problem(run: Run) -> None:
     run.add(0, "step-end", ticket="a", state="failed", reason="crashed: OSError: disk full")
 
 
+def a_problem_with_no_reason(run: Run) -> None:
+    """A failed step with a null reason. A review found that the feed then showed "None"."""
+    run.step_start(0, "a")
+    run.add(0, "step-end", ticket="a", state="failed", reason=None)
+
+
 def a_verdict(run: Run) -> None:
     run.step_start(0, "a")
     run.verify(3121, 3600, "a", "REJECT")
@@ -439,6 +445,7 @@ END_REASONS = [
     pytest.param(ended_built, (), 0, None, r"16:00  run built · 1s · 0 tok", id="run-succeeded"),
     pytest.param(ended_failed, (), 1, None, r"16:00  run failed · 1s · 0 tok", id="run-failed"),
     pytest.param(a_problem, (), 3, RAW_OF_A_PROBLEM, r"16:00  ✗ #a the step failed: crashed: OSError: disk full", id="problem"),
+    pytest.param(a_problem_with_no_reason, (), 3, None, r"16:00  ✗ #a the step failed", id="problem-with-no-reason"),
     pytest.param(a_verdict, ("--until", "verdict"), 4, RAW_OF_A_VERDICT, r"17:00  #a REJECT · 1 finding", id="verdict"),
     pytest.param(a_stall, ("--stall-minutes", "5"), 5, None, r"\d\d:\d\d  ✗ stall · no change for 5m", id="stall"),
     pytest.param(

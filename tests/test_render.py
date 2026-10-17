@@ -746,6 +746,12 @@ AMPERSAND_DIVIDES = [
     ("cat x& rm -rf src &", "rm -rf src"),
     ("git status & git push", "git push"),
     ("cat x &\nrm -rf src", "rm -rf src"),
+    # A backslash makes the redirection sign before the "&" a literal, so the
+    # "&" ends the command. A review found this gap. The segment test reads a
+    # word that holds ">" as a redirection, so it refuses the first segment,
+    # which ends at the "&".
+    ("echo \\>& rm -rf src", "echo \\>"),
+    ("echo \\<& rm -rf src", "rm -rf src"),
 ]
 
 #: Commands that run "rm -rf src" inside a substitution. The guard cannot
@@ -759,6 +765,12 @@ SUBSTITUTION_DENIES = [
     "echo =(rm -rf src)",
     "cat /tmp/$(rm -rf src)",
     "git log `rm -rf src`",
+    # The shell removes a backslash-newline before it reads the command, so
+    # it does not hide the substitution. A review found this gap.
+    "echo $\\\n(rm -rf src)",
+    "cat <\\\n(rm -rf src)",
+    "cat x >\\\n(rm -rf src)",
+    "echo =\\\n(rm -rf src)",
 ]
 
 #: An "&" in a redirection is not a divider. These commands stay permitted.
@@ -771,6 +783,8 @@ AMPERSAND_IN_A_REDIRECTION = [
     "grep 'a & b' src",
     'grep "a & b" src',
     "grep a\\&b src",
+    # An escaped backslash escapes nothing more: the ">" is a redirection sign.
+    "ls \\\\>&2",
 ]
 
 

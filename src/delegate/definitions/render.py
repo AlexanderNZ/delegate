@@ -136,6 +136,9 @@ GET_ONLY_ARGUMENT_CHECK = (
 #: reads "$s" one character at a time, and it divides at &&, ||, ;, |, & and a
 #: newline only outside quotes. An "&" next to a redirection sign (2>&1, >&2,
 #: <&3, &>file, &>>file) is part of the redirection, and it does not divide.
+#: A redirection sign that a backslash escapes is a literal, so the "&" after
+#: it divides (echo \>& rm). $l is 1 when the last character in the segment
+#: is an escaped one, and $b holds that value for the character before $c.
 #: It reads quotes as bash and zsh do: a single quote ends at the next single
 #: quote; a double quote ends at the next double quote that no backslash
 #: escapes; outside quotes, a backslash makes the next
@@ -147,23 +150,26 @@ GET_ONLY_ARGUMENT_CHECK = (
 #: here-document (<<). The divider does not parse them. When the text holds one
 #: of them, it divides at each separator, also inside quotes, as the guard did
 #: before. Each of these differences gives more segments, never fewer, so a
-#: separator that the shell sees always divides the command.
+#: separator that the shell sees always divides the command. The test for the
+#: four forms reads "$u", the command text without each backslash-newline,
+#: because the shell removes a backslash-newline before it reads a form
+#: ($\<newline>( is a command substitution).
 #:
 #: At the end, $q holds "s" or "d" when a quote is not closed. The guard then
 #: cannot read the command, and it fails closed.
 COMMAND_DIVIDER = " ".join(
     [
-        r"""q=; case "$s" in *'`'*|*'$('*|*'${'*|*"\$'"*|*'<<'*) q=L ;; esac;""",
-        r"""segs=(); o=; e=0; i=0; n=${#s};""",
+        r"""q=; case "$u" in *'`'*|*'$('*|*'${'*|*"\$'"*|*'<<'*) q=L ;; esac;""",
+        r"""segs=(); o=; e=0; l=; i=0; n=${#s};""",
         r"""while [ "$i" -lt "$n" ]; do c=${s:$i:1}; i=$((i+1));""",
-        r"""if [ "$e" = 1 ]; then e=0; o+=$c; continue; fi;""",
+        r"""if [ "$e" = 1 ]; then e=0; l=1; o+=$c; continue; fi; b=$l; l=;""",
         r"""case "$q" in""",
         r"""s) [ "$c" = "'" ] && q=; o+=$c; continue ;;""",
         r"""d) case "$c" in '\') e=1 ;; '"') q= ;; esac; o+=$c; continue ;;""",
         r"""esac;""",
         r"""case "$c" in""",
         r"""$'\n'|';'|'|') segs+=("$o"); o=; [ "$c$q" = $'\n'c ] && q=; continue ;;""",
-        r"""'&') case "${o#"${o%?}"}${s:$i:1}" in '>'*|'<'*|*'>') ;;""",
+        r"""'&') case "${b:-${o#"${o%?}"}}${s:$i:1}" in '>'*|'<'*|*'>') ;;""",
         r"""*) [ "${s:$i:1}" = '&' ] && i=$((i+1)); segs+=("$o"); o=; continue ;; esac ;;""",
         r"""esac;""",
         r"""[ -n "$q" ] || case "$c" in "'") q=s ;; '"') q=d ;; '\') e=1 ;; '#') q=c ;; esac;""",
@@ -187,8 +193,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     >(...), and the zsh =(...)). When all segments pass and the command still
     holds one of these forms, the guard denies the full command. It reads the
     command as text for this test, so the form also denies inside single
-    quotes. The one exception is an exact gate of the declaration (a gate with
-    a substitution, see declaration.EXACT_GATE_COMMAND): the guard permits it
+    quotes. The text has no backslash-newline for this test: the shell removes
+    each one first, so "$\\<newline>(" is a command substitution too. The one
+    exception is an exact gate of the declaration (a gate with a substitution,
+    see declaration.EXACT_GATE_COMMAND): the guard permits it
     when the full command is that gate, character for character, with only
     spaces before and after it.
 
@@ -316,6 +324,12 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # A tab becomes a space first: the prefix strips cut at a space,
             # and a tab between words must not hide a flag or a write.
             "s=${cmd//$'\\t'/ }",
+            # The text without each backslash-newline, for the tests that look
+            # for a substitution and the other forms that the divider does not
+            # parse. Only these tests read it: in single quotes and after an
+            # escaped backslash the shell keeps the newline, so the divider
+            # reads "$s".
+            "u=${s//\\\\$'\\n'/}",
             # The full command without the spaces at each end, for the exact
             # gate test and for the substitution message.
             'x=${s#"${s%%[! ]*}"}; x=${x%"${x##*[! ]}"}',
@@ -328,7 +342,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # tests match from the first word, so remove them.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
             f"{segment} done",
-            "case \"$s\" in *'`'*|*'$('*|*'<('*|*'>('*|*'=('*) "
+            "case \"$u\" in *'`'*|*'$('*|*'<('*|*'>('*|*'=('*) "
             f'deny "$x" "{substitution}" ;; esac',
             f"exit 0 {VERIFIER_GUARD_MARKER}",
         ]
