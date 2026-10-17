@@ -40,8 +40,10 @@
       devShells = forAllSystems (
         pkgs:
         let
+          # pytest-xdist runs the suite in parallel: `pytest -n auto`.
           python = pkgs.python313.withPackages (ps: [
             ps.pytest
+            ps.pytest-xdist
             ps.pyyaml
           ]);
           wrapper =
