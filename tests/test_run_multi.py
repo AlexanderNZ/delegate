@@ -76,7 +76,7 @@ def test_tickets_run_in_dependency_order_and_the_run_branch_holds_all_three_when
 
 
 def test_the_journal_shows_the_gates_before_and_after_the_rebase_for_each_ticket(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
 
     code, out, err = run(repo, capsys)
 
@@ -90,7 +90,7 @@ def test_the_journal_shows_the_gates_before_and_after_the_rebase_for_each_ticket
         gates = [(e["event"], e["phase"]) for e in mine if e["event"] in ("gate-result", "gate-skip")]
         assert gates == [("gate-result", "build"), (after, "rebase")]
     b_gates = [e for e in of_ticket(events, "b") if e["event"] == "gate-result"]
-    # Ticket b is built from main, so it lacks a.txt until the rebase puts the accepted work of ticket a under it.
+    # Ticket b has no blocker, so it is built from the base of the run, and it lacks a.txt until the rebase puts the accepted work of ticket a under it.
     assert b_gates[0]["output_tail"] == "b.txt\nseed.txt\n"
     assert b_gates[1]["output_tail"] == "a.txt\nb.txt\nseed.txt\n"
     rebase = next(e for e in of_ticket(events, "b") if e["event"] == "rebase")
@@ -100,7 +100,7 @@ def test_the_journal_shows_the_gates_before_and_after_the_rebase_for_each_ticket
 
 def test_a_gate_that_is_red_only_after_the_rebase_fails_the_step_before_the_verifier_starts(tmp_path, capsys, scripted):
     # Three text files make the gate red. Ticket b holds two before the rebase (seed.txt, b.txt) and three after it.
-    workflow = HEAD.replace(GATE_LISTING, 'gates = ["test $(ls *.txt | wc -l) -lt 3"]') + ticket("a") + ticket("b", ("a",))
+    workflow = HEAD.replace(GATE_LISTING, 'gates = ["test $(ls *.txt | wc -l) -lt 3"]') + ticket("a") + ticket("b")
     repo = make_repo(tmp_path, workflow)
 
     code, out, err = run(repo, capsys)
@@ -200,7 +200,7 @@ def test_a_rebase_that_cannot_start_because_a_tracked_file_is_dirty_fails_only_t
 def test_a_ticket_that_holds_no_commit_beyond_the_run_branch_after_the_rebase_fails_the_step(tmp_path, capsys, scripted):
     # Ticket b writes the same file as ticket a. After the rebase onto the work of a, nothing of b is left.
     scripted.files_by_ticket = {"a": {"feature.txt": "feature\n"}, "b": {"feature.txt": "feature\n"}}
-    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
 
     code, out, err = run(repo, capsys)
 

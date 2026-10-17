@@ -91,9 +91,9 @@ def test_the_page_shows_the_state_of_a_finished_run_and_follows_its_journal_to_t
     assert "ticket 1: state built, verdict ACCEPT" in status.out and "ticket 2: state built, verdict ACCEPT" in status.out
     watch = next(step for step in watched if step.command.startswith("delegate watch"))
     assert watch.out.splitlines()[0].startswith("1 ") and " run-start " in watch.out.splitlines()[0]
-    assert watch.out.splitlines()[-2].endswith("run-end result=built") and watch.out.splitlines()[-1] == "position 33"  # each of the three gate runs adds gate-start
+    assert watch.out.splitlines()[-2].endswith("run-end result=built") and watch.out.splitlines()[-1] == "position 32"  # each of the two gate runs adds gate-start
     assert [step.command for step in raw] == ["delegate watch --raw"]
-    assert raw[0].out.splitlines()[0].startswith("1 ") and raw[0].out.splitlines()[-1] == "position 33"
+    assert raw[0].out.splitlines()[0].startswith("1 ") and raw[0].out.splitlines()[-1] == "position 32"
     # Going on from position 2 prints the events after it, and no event at or before it.
     printed = [line for line in from_position[0].out.splitlines() if line[:1].isdigit() and " " in line]
     assert printed[0].startswith("3 ") and printed[-1].endswith("run-end result=built")

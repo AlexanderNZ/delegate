@@ -39,17 +39,17 @@ To check a workflow file without a build, use `--dry-run`. See [the workflow ref
 2. The engine checks that no other run holds the lock of the run branch. See [the run lock](#the-run-lock). A held lock exits 1 and creates nothing.
 3. The engine checks that `base-branch` is a branch of the repository and that no ticket branch exists. A problem exits 1 and creates nothing.
 4. The engine takes the lock.
-5. The engine creates the run branch at `base-branch`, and writes `run-start` to a new journal.
+5. The engine creates the run branch at the commit of `base-branch`, and writes `run-start` to a new journal. That commit is the base of the run. See [the base of the run](#the-base-of-the-run).
 6. For each ticket in dependency order, the engine does the [**step**](../glossary.md#step) below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
 7. In `economy` mode, the engine verifies the chain. See [the chain verification](#the-chain-verification).
 8. The engine writes `run-end`, and releases the lock.
 
 A step has these parts:
 
-1. Make a worktree and the branch `<run-branch>-<ticket id>` from `base-branch`, and install the [**push guard**](../glossary.md#push-guard) in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain). In `assure` mode with `ticket-start = "run-branch"`, the branch starts from the tip of the run branch. See [the ticket start](workflow.md#ticket-start).
+1. Make a worktree and the branch `<run-branch>-<ticket id>` from the base of the run, and install the [**push guard**](../glossary.md#push-guard) in it. See [the guards](#the-guards). In `economy` mode the branch starts from the tip of the previous ticket. See [the economy chain](#the-economy-chain). In `assure` mode, the branch of a ticket with `blocked-by` starts from the tip of the run branch, and so does every ticket branch with `ticket-start = "run-branch"`. See [the ticket start](workflow.md#ticket-start).
 2. Spawn the specialist through the adapter. The prompt is the specialist brief.
 3. Read the [**report**](../glossary.md#report) from the report path and check it against the schema.
-4. Check that the branch holds at least one commit beyond the point where it started (`base-branch`, the tip of the previous ticket in `economy` mode, or the tip of the run branch with `ticket-start = "run-branch"`).
+4. Check that the branch holds at least one commit beyond the point where it started: the base of the run, the tip of the previous ticket in `economy` mode, or the tip of the run branch. `step-start` records that point in `base_commit`.
 5. Compare the changed paths with the [**hotspot**](../glossary.md#hotspot) patterns of the stack. A match fails the step. See [the hotspot guard](#the-hotspot-guard).
 6. In `assure` mode, run each gate of the stack in the worktree. The engine runs all gates, also after a red gate. A gate that the journal holds green on the same commit does not run again. See [one green gate run for each commit](#one-green-gate-run-for-each-commit). A specialist that ends `failed` or `capped`, a red gate, and a report that is not valid on a branch with a commit start a [**continuation**](../glossary.md#continuation). See [the continuation](#the-continuation). In `economy` mode, the engine runs no gate here: a valid report with the status `committed`, on a branch with a commit, builds the step. The gates run once, on the tip of the chain. See [the chain verification](#the-chain-verification).
 7. In `assure` mode, rebase the branch onto the run branch, and run the gates again. See [the rebase](#the-rebase-onto-the-run-branch).
@@ -60,6 +60,15 @@ The engine does not trust the report for the gates. A gate that is red is record
 The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step.
 
 The engine sets `core.fsmonitor` to false in the configuration of each worktree and each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
+
+### The base of the run
+
+A run has one base: the commit of `base-branch` at the start of the run. The journal records it in the field `base_commit` of `run-start`. The run branch starts at that commit.
+
+- No ticket branch starts from `base-branch` itself. Other work can land on `base-branch` while the run goes on, and the run does not see it. A ticket branch starts from the base of the run, from the tip of the run branch, or from the tip of the previous ticket in `economy` mode.
+- So the rebase onto the run branch copies no commit of `base-branch` onto a ticket branch, and the verifier diff and the hotspot guard see only the commits of the ticket.
+- A [**resume**](../glossary.md#resume) uses the `base_commit` of `run-start`, not the tip of `base-branch`. A journal from version 1.2.0 or earlier has no `base_commit` in `run-start`. The resume then uses the `from_commit` of the first `run-branch-advance`, or the tip of the run branch when the run branch did not move. The run branch started at the base of the run and moves only by fast-forward, so both are the base of the run.
+- To give a run the newer commits of `base-branch`, start a new run.
 
 ## The continuation
 
@@ -113,8 +122,10 @@ The engine treats each ticket by what the journal holds for it:
 An open step goes on as follows:
 
 - The worktree is used again as it is. A rebase that the stop left half done is aborted. If the worktree is gone, the engine makes it again on the same branch.
+- A ticket that did not start yet starts from the base of the run that `run-start` records, not from the tip of `base-branch`. See [the base of the run](#the-base-of-the-run).
+- After a `rebase` with the result `rebased`, the commits of the ticket are the commits beyond the `onto_commit` of the newest such event. The hotspot guard and the continuation brief use this point, so they do not see the commits of the run branch under the ticket.
 - If the journal shows a valid report after the last time the specialist was spawned, the engine does not spawn the specialist again. It runs the gates, and the step goes on from there. A gate that the journal holds green on the commit of the branch does not run again. So a resume after a stop at the verifier runs no gate on that commit.
-- Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond `base-branch`, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
+- Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond the point where it started, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
 - The continuations that the journal holds count against the limit of the mode.
 - In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of [**verdicts**](../glossary.md#verdict) that the journal holds, and the limit of two fix-up rounds counts across the stop. A verifier run that ended with no verdict does not count: for example, a verifier that a stop or the time limit of a harness killed. The resume runs that round again.
 
@@ -189,7 +200,7 @@ The engine installs the push guard in each worktree that it makes, also in a wor
 
 ### The hotspot guard
 
-After the specialist reports `committed` and the branch holds a commit, and before the gates run, the engine compares the paths that the branch changed since the merge base with `base-branch` with the `hotspots` of the stack. After a fix-up specialist, the engine compares the paths that changed since the rejected commit. The engine does this in every mode.
+After the specialist reports `committed` and the branch holds a commit, and before the gates run, the engine compares the paths that the branch changed since the point where it started (the `base_commit` of `step-start`) with the `hotspots` of the stack. After a fix-up specialist, the engine compares the paths that changed since the rejected commit. The engine does this in every mode.
 
 - A changed path is a path that is added, changed, or deleted. A rename counts as its old path and its new path.
 - A pattern that ends with `/` names a directory. It matches every path below the directory.
@@ -210,7 +221,7 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 
 ## The rebase onto the run branch
 
-In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. A ticket branch that starts from the run branch (`ticket-start = "run-branch"`) holds the run branch already, so its rebase has no conflict. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. A rebase that changes the commit runs the gates again, so the journal shows a gate result before and after the rebase. A rebase that keeps the commit runs no gate again: for example, when the run branch is still at the commit where the ticket branch started. The journal then shows `gate-skip` with the phase `rebase` for each gate. See [one green gate run for each commit](#one-green-gate-run-for-each-commit).
+In `assure` mode, the engine rebases the ticket branch onto the run branch before the verifier starts, and runs the gates again on the rebased tree. A ticket branch that starts from the run branch (a ticket with `blocked-by`, or `ticket-start = "run-branch"`) holds the run branch already, so its rebase has no conflict. A ticket branch that starts from the base of the run holds no commit that the run branch does not hold, except its own. So the rebase copies only the commits of the ticket. The first gate results have the phase `build`. The gate results after the rebase have the phase `rebase`. A rebase that changes the commit runs the gates again, so the journal shows a gate result before and after the rebase. A rebase that keeps the commit runs no gate again: for example, when the run branch is still at the commit where the ticket branch started. The journal then shows `gate-skip` with the phase `rebase` for each gate. See [one green gate run for each commit](#one-green-gate-run-for-each-commit).
 
 - The engine writes `rebase` with the run branch tip (`onto_commit`) and the branch tip before (`from_commit`) and after (`to_commit`) the rebase.
 - A rebase that stops with a conflict fails the step. The engine aborts the rebase, so the branch keeps its commits and the worktree is clean. The journal records `rebase` with the result `conflict` and the conflicting files in `files`. The independent tickets go on.
@@ -236,7 +247,7 @@ The engine does not run a gate again on a commit for which the journal holds a g
 In `economy` mode, the tickets form a chain. Each ticket branch starts from the tip of the previous ticket, so a dependent ticket sees the work it depends on.
 
 - The previous ticket is the last ticket before it, in the order of the plan, that was built. A ticket that failed or was skipped is not part of the chain, and its branch is not a start point.
-- The first ticket starts from `base-branch`.
+- The first ticket starts from the base of the run. So does a ticket whose earlier tickets all failed or were skipped.
 - `step-start` records the start commit in `base_commit`. The commits of a ticket are the commits beyond `base_commit`. The check for a commit, the hotspot guard, and the continuation brief all use this point, so the commits of earlier tickets in the chain do not count for a ticket.
 - The specialist runs on the tier `standard`. The `specialist` entry of `tier-overrides` replaces it.
 - The engine does not rebase in `economy` mode.
@@ -450,7 +461,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 
 | `event` | Fields |
 |---|---|
-| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `run_branch`, `tickets` (the ids in plan order) |
+| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `base_commit` (the base of the run: the commit of `base_branch` at the start), `run_branch`, `tickets` (the ids in plan order) |
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `agent-start` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (0 for the specialist and the first verifier, else the fix-up round), `event_stream` (the path of the stream of the agent). The engine writes it just before each agent starts: the specialist, each continuation, the fix-up specialist, and each verifier. The result event of the agent names the same path. |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream`, and `refused` when a permission mode of the harness refused a tool: a list of objects, each with the `tool` and the `mode`. `fixup-result` and `verify-result` have the same `refused` field. See [the settings of a host](claude-code-adapter.md#the-settings-of-a-host). |
@@ -482,7 +493,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 
 ## Limits of this version
 
-- In `assure` mode, every ticket branch starts from `base-branch`, not from the work of the tickets that block it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see the work of its blockers.
+- In `assure` mode with `ticket-start = "base-branch"`, a ticket with no `blocked-by` starts from the base of the run, not from the accepted work of the tickets before it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see that work.
 - The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run. `--retry` goes on with one failed step also after `run-end`, but only in `assure` mode, and the tickets that the engine skipped for that step stay skipped.
 - During a retry of a run that ended, `delegate status` and `delegate watch` read the old `run-end` until the retry writes a new one.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.

@@ -222,9 +222,11 @@ def test_a_branch_with_no_commit_beyond_the_base_fails_the_step_even_when_the_re
     code, out, err = run(repo, capsys)
 
     assert code == 1
-    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    events = read_journal(out)
+    step_end = next(e for e in events if e["event"] == "step-end")
     assert step_end["state"] == "failed"
-    assert "no commit" in step_end["reason"] and "main" in step_end["reason"]
+    base = next(e for e in events if e["event"] == "step-start")["base_commit"]
+    assert "no commit" in step_end["reason"] and base in step_end["reason"]
 
 
 def tier_file(tmp_path, columns=("claude-code", "opencode")):

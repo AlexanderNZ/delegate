@@ -144,7 +144,7 @@ def test_a_ticket_after_a_crashed_step_is_skipped_for_that_reason():
 # The start of a ticket in each mode
 
 
-def test_in_assure_mode_every_ticket_starts_from_the_base_branch():
+def test_in_assure_mode_no_ticket_starts_from_another_ticket():
     assert domain.chain_predecessor("assure", ["a", "b", "c"], built=["a", "b"]) is None
 
 
@@ -160,26 +160,27 @@ def test_in_economy_mode_the_first_ticket_has_no_predecessor():
     assert domain.chain_predecessor("economy", ["a", "b"], built=[]) is None
 
 
-def test_in_assure_mode_the_work_of_a_ticket_is_counted_from_the_base_branch():
-    assert domain.work_starts_at("assure", "main", "abc123") == "main"
+def test_the_work_of_a_ticket_is_counted_from_where_its_branch_started():
+    assert domain.work_starts_at("abc123") == "abc123"
 
 
-def test_in_economy_mode_the_work_of_a_ticket_is_counted_from_where_its_branch_started():
-    assert domain.work_starts_at("economy", "main", "abc123") == "abc123"
+def test_after_a_rebase_the_work_of_a_ticket_is_counted_from_the_commit_that_it_was_rebased_onto():
+    assert domain.work_starts_at("abc123", rebased_onto="def456") == "def456"
 
 
-def test_in_assure_mode_a_ticket_starts_from_the_run_branch_only_with_ticket_start_run_branch():
+def test_in_assure_mode_a_ticket_with_no_blockers_starts_from_the_run_branch_only_with_ticket_start_run_branch():
     assert domain.starts_from_run_branch("assure", domain.START_RUN_BRANCH) is True
     assert domain.starts_from_run_branch("assure", domain.START_BASE_BRANCH) is False
 
 
+def test_in_assure_mode_a_ticket_with_blockers_starts_from_the_run_branch_with_every_ticket_start():
+    assert domain.starts_from_run_branch("assure", domain.START_BASE_BRANCH, ["a"]) is True
+    assert domain.starts_from_run_branch("assure", domain.START_RUN_BRANCH, ["a"]) is True
+
+
 def test_in_economy_mode_no_ticket_starts_from_the_run_branch():
     assert domain.starts_from_run_branch("economy", domain.START_RUN_BRANCH) is False
-
-
-def test_in_assure_mode_with_ticket_start_run_branch_the_work_of_a_ticket_is_counted_from_where_its_branch_started():
-    assert domain.work_starts_at("assure", "main", "abc123", domain.START_RUN_BRANCH) == "abc123"
-    assert domain.work_starts_at("assure", "main", "abc123", domain.START_BASE_BRANCH) == "main"
+    assert domain.starts_from_run_branch("economy", domain.START_BASE_BRANCH, ["a"]) is False
 
 
 # The verdict

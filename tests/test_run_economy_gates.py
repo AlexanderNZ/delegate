@@ -199,8 +199,9 @@ def test_an_assure_run_runs_the_gates_of_each_ticket_after_its_build_and_its_reb
     result = start_run(repo, scripted, gates)
 
     assert result.ok and result.built == ["a", "b"]
-    # a: the build (the rebase keeps its commit, so no second run). b: the build, then the rebase onto the work of a.
-    assert gates.calls == [(gate, "a", 0), (gate, "b", 1), (gate, "b", 1)]
+    # a: the build (the rebase keeps its commit, so no second run). b waits on a, so it starts from the run branch that
+    # holds the work of a: the build, and its rebase keeps its commit too.
+    assert gates.calls == [(gate, "a", 0), (gate, "b", 1)]
     events = read_journal_file(repo, result.run_id)
     phases = [(e["ticket"], e["phase"]) for e in events if e["event"] in ("gate-result", "gate-skip")]
     assert phases == [("a", "build"), ("a", "rebase"), ("b", "build"), ("b", "rebase")]

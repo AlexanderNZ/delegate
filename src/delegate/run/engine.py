@@ -1,7 +1,10 @@
 """The workflow engine: build each ticket through a harness adapter.
 
-For each ticket the engine makes a worktree from the base branch (or from the
-run branch, when the workflow sets `ticket-start = "run-branch"`), installs the
+A run has one base: the commit of the base branch at `run-start`. The run
+branch starts at that commit, the journal records it, and a resume uses it, not
+the tip of the base branch. For each ticket the engine makes a worktree from the
+base of the run (or from the run branch, when the ticket has `blocked-by` or the
+workflow sets `ticket-start = "run-branch"`), installs the
 push guard in it (see `guards.py`), spawns the stack's specialist through the adapter, checks the specialist's report, runs
 the stack's gates itself (in `assure` mode), and records each event in the journal. After the
 specialist reports `committed`, and before any gate runs, the engine compares
@@ -491,11 +494,12 @@ def _execute(
     plan: _RetryPlan | None = None
     if not resuming:
         with _vcs_errors():
-            vcs.create_branch(repo, workflow.run_branch, workflow.base_branch)
+            run_base = vcs.commit_of(repo, workflow.base_branch)
+            vcs.create_branch(repo, workflow.run_branch, run_base)
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
         journal.append(
             "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
-            base_branch=workflow.base_branch, run_branch=workflow.run_branch, tickets=[t.id for t in order],
+            base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
         )
         progress = _Progress()
     else:
@@ -506,6 +510,7 @@ def _execute(
             run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
         if not run_branch_exists:
             raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
+        run_base = _run_base(vcs, repo, workflow, events)
         # A step that cannot be retried is refused before the journal changes.
         plan = _retry_plan(workflow, progress, run_id, retry) if retry is not None else None
         journal.append(
@@ -530,15 +535,14 @@ def _execute(
             journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
+        start = _start_ref(workflow, order, built, ticket, run_base)
         try:
             if plan is not None and ticket.id == plan.ticket:
                 reason = _retry_ticket(
-                    _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason
+                    _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason, start
                 )
             else:
-                reason = _build_ticket(
-                    workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, prior, _start_ref(workflow, order, built)
-                )
+                reason = _build_ticket(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, start, prior)
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
             # step unknown, so the run ends here. The journal says why. A verifier
@@ -571,16 +575,35 @@ def _execute(
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
 
 
-def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str]) -> str:
-    """The branch that the next ticket starts from.
+def _run_base(vcs: VersionControl, repo: Path, workflow: Workflow, events: list[dict[str, object]]) -> str:
+    """The base of a run that goes on: the commit of the base branch at `run-start`, which the journal records.
+
+    The engine of 1.2.0 and before did not record it. The run branch started at that
+    commit and moves only by fast-forward, so it is then the `from_commit` of the
+    first `run-branch-advance`, or the tip of the run branch when it did not move.
+    """
+    recorded = events[0].get("base_commit")
+    if recorded is not None:
+        return str(recorded)
+    advances = [e for e in events if e["event"] == "run-branch-advance"]
+    if advances:
+        return str(advances[0]["from_commit"])
+    return _tip(vcs, repo, workflow.run_branch)
+
+
+def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str], ticket: Ticket, run_base: str) -> str:
+    """The branch or the commit that `ticket` starts from.
 
     It is the branch of its predecessor in a chain (see `domain.chain_predecessor`),
-    the run branch when the workflow says so (see `domain.starts_from_run_branch`),
-    or the base branch.
+    the run branch when the ticket has blockers or the workflow says so (see
+    `domain.starts_from_run_branch`), or else `run_base`, the base of the run. It
+    is never the base branch, which can move while the run goes on.
     """
     predecessor = domain.chain_predecessor(workflow.mode, [ticket.id for ticket in order], built)
     if predecessor is None:
-        return workflow.run_branch if domain.starts_from_run_branch(workflow.mode, workflow.ticket_start) else workflow.base_branch
+        if domain.starts_from_run_branch(workflow.mode, workflow.ticket_start, ticket.blocked_by):
+            return workflow.run_branch
+        return run_base
     return _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
 
 
@@ -678,14 +701,12 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
 
 def _build_ticket(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, roles: dict[str, tuple[str, str]],
-    repo: Path, state_dir: Path, run_id: str, journal: Journal, prior: list[dict[str, object]] | None = None,
-    start_ref: str | None = None,
+    repo: Path, state_dir: Path, run_id: str, journal: Journal, start_ref: str, prior: list[dict[str, object]] | None = None,
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed.
 
-    The branch of the ticket starts from `start_ref`, which is the base branch
-    unless the mode chains the tickets or the workflow starts each ticket from
-    the run branch (see `_start_ref`).
+    The branch of the ticket starts from `start_ref`: the base of the run, the
+    run branch, or the branch of the previous ticket of a chain (see `_start_ref`).
 
     In `assure` mode a ticket is built only when its verifier accepts it.
 
@@ -698,7 +719,7 @@ def _build_ticket(
     worktree = state_dir / "worktrees" / run_id / ticket.id
     hooks_dir = state_dir / "hooks" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
-    start_ref = start_ref or workflow.base_branch
+    rebased_onto: str | None = None
     if prior is None:
         with _vcs_errors():
             base_commit = vcs.commit_of(repo, start_ref)
@@ -722,10 +743,13 @@ def _build_ticket(
         continuations = sum(1 for e in prior if e["event"] == "continuation")
         # A verifier run that ended with no verdict does not count against the fix-up limit.
         verify_rounds = sum(1 for e in prior if e["event"] == "verdict")
-    # The commits of a ticket are the commits beyond the point where its branch started. In a chain that
-    # point is the tip of the previous ticket, and with `ticket-start = "run-branch"` it is the tip of the
-    # run branch, so the commits of earlier tickets are not counted.
-    since = domain.work_starts_at(workflow.mode, workflow.base_branch, base_commit, workflow.ticket_start)
+        rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
+        if rebases:
+            rebased_onto = str(rebases[-1]["onto_commit"])
+    # The commits of a ticket are the commits beyond the point where its branch started, or, after a rebase,
+    # beyond the commit of the run branch that the branch was rebased onto. So the hotspot check and the
+    # continuation brief see the commits of this ticket only.
+    since = domain.work_starts_at(base_commit, rebased_onto)
     reason = _build_with_continuations(
         workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
@@ -1238,8 +1262,10 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     return None
 
 
-def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str) -> str | None:
+def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -> str | None:
     """Go on with a failed step at the phase of `plan`. Return None when it is built, or the reason it failed.
+
+    `start_ref` is where the branch of the ticket starts if it is gone (see `_start_ref`).
 
     The step uses its worktree and its commits again, and the engine writes
     `retry` with the phase where the step goes on, and the reason it failed
@@ -1261,16 +1287,14 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str) -> str | None:
         step.journal.append("retry", ticket=ticket.id, phase=RETRY_GATES, round=plan.round, reason=failure)
         return _build_ticket(
             workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
-            list(plan.prior),
+            start_ref, list(plan.prior),
         )
     branch_ref = f"refs/heads/{step.branch}"
     on_tip = _holds(vcs, step.repo, _tip(vcs, step.repo, workflow.run_branch), branch_ref)
     fixup_held = plan.rejected is not None and _holds(vcs, step.repo, plan.rejected, branch_ref)
     goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_GATES
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
-    _prepare_worktree(
-        vcs, step.repo, step.worktree, step.branch, workflow.base_branch, step.state_dir / "hooks" / step.run_id / ticket.id
-    )
+    _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
         if plan.rejected is not None and fixup_held:
             brief = _checked_fixup_brief(step, plan.round, plan.rejected, _findings_text(list(plan.findings)))

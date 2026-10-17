@@ -63,11 +63,11 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 
 | Field | Type | Meaning |
 |---|---|---|
-| `base-branch` | string | The branch that the run starts from. |
+| `base-branch` | string | The branch that the run starts from. The run takes the commit of this branch at its start, and records it as the base of the run. A commit that lands on `base-branch` later is not part of the run. See [the base of the run](run.md#the-base-of-the-run). |
 | `run-branch` | string | The branch that the engine owns and accepted work lands on. It must differ from `base-branch`. |
 | [**`mode`**](../glossary.md#mode) | string | [**`assure`**](../glossary.md#assure) or [**`economy`**](../glossary.md#economy). |
 | [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. See [the run reference](run.md#the-adapter-interface). |
-| `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
+| `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode with no `blocked-by` starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
 | `stacks` | table | One sub-table for each stack. See [Stacks](#stacks). |
 | `tickets` | array of tables | At least one `[[tickets]]` table. See [Tickets](#tickets). |
@@ -83,16 +83,20 @@ All fields except `ticket-start` and `tier-overrides` are required. A field that
 
 ## Ticket start
 
-The field `ticket-start` sets the branch that each ticket branch starts from in `assure` mode.
+The field `ticket-start` sets the branch that each ticket branch with no `blocked-by` starts from in `assure` mode.
 
 | Value | Meaning |
 |---|---|
-| `base-branch` | Each ticket branch starts from `base-branch`. This is the default. |
+| `base-branch` | Each ticket branch starts from the base of the run: the commit of `base-branch` at the start of the run. This is the default. |
 | `run-branch` | Each ticket branch starts from the tip of `run-branch` at the start of its [**step**](../glossary.md#step). The branch then holds the accepted work of each ticket before it. |
 
-Use `run-branch` for a sequential chain of tickets that change the same files. With `base-branch`, a ticket that changes a file that an accepted ticket changed has a conflict at [the rebase onto the run branch](run.md#the-rebase-onto-the-run-branch), and its step fails. Such tickets must then go in separate runs. With `run-branch`, the rebase has no conflict, because the ticket branch holds the [**run branch**](../glossary.md#run-branch) already. The engine still verifies each ticket at once, after its specialist finishes it.
+A ticket with `blocked-by` starts from the tip of `run-branch` with both values. Its [**blockers**](../glossary.md#blocker) are accepted before its step starts, so its branch holds their commits, and its specialist sees their work.
 
-With `run-branch`, the commits of a ticket are the commits beyond the start commit, which `step-start` records in `base_commit`. The check for a commit, the [**hotspot**](../glossary.md#hotspot) guard and the [**continuation**](../glossary.md#continuation) brief use this commit, so the commits of earlier tickets do not count for the ticket.
+No ticket branch starts from the tip of `base-branch`. Other work can land on `base-branch` while the run goes on. See [the base of the run](run.md#the-base-of-the-run).
+
+Use `run-branch` for a sequential chain of tickets that change the same files. With `base-branch`, a ticket with no `blocked-by` that changes a file that an accepted ticket changed has a conflict at [the rebase onto the run branch](run.md#the-rebase-onto-the-run-branch), and its step fails. Give such a ticket `blocked-by`, or put the tickets in separate runs. With `run-branch`, the rebase has no conflict, because the ticket branch holds the [**run branch**](../glossary.md#run-branch) already. The engine still verifies each ticket at once, after its specialist finishes it.
+
+For each ticket, the commits of the ticket are the commits beyond the start commit, which `step-start` records in `base_commit`. The check for a commit, the [**hotspot**](../glossary.md#hotspot) guard and the [**continuation**](../glossary.md#continuation) brief use this commit, so the commits of earlier tickets do not count for the ticket.
 
 A ticket that failed or was skipped did not move the run branch, so the next ticket does not hold its work. Use `blocked-by` when a ticket needs the work of another ticket: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped.
 

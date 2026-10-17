@@ -16,9 +16,10 @@ def raise_in_b(request):
         raise RuntimeError("harness binary missing")
 
 
-def break_base_branch(request):
+def break_run_branch(request):
+    # The run does not read the base branch after `run-start`, so the run branch is the branch that the step needs.
     if ticket_of(request) == "b":
-        git(request.cwd, "update-ref", "-d", "refs/heads/main")
+        git(request.cwd, "update-ref", "-d", "refs/heads/run/demo")
 
 
 def test_an_exception_from_the_adapter_records_a_failed_step_end_then_a_run_end_and_exits_non_zero(tmp_path, capsys, scripted):
@@ -42,7 +43,7 @@ def test_an_exception_from_the_adapter_records_a_failed_step_end_then_a_run_end_
 
 def test_an_exception_from_git_during_a_step_records_a_failed_step_end_then_a_run_end_and_exits_non_zero(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, CRASH)
-    scripted.on_specialist = break_base_branch
+    scripted.on_specialist = break_run_branch
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 

@@ -75,8 +75,9 @@ def test_a_rebase_that_keeps_the_commit_runs_each_gate_once_and_the_journal_reco
 
 
 def test_a_rebase_that_changes_the_commit_runs_the_gates_again(tmp_path, scripted):
-    # Ticket b starts from main. The rebase puts the accepted work of ticket a under it, so its commit changes.
-    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+    # Ticket b has no blocker, so it starts from the base of the run. The rebase puts the accepted work of ticket a
+    # under it, so its commit changes.
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
     gates = SpyGates()
 
     result = start_run(repo, scripted, gates)

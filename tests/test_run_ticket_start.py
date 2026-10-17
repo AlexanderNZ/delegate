@@ -3,8 +3,10 @@
 With `ticket-start = "run-branch"`, each ticket branch starts from the tip of
 the run branch at the start of its step, so a ticket sees the accepted work of
 the tickets before it. Two tickets that change the same file then do not
-conflict at the rebase onto the run branch. Without the field, each ticket
-branch starts from the base branch, as before.
+conflict at the rebase onto the run branch. Without the field, a ticket branch
+starts from the base of the run: the commit of the base branch at `run-start`.
+A ticket with `blocked-by` starts from the run branch with every value of the
+field, so it holds the accepted commits of its blockers (issue #91).
 
 Each case writes a workflow into a real temporary git repository, registers a
 scripted adapter by name, and calls `delegate.main`.
@@ -28,11 +30,12 @@ def ticket(ticket_id: str, blocked_by: tuple[str, ...] = ()) -> str:
     return f'\n[[tickets]]\nid = "{ticket_id}"\ntext = "Ticket {ticket_id} changes the shared file."\nstack = "python"\nblocked-by = [{blockers}]\n'
 
 
-def workflow(ticket_start: str | None = None, mode: str = "assure") -> str:
+def workflow(ticket_start: str | None = None, mode: str = "assure", blocked: bool = True) -> str:
+    """Two tickets that change one file. Ticket b waits on ticket a when `blocked` is set."""
     head = HEAD.replace('mode = "assure"', f'mode = "{mode}"')
     if ticket_start is not None:
         head = head.replace('adapter = "scripted"\n', f'adapter = "scripted"\nticket-start = "{ticket_start}"\n')
-    return head + ticket("a") + ticket("b", ("a",))
+    return head + ticket("a") + ticket("b", ("a",) if blocked else ())
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +79,29 @@ def test_with_ticket_start_run_branch_two_tickets_that_change_one_file_both_buil
     assert [e["ticket"] for e in events if e["event"] == "verify-start"] == ["a", "b"]
 
 
-def test_without_ticket_start_each_ticket_starts_from_the_base_branch_and_the_same_file_conflicts_at_the_rebase(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path, workflow())
+@pytest.mark.parametrize("ticket_start", [None, "base-branch"], ids=["no-ticket-start", "ticket-start-base-branch"])
+def test_a_ticket_with_blocked_by_starts_from_the_run_branch_after_its_blockers_were_accepted(tmp_path, capsys, scripted, ticket_start):
+    repo = make_repo(tmp_path, workflow(ticket_start))
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    events = read_journal(out)
+    advance_a = next(e for e in events if e["event"] == "run-branch-advance" and e["ticket"] == "a")
+    start_b = next(e for e in events if e["event"] == "step-start" and e["ticket"] == "b")
+    assert start_b["base_commit"] == advance_a["to_commit"]
+    # The branch of ticket b holds the accepted commit of ticket a, so the same file does not conflict at the rebase.
+    git(repo, "merge-base", "--is-ancestor", advance_a["to_commit"], "run/demo-b")
+    assert next(e for e in events if e["event"] == "rebase" and e["ticket"] == "b")["result"] == "rebased"
+    assert (events[-1]["built"], events[-1]["failed"]) == (["a", "b"], [])
+    assert git(repo, "show", "run/demo:shared.txt") == "from a\nfrom b\n"
+
+
+@pytest.mark.parametrize("ticket_start", [None, "base-branch"], ids=["no-ticket-start", "ticket-start-base-branch"])
+def test_a_ticket_with_no_blocked_by_starts_from_the_base_of_the_run_and_the_same_file_conflicts_at_the_rebase(
+    tmp_path, capsys, scripted, ticket_start
+):
+    repo = make_repo(tmp_path, workflow(ticket_start, blocked=False))
     base_tip = git(repo, "rev-parse", "main").strip()
 
     code, out, err = run(repo, capsys)
@@ -92,16 +116,16 @@ def test_without_ticket_start_each_ticket_starts_from_the_base_branch_and_the_sa
     assert git(repo, "show", "run/demo:shared.txt") == "from a\n"
 
 
-def test_ticket_start_base_branch_is_the_default_behaviour(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path, workflow("base-branch"))
-    base_tip = git(repo, "rev-parse", "main").strip()
+def test_with_ticket_start_run_branch_a_ticket_with_no_blocked_by_starts_from_the_run_branch(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, workflow("run-branch", blocked=False))
 
-    code, out, _ = run(repo, capsys)
+    code, out, err = run(repo, capsys)
 
-    assert code == 1
+    assert (code, err) == (0, "")
     events = read_journal(out)
-    assert next(e for e in events if e["event"] == "step-start" and e["ticket"] == "b")["base_commit"] == base_tip
-    assert next(e for e in events if e["event"] == "rebase" and e["ticket"] == "b")["result"] == "conflict"
+    advance_a = next(e for e in events if e["event"] == "run-branch-advance" and e["ticket"] == "a")
+    assert next(e for e in events if e["event"] == "step-start" and e["ticket"] == "b")["base_commit"] == advance_a["to_commit"]
+    assert git(repo, "show", "run/demo:shared.txt") == "from a\nfrom b\n"
 
 
 def test_with_ticket_start_run_branch_the_work_of_a_ticket_counts_from_the_run_branch_tip_and_not_from_the_base_branch(

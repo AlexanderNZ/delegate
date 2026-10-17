@@ -20,8 +20,9 @@ ECONOMY: str = "economy"
 MODES: tuple[str, ...] = (ASSURE, ECONOMY)
 
 # The values of the workflow field `ticket-start`: the branch that each ticket branch of `assure` mode starts from.
-# `base-branch` is the default. With `run-branch`, a ticket branch starts from the tip of the run branch at the start
-# of its step, so it holds the accepted work of the tickets before it.
+# `base-branch` is the default: a ticket branch starts from the base of the run, the commit of the base branch at
+# `run-start`. With `run-branch`, a ticket branch starts from the tip of the run branch at the start of its step, so it
+# holds the accepted work of the tickets before it. A ticket with `blocked-by` starts from the run branch with both values.
 START_BASE_BRANCH: str = "base-branch"
 START_RUN_BRANCH: str = "run-branch"
 TICKET_STARTS: tuple[str, ...] = (START_BASE_BRANCH, START_RUN_BRANCH)
@@ -137,7 +138,7 @@ def unreached_reason(ticket_id: str, halted: bool) -> str:
 
 
 def chain_predecessor(mode: str, order: Sequence[str], built: Collection[str]) -> str | None:
-    """The ticket that the next ticket starts from, or None when it starts from a branch of the run (see `starts_from_run_branch`).
+    """The ticket that the next ticket starts from, or None when it starts from the run (see `starts_from_run_branch`).
 
     In `assure` mode no ticket starts from another ticket. In `economy`
     mode the tickets form a chain: a ticket starts from the last ticket before
@@ -151,26 +152,31 @@ def chain_predecessor(mode: str, order: Sequence[str], built: Collection[str]) -
     return None
 
 
-def starts_from_run_branch(mode: str, ticket_start: str) -> bool:
-    """Tell whether a ticket branch starts from the tip of the run branch, and not from the base branch.
+def starts_from_run_branch(mode: str, ticket_start: str, blocked_by: Sequence[str] = ()) -> bool:
+    """Tell whether a ticket branch starts from the tip of the run branch, and not from the base of the run.
 
-    That is so in `assure` mode with the workflow field `ticket-start` set to
-    `run-branch`. In `economy` mode the chain sets the start of a ticket.
+    The base of the run is the commit of the base branch at `run-start`. No
+    ticket branch starts from the base branch itself: other work can land on
+    it while the run goes on.
+
+    In `assure` mode a ticket starts from the run branch when the workflow field
+    `ticket-start` is `run-branch`, or when the ticket has `blocked-by`: its
+    blockers are accepted, and the run branch holds their commits. In `economy`
+    mode the chain sets the start of a ticket.
     """
-    return mode == ASSURE and ticket_start == START_RUN_BRANCH
+    return mode == ASSURE and (ticket_start == START_RUN_BRANCH or bool(blocked_by))
 
 
-def work_starts_at(mode: str, base_branch: str, base_commit: str, ticket_start: str = START_BASE_BRANCH) -> str:
-    """The commit or branch from which the commits of a ticket are its own work.
+def work_starts_at(base_commit: str, rebased_onto: str | None = None) -> str:
+    """The commit from which the commits of a ticket are its own work.
 
-    In a chain the branch of a ticket starts at the tip of the previous ticket,
-    and a ticket that starts from the run branch starts at the tip of the run
-    branch. In both cases the work starts at that commit, so the commits of
-    earlier tickets are not counted. Otherwise the work starts at the base branch.
+    It is the commit where the branch of the ticket started, `base_commit`:
+    the base of the run, the tip of the run branch, or the tip of the previous
+    ticket of a chain. After a rebase onto the run branch, it is the commit of
+    the run branch that the branch was rebased onto, `rebased_onto`. So the
+    commits of earlier tickets, and the commits of the base branch, are not counted.
     """
-    if mode == ECONOMY or starts_from_run_branch(mode, ticket_start):
-        return base_commit
-    return base_branch
+    return rebased_onto if rebased_onto is not None else base_commit
 
 
 def is_accepted(verdict: str) -> bool:

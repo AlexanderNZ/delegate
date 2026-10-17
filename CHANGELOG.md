@@ -8,6 +8,12 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 - The Nix package builds with no tests. `package.nix` takes `runTests` (default `false`); the flake check `tests` sets it and runs the suite in parallel, so `nix flake check` and CI still run it. A configuration that installs the package, such as a system rebuild with a new `delegate` input, no longer runs the suite: on a developer Mac that took about 30 minutes. To run the suite with a private denylist, build `agent-definitions.override { neutralityDenylist = <path>; runTests = true; }`.
 
+### Fixed
+
+- One run has one base: the commit of `base-branch` at the start of the run. The journal records it in the new field `base_commit` of `run-start`, the run branch starts at it, and a resume uses it, not the tip of `base-branch`. No ticket branch starts from `base-branch` itself. Before, a ticket branch that the engine made after a commit landed on `base-branch` started from that newer commit. The rebase onto the run branch then copied the commits of `base-branch` onto the ticket branch, and the verifier diff and the hotspot guard saw them as the work of the ticket (#90). A resume of a journal of 1.2.0 or earlier, which has no `base_commit`, takes the base of the run from the first `run-branch-advance`, or from the tip of the run branch.
+- In `assure` mode, a ticket with `blocked-by` starts from the tip of the run branch, also with the default `ticket-start = "base-branch"`. Its blockers are accepted before its step starts, so its branch holds their commits, and its specialist sees their work. Before, the branch started from `base-branch`, and a ticket that changed the files of its blocker stopped with a conflict at the rebase onto the run branch (#91). A ticket with no `blocked-by` keeps the rule of `ticket-start`.
+- A resume of a step that the engine rebased onto the run branch counts the commits of the ticket from the commit that the branch was rebased onto. So the hotspot guard and the continuation brief do not see the commits of the run branch under the ticket.
+
 ## [1.3.0] - 2026-10-18
 
 ### Added
