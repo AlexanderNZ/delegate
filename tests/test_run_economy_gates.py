@@ -88,6 +88,9 @@ def test_a_green_chain_of_three_tickets_runs_each_gate_command_once_on_the_chain
     # Each command runs once, in the worktree of the last ticket, and no verifier has run yet.
     assert gates.calls == [(commands[0], "c", 0), (commands[1], "c", 0)]
     assert len(scripted.verifier_calls) == 1
+    # The brief of each specialist says that the gates run once, on the tip of the chain, and not after its ticket.
+    for call in scripted.calls:
+        assert "once, on the tip of the chain" in call.prompt and "after you finish" not in call.prompt
     events = read_journal_file(repo, result.run_id)
     results = [(e["ticket"], e["phase"], e["command"], e["commit"], e["green"]) for e in events if e["event"] == "gate-result"]
     assert results == [("c", "chain", command, tip(repo, "run/demo-c"), True) for command in commands]
@@ -202,3 +205,5 @@ def test_an_assure_run_runs_the_gates_of_each_ticket_after_its_build_and_its_reb
     phases = [(e["ticket"], e["phase"]) for e in events if e["event"] in ("gate-result", "gate-skip")]
     assert phases == [("a", "build"), ("a", "rebase"), ("b", "build"), ("b", "rebase")]
     assert len(scripted.verifier_calls) == 2
+    for call in scripted.calls:
+        assert "The engine runs these gates itself after you finish." in call.prompt and "tip of the chain" not in call.prompt
