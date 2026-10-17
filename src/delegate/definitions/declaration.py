@@ -21,7 +21,18 @@ OUTPUT_LANGUAGES = ("none", "ste")
 #: A gate command is plain words separated by single spaces. The guard puts it
 #: in a bash case pattern, and the OpenCode map in a glob: no quote, no shell
 #: syntax, no glob character may reach either (ADR 0004).
-GATE_COMMAND = re.compile(r"[A-Za-z0-9._/:=@+-]+( [A-Za-z0-9._/:=@+-]+)*")
+_WORD = r"[A-Za-z0-9._/:=@+-]+"
+GATE_COMMAND = re.compile(rf"{_WORD}( {_WORD})*")
+
+#: An exact gate is a gate command with one more form of word: a word in double
+#: quotes that holds one command substitution of plain words, such as
+#: "zensical==$(cat .zensical-version)". One entry can hold more than one such
+#: word. The first word stays plain. The guard permits an exact gate only as
+#: the whole command, character for character, and the OpenCode map leaves it
+#: out (issue #75).
+_SUBSTITUTION_WORD = r'"[A-Za-z0-9._/:=@+-]*\$\(' + rf"{_WORD}( {_WORD})*" + r'\)[A-Za-z0-9._/:=@+-]*"'
+EXACT_GATE_COMMAND = re.compile(rf"{_WORD}( ({_WORD}|{_SUBSTITUTION_WORD}))*")
+_SUBSTITUTION_BODY = re.compile(r"\$\(([^)]*)\)")
 
 
 @dataclass
@@ -48,24 +59,38 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
     A gate command opens itself, alone or with arguments, in this repository's
     verifier guard. It must not open a write: a temp-write or temp-destination
     command (those have their own path rules), or a prefix of a known write.
+    An exact gate (EXACT_GATE_COMMAND, gateCommands only) opens itself as the
+    full command only, and the command in each of its $(...) obeys the same
+    write rule.
     A getOnlyCommands entry obeys the same rules, because the guard permits it
     in the same way while its arguments hold no method, body or output flag.
     """
     from .render import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
     from .validate import VERIFIER_BASH_WRITE_PROBES
 
-    out = []
-    for c in values:
-        if not isinstance(c, str) or not GATE_COMMAND.fullmatch(c):
-            raise ValueError(
-                f"agent {key!r}: {field_name} entry {c!r} must be plain words "
-                "(letters, digits, . _ / : = @ + -) separated by single spaces"
-            )
+    def opens_write(c: str) -> bool:
         first = c.split(" ", 1)[0]
-        opens_write = first in VERIFIER_TEMP_WRITE_COMMANDS + VERIFIER_TEMP_DEST_COMMANDS or any(
+        return first in VERIFIER_TEMP_WRITE_COMMANDS + VERIFIER_TEMP_DEST_COMMANDS or any(
             p == c or p.startswith(c + " ") or c.startswith(p) for p in VERIFIER_BASH_WRITE_PROBES
         )
-        if opens_write:
+
+    exact_allowed = field_name == "gateCommands"
+    out = []
+    for c in values:
+        plain = isinstance(c, str) and GATE_COMMAND.fullmatch(c)
+        exact = not plain and exact_allowed and isinstance(c, str) and EXACT_GATE_COMMAND.fullmatch(c)
+        if not plain and not exact:
+            extra = (
+                ", or such words with words in double quotes that each hold one $(...) of plain words"
+                if exact_allowed
+                else ""
+            )
+            raise ValueError(
+                f"agent {key!r}: {field_name} entry {c!r} must be plain words "
+                f"(letters, digits, . _ / : = @ + -) separated by single spaces{extra}"
+            )
+        bodies = _SUBSTITUTION_BODY.findall(c) if exact else []
+        if opens_write(c) or any(opens_write(b) for b in bodies):
             raise ValueError(f"agent {key!r}: {field_name} entry {c!r} opens a write command")
         out.append(c)
     return out

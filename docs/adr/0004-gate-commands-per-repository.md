@@ -1,7 +1,7 @@
 # ADR 0004: Gate commands are per repository
 
 - Status: accepted
-- Date: 2026-09-26, extended 2026-10-08
+- Date: 2026-09-26, extended 2026-10-08 and 2026-10-17
 - Applies to: the verifier guard, and the `gateCommands` and `getOnlyCommands` keys of a declaration
 
 ## Context
@@ -31,6 +31,8 @@ On 2026-10-08 the decision was extended in two parts:
 
 - The global list lost its build tools and its tracker CLI. It holds only the commands that every verifier needs. A consumer that needs a build tool or a tracker CLI names it in its declaration.
 - A declaration can name `getOnlyCommands`: a command that reads only while it stays a GET, for example a tracker API client that writes with `-X POST`. The Claude Code guard permits it in that verifier only, and it denies a segment that holds ` -X`. On OpenCode the entry is not permitted, because a pattern cannot examine the arguments.
+
+On 2026-10-17 the decision was extended for issue #75. The guard now denies a command that holds a substitution, because it cannot examine the command in the substitution. A gate such as `uvx "zensical==$(cat .zensical-version)" build --strict` holds one. `gateCommands` therefore also takes an exact gate: plain words, and one or more words in double quotes that hold one `$(...)` of plain words. The first word stays plain, and the command in the `$(...)` must not open a write. The guard permits an exact gate only as the full command, as a literal in single quotes. The OpenCode map does not hold an exact gate.
 
 ## Rejected alternatives
 

@@ -736,6 +736,84 @@ def test_the_quote_reader_gives_the_same_verdicts_under_zsh():
         assert f"[{segment}]" in r.stderr, (command, r.stderr)
 
 
+# --- A single ampersand and a command substitution (issue #75) ---------------
+
+#: (command, the segment the deny message must name). A single "&" outside
+#: quotes ends a command and starts the next one, as "&&" does.
+AMPERSAND_DIVIDES = [
+    ("cat x & rm -rf src", "rm -rf src"),
+    ("cat x &rm -rf src", "rm -rf src"),
+    ("cat x& rm -rf src &", "rm -rf src"),
+    ("git status & git push", "git push"),
+    ("cat x &\nrm -rf src", "rm -rf src"),
+]
+
+#: Commands that run "rm -rf src" inside a substitution. The guard cannot
+#: examine a command there, so it denies each of them.
+SUBSTITUTION_DENIES = [
+    "echo `rm -rf src`",
+    "echo $(rm -rf src)",
+    'echo "$(rm -rf src)"',
+    "cat <(rm -rf src)",
+    "cat x >(rm -rf src)",
+    "echo =(rm -rf src)",
+    "cat /tmp/$(rm -rf src)",
+    "git log `rm -rf src`",
+]
+
+#: An "&" in a redirection is not a divider. These commands stay permitted.
+AMPERSAND_IN_A_REDIRECTION = [
+    "ls 2>&1",
+    "ls >&2",
+    "ls &>/tmp/log",
+    "ls &>>/tmp/log",
+    "ls 2>&1 | grep x",
+    "grep 'a & b' src",
+    'grep "a & b" src',
+    "grep a\\&b src",
+]
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command,segment", AMPERSAND_DIVIDES)
+def test_a_single_ampersand_divides_the_command(command, segment, shell):
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+        assert f"[{segment}]" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", SUBSTITUTION_DENIES)
+def test_a_command_substitution_is_denied(command, shell):
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+        assert "rm -rf src" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", AMPERSAND_IN_A_REDIRECTION)
+def test_an_ampersand_in_a_redirection_or_in_quotes_does_not_divide(command, shell):
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not on PATH")
+def test_the_ampersand_and_substitution_verdicts_are_the_same_under_zsh():
+    for command, segment in AMPERSAND_DIVIDES:
+        r = _run_guard(command, shell="zsh")
+        assert r.returncode == 2, (command, r.stdout, r.stderr)
+        assert f"[{segment}]" in r.stderr, (command, r.stderr)
+    for command in SUBSTITUTION_DENIES:
+        r = _run_guard(command, shell="zsh")
+        assert r.returncode == 2, (command, r.stdout, r.stderr)
+    for command in AMPERSAND_IN_A_REDIRECTION:
+        r = _run_guard(command, shell="zsh")
+        assert r.returncode == 0, (command, r.stdout, r.stderr)
+
+
 @pytest.mark.parametrize("shell", GUARD_SHELLS)
 @pytest.mark.parametrize("command", ['grep "a src', "grep 'a;b src", "grep -e 'a' \"b|c src"])
 def test_a_quote_that_is_not_closed_fails_closed(command, shell):

@@ -12,7 +12,7 @@ from string import Template
 
 import yaml
 
-from .declaration import Agent
+from .declaration import GATE_COMMAND, Agent
 from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
@@ -133,10 +133,12 @@ GET_ONLY_ARGUMENT_CHECK = (
 
 
 #: The shell text that divides the command text "$s" into the array "segs". It
-#: reads "$s" one character at a time, and it divides at &&, ||, ;, | and a
-#: newline only outside quotes. It reads quotes as bash and zsh do: a single
-#: quote ends at the next single quote; a double quote ends at the next double
-#: quote that no backslash escapes; outside quotes, a backslash makes the next
+#: reads "$s" one character at a time, and it divides at &&, ||, ;, |, & and a
+#: newline only outside quotes. An "&" next to a redirection sign (2>&1, >&2,
+#: <&3, &>file, &>>file) is part of the redirection, and it does not divide.
+#: It reads quotes as bash and zsh do: a single quote ends at the next single
+#: quote; a double quote ends at the next double quote that no backslash
+#: escapes; outside quotes, a backslash makes the next
 #: character a literal. An unquoted "#" starts a comment, and a quote or a
 #: backslash in a comment does nothing until the next newline.
 #:
@@ -161,7 +163,8 @@ COMMAND_DIVIDER = " ".join(
         r"""esac;""",
         r"""case "$c" in""",
         r"""$'\n'|';'|'|') segs+=("$o"); o=; [ "$c$q" = $'\n'c ] && q=; continue ;;""",
-        r"""'&') [ "${s:$i:1}" = '&' ] && { i=$((i+1)); segs+=("$o"); o=; continue; } ;;""",
+        r"""'&') case "${o#"${o%?}"}${s:$i:1}" in '>'*|'<'*|*'>') ;;""",
+        r"""*) [ "${s:$i:1}" = '&' ] && i=$((i+1)); segs+=("$o"); o=; continue ;; esac ;;""",
         r"""esac;""",
         r"""[ -n "$q" ] || case "$c" in "'") q=s ;; '"') q=d ;; '\') e=1 ;; '#') q=c ;; esac;""",
         r"""o+=$c;""",
@@ -174,10 +177,20 @@ COMMAND_DIVIDER = " ".join(
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
-    The guard divides the command at &&, ||, ;, | and a newline outside quotes
-    (COMMAND_DIVIDER), and it examines each segment. One segment that is not on
-    the allow list denies the full command, and the message names that segment.
-    A quote that is not closed denies the full command.
+    The guard divides the command at &&, ||, ;, |, & and a newline outside
+    quotes (COMMAND_DIVIDER), and it examines each segment. One segment that is
+    not on the allow list denies the full command, and the message names that
+    segment. A quote that is not closed denies the full command.
+
+    A substitution runs a command that the guard cannot examine: a command
+    substitution ($(...) and the backtick) and a process substitution (<(...),
+    >(...), and the zsh =(...)). When all segments pass and the command still
+    holds one of these forms, the guard denies the full command. It reads the
+    command as text for this test, so the form also denies inside single
+    quotes. The one exception is an exact gate of the declaration (a gate with
+    a substitution, see declaration.EXACT_GATE_COMMAND): the guard permits it
+    when the full command is that gate, character for character, with only
+    spaces before and after it.
 
     A segment that starts with "git -C <path>" loses that prefix before the
     test, so a read of a repository by path is the same read as a read of the
@@ -198,8 +211,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
 
     `gates` are the repository's gate commands from its declaration. The
     gates differ in each repository, so the global list holds none of them
-    (ADR 0004). Each one is permitted like a read command, in that verifier
-    only.
+    (ADR 0004). Each plain gate is permitted like a read command, in that
+    verifier only. Each exact gate is permitted only as the full command.
 
     `get_only` are the declaration's commands that read only while they stay a
     GET, such as a tracker API client. Each one is permitted alone or with
@@ -233,6 +246,17 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # options that start with "--t" are the target-directory pair, and -T with
     # --no-target-directory changes what the last path means.
     target_flag = "A flag that holds t or T can move the destination, so it is not permitted. Give the destination as the last path."
+    prefix_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
+    # An exact gate holds a double quote and a $( but never a single quote, so
+    # a single-quoted case pattern holds it as a literal.
+    exact_gates = tuple(g for g in gates if not GATE_COMMAND.fullmatch(g))
+    exact_gate_test = (
+        ["case \"$x\" in " + "|".join(f"'{g}'" for g in exact_gates) + ") exit 0 ;; esac"] if exact_gates else []
+    )
+    substitution = (
+        "A substitution runs a command that the guard cannot examine. Only an exact gate of the declaration, "
+        "given as the full command, may hold one. To search for the text, put the dollar sign in brackets."
+    )
     get_only_branch = f"{_exact_or_prefix(get_only)}) {GET_ONLY_ARGUMENT_CHECK} ;; " if get_only else ""
     segment = (
         '[ -n "$seg" ] || continue; '
@@ -257,7 +281,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "set -- $g; "
         'case "$g" in '
         f"{get_only_branch}"
-        f"{_exact_or_prefix(VERIFIER_READ_COMMANDS + gates)}) ;; "
+        f"{_exact_or_prefix(VERIFIER_READ_COMMANDS + prefix_gates)}) ;; "
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; q=0; k=0; "
         'for a in "$@"; do '
         'if [ "$k" = 1 ]; then k=0; continue; fi; '
@@ -292,6 +316,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # A tab becomes a space first: the prefix strips cut at a space,
             # and a tab between words must not hide a flag or a write.
             "s=${cmd//$'\\t'/ }",
+            # The full command without the spaces at each end, for the exact
+            # gate test and for the substitution message.
+            'x=${s#"${s%%[! ]*}"}; x=${x%"${x##*[! ]}"}',
+            *exact_gate_test,
             COMMAND_DIVIDER,
             'case "$q" in s|d) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
             'The guard fails closed." >&2; exit 2 ;; esac',
@@ -300,6 +328,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # tests match from the first word, so remove them.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
             f"{segment} done",
+            "case \"$s\" in *'`'*|*'$('*|*'<('*|*'>('*|*'=('*) "
+            f'deny "$x" "{substitution}" ;; esac',
             f"exit 0 {VERIFIER_GUARD_MARKER}",
         ]
     )
@@ -321,7 +351,10 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     GET-only commands stay out.
     """
     perm: dict[str, str] = {"*": "deny"}
-    for command in VERIFIER_READ_COMMANDS + gates:
+    # An exact gate stays out: the map is a glob, and a glob cannot hold a
+    # quote or a substitution as text that only matches itself.
+    plain_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
+    for command in VERIFIER_READ_COMMANDS + plain_gates:
         perm[f"{command} *"] = "allow"
     return perm
 

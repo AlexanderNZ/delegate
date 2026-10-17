@@ -207,7 +207,9 @@ def test_a_get_only_command_with_read_only_arguments_is_permitted(api_client, ti
         "./scripts/api --paginate /repos/o/r/issues",
         "./scripts/api -H Accept:application/json /repos/o/r",
         "./scripts/api --jq .title /repos/o/r/issues/1",
-        "./scripts/api /repos/o/r/issues?state=open&per_page=5",
+        # The shell ends a command at an "&" outside quotes (issue #75), so a
+        # query string with "&" is in quotes.
+        "./scripts/api '/repos/o/r/issues?state=open&per_page=5'",
         "./scripts/api -o /tmp/out.json /repos/o/r",
         "./scripts/api -o/tmp/out.json /repos/o/r",
         "./scripts/api --output /tmp/out.json /repos/o/r",

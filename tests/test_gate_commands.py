@@ -63,6 +63,27 @@ def test_a_gate_command_with_shell_syntax_is_refused(bad):
         parse_declaration({"agents": {"web": {"description": "d", "gateCommands": [bad]}}})
 
 
+#: A gate that reads a pinned version from a file. It holds a command
+#: substitution, so the guard permits it only as the whole command, exactly.
+EXACT_GATE = 'uvx "zensical==$(cat .zensical-version)" build --strict'
+
+
+def test_a_declaration_carries_an_exact_gate_with_a_substitution():
+    [agent] = parse_declaration({"agents": {"web": {"description": "d", "gateCommands": ["npm test", EXACT_GATE]}}})
+    assert agent.gate_commands == ["npm test", EXACT_GATE]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ['uvx "zensical==$(rm -rf src)" build', '"$(cat x)" build', 'uvx "$(cat x)" *', "uvx '$(cat x)'",
+     'uvx "$(cat x; rm -rf src)"', 'uvx "$(cat $(x))"', 'uvx "$(cat x)" && rm -rf src', 'uvx "a" "$(cat x)"',
+     'rm "$(cat x)"', 'git push "$(cat x)"', 'uvx "$(git push)"'],
+)
+def test_an_exact_gate_with_more_shell_syntax_or_a_write_is_refused(bad):
+    with pytest.raises(ValueError, match="gateCommands"):
+        parse_declaration({"agents": {"web": {"description": "d", "gateCommands": [bad]}}})
+
+
 @pytest.mark.parametrize(
     "bad",
     ["rm", "rm -rf", "cp", "mv", "tee", "cd", "git", "git push", "git commit", "darwin-rebuild switch",
@@ -98,6 +119,44 @@ def test_a_gate_command_opens_that_command_and_no_other(web, shell):
     for command in ("npm install left-pad", "npm", "npx rimraf /Users/x", "npm testx", "dotnet run", "npm test; git push"):
         r = _run(hook, command, shell)
         assert r.returncode == 2, (shell, command, r.stdout)
+
+
+@pytest.fixture
+def docs(tiers):
+    agent = Agent(key="docs", description="A docs site.", gate_commands=["npm test", "uvx", EXACT_GATE])
+    return render_claude_code(agent, tiers), render_opencode(agent, tiers)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_each_gate_command_of_a_declaration_still_passes(docs, shell):
+    hook = _guard_of(docs[0], "docs-verifier.md")
+    for command in ("npm test", "uvx", "uvx zensical build", EXACT_GATE, f"  {EXACT_GATE} "):
+        r = _run(hook, command, shell)
+        assert r.returncode == 0, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_an_exact_gate_opens_only_that_exact_command(docs, shell):
+    hook = _guard_of(docs[0], "docs-verifier.md")
+    for command in (
+        'uvx "zensical==$(rm -rf src)" build --strict',
+        f"{EXACT_GATE} --clean",
+        f"{EXACT_GATE}; rm -rf src",
+        f"{EXACT_GATE} & rm -rf src",
+        f"nix develop -c {EXACT_GATE}",
+        "echo $(cat .zensical-version)",
+        "uvx `rm -rf src`",
+    ):
+        r = _run(hook, command, shell)
+        assert r.returncode == 2, (shell, command, r.stdout)
+
+
+def test_the_opencode_map_leaves_out_an_exact_gate(docs):
+    fm, _, err = split_frontmatter(docs[1]["docs-verifier.md"])
+    assert err is None, err
+    perm = fm["permission"]
+    assert opencode_bash_action(perm, "npm test") == "allow"
+    assert not any("$(" in pattern for pattern in perm["bash"])
 
 
 @pytest.mark.parametrize("shell", SHELLS)
