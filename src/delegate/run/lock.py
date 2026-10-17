@@ -6,8 +6,10 @@ run id and the process id of the holder. The file is put in place with a hard li
 that fails when the lock exists, so two runs that start at the same time cannot both get it.
 
 A process that is killed cannot release its lock. A later run finds a lock whose
-process no longer exists, reports it, and removes it only when the caller asks
-for that with `break_stale`. A lock whose process still exists is never removed.
+process no longer exists. When the lock names the run id of the caller, the caller
+resumes its own run, and it takes the lock over. A lock of another run is reported,
+and removed only when the caller asks for that with `break_stale`. A lock whose
+process still exists is never removed.
 """
 
 from __future__ import annotations
@@ -53,20 +55,23 @@ def _read_holder(path: Path) -> LockHolder:
         raise LockError(f"lock file {path} cannot be read ({error!r}); remove it by hand when no run uses it") from None
 
 
-def _refuse(path: Path, run_branch: str, holder: LockHolder, break_stale: bool) -> None:
-    """Raise LockError for a lock that the caller may not take. Return when the lock is stale and `break_stale` is set."""
+def _refuse(path: Path, run_branch: str, holder: LockHolder, run_id: str, break_stale: bool) -> None:
+    """Raise LockError for a lock that the caller may not take.
+
+    Return when the lock is stale, and it names `run_id` or `break_stale` is set.
+    """
     if _alive(holder.pid):
         raise LockError(
             f"run branch {run_branch} is in use by run {holder.run_id} (process {holder.pid}); lock file {path}"
         )
-    if not break_stale:
+    if holder.run_id != run_id and not break_stale:
         raise LockError(
             f"run branch {run_branch} is locked by run {holder.run_id}, process {holder.pid}, which no longer exists; "
             f"pass --break-lock to remove the lock (lock file {path})"
         )
 
 
-def check_free(state_dir: Path, run_branch: str, *, break_stale: bool = False) -> None:
+def check_free(state_dir: Path, run_branch: str, run_id: str, *, break_stale: bool = False) -> None:
     """Raise LockError, as `run_lock` does, when the lock of the run branch is held. Create nothing.
 
     A caller uses it to report a run branch in use before any other check, and
@@ -75,7 +80,7 @@ def check_free(state_dir: Path, run_branch: str, *, break_stale: bool = False) -
     """
     path = _lock_path(state_dir, run_branch)
     if path.exists():
-        _refuse(path, run_branch, _read_holder(path), break_stale)
+        _refuse(path, run_branch, _read_holder(path), run_id, break_stale)
 
 
 @contextmanager
@@ -84,9 +89,10 @@ def run_lock(
 ) -> Iterator[LockHolder | None]:
     """Hold the lock of a run branch while the block runs.
 
-    Yield None, or the holder of a stale lock that `break_stale` removed. Raise
-    LockError when a live process holds the lock, or when a stale lock is there
-    and `break_stale` is false. The message names the run id and the process id of the holder.
+    Yield None, or the holder of a stale lock that was removed: a lock of
+    `run_id`, or a lock that `break_stale` removed. Raise LockError when a live
+    process holds the lock, or when a stale lock of another run is there and
+    `break_stale` is false. The message names the run id and the process id of the holder.
     """
     path = _lock_path(state_dir, run_branch)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,7 +107,7 @@ def run_lock(
                 os.link(private, path)
             except FileExistsError:
                 holder = _read_holder(path)
-                _refuse(path, run_branch, holder, break_stale)
+                _refuse(path, run_branch, holder, run_id, break_stale)
                 path.unlink()
                 broken = holder
                 continue

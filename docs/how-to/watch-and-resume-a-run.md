@@ -96,13 +96,9 @@ A ticket with a recorded commit is not built again. A step that was open continu
 
 ### 2. Resume after a kill
 
-A process that is killed cannot release the lock of its [**run branch**](../glossary.md#run-branch). The [**resume**](../glossary.md#resume) then refuses, and the message tells you to pass `--break-lock`. First check that no other run uses the run branch. Then remove the lock and resume.
+A process that is killed cannot release the lock of its [**run branch**](../glossary.md#run-branch). Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the [**resume**](../glossary.md#resume) takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
 
-```bash
-delegate run --resume <run-id> --break-lock
-```
-
-The option does not remove the lock of a process that still exists. See [the run lock](../reference/run.md#the-run-lock).
+A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
 A run that the [**invariant**](../glossary.md#invariant) check halted, or that has a `run-end`, cannot be resumed.
 
@@ -121,4 +117,4 @@ The log file holds the run id. `delegate status` and `delegate watch` with no ru
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. A background task has no terminal, so `watch` prints the raw lines, as with `--raw`. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).
 3. **Show `delegate status` as it is.** Each time the coordinator tells the person the state, it shows the output of `delegate status`, as it is. The coordinator does not write its own script to read the journal or an event stream.
 4. **Report a stall at once.** A stalled agent is an agent with no activity for the stall limit, the time that `--stall-minutes` sets. `watch` then exits with the reason `stall`, as [the stall](../reference/status-and-watch.md#the-stall) tells. The coordinator tells the person at once, and gives the output of `delegate status`.
-5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --resume <run-id>`. If the lock belongs to a process that no longer exists, it adds `--break-lock`, as in [the resume after a kill](#2-resume-after-a-kill).
+5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --resume <run-id>`. The resume takes over the lock of the same run when its process no longer exists, as in [the resume after a kill](#2-resume-after-a-kill). If the lock belongs to another run and to a process that no longer exists, the coordinator adds `--break-lock`.

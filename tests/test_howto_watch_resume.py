@@ -112,7 +112,7 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
 
     # The run has no end, so `watch` would wait for it: it is not run here.
     state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))
-    resumed = follow(PAGE, repo, monkeypatch, only=lambda block: containing("--resume")(block) and not containing("--break-lock")(block), replace={"<run-id>": run_id})
+    resumed = follow(PAGE, repo, monkeypatch, only=containing("--resume"), replace={"<run-id>": run_id})
 
     assert "running" in state[0].out.splitlines()[0]  # the run has no end, so it is still "running"
     assert [(step.code, step.err) for step in resumed] == [(0, "")]
@@ -142,7 +142,7 @@ sys.exit(delegate.main(["run", "workflow.toml", "--repo", sys.argv[1]]))
 
 
 @outside_the_package
-def test_the_page_resumes_a_run_that_was_killed_with_break_lock_and_a_resume_without_it_is_refused(
+def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_took_over_the_lock(
     tmp_path, monkeypatch, git_identity, registered, capsys
 ):
     repo = a_repo(tmp_path)
@@ -153,9 +153,10 @@ def test_the_page_resumes_a_run_that_was_killed_with_break_lock_and_a_resume_wit
     adapter = ScriptedAdapter(files_by_ticket=FILES)
     registered(adapter)
 
-    plain = follow(PAGE, repo, monkeypatch, only=lambda block: containing("--resume")(block) and not containing("--break-lock")(block), replace={"<run-id>": run_id})
-    broken = follow(PAGE, repo, monkeypatch, only=containing("--break-lock"), replace={"<run-id>": run_id})
+    resumed = follow(PAGE, repo, monkeypatch, only=containing("--resume"), replace={"<run-id>": run_id})
 
-    assert plain[0].code == 1 and "--break-lock" in plain[0].err  # the lock of a killed process stays
-    assert [(step.code, step.err) for step in broken] == [(0, "")]
+    assert [step.command for step in resumed] == [f"delegate run --resume {run_id}"]  # the page has no --break-lock command
+    assert resumed[0].code == 0
+    assert resumed[0].err.startswith(f"delegate run: took over the lock of run/demo from run {run_id}, process ")
+    assert resumed[0].err.rstrip().endswith("which no longer exists")
     assert [call.cwd.name for call in adapter.calls] == ["2"]

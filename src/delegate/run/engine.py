@@ -91,7 +91,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -175,6 +175,8 @@ class RunResult:
     failures: dict[str, str]
     skipped: dict[str, str]
     unmapped: list[str] = field(default_factory=list)
+    # The holder of a lock of this run whose process no longer exists, which the resume took over without `break_lock`.
+    taken_over: LockHolder | None = None
 
     @property
     def ok(self) -> bool:
@@ -465,22 +467,24 @@ def run_workflow(
     cannot be retried.
 
     The run holds the lock of its run branch until it ends. Raise EngineError,
-    which names the holder, when another run holds the lock. `break_lock`
-    removes a lock whose process no longer exists, and never one whose process
-    is alive.
+    which names the holder, when another run holds the lock. A resume takes over
+    a lock of its own run whose process no longer exists, and the result names
+    that holder in `taken_over`. `break_lock` also removes a lock of another run
+    whose process no longer exists. No lock whose process is alive is removed.
     """
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     run_id = resume if resume is not None else _new_run_id()
     try:
         # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
-        check_free(state_dir, workflow.run_branch, break_stale=break_lock)
+        check_free(state_dir, workflow.run_branch, run_id, break_stale=break_lock)
         if resume is None:
             _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
-            return _execute(
+            result = _execute(
                 workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry
             )
+            return result if break_lock else replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
 

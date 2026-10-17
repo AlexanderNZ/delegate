@@ -1,4 +1,4 @@
-"""The run lock: a second run on one run branch exits non-zero, and a stale lock needs an explicit flag.
+"""The run lock: a second run on one run branch exits non-zero. A resume takes over the stale lock of its own run, and a stale lock of another run needs an explicit flag.
 
 A killed run is a real one: a child process runs `delegate run` with a scripted
 adapter and SIGKILLs itself, so it leaves a lock that nobody releases. Each case
@@ -47,24 +47,73 @@ def test_a_second_run_on_a_run_branch_in_use_exits_non_zero_and_names_the_lock_h
     assert "a.txt" in tree(repo, "run/demo")
 
 
-def test_a_lock_left_by_a_killed_process_is_reported_and_an_explicit_flag_removes_it(tmp_path, capsys, scripted):
+def test_a_resume_of_the_same_run_takes_over_the_lock_of_its_killed_process_with_no_flag_and_says_so(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, THREE)
     run_id, dead_pid = kill_a_run(repo, 3)
-    before = journal_path(repo, run_id).read_bytes()
 
     code, out, err = resume_main(repo, capsys, run_id)
 
-    assert code == 1 and "Traceback" not in err
-    assert run_id in err and f"process {dead_pid}" in err and "no longer exists" in err and "--break-lock" in err
-    assert journal_path(repo, run_id).read_bytes() == before and scripted.calls == []
-
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
-
-    assert (code, err) == (0, "")
+    assert code == 0 and "Traceback" not in err
+    assert err.splitlines() == [
+        f"delegate run: took over the lock of run/demo from run {run_id}, process {dead_pid}, which no longer exists"
+    ]
     events = read_journal_file(repo, run_id)
     broken = next(e for e in events if e["event"] == "lock-broken")
     assert (broken["run_id"], broken["pid"]) == (run_id, dead_pid)
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
+    assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
+
+
+def test_a_resume_with_break_lock_of_the_same_run_takes_over_the_lock_of_its_killed_process_with_no_note(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, THREE)
+    run_id, dead_pid = kill_a_run(repo, 3)
+
+    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+
+    assert (code, err) == (0, "")
+    broken = [e for e in read_journal_file(repo, run_id) if e["event"] == "lock-broken"]
+    assert [(e["run_id"], e["pid"]) for e in broken] == [(run_id, dead_pid)]
+
+
+@pytest.mark.parametrize("extra", [[], ["--break-lock"]], ids=["plain", "with-break-lock"])
+def test_a_resume_of_the_same_run_is_refused_while_the_process_of_its_lock_is_alive(tmp_path, capsys, scripted, extra):
+    repo = make_repo(tmp_path, THREE)
+    seen = []
+
+    def resume_inside(request):
+        if ticket_of(request) == "b":
+            (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+            seen.append((run_dir.name, journal_path(repo, run_dir.name).read_bytes(), nested_run(repo, "--resume", run_dir.name, *extra)))
+
+    scripted.on_specialist = resume_inside
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert (code, err) == (0, "")  # the run that holds the lock is not harmed
+    ((run_id, before, (second_code, second_err)),) = seen
+    assert second_code == 1 and "Traceback" not in second_err
+    assert f"run branch run/demo is in use by run {run_id} (process {os.getpid()})" in second_err
+    assert "took over" not in second_err
+    events = read_journal_file(repo, run_id)
+    assert "lock-broken" not in event_names(events) and event_names(events).count("resume") == 0
+    assert journal_path(repo, run_id).read_bytes().startswith(before)
+
+
+def test_a_lock_of_another_run_whose_process_no_longer_exists_still_needs_break_lock(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, THREE)
+    run_id, dead_pid = kill_a_run(repo, 3)
+    before = journal_path(repo, run_id).read_bytes()
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1 and "Traceback" not in err
+    assert (
+        f"run branch run/demo is locked by run {run_id}, process {dead_pid}, which no longer exists; "
+        "pass --break-lock to remove the lock" in err
+    )
+    assert "took over" not in err
+    assert [p.name for p in (repo / ".git" / "delegate" / "runs").iterdir()] == [run_id]
+    assert journal_path(repo, run_id).read_bytes() == before and scripted.calls == []
 
 
 def test_the_lock_is_gone_when_a_run_ends(tmp_path, capsys, scripted):

@@ -2,8 +2,9 @@
 
 A killed run is a real one: a child process runs `delegate run` with a scripted
 adapter and SIGKILLs itself at a chosen adapter call. It leaves what a kill
-leaves, an open journal, a lock, and a worktree. A resume of such a run needs
-`--break-lock`, because the lock belongs to a process that no longer exists. A case that needs another
+leaves, an open journal, a lock, and a worktree. A resume of such a run takes over
+the lock, because the lock names the same run and a process that no longer exists.
+These cases pass `--break-lock`, so the resume prints no note. A case that needs another
 journal state cuts a finished journal, which is the file a kill at that point
 would leave. Each case calls `delegate.main` against a real temporary git
 repository.

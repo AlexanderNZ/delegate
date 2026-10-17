@@ -123,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
+        if result.taken_over is not None:
+            print(
+                f"delegate run: took over the lock of {workflow.run_branch} from run {result.taken_over.run_id}, "
+                f"process {result.taken_over.pid}, which no longer exists",
+                file=sys.stderr,
+            )
         print(f"run {result.run_id}")
         print(f"journal {result.journal}")
         for ticket, reason in result.failures.items():

@@ -622,9 +622,10 @@ end.
    then exits 5, with the reason `stall`. Tell the person at once, and give
    the output of `delegate status`.
 5. **Resume a stopped run.** When the run process stops before the run ends,
-   go on with `delegate run --resume <run-id>`. If the lock belongs to a
-   process that no longer exists, add `--break-lock`. First make sure that no
-   other run uses the run branch.
+   go on with `delegate run --resume <run-id>`. The resume takes over the
+   lock of the same run when its process no longer exists. If the lock belongs
+   to another run and to a process that no longer exists, add `--break-lock`.
+   First make sure that no other run uses the run branch.
 
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a

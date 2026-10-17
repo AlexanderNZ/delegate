@@ -164,8 +164,10 @@ The command exits 1, names the ticket, and changes nothing, when the step cannot
 A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
 
 - If another run holds the lock, and its process exists, the command exits 1. The message names the run branch, the run id, and the process id of the holder: `run branch <name> is in use by run <run id> (process <pid>)`. The run in progress is not changed. `--break-lock` does not remove the lock of a process that exists.
-- A process that is killed cannot release its lock. The next run finds a lock whose process no longer exists. The command exits 1 and says so: `run branch <name> is locked by run <run id>, process <pid>, which no longer exists; pass --break-lock to remove the lock`. Nothing is changed.
-- With `--break-lock`, the engine removes that lock, takes a new one, and goes on. It writes `lock-broken` with the run id and the process id of the old holder. The flag is for a lock of a process that no longer exists, so check that no other run uses the branch. A process id can be used again by an unrelated process. If so, the lock looks alive. Remove the lock file by hand.
+- A process that is killed cannot release its lock. The next run finds a lock whose process no longer exists.
+- `--resume <run-id>` takes over a lock that names the same run id and a process that no longer exists. It needs no flag. The engine removes that lock, takes a new one, and goes on. It writes `lock-broken` with the run id and the process id of the old holder. When the run ends, the command prints a note on stderr: `delegate run: took over the lock of <name> from run <run id>, process <pid>, which no longer exists`.
+- A lock of another run id, whose process no longer exists, stays. The command exits 1 and says so: `run branch <name> is locked by run <run id>, process <pid>, which no longer exists; pass --break-lock to remove the lock`. Nothing is changed.
+- With `--break-lock`, the engine removes a lock whose process no longer exists, also the lock of another run, takes a new one, and goes on. It writes `lock-broken` with the run id and the process id of the old holder, and it prints no note. The flag is for a lock of a process that no longer exists, so check that no other run uses the branch. A process id can be used again by an unrelated process. If so, the lock looks alive. Remove the lock file by hand.
 - A lock file that cannot be read exits 1 and names the file. Remove it by hand when no run uses the branch.
 
 The lock is a file for each run branch in `locks/`, and it holds the run id and the process id. The lock protects one machine: the state is in the git directory of the repository.
@@ -475,7 +477,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
 | `retry` | `ticket`, `phase` (`gates`, `verifier`, or `scoped-verifier`: where the step goes on), `round` (the verifier round of the retry), `reason` (the reason the step failed before). See [the retry](#the-retry). |
-| `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock `--break-lock` removed) |
+| `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |
