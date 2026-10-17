@@ -228,9 +228,9 @@ The feed has one short line for each event that matters. A line starts with the 
 
 | Line | The events |
 |---|---|
-| `#a specialist finished · 36m · 19k tok · report ok` | The result of an agent (`adapter-result`, `fixup-result` or `verify-result`) and its report event. It gives the role, the end state, the time from its `agent-start`, and the tokens of its stream. |
+| `#a specialist finished · 36m · 19k tok · report ok` | The result of an agent (`adapter-result`, `fixup-result` or `verify-result`) and the event of its [**report**](../glossary.md#report). It gives the role, the end state, the time from its `agent-start`, and the tokens of its stream. |
 | `#a gates green (pytest 16m, zensical 1s)` | The `gate-result` and `gate-skip` events of one round of gates. Each gate has the short name of its command and its time. The name is the first word of the command that is not a launcher (such as `nix develop -c` or `python3 -m`), with no version. A red gate has the word `red`. |
-| `#a ✓ ACCEPT · built` | A verdict, or the gates, with the `step-end` that follows them. A REJECT gives the number of findings. |
+| `#a ✓ ACCEPT · built` | A verdict, or the gates, with the `step-end` that follows them. A [**REJECT**](../glossary.md#reject) gives the number of findings. |
 | `stack python ✓ ACCEPT · run built · 16m · 39k tok` | The verdict of the chain of a stack in `economy` mode, with the `run-end` that follows it. |
 | `run built · 1h06m · 64k tok` | The `run-end`: the result, the time of the run, and its tokens. |
 
