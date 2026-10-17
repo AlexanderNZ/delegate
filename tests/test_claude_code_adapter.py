@@ -290,3 +290,79 @@ def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_name
 def test_the_activity_of_a_stream_that_is_not_there_raises_and_names_the_path(tmp_path):
     with pytest.raises(AdapterError, match="no-such.jsonl"):
         adapters.get("claude-code").activity(tmp_path / "no-such.jsonl")
+
+
+# The settings of the agents of a host (#96). The agent host has `defaultMode` "dontAsk" with an empty allow list in
+# its user settings, so an agent that gets only those settings can run no tool that is not read-only.
+HOST_SETTINGS: str = "DELEGATE_AGENT_SETTINGS"
+HOST_MODE: str = "DELEGATE_PERMISSION_MODE"
+
+
+@pytest.mark.parametrize("agent", ["python-specialist", "python-verifier"])
+def test_the_settings_file_and_the_permission_mode_of_the_host_reach_each_agent(tmp_path, monkeypatch, agent):
+    settings = tmp_path / "agent-settings.json"
+    settings.write_text('{"permissions": {"allow": ["Bash"]}}\n')
+    monkeypatch.setenv(HOST_SETTINGS, str(settings))
+    monkeypatch.setenv(HOST_MODE, "acceptEdits")
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path, agent=agent))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv.count("--settings") == 1
+    assert argv[argv.index("--settings") + 1] == str(settings)
+    assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
+    assert argv[argv.index("--agent") + 1] == agent
+
+
+def test_with_no_setting_of_the_host_the_command_has_no_settings_file_and_no_permission_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv(HOST_SETTINGS, raising=False)
+    monkeypatch.delenv(HOST_MODE, raising=False)
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path))
+
+    (call,) = fake.calls()
+    assert "--settings" not in call["argv"]
+    assert "--permission-mode" not in call["argv"]
+
+
+def test_a_settings_file_of_the_host_that_does_not_exist_stops_the_adapter_and_starts_no_agent(tmp_path, monkeypatch):
+    missing = tmp_path / "no-such-settings.json"
+    monkeypatch.setenv(HOST_SETTINGS, str(missing))
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    with pytest.raises(AdapterError, match=f"{HOST_SETTINGS}.*{re.escape(str(missing))}"):
+        adapters.get("claude-code").run(request(tmp_path))
+
+    assert fake.calls() == []
+
+
+def test_a_tool_that_a_permission_mode_refused_is_in_the_result(tmp_path, monkeypatch):
+    # The text of the refusal is the text that Claude Code wrote on the agent host on 2026-10-18 (#96).
+    lines = (claude_fake.FIXTURES / "finished.jsonl").read_text().splitlines()
+    refusal = {
+        "type": "user",
+        "message": {"role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": "toolu_1", "is_error": True,
+            "content": "Permission to use Bash has been denied because Claude Code is running in don't ask mode.",
+        }]},
+    }
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "refused.jsonl").write_text("\n".join([*lines[:-1], json.dumps(refusal), lines[-1]]) + "\n")
+    from . import harness_fake
+    harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "refused.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == (("Bash", "don't ask"),)
+
+
+def test_a_stream_with_no_refusal_gives_no_refused_tool(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == ()

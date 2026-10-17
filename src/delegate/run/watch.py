@@ -61,6 +61,9 @@ EXIT_CODES: dict[int, str] = {
 AGENT_RESULT_ROLES: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up specialist", "verify-result": "verifier"}
 AGENT_REPORT_ROLES: dict[str, str] = {"report-validation": "specialist", "fixup-report": "fix-up specialist", "verify-report": "verifier"}
 
+# What the problem line of a refused tool tells the reader to do (see the Claude Code adapter).
+REFUSED_HINT: str = "give the agents a settings file with DELEGATE_AGENT_SETTINGS"
+
 # The value of `--until` that makes `watch` exit at a verifier verdict.
 UNTIL_VERDICT: str = "verdict"
 
@@ -116,6 +119,11 @@ class _Tracker:
             self._gates.setdefault(ticket, {})[str(event["command"])] = bool(event["green"])
         elif kind == "idle-timeout":
             self._idle.add(ticket)
+        elif kind in AGENT_RESULT_ROLES and event.get("refused"):
+            refused = event["refused"]  # a list of {"tool", "mode"}, from `_refused_fields` of the engine
+            tools = ", ".join(dict.fromkeys(str(item["tool"]) for item in refused))  # type: ignore[index, union-attr]
+            modes = ", ".join(dict.fromkeys(str(item["mode"]) for item in refused))  # type: ignore[index, union-attr]
+            return f"the {AGENT_RESULT_ROLES[kind]} was refused {tools} in {modes} mode; {REFUSED_HINT}"
         elif kind in AGENT_RESULT_ROLES and ticket in self._idle:
             # The engine ended the session after a valid report, so its end state is no problem.
             self._idle.discard(ticket)

@@ -757,7 +757,7 @@ def _build_with_continuations(
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
-                session_id=result.session_id, event_stream=str(result.event_stream),
+                session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
             )
         gate_output: str | None = None
         problems: tuple[str, ...] = ()
@@ -1013,7 +1013,7 @@ def _run_fixup(
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
-        session_id=result.session_id, event_stream=str(result.event_stream),
+        session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
     )
     if not _session_done(result, report_valid):
         raise _StepFailed(f"the fix-up specialist ended {result.end_state} with exit status {result.exit_status}")
@@ -1145,7 +1145,7 @@ def _verify_round(
     _journal_idle(step.journal, result, ticket.id, ROLE_VERIFIER, round_number)
     step.journal.append(
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
-        session_id=result.session_id, event_stream=str(stream),
+        session_id=result.session_id, event_stream=str(stream), **_refused_fields(result),
     )
     if violation is not None:
         step.journal.append(
@@ -1503,6 +1503,13 @@ def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int)
             number += 1
             continue
         return path
+
+
+def _refused_fields(result: AdapterResult) -> dict[str, object]:
+    """The `refused` field of a result event: each tool that a permission mode refused, with the mode. Empty when none."""
+    if not result.refused:
+        return {}
+    return {"refused": [{"tool": tool, "mode": mode} for tool, mode in result.refused]}
 
 
 def _green_result(journal: Journal, command: str, commit: str) -> dict[str, object] | None:

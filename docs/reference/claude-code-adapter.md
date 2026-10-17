@@ -13,7 +13,7 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --agent <agent> --disallowedTools Monitor,TaskStop [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --agent <agent> --disallowedTools Monitor,TaskStop [--settings <path>] [--permission-mode <mode>] [--resume <session id>]
 ```
 
 The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
@@ -26,12 +26,29 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--model <model>` | The model from the `claude-code` column of the [**tier table**](../glossary.md#tier-table). The adapter never chooses a model. A `--tiers` file changes it. |
 | `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
 | `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
+| `--settings <path>` | Only when the host sets `DELEGATE_AGENT_SETTINGS`. See [the settings of a host](#the-settings-of-a-host). |
+| `--permission-mode <mode>` | Only when the host sets `DELEGATE_PERMISSION_MODE`. See [the settings of a host](#the-settings-of-a-host). |
 | `--resume <session id>` | Only for a [**continuation**](../glossary.md#continuation). See [the resume](#the-resume). |
 | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | An environment variable, not an argument. It removes the `run_in_background` parameter of the Bash tool and of the subagent tool. That parameter is not a tool name, so `--disallowedTools` cannot remove it. |
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
-The adapter passes no permission option other than `--disallowedTools`. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [what the adapter does not set](#what-the-adapter-does-not-set).
+With no setting of the host, the adapter passes no permission option other than `--disallowedTools`. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [the settings of a host](#the-settings-of-a-host) and [what the adapter does not set](#what-the-adapter-does-not-set).
+
+## The settings of a host
+
+A host can give every agent of every [**run**](../glossary.md#run) a settings file and a permission mode, with no change to a workflow file. Two environment variables of the engine set them:
+
+| Variable | Effect |
+|---|---|
+| `DELEGATE_AGENT_SETTINGS` | The path of a Claude Code settings file. The adapter adds `--settings <path>` to the command of each specialist, each continuation, each [**fix-up**](../glossary.md#fix-up) specialist, and each verifier. A path that is not a file stops the adapter before it starts the agent: the adapter raises `AdapterError`, and the engine records a crash. |
+| `DELEGATE_PERMISSION_MODE` | A permission mode of Claude Code, for example `acceptEdits`. The adapter adds `--permission-mode <mode>` to the same commands. |
+
+With neither variable set, the command is the same as in 1.2.0. The [**verifier guard**](../glossary.md#verifier-guard) hook of the agent file still applies on top of the settings file, so a verifier stays read-only.
+
+A host needs these variables when its user settings refuse each tool that is not read-only. An example is `defaultMode` `"dontAsk"` with an empty allow list. Measured on the agent host on 2026-10-18: with no settings file, each `Bash` call of a specialist gave the tool result `Permission to use Bash has been denied because Claude Code is running in don't ask mode.`, so the run did no work.
+
+The adapter reads each tool result of the stream. A result that says that a permission mode refused a tool goes into the `refused` field of the result of the agent, with the tool and the mode. The engine writes it into the result event of the agent, and `delegate watch` shows it as a problem. See [the problem events](status-and-watch.md#the-problem-events).
 
 ## The foreground rule
 
@@ -88,7 +105,7 @@ When the harness exits and writes no event, no end state can describe the [**run
 
 ## What the adapter does not set
 
-A headless session cannot ask for a permission. A tool use that the rules do not allow is denied, and the result event lists it in `permission_denials`. Measured on Claude Code 2.1.287 on 2026-10-08: a `Write` to a file was denied in a headless run with no allow rule, and it was still denied with a project rule `Write` in `.claude/settings.json`. The adapter therefore does not decide the permission posture. The adopter sets the allow rules of the repository, or the [**coordinator**](../glossary.md#coordinator) changes the adapter. A run that needs a tool without a rule ends with the agent reporting the denial, and the [**step**](../glossary.md#step) fails on the report check.
+A headless session cannot ask for a permission. A tool use that the rules do not allow is denied, and the result event lists it in `permission_denials`. Measured on Claude Code 2.1.287 on 2026-10-08: a `Write` to a file was denied in a headless run with no allow rule, and it was still denied with a project rule `Write` in `.claude/settings.json`. The adapter therefore does not decide the permission posture. The adopter sets the allow rules of the repository, the host sets [the settings of a host](#the-settings-of-a-host), or the [**coordinator**](../glossary.md#coordinator) changes the adapter. A run that needs a tool without a rule ends with the agent reporting the denial, and the [**step**](../glossary.md#step) fails on the report check.
 
 The report path is in the [**state directory**](../glossary.md#state-directory) of the repository, outside the [**worktree**](../glossary.md#worktree). The agent must be able to write there.
 

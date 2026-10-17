@@ -26,7 +26,7 @@ opencode run --format json --model <model> --agent <agent> --dir <directory> [--
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
-The adapter passes no permission option. The permission rules of the repository and of the user decide which tools the agent can use.
+The adapter passes no permission option. The permission rules of the repository and of the user decide which tools the agent can use. The variables `DELEGATE_AGENT_SETTINGS` and `DELEGATE_PERMISSION_MODE` of the `claude-code` adapter have no effect here: OpenCode has no option that takes a settings file or a permission mode. A host that must give every agent its own permission rules sets `OPENCODE_CONFIG` to the path of an OpenCode configuration file with a `permission` block. The environment of the command is the environment of the [**engine**](../glossary.md#engine), so OpenCode reads that variable itself. Measured on OpenCode 1.15.10 on 2026-10-18: with `OPENCODE_CONFIG` set, `opencode debug config` shows the `permission` block of that file, and with no variable it shows none. The adapter does not read refused tools from the OpenCode stream.
 
 ## The model
 

@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -168,7 +169,9 @@ class ScriptedAdapter:
     specialist call that is not a fix-up, in call order, the first build
     included; the last pair repeats. `session_ids` gives the session id of each
     such call in the same way. `supports_resume` is the `supports_resume`
-    attribute of the adapter.
+    attribute of the adapter. `refusals` gives, for a role (`specialist`,
+    `fix-up` or `verifier`), the (tool, mode) pairs that a permission mode
+    refused, in the `refused` field of its result.
 
     Each call writes the line `{"type":"result"}` to the event stream that the
     request names, and gives that path back in the result. `activity` reads
@@ -227,6 +230,7 @@ class ScriptedAdapter:
     on_specialist: Callable[[AdapterRequest], None] | None = None
     idle_roles: set[str] = field(default_factory=set)
     report_checks: list[tuple[str, float | None, bool | None, bool | None]] = field(default_factory=list)
+    refusals: dict[str, tuple[tuple[str, str], ...]] = field(default_factory=dict)
 
     def _report_check(self, request: AdapterRequest) -> bool | None:
         return None if request.report_valid is None else request.report_valid()
@@ -237,6 +241,8 @@ class ScriptedAdapter:
         self.report_checks.append((role, request.idle_timeout, before, after))
         if role in self.idle_roles and after:
             return AdapterResult(-15, "failed", result.session_id, result.event_stream, ended_idle=True)
+        if role in self.refusals:
+            return dataclasses.replace(result, refused=self.refusals[role])
         return result
 
     def run(self, request: AdapterRequest) -> AdapterResult:

@@ -274,6 +274,7 @@ A problem is one of these events. The raw line `watch: problem: ticket <id>: <re
 | A step ends blocked or partial | `report-validation` or `fixup-report` with a `status` other than `committed` | `the step ended <status>: <blocked_reason>` |
 | A step ends with [**gates**](../glossary.md#gate) that are not green | `step-end` with the state `failed`, when the newest result of a gate command of the ticket is red | `the gates are not green: <commands>` |
 | An agent fails | `adapter-result`, `fixup-result` or `verify-result` with the [**end state**](../glossary.md#end-state) `failed`, or (for a [**fix-up**](../glossary.md#fix-up) [**specialist**](../glossary.md#specialist) and a [**verifier**](../glossary.md#verifier)) the end state `capped` | `the <role> ended <end state> with exit status <n>` |
+| A permission mode refused a tool | `adapter-result`, `fixup-result` or `verify-result` with a `refused` field | `the <role> was refused <tools> in <mode> mode; give the agents a settings file with DELEGATE_AGENT_SETTINGS` |
 | An agent returns no result | `report-validation`, `fixup-report` or `verify-report` with `valid` false | `the <role> returned no valid result: <reason>` |
 | A second [**continuation**](../glossary.md#continuation) of a step | `continuation` with a `count` of 2 or more | `the step continued <n> times (limit <n>, trigger <trigger>)` |
 | A step fails for any other reason | `step-end` with the state `failed`, and no red gate | `the step failed: <reason>` |

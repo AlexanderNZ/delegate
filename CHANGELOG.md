@@ -6,6 +6,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Added
 
+- A host can give every agent a Claude Code settings file and a permission mode, with no change to a workflow file. The `claude-code` adapter adds `--settings <path>` when `DELEGATE_AGENT_SETTINGS` is set, and `--permission-mode <mode>` when `DELEGATE_PERMISSION_MODE` is set, for each specialist and each verifier. A settings path that is not a file stops the adapter before an agent starts. With neither variable, the command does not change. For OpenCode, a host sets `OPENCODE_CONFIG`, which OpenCode reads itself.
+- A tool that a permission mode refused is in the new `refused` field of the result events (`adapter-result`, `fixup-result`, `verify-result`), with the tool and the mode. `delegate watch` shows it as a problem that names them. The harness port has the new result field `refused`; an adapter outside the kit that does not set it still works.
 - The package has a `test` extra: `pip install '.[test]'` installs `pytest` and `pytest-xdist`, so the suite can run in parallel with `python -m pytest -n auto`. The development shell of the flake also holds `pytest-xdist`.
 
 ### Changed

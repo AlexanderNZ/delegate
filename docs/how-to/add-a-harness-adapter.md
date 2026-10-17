@@ -28,6 +28,7 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `session_id`: the session id that the harness gave, or `None`.
 - `event_stream`: the path of the captured stream, which is the `event_stream` of the request.
 - `ended_idle`: true when the adapter ended the session at the idle timeout. `run_harness` tells you.
+- `refused`: one pair for each tool call that the permission settings of the harness refused, in the order of the stream: the tool, and the name that the harness gives that setting (for example `don't ask`). Leave it empty when your harness does not write such a refusal. The engine copies it into the result event, and `delegate watch` shows it as a problem.
 
 The adapter class has two attributes and two methods:
 

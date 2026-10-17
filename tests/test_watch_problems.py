@@ -187,3 +187,44 @@ def test_a_step_that_failed_for_any_other_reason_is_a_problem_that_gives_the_rea
 
     assert code == PROBLEM
     assert problem_line(out) == "watch: problem: ticket a: the step failed: rebase onto run/demo stopped with a conflict in x.txt"
+
+
+# A tool that a permission mode refused (#96): the agent host ran each agent in "dontAsk" mode with an empty allow list.
+REFUSED_HINT: str = "give the agents a settings file with DELEGATE_AGENT_SETTINGS"
+
+
+def test_a_tool_that_a_permission_mode_refused_is_in_the_journal_and_is_a_problem_that_names_the_tool_and_the_mode(tmp_path, capsys, git_identity):
+    adapter = ScriptedAdapter(refusals={"specialist": (("Bash", "don't ask"), ("Edit", "don't ask"))})
+
+    code, out, _, events = build_then_watch(tmp_path, capsys, adapter)
+
+    (result,) = [event for event in events if event["event"] == "adapter-result"]
+    assert result["refused"] == [{"tool": "Bash", "mode": "don't ask"}, {"tool": "Edit", "mode": "don't ask"}]
+    assert code == PROBLEM
+    assert problem_line(out) == f"watch: problem: ticket a: the specialist was refused Bash, Edit in don't ask mode; {REFUSED_HINT}"
+
+
+def test_an_agent_with_no_refused_tool_writes_no_refused_field(tmp_path, capsys, git_identity):
+    _, _, _, events = build_then_watch(tmp_path, capsys, ScriptedAdapter())
+
+    (result,) = [event for event in events if event["event"] == "adapter-result"]
+    assert "refused" not in result
+
+
+@pytest.mark.parametrize(
+    ("event", "fields", "role"),
+    [
+        pytest.param("verify-result", {"round": 0}, "verifier", id="verifier"),
+        pytest.param("fixup-result", {"round": 1}, "fix-up specialist", id="fixup"),
+    ],
+)
+def test_each_agent_role_that_a_permission_mode_refused_is_a_problem(tmp_path, capsys, event, fields, role):
+    repo = bare_repo(tmp_path)
+    result = {"exit_status": 0, "end_state": "finished", "session_id": None, "event_stream": "/s", "refused": [{"tool": "Bash", "mode": "don't ask"}]}
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), (event, {"ticket": "a", **fields, **result}), step_end("a", "failed", "x"), run_end("failed", [], ["a"]))
+
+    code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
+    out = capsys.readouterr().out
+
+    assert code == PROBLEM
+    assert problem_line(out) == f"watch: problem: ticket a: the {role} was refused Bash in don't ask mode; {REFUSED_HINT}"

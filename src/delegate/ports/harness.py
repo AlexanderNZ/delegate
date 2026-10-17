@@ -81,7 +81,9 @@ class AdapterResult:
     harness gives. The exit status does not change it, because the engine weighs
     the exit status itself: a `finished` session with a valid report continues
     the step, whatever the exit status. `ended_idle` is true when the adapter
-    ended the session at the idle timeout of the request.
+    ended the session at the idle timeout of the request. `refused` holds a
+    (tool, mode) pair for each tool call that a permission mode of the harness
+    refused, in the order of the stream, so the engine can name the cause.
     """
 
     exit_status: int
@@ -89,6 +91,7 @@ class AdapterResult:
     session_id: str | None
     event_stream: Path
     ended_idle: bool = False
+    refused: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.end_state not in END_STATES:
