@@ -503,9 +503,9 @@ def report_correction_brief(
     """The brief the engine sends a specialist that committed work but wrote a report that is not valid.
 
     It asks only for a corrected report. It holds the ticket id, the commits on
-    the branch, each problem of the report check, the report rule, and the shape
-    of the report. It does not give the task again, so a resumed session and a
-    new agent get the same brief.
+    the branch, each problem of the report check, the report rule, the foreground
+    rule, and the shape of the report. It does not give the task again, so a
+    resumed session and a new agent get the same brief.
     """
     lines = [
         f"Ticket {ticket}",
@@ -524,6 +524,7 @@ def report_correction_brief(
     ]
     return _sections(
         ("## Continuation", "\n".join(lines)),
+        ("## Commands", FOREGROUND_RULE),
         ("## Report", _specialist_report_shape(ticket, worktree, report_path)),
     )
 
