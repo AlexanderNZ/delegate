@@ -115,12 +115,14 @@ def test_a_session_whose_report_is_not_valid_is_not_ended_at_the_idle_timeout(tm
 
 
 def test_a_session_that_writes_events_more_often_than_the_idle_timeout_is_not_ended(tmp_path, monkeypatch):
-    # Seven events, one each 0.2 seconds, after a start that is longer than the idle timeout.
-    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=1.5, drip_seconds=0.2)
+    # Seven events, one each 0.8 seconds. From the first event to the last is 4.8 seconds, longer than the idle
+    # timeout, so only the events keep the session open. Each gap is 2.2 seconds shorter than the idle timeout,
+    # so a fake that a high load slows down still writes in time.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", drip_seconds=0.8)
 
     first_event = (claude_fake.FIXTURES / "finished.jsonl").read_text().splitlines(keepends=True)[0]
     stream = tmp_path / "streams" / "a.stream.jsonl"
-    req = request(tmp_path, idle_timeout=1.0, event_stream=stream, report_valid=wrote(stream, first_event))  # valid from the first event on
+    req = request(tmp_path, idle_timeout=3.0, event_stream=stream, report_valid=wrote(stream, first_event))  # valid from the first event on
 
     result = adapters.get("claude-code").run(req)
 
