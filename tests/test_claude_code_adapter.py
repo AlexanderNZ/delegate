@@ -412,3 +412,22 @@ def test_a_settings_file_of_the_host_that_is_a_relative_path_stops_the_adapter(t
         adapters.get("claude-code").run(request(tmp_path))
 
     assert fake.calls() == []
+
+
+def test_the_refusal_block_that_claude_code_wrote_on_the_agent_host_is_found(tmp_path, monkeypatch):
+    # The block as Claude Code 2.1.283 wrote it in the stream of a verifier on the agent host on 2026-10-18
+    # (run 20261017T212607Z-26c5): `is_error` true, and the content a plain string with more text after the mode.
+    _stream_with(tmp_path, monkeypatch, {
+        "type": "tool_result",
+        "content": (
+            "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You "
+            "*may* attempt to accomplish this action using other tools that might naturally be used to accomplish this "
+            "goal, e.g. using head instead of cat."
+        ),
+        "is_error": True,
+        "tool_use_id": "toolu_012BYPEhdPGkc1zUfZVCBZ55",
+    })
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == (("Bash", "don't ask"),)
