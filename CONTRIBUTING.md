@@ -17,6 +17,10 @@ python -m pytest -rs
 
 These are the commands that CI runs, so a green run on your machine is a green run in CI. A test checks that this page and the CI file agree.
 
+To run the suite in parallel, install the test extra with `pip install '.[test]'`, which adds `pytest-xdist`. Then add `-n auto` to the pytest command. The suite passes with and without `-n`.
+
+The tests ignore the git configuration of your machine. Each test runs git with an empty global and system configuration, and with an author and a committer from the environment. Thus a setting such as `commit.gpgsign`, `core.hooksPath` or `core.fsmonitor` does not change a result.
+
 One test checks the tree against a private list of terms. The list is not in the repository. Without it, that test skips with a notice, and the rest of the suite runs. You do not need the list.
 
 ### Nix

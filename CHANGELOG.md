@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- The package has a `test` extra: `pip install '.[test]'` installs `pytest` and `pytest-xdist`, so the suite can run in parallel with `python -m pytest -n auto`. The development shell of the flake also holds `pytest-xdist`.
+
 ### Changed
 
 - In `economy` mode, the engine runs no gate for one ticket. A valid report with the status `committed`, on a branch with a commit of the ticket, builds the step. At the end of the chain, for each stack, the engine runs the gates once on the chain tip. Red gates start a fix-up round with the output of the red gates, and the gates then run again. Green gates go on to the verifier of the chain. Its brief holds the gate commands, the commit and the output of the green gates, and it tells the verifier not to run the gates again. A REJECT starts a fix-up round, then the gates, then a scoped verifier. The rounds of red gates and of a REJECT count together against the fix-up limit of `economy` mode, which goes from 1 to 2. Before, the engine ran the gates after each ticket, and the verifier of the chain ran them again. `assure` mode does not change.

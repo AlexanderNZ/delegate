@@ -10,14 +10,33 @@ from delegate.shared.tiers import load_tiers
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
 
+# The identity of every commit that a test makes. It comes from the environment, so no test needs the git
+# configuration of the machine for it.
+IDENTITY: dict[str, str] = {"NAME": "Scratch", "EMAIL": "scratch@example.invalid"}
+
+
+@pytest.fixture(scope="session")
+def empty_git_config(tmp_path_factory) -> Path:
+    """An empty file in a temporary directory, for the global and the system git configuration of the suite."""
+    path = tmp_path_factory.mktemp("git-config") / "empty-gitconfig"
+    path.write_text("")
+    return path
+
+
 @pytest.fixture(autouse=True)
-def isolated_git_config(monkeypatch):
-    """Keep the git configuration of the host out of every test.
+def isolated_git_config(monkeypatch, empty_git_config):
+    """Keep the git configuration of the machine out of every test.
+
+    `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` name an empty file, and
+    `GIT_CONFIG_NOSYSTEM` is set, so git reads no configuration file of the
+    machine. The author and the committer come from the environment.
 
     A global `core.hooksPath` can name a `post-rewrite` hook that does not read
     its stdin. Git then dies of SIGPIPE (exit 141) after a finished rebase, and a
-    test of the run fails for a cause outside the code. Setting the environment
-    of the process is the boundary; the test repositories hold all they need.
+    test of the run fails for a cause outside the code. A global
+    `commit.gpgsign` or `init.defaultBranch` can also change a result, and each
+    hook or signature is one more process start. Setting the environment of the
+    process is the boundary; the test repositories hold all they need.
 
     The same fixture turns `core.fsmonitor` off for every git command of the
     suite. With the setting on, git starts a `git fsmonitor--daemon` for each of
@@ -25,8 +44,12 @@ def isolated_git_config(monkeypatch):
     directory. The entry goes in the git configuration environment, after any
     entry that is already there, so a test can still set its own value after it.
     """
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_git_config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_git_config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for key, value in IDENTITY.items():
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
     count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
     monkeypatch.setenv(f"GIT_CONFIG_KEY_{count}", "core.fsmonitor")
     monkeypatch.setenv(f"GIT_CONFIG_VALUE_{count}", "false")
