@@ -360,6 +360,11 @@ def test_a_tool_that_a_permission_mode_refused_is_in_the_result(tmp_path, monkey
 
 
 def test_a_stream_with_no_refusal_gives_no_refused_tool(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == ()
 
 
 def test_the_final_text_of_the_session_is_in_the_result(tmp_path, monkeypatch):
@@ -367,7 +372,7 @@ def test_the_final_text_of_the_session_is_in_the_result(tmp_path, monkeypatch):
 
     result = adapters.get("claude-code").run(request(tmp_path))
 
-    assert result.refused == ()
+    assert result.final_text == "SMOKE-AGENT-ACTIVE\n\nI'm ready to help with your project at /work."
 
 
 def _stream_with(tmp_path: Path, monkeypatch, block: dict[str, object]) -> None:
@@ -434,6 +439,3 @@ def test_the_refusal_block_that_claude_code_wrote_on_the_agent_host_is_found(tmp
     result = adapters.get("claude-code").run(request(tmp_path))
 
     assert result.refused == (("Bash", "don't ask"),)
-
-
-    assert result.final_text == "SMOKE-AGENT-ACTIVE\n\nI'm ready to help with your project at /work."
