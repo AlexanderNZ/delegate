@@ -6,8 +6,8 @@ The command is `claude --print --output-format stream-json --verbose --model
 every command in the foreground. A host can give every agent a settings file and
 a permission mode: `DELEGATE_AGENT_SETTINGS` adds `--settings <path>`, and
 `DELEGATE_PERMISSION_MODE` adds `--permission-mode <mode>`. With neither set, the
-command does not change. A tool result that says that a permission mode refused
-a tool goes into `refused` of the result. The prompt goes on standard input, never in
+command does not change. An error tool result that says that a permission mode
+refused a tool goes into `refused` of the result. The prompt goes on standard input, never in
 argv, so a long brief meets no argument limit and shows in no process list. The
 harness writes one JSON event on each line of standard output. The adapter
 copies that stream to the file that the request names, and reads the final
@@ -83,6 +83,9 @@ def _host_permissions() -> list[str]:
     options: list[str] = []
     settings = os.environ.get(SETTINGS_VARIABLE)
     if settings:
+        # The agent runs in its worktree, not in the directory of the engine, so a relative path can name another file.
+        if not Path(settings).is_absolute():
+            raise AdapterError(f"{SETTINGS_VARIABLE} is {settings!r}, which is not an absolute path")
         if not Path(settings).is_file():
             raise AdapterError(f"{SETTINGS_VARIABLE} names {settings}, which is not a file")
         options += ["--settings", settings]
@@ -93,13 +96,17 @@ def _host_permissions() -> list[str]:
 
 
 def _refusals(event: dict[str, object]) -> list[tuple[str, str]]:
-    """The (tool, mode) pair of each tool result of the event that says that a permission mode refused the tool."""
+    """The (tool, mode) pair of each error tool result of the event that says that a permission mode refused the tool.
+
+    Only a result with `is_error` true counts. A Read or a grep of a file that
+    quotes the refusal text gives a result that is no error.
+    """
     message = event.get("message")
     if event.get("type") != "user" or not isinstance(message, dict) or not isinstance(message.get("content"), list):
         return []
     found: list[tuple[str, str]] = []
     for block in message["content"]:
-        if not isinstance(block, dict) or block.get("type") != "tool_result":
+        if not isinstance(block, dict) or block.get("type") != "tool_result" or block.get("is_error") is not True:
             continue
         content = block.get("content")
         if isinstance(content, str):

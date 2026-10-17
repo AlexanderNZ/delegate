@@ -18,7 +18,7 @@ import pytest
 from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest
 
-from . import claude_fake
+from . import claude_fake, harness_fake
 from .harness_fake import wrote
 
 
@@ -352,7 +352,6 @@ def test_a_tool_that_a_permission_mode_refused_is_in_the_result(tmp_path, monkey
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
     (fixtures / "refused.jsonl").write_text("\n".join([*lines[:-1], json.dumps(refusal), lines[-1]]) + "\n")
-    from . import harness_fake
     harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "refused.jsonl")
 
     result = adapters.get("claude-code").run(request(tmp_path))
@@ -366,3 +365,50 @@ def test_a_stream_with_no_refusal_gives_no_refused_tool(tmp_path, monkeypatch):
     result = adapters.get("claude-code").run(request(tmp_path))
 
     assert result.refused == ()
+
+
+def _stream_with(tmp_path: Path, monkeypatch, block: dict[str, object]) -> None:
+    """Install a `claude` that replays the finished stream with one user event that holds `block` before its result."""
+    lines = (claude_fake.FIXTURES / "finished.jsonl").read_text().splitlines()
+    event = {"type": "user", "message": {"role": "user", "content": [block]}}
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "stream.jsonl").write_text("\n".join([*lines[:-1], json.dumps(event), lines[-1]]) + "\n")
+    harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "stream.jsonl")
+
+
+def test_a_tool_result_that_only_quotes_the_refusal_text_is_no_refusal(tmp_path, monkeypatch):
+    # A Read or a grep of a file that holds the text, such as the reference page of this adapter, gives a result
+    # that is no error. It must not count as a refused tool.
+    _stream_with(tmp_path, monkeypatch, {
+        "type": "tool_result", "tool_use_id": "toolu_2", "is_error": False,
+        "content": "49\tthe tool result Permission to use Bash has been denied because Claude Code is running in don't ask mode.",
+    })
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == ()
+
+
+def test_a_refusal_whose_content_is_a_list_of_text_parts_is_in_the_result(tmp_path, monkeypatch):
+    _stream_with(tmp_path, monkeypatch, {
+        "type": "tool_result", "tool_use_id": "toolu_3", "is_error": True,
+        "content": [{"type": "text", "text": "Permission to use Write has been denied because Claude Code is running in don't ask mode."}],
+    })
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused == (("Write", "don't ask"),)
+
+
+def test_a_settings_file_of_the_host_that_is_a_relative_path_stops_the_adapter(tmp_path, monkeypatch):
+    # The agent runs in its worktree, not in the directory of the engine, so a relative path can name another file.
+    (tmp_path / "agent-settings.json").write_text("{}\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(HOST_SETTINGS, "agent-settings.json")
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    with pytest.raises(AdapterError, match=f"{HOST_SETTINGS}.*absolute"):
+        adapters.get("claude-code").run(request(tmp_path))
+
+    assert fake.calls() == []

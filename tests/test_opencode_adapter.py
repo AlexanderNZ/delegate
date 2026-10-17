@@ -295,3 +295,17 @@ def test_the_activity_of_a_stream_with_a_bad_line_before_its_end_raises_and_name
 def test_the_activity_of_a_stream_that_is_not_there_raises_and_names_the_path(tmp_path):
     with pytest.raises(AdapterError, match="no-such.jsonl"):
         adapters.get("opencode").activity(tmp_path / "no-such.jsonl")
+
+
+@pytest.mark.parametrize("variable", ["DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE"])
+def test_a_host_setting_of_the_claude_code_adapter_gives_a_warning_and_changes_no_command(tmp_path, monkeypatch, capsys, variable):
+    # OpenCode has no option that takes a settings file or a permission mode, so the run says that the value has no effect.
+    monkeypatch.setenv(variable, str(tmp_path / "x"))
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("opencode").run(request(tmp_path))
+
+    (call,) = fake.calls()
+    assert not any(arg.startswith("--settings") or arg.startswith("--permission") for arg in call["argv"])
+    err = capsys.readouterr().err
+    assert variable in err and "no effect" in err and "OPENCODE_CONFIG" in err

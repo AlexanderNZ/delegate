@@ -120,6 +120,7 @@ class _Tracker:
         elif kind == "idle-timeout":
             self._idle.add(ticket)
         elif kind in AGENT_RESULT_ROLES and event.get("refused"):
+            self._idle.discard(ticket)  # the idle timeout belongs to this result event, as in the branch below
             refused = event["refused"]  # a list of {"tool", "mode"}, from `_refused_fields` of the engine
             tools = ", ".join(dict.fromkeys(str(item["tool"]) for item in refused))  # type: ignore[index, union-attr]
             modes = ", ".join(dict.fromkeys(str(item["mode"]) for item in refused))  # type: ignore[index, union-attr]

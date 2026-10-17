@@ -19,6 +19,8 @@ The activity of a stream comes from the `step_finish` events and the
 
 from __future__ import annotations
 
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +60,23 @@ def _end_state(events: list[dict[str, object]], stream: Path) -> str:
     return STEP_REASON_END_STATE.get(reason, FAILED)
 
 
+
+# The host variables of the claude-code adapter. OpenCode has no option that takes a settings file or a permission
+# mode, so this adapter passes neither, and says so. A host sets OPENCODE_CONFIG instead, which OpenCode reads itself.
+CLAUDE_CODE_HOST_VARIABLES: tuple[str, ...] = ("DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE")
+
+
+def _warn_of_host_settings() -> None:
+    """Write one line to standard error for each host variable of the claude-code adapter that is set."""
+    for name in CLAUDE_CODE_HOST_VARIABLES:
+        if os.environ.get(name):
+            print(
+                f"delegate: {name} has no effect with the opencode adapter; set OPENCODE_CONFIG to an OpenCode "
+                "configuration file with a permission block instead",
+                file=sys.stderr,
+            )
+
+
 class OpenCodeAdapter:
     """Run one agent through `opencode run`."""
 
@@ -65,6 +84,7 @@ class OpenCodeAdapter:
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
+        _warn_of_host_settings()
         command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", request.agent, "--dir", str(request.cwd)]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]

@@ -41,14 +41,14 @@ A host can give every agent of every [**run**](../glossary.md#run) a settings fi
 
 | Variable | Effect |
 |---|---|
-| `DELEGATE_AGENT_SETTINGS` | The path of a Claude Code settings file. The adapter adds `--settings <path>` to the command of each specialist, each continuation, each [**fix-up**](../glossary.md#fix-up) specialist, and each verifier. A path that is not a file stops the adapter before it starts the agent: the adapter raises `AdapterError`, and the engine records a crash. |
+| `DELEGATE_AGENT_SETTINGS` | The absolute path of a Claude Code settings file. The adapter adds `--settings <path>` to the command of each specialist, each continuation, each [**fix-up**](../glossary.md#fix-up) specialist, and each verifier. A relative path, and a path that is not a file, stop the adapter before it starts the agent: the adapter raises `AdapterError`, and the engine records a crash. |
 | `DELEGATE_PERMISSION_MODE` | A permission mode of Claude Code, for example `acceptEdits`. The adapter adds `--permission-mode <mode>` to the same commands. |
 
-With neither variable set, the command is the same as in 1.2.0. The [**verifier guard**](../glossary.md#verifier-guard) hook of the agent file still applies on top of the settings file, so a verifier stays read-only.
+With neither variable set, the command is the same as in 1.2.0. The [**verifier guard**](../glossary.md#verifier-guard) hook of the agent file still applies on top of the settings file, so a verifier stays read-only. The guard is a hook, so the settings file must not turn off hooks: do not set `disableAllHooks` in it.
 
 A host needs these variables when its user settings refuse each tool that is not read-only. An example is `defaultMode` `"dontAsk"` with an empty allow list. Measured on the agent host on 2026-10-18: with no settings file, each `Bash` call of a specialist gave the tool result `Permission to use Bash has been denied because Claude Code is running in don't ask mode.`, so the run did no work.
 
-The adapter reads each tool result of the stream. A result that says that a permission mode refused a tool goes into the `refused` field of the result of the agent, with the tool and the mode. The engine writes it into the result event of the agent, and `delegate watch` shows it as a problem. See [the problem events](status-and-watch.md#the-problem-events).
+The adapter reads each tool result of the stream. An error result (`is_error` true) that says that a permission mode refused a tool goes into the `refused` field of the result of the agent, with the tool and the mode. The engine writes it into the result event of the agent, and `delegate watch` shows it as a problem. See [the problem events](status-and-watch.md#the-problem-events).
 
 ## The foreground rule
 
