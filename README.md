@@ -32,6 +32,7 @@ This puts [three commands](docs/reference/commands.md) on the PATH: `delegate`, 
 | `src/delegate/` | The Python package: every command, the engine, the renderer, the validator and the harness adapters. |
 | `tests/` | The pytest suite of the package and of the docs. |
 | `skills/` | The two skills: the delegation protocol and the agent-definition rules. |
+| `plugins/claude-code/`, `.claude-plugin/` | The Claude Code plugin that shows the progress of a run, and the marketplace manifest that lists it. |
 | `docs/` | The docs site, the decision records in `docs/adr/`, and the agent rules of this repository in `docs/agents/`. |
 | `flake.nix`, `package.nix` | The optional Nix flake. |
 

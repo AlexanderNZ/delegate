@@ -9,3 +9,6 @@ build/
 site/
 .codegraph/
 .claude/worktrees/
+
+# The type declarations that Claude Code writes when it loads the plugin from this folder.
+plugins/claude-code/.claude-plugin/types/

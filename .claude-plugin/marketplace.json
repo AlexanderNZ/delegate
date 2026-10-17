@@ -1,0 +1,12 @@
+{
+  "name": "delegate",
+  "owner": { "name": "Alex J Corkin" },
+  "description": "The plugins of the delegate kit.",
+  "plugins": [
+    {
+      "name": "delegate",
+      "source": "./plugins/claude-code",
+      "description": "Shows the progress of a delegate run of the repository in Claude Code: a status line entry, toasts, and a /delegate pane."
+    }
+  ]
+}
