@@ -19,6 +19,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Fixed
 
+- A verifier that cannot write its verdict file still gives a verdict. When the file is missing, the engine takes the last JSON object with a `verdict` field from the final text of the verifier, writes it to the report path, and checks it as a file; `verify-report` records `source` `final-text`. The verifier brief tells the verifier to end its final message with the verdict object. A host whose permission mode refuses a shell redirect to a file (Claude Code in `dontAsk` mode) needs this. The harness port has the new optional result field `final_text`; an adapter outside the kit that does not set it still works.
 - A verifier can write its verdict through the verifier guard. The guard refuses a heredoc and a here-string, and some characters of a command, also inside quotes, so a verifier that tried a heredoc, or a verdict with a backtick in its evidence, failed the step after all its work. The report section of each verifier brief (full, fix-up, and chain) now names the one form that the guard permits: `printf '%s\n' '<json>' > <report path>`, with the JSON on one line, and `$`, the backtick, the apostrophe, `<`, `>` and `&` written as JSON escapes.
 
 ## [1.2.0] - 2026-10-17

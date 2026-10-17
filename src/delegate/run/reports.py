@@ -185,6 +185,25 @@ def read_specialist_report(path: Path, ticket: str) -> SpecialistReport:
     )
 
 
+def verdict_in_text(text: str) -> dict[str, object] | None:
+    """The last JSON object in `text` that has a `verdict` field, or None.
+
+    A verifier that cannot write its verdict file ends its final message with
+    the verdict object, as the brief asks. The object can stand in a code fence.
+    """
+    decoder = json.JSONDecoder()
+    start = text.rfind("{")
+    while start != -1:
+        try:
+            found, _ = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            found = None
+        if isinstance(found, dict) and "verdict" in found:
+            return found
+        start = text.rfind("{", 0, start)
+    return None
+
+
 def read_verifier_report(path: Path, mode: str) -> VerifierReport:
     """Read and check the verdict report of a verifier that ran in `mode`. Raise ReportError.
 

@@ -171,7 +171,9 @@ class ScriptedAdapter:
     such call in the same way. `supports_resume` is the `supports_resume`
     attribute of the adapter. `refusals` gives, for a role (`specialist`,
     `fix-up` or `verifier`), the (tool, mode) pairs that a permission mode
-    refused, in the `refused` field of its result.
+    refused, in the `refused` field of its result. `verifier_final_text` (a
+    text, or a function of the request) is the `final_text` of each verifier
+    result.
 
     Each call writes the line `{"type":"result"}` to the event stream that the
     request names, and gives that path back in the result. `activity` reads
@@ -207,6 +209,7 @@ class ScriptedAdapter:
     verdict_findings: list[str] | None = None
     verifier_report_text: str | Callable[[AdapterRequest], str] | None = None
     write_verifier_report: bool = True
+    verifier_final_text: str | Callable[[AdapterRequest], str] | None = None
     verifier_files: dict[str, str] = field(default_factory=dict)
     verifier_end_state: str = "finished"
     verifier_exit_status: int = 0
@@ -323,7 +326,10 @@ class ScriptedAdapter:
             request.report_path.write_text(text)
         stream = request.event_stream
         stream.write_text('{"type":"result"}\n')
-        result = AdapterResult(self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream)
+        final = self.verifier_final_text(request) if callable(self.verifier_final_text) else self.verifier_final_text
+        result = AdapterResult(
+            self.verifier_exit_status, self.verifier_end_state, f"verifier-session-{turn + 1}", stream, final_text=final
+        )
         return self._ended("verifier", request, before, result)
 
 

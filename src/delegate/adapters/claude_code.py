@@ -154,13 +154,16 @@ class ClaudeCodeAdapter:
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
-        end_state, session_id = FAILED, None
+        end_state, session_id, final_text = FAILED, None, None
         refused: list[tuple[str, str]] = []
         for event in read_events(stream):
             if event.get("type") == "result":
                 end_state, session_id = _end_state(event), event["session_id"]
+                final_text = event["result"] if isinstance(event.get("result"), str) else final_text
             refused += _refusals(event)
-        return AdapterResult(process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused))
+        return AdapterResult(
+            process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text
+        )
 
     def activity(self, stream: Path) -> Activity:
         tokens = 0

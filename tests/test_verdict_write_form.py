@@ -52,6 +52,7 @@ def test_the_verifier_brief_names_the_printf_form_and_the_escapes(mode, tmp_path
     assert all(escape in brief for escape in ESCAPES.values())
     assert "heredoc" in brief
     assert "one line" in brief
+    assert "end your final message with the same JSON object" in brief
 
 
 def test_a_verdict_with_a_backtick_a_substitution_and_an_apostrophe_passes_the_guard_and_reads_back_unchanged(tmp_path):

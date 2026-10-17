@@ -81,6 +81,7 @@ the run context imports `subprocess`.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import shutil
@@ -107,7 +108,7 @@ from .guards import (
 )
 from .journal import Journal, JournalError, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report
+from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order
 
 # The journal keeps this many characters of the end of a gate's output.
@@ -1184,17 +1185,26 @@ def _verify_round(
             head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
         )
         raise violation
+    # A verifier that could not write its verdict file (a permission mode that refuses a shell redirect, for example)
+    # ends its final message with the verdict object, as the brief asks. The engine writes that object to the report
+    # path and checks it as it checks a file (#98).
+    source: dict[str, object] = {}
+    recovered = verdict_in_text(result.final_text) if not report_path.exists() and result.final_text else None
+    if recovered is not None:
+        report_path.write_text(json.dumps(recovered, indent=2) + "\n")
+        source = {"source": "final-text"}
     if not _session_done(result, _report_check(lambda: read_verifier_report(report_path, mode))):
         raise _StepFailed(f"the verifier ended {result.end_state} with exit status {result.exit_status}")
     try:
         report = read_verifier_report(report_path, mode)
     except ReportError as error:
         step.journal.append(
-            "verify-report", ticket=ticket.id, round=round_number, valid=False, path=str(report_path), reason=str(error)
+            "verify-report", ticket=ticket.id, round=round_number, valid=False, path=str(report_path), reason=str(error),
+            **source,
         )
         raise _StepFailed(str(error)) from None
     step.journal.append(
-        "verify-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None
+        "verify-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None, **source
     )
     chain_fields = step.chain_fields
     if step.segments is not None:

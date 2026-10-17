@@ -253,7 +253,9 @@ VERDICT_WRITE_RULE = (
     "The guard also refuses some characters in the command text, also inside quotes. "
     "So in the JSON text, write each `$` as `\\u0024`, each backtick as `\\u0060`, each apostrophe as `\\u0027`, "
     "each `<` as `\\u003c`, each `>` as `\\u003e`, and each `&` as `\\u0026`. "
-    "A JSON parser reads each escape back as the same character, so the report keeps your text."
+    "A JSON parser reads each escape back as the same character, so the report keeps your text. "
+    "Then end your final message with the same JSON object, as written in the file, in a `json` code fence. "
+    "When the harness refuses the command that writes the file, the engine reads the verdict from that object."
 )
 
 FOREGROUND_RULE = (

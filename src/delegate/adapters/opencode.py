@@ -101,7 +101,14 @@ class OpenCodeAdapter:
             )
         events = read_events(stream)
         session_id = next((event["sessionID"] for event in events if "sessionID" in event), None)
-        return AdapterResult(process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle)
+        # The last text part of the session is the final text of the agent.
+        texts = [
+            str(event["part"]["text"])  # type: ignore[index]
+            for event in events
+            if event.get("type") == "text" and isinstance(event.get("part"), dict) and "text" in event["part"]  # type: ignore[operator]
+        ]
+        final_text = texts[-1] if texts else None
+        return AdapterResult(process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle, final_text=final_text)
 
     def activity(self, stream: Path) -> Activity:
         tokens, last = 0, None

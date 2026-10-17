@@ -309,3 +309,12 @@ def test_a_host_setting_of_the_claude_code_adapter_gives_a_warning_and_changes_n
     assert not any(arg.startswith("--settings") or arg.startswith("--permission") for arg in call["argv"])
     err = capsys.readouterr().err
     assert variable in err and "no effect" in err and "OPENCODE_CONFIG" in err
+
+
+def test_the_last_text_part_of_the_session_is_the_final_text_of_the_result(tmp_path, monkeypatch):
+    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    texts = [event["part"]["text"] for event in map(json.loads, (opencode_fake.FIXTURES / "finished.jsonl").read_text().splitlines()) if event.get("type") == "text"]
+
+    result = adapters.get("opencode").run(request(tmp_path))
+
+    assert texts and result.final_text == texts[-1]
