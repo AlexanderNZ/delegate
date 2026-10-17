@@ -11,8 +11,8 @@ You need Python 3.11 or later and git. The tests of the guards run the rendered 
 Run these commands from the root of the repository, in a clean Python environment:
 
 ```bash
-pip install . pytest
-python -m pytest -rs
+pip install '.[test]'
+python -m pytest -rs -n auto
 ```
 
 These are the commands that CI runs, so a green run on your machine is a green run in CI. A test checks that this page and the CI file agree.

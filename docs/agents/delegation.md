@@ -9,11 +9,11 @@ The repository holds a harness-neutral delegation kit. It has one stack: a Pytho
 ## Verification gates
 
 ```bash
-nix develop -c python3 -m pytest -rs
+nix develop -c python3 -m pytest -rs -n auto
 nix flake check
 ```
 
-Without Nix, the same suite runs with `pip` and `pytest`: in the repository root, run `pip install . pytest` into a Python 3.11+ environment, then `python -m pytest -rs`.
+Without Nix, the same suite runs with `pip` and `pytest`: in the repository root, run `pip install '.[test]'` into a Python 3.11+ environment, then `python -m pytest -rs -n auto`. The `test` extra holds `pytest` and `pytest-xdist`, which runs the tests in parallel.
 
 CI runs both gates on every push: the suite on Python 3.11 and 3.13, and `nix flake check` on Linux. The full suite takes a long time on a developer machine. An agent therefore runs the targeted test files of its change, and the coordinator takes the full result from CI before a merge to `main`. In a `delegate run`, the engine runs the full suite as a gate after the report of the specialist, so the specialist does not run it.
 
