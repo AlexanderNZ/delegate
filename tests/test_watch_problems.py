@@ -228,3 +228,24 @@ def test_each_agent_role_that_a_permission_mode_refused_is_a_problem(tmp_path, c
 
     assert code == PROBLEM
     assert problem_line(out) == f"watch: problem: ticket a: the {role} was refused Bash in don't ask mode; {REFUSED_HINT}"
+
+
+def test_a_refused_result_after_an_idle_timeout_clears_the_idle_mark_so_the_next_result_is_checked(tmp_path, capsys):
+    # The idle timeout belongs to the result event that follows it. A refused result consumes it as the idle branch
+    # does, so a later failed result of the same ticket is a problem and not skipped as idle (#96).
+    repo = bare_repo(tmp_path)
+    refused = {"exit_status": 0, "end_state": "finished", "session_id": None, "event_stream": "/s", "refused": [{"tool": "Bash", "mode": "don't ask"}]}
+    failed = {"exit_status": 1, "end_state": "failed", "session_id": None, "event_stream": "/s"}
+    write_journal(
+        repo, "r1", run_start("r1", "a"), step_start("a"),
+        ("idle-timeout", {"ticket": "a", "role": "verifier", "round": 0, "seconds": 900}),
+        ("verify-result", {"ticket": "a", "round": 0, **refused}),
+        ("verify-result", {"ticket": "a", "round": 1, **failed}),
+        step_end("a", "failed", "x"), run_end("failed", [], ["a"]),
+    )
+
+    code = delegate.main(["watch", "r1", "--repo", str(repo), "--from", "4", *POLL])
+    out = capsys.readouterr().out
+
+    assert code == PROBLEM
+    assert problem_line(out) == "watch: problem: ticket a: the verifier ended failed with exit status 1"

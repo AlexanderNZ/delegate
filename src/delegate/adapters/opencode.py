@@ -60,7 +60,6 @@ def _end_state(events: list[dict[str, object]], stream: Path) -> str:
     return STEP_REASON_END_STATE.get(reason, FAILED)
 
 
-
 # The host variables of the claude-code adapter. OpenCode has no option that takes a settings file or a permission
 # mode, so this adapter passes neither, and says so. A host sets OPENCODE_CONFIG instead, which OpenCode reads itself.
 CLAUDE_CODE_HOST_VARIABLES: tuple[str, ...] = ("DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE")
