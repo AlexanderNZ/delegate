@@ -243,6 +243,22 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # redirection read the source as the destination: "cp /tmp/a >/tmp/log
     # /Users/x" writes to /Users/x.
     after_redirect = "A path argument comes after a redirection."
+    # A redirection with "&" duplicates a file descriptor only when the word
+    # after the "&" is a descriptor number or "-". With another word, bash,
+    # /bin/sh and zsh send the output to the file of that name (">&out",
+    # ">& out", "1>&out"), and zsh does so also after "2>". In zsh, ">>&"
+    # always appends to a file, also with a number (">>&1" writes the file
+    # "1"). A word that holds ">&" therefore needs a descriptor after the
+    # first ">&" and no ">" before it.
+    to_file = (
+        "A redirection with & writes to a file when the word after the & is not a file descriptor number or -, "
+        "and >>& always writes to a file in zsh. To search for the text, write a . in place of the >."
+    )
+    # The divider cuts at each "|", but in ">|" and ">&|" the "|" is part of
+    # the redirection, and the word after it is the file. So a segment that
+    # ends at a redirection sign gives its target to the next segment, where
+    # the guard reads it as a command ("ls >|cat" writes the file "cat").
+    no_target = "A redirection sign has no target in this segment, so the next word can be a file that the shell writes."
     # GNU cp takes its destination from -t or --target-directory, and a word
     # that starts with a hyphen is otherwise dropped as a flag. Two literal
     # prefixes do not hold the class: GNU short options cluster, so "cp -Rt
@@ -272,12 +288,19 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "r=0; "
         'for a in "$@"; do '
         f'if [ "$r" = 1 ]; then r=0; istmp "$a" || deny "$seg" "{redirect}"; continue; fi; '
+        f'if [ "$r" = 2 ]; then r=0; isfd "$a" || deny "$seg" "{to_file}"; continue; fi; '
         'case "$a" in '
-        "*'>&'*) ;; "
+        # A word with ">&": the text before the first ">&" holds no ">" (so
+        # no ">>&"), and the text after it is a descriptor. When the word
+        # ends at ">&", the next word is the descriptor.
+        "*'>&'*) t=${a%%'>&'*}; v=${a#*'>&'}; "
+        f'case "$t" in *\'>\'*) deny "$seg" "{to_file}" ;; esac; '
+        f'if [ -z "$v" ]; then r=2; else isfd "$v" || deny "$seg" "{to_file}"; fi ;; '
         "'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>') r=1 ;; "
         f'*\'>\'*) istmp "${{a##*>}}" || deny "$seg" "{redirect}" ;; '
         "esac; "
         "done; "
+        f'[ "$r" = 0 ] || deny "$seg" "{no_target}"; '
         'g=$seg; case "$seg" in "git -C "*) t=${seg#git -C }; g="git ${t#* }" ;; esac; '
         'case "$g" in "direnv exec "*) t=${g#direnv exec }; '
         'case "$t" in *" "*) g=${t#* } ;; *) g="direnv exec" ;; esac ;; esac; '
@@ -296,7 +319,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         'case "$a" in '
         f'--t*|--n*|-*t*|-*T*) deny "$seg" "{target_flag}" ;; '
         "-*) continue ;; "
-        "'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>'|'<'|'<<'|'0<') q=1; k=1; continue ;; "
+        "*'>&'|'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>'|'<'|'<<'|'0<') q=1; k=1; continue ;; "
         "*'>'*|*'<'*) q=1; continue ;; "
         "esac; "
         f'[ "$q" = 0 ] || deny "$seg" "{after_redirect}"; '
@@ -318,6 +341,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             f'istmp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
+            # A file descriptor number, or "-", which closes a descriptor.
+            "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
             f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",
             '[ -n "$cmd" ] || { echo "verifier guard: no command text, or python3 is absent. '
             'The guard fails closed." >&2; exit 2; }',

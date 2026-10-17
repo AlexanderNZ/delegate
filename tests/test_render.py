@@ -828,6 +828,85 @@ def test_the_ampersand_and_substitution_verdicts_are_the_same_under_zsh():
         assert r.returncode == 0, (command, r.stdout, r.stderr)
 
 
+#: Each shell that runs the guard in these tests. zsh is a third shell: it
+#: reads more redirections with "&" as a write to a file than bash does.
+ALL_GUARD_SHELLS = (
+    *GUARD_SHELLS,
+    pytest.param("zsh", marks=pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not on PATH")),
+)
+
+#: (command, the segment the deny message must name). Each command writes a
+#: file outside a temp directory in at least one of bash, /bin/sh and zsh.
+#: A redirection with "&" goes to a file when the word after "&" is not a
+#: file descriptor number or "-". In zsh, ">>&" always goes to a file, also
+#: with a number. A redirection sign at the end of a segment has its target
+#: after a "|" that the guard reads as a pipe: ">|" and ">&|" write a file.
+AMPERSAND_REDIRECTION_TO_A_FILE = [
+    ("ls >&src/out", "ls >&src/out"),
+    ("cat x >& rm -rf src", "cat x >& rm -rf src"),
+    ("ls >& out", "ls >& out"),
+    ("ls 1>&out", "ls 1>&out"),
+    ("ls 2>&out", "ls 2>&out"),
+    ("ls 2>& out", "ls 2>& out"),
+    ("ls >&2>src/out", "ls >&2>src/out"),
+    ("ls >&'1 x'", "ls >&'1 x'"),
+    ("ls >&!out", "ls >&!out"),
+    ("ls >>&1", "ls >>&1"),
+    ("ls >>& out", "ls >>& out"),
+    ("ls >|cat", "ls >"),
+    ("ls >&|cat", "ls >&"),
+    ("ls &>|cat", "ls &>"),
+    ("ls 2>|cat", "ls 2>"),
+]
+
+#: A redirection with "&" to a file descriptor number or to "-" writes no file.
+#: These commands stay permitted.
+AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR = [
+    "ls 2>&1",
+    "ls >&2",
+    "ls >&1",
+    "ls >&-",
+    "ls 2>&-",
+    "ls 2>&1 | tail -3",
+    "./gradlew test 2>&1 | tail -3",
+    # The search form that the deny message gives: a "." in place of the ">".
+    "grep -n '2.&1' src",
+]
+
+#: The same rule with a space after the "&". zsh does not divide a segment
+#: into words, so it denies these forms. SKILL.md records that difference, and
+#: a deny keeps the guard closed.
+AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE = [
+    "ls 2>& 1",
+    "ls >& 2",
+    "ls >& -",
+    f"cp -R {WORKTREE} /tmp/proof >& 2",
+]
+
+
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
+@pytest.mark.parametrize("command,segment", AMPERSAND_REDIRECTION_TO_A_FILE)
+def test_a_redirection_with_an_ampersand_to_a_file_is_denied(command, segment, shell):
+    for hook in (VERIFIER_BASH_HOOK, GATED_HOOK):
+        r = _run_guard(command, shell=shell, hook=hook)
+        assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+        assert f"[{segment}]" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
+@pytest.mark.parametrize("command", AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR)
+def test_a_redirection_with_an_ampersand_to_a_descriptor_stays_permitted(command, shell):
+    r = _run_guard(command, shell=shell, hook=_hook_for(command))
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE)
+def test_a_descriptor_after_a_space_stays_permitted(command, shell):
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
 @pytest.mark.parametrize("shell", GUARD_SHELLS)
 @pytest.mark.parametrize("command", ['grep "a src', "grep 'a;b src", "grep -e 'a' \"b|c src"])
 def test_a_quote_that_is_not_closed_fails_closed(command, shell):

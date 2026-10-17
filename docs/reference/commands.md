@@ -157,6 +157,8 @@ delegate brief fixup --repo <dir> --branch <branch> --rejected <commit> --findin
 
 <!-- generated:end verifier-guard-commands -->
 
+A redirection with `&` must go to a file descriptor, not to a file. The guard permits `>&` and `n>&` only when the word after the `&` is a file descriptor number or `-`: `2>&1`, `>&2`, `>&1` and `>&-` are permitted. With another word, bash, `/bin/sh` and zsh write the output to a file of that name, so the guard denies `ls >&src/out`, `ls >& out`, `cat x >& rm -rf src` and `ls 2>&out`. It denies each `>>&`, because zsh then appends to a file, also with a number. A segment that ends at a redirection sign is also denied: in `ls >|cat` and `ls >&|cat`, the shell writes the file `cat`. The guard reads a quoted search pattern as text too, so it also denies `grep -F '2>&1' src`. To search for the text `2>&1`, write a `.` in place of the `>`: `grep -n '2.&1' src`.
+
 ## The finding codes
 
 `validate` writes one line for each finding: the code, the file, and a message. The code is one of these.
