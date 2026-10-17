@@ -251,18 +251,25 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
 STATE_ROOT_VARIABLE: str = "DELEGATE_STATE_ROOT"
 
 
+class StateRootError(EngineError):
+    """`DELEGATE_STATE_ROOT` has a value that the engine cannot use."""
+
+
 def state_directory(repo: Path, vcs: VersionControl) -> tuple[Path, Path]:
     """The top level of the repository and the directory where the engine keeps its state.
 
     The state is in `<git common dir>/delegate`. When the host sets
-    `DELEGATE_STATE_ROOT`, it is in `<root>/<name>-<key>` instead: `<name>` is
-    the name of the top level, and `<key>` the first 12 hex digits of the
-    SHA-256 of the absolute git common directory. So one root serves every
-    repository of a host, each repository gets its own directory, and every
-    worktree of a repository finds the same one.
+    `DELEGATE_STATE_ROOT`, it is in `<root>/<name>-<key>` instead. Both parts
+    come from the git common directory, which every worktree of a repository
+    shares: `<name>` is the name of the directory that holds it (`.git` is in
+    the top level of the main checkout), or its own name when it is not called
+    `.git` (a bare repository or a separate git directory), and `<key>` is the
+    first 12 hex digits of the SHA-256 of its absolute path. So one root serves
+    every repository of a host, each repository gets its own directory, and
+    every worktree of a repository finds the same one.
 
-    Raise EngineError when `repo` is not inside a repository, or when the root
-    is not an absolute path.
+    Raise EngineError when `repo` is not inside a repository, and
+    StateRootError when the root is not an absolute path.
     """
     with _vcs_errors():
         top = vcs.repository_root(repo)
@@ -271,9 +278,10 @@ def state_directory(repo: Path, vcs: VersionControl) -> tuple[Path, Path]:
     if not root:
         return top, shared / "delegate"
     if not Path(root).is_absolute():
-        raise EngineError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
+        raise StateRootError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
+    name = shared.parent.name if shared.name == ".git" else shared.name
     key = hashlib.sha256(str(shared).encode()).hexdigest()[:12]
-    return top, Path(root) / f"{top.name}-{key}"
+    return top, Path(root) / f"{name}-{key}"
 
 
 def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:

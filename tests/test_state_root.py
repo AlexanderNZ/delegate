@@ -10,6 +10,7 @@ the engine keeps one directory under the root for each repository.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -98,7 +99,8 @@ def test_a_resume_finds_its_run_under_the_state_root(tmp_path, capsys, git_ident
         adapters.unregister("scripted")
     err = capsys.readouterr().err
 
-    # The run ended `built`, so the resume refuses it: the engine found the journal under the root.
+    # The run ended `built`, so the resume refuses it: the engine found the journal under the root, and nowhere else.
+    assert not (repo / ".git" / "delegate" / "runs").exists()
     assert code == 1
     assert "has ended with the result 'built'" in err
 
@@ -122,3 +124,22 @@ def test_a_state_root_that_is_not_an_absolute_path_is_an_error(tmp_path, capsys,
 
     assert code != 0
     assert ROOT_VARIABLE in err and "absolute" in err
+    assert "not a git repository" not in err
+
+
+def test_a_linked_worktree_of_the_repository_finds_the_same_state_directory(tmp_path, capsys, git_identity, monkeypatch):
+    # The state of a repository is one directory for all its worktrees, as `<git common dir>/delegate` is: the
+    # coordinator can work in a linked worktree, and the run lock covers every worktree.
+    root = tmp_path / "state-root"
+    monkeypatch.setenv(ROOT_VARIABLE, str(root))
+    repo = make_repo(tmp_path)
+    run_id = str(run_in(tmp_path, capsys, repo)[0]["run_id"])
+    linked = tmp_path / "feature-wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(linked)], check=True)
+
+    code = delegate.main(["status", run_id, "--repo", str(linked), "--json"])
+    out, err = capsys.readouterr()
+
+    assert code == 0, err
+    assert json.loads(out)["state"] == "built"
+    assert [path.name for path in root.iterdir()] == [next(root.iterdir()).name]  # one directory for the repository

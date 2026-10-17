@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .engine import EngineError, state_directory
+from .engine import EngineError, StateRootError, state_directory
 from ..ports.vcs import VersionControl
 
 JOURNAL_NAME: str = "journal.jsonl"
@@ -41,6 +41,8 @@ def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
     """
     try:
         _, state = state_directory(repo, vcs)
+    except StateRootError as error:
+        raise RunsError(str(error)) from None
     except EngineError as error:
         raise RunsError(f"{repo} is not a git repository: {error}") from None
     runs = state / "runs"
