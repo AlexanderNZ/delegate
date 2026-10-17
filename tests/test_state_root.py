@@ -142,4 +142,22 @@ def test_a_linked_worktree_of_the_repository_finds_the_same_state_directory(tmp_
 
     assert code == 0, err
     assert json.loads(out)["state"] == "built"
-    assert [path.name for path in root.iterdir()] == [next(root.iterdir()).name]  # one directory for the repository
+    assert len(list(root.iterdir())) == 1  # one directory for the repository
+
+
+def test_a_clone_with_a_separate_git_directory_names_its_directory_after_the_git_directory(tmp_path, capsys, git_identity, monkeypatch):
+    # The agent host clones with `--separate-git-dir`, so its git directory is not called `.git`.
+    root = tmp_path / "state-root"
+    monkeypatch.setenv(ROOT_VARIABLE, str(root))
+    source = make_repo(tmp_path / "source")
+    work, gitdir = tmp_path / "work", tmp_path / "gitdirs" / "proj"
+    gitdir.parent.mkdir()
+    cloned = subprocess.run(["git", "clone", "-q", "--separate-git-dir", str(gitdir), str(source), str(work)], capture_output=True, text=True)
+    assert cloned.returncode == 0, cloned.stderr
+
+    run_id = str(run_in(tmp_path, capsys, work)[0]["run_id"])
+
+    (directory,) = root.iterdir()
+    assert directory.name.startswith("proj-")
+    assert (directory / "runs" / run_id / "journal.jsonl").is_file()
+    assert not (gitdir / "delegate").exists()
