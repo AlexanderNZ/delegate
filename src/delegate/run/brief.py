@@ -249,6 +249,14 @@ FOREGROUND_RULE = (
 )
 
 
+# The first sentence of the `## Gates` section of a specialist brief.
+GATES_AFTER_YOU = "The engine runs these gates itself after you finish."
+GATES_AT_CHAIN_END = (
+    "The engine runs these gates itself once, on the tip of the chain, after the last ticket. "
+    "It does not run them after this ticket. Run the tests of what you change."
+)
+
+
 def _sections(*pairs: tuple[str, str]) -> str:
     return "\n\n".join(f"{title}\n\n{body}" for title, body in pairs) + "\n"
 
@@ -312,13 +320,42 @@ def finding_labels_section() -> str:
     ))
 
 
-def chain_brief(vcs: VersionControl, repo: str | Path, segments: Sequence[ChainSegment], gate_commands: Sequence[str]) -> str:
+def green_gates_text(commit: str, outputs: Sequence[tuple[str, str]]) -> str:
+    """The text of the `## Gates` section of a verifier brief when the engine ran the gates green on `commit`.
+
+    `outputs` holds each gate command with its output. The text gives the
+    commands, the commit and the output, and tells the verifier not to run the
+    gates again. The verifier can still run a test to check a claim.
+    """
+    shown = "\n\n".join(f"$ {command}\n{output.rstrip(chr(10))}" for command, output in outputs)
+    return (
+        f"The engine ran these gates on the commit `{commit}`, and they are green. "
+        "Do not run these gates again. To check a claim, you can run a single test or another command.\n\n"
+        + _bash("\n".join(command for command, _ in outputs))
+        + "\n\nThe output of the gates:\n\n```\n" + shown + "\n```"
+    )
+
+
+def chain_brief(
+    vcs: VersionControl,
+    repo: str | Path,
+    segments: Sequence[ChainSegment],
+    gate_commands: Sequence[str],
+    gates_text: str | None = None,
+    fixups: tuple[str, str] | None = None,
+) -> str:
     """The first-pass brief for a chain: the task and the three-dot diff of each ticket, and the gates.
 
     Each ticket has its own diff `git diff <base>...<tip>`, so the brief holds
     the commits of the tickets in `segments` and no other commit of the chain.
     `full_brief` is the form for one ticket, and this is the same form for
     many, with the labels that map a finding to a ticket.
+
+    `gates_text` replaces the gate commands in the `## Gates` section: the
+    engine gives the output of the gates that it ran green (see
+    `green_gates_text`). `fixups` is the pair `(start, tip)` of the fix-up
+    commits that red gates caused before the first verifier of the stack. The
+    brief then holds their delta `git diff <start>..<tip>` too.
     """
     tasks: list[str] = []
     diffs: list[str] = []
@@ -329,10 +366,18 @@ def chain_brief(vcs: VersionControl, repo: str | Path, segments: Sequence[ChainS
             raise BriefError(f"{command} is empty. The ticket {segment.ticket} holds no change to verify.")
         tasks.append(f"Ticket {segment.ticket}\n\n{segment.text.rstrip(chr(10))}")
         diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n" + _fenced_diff(diff))
+    if fixups is not None:
+        start, tip = fixups
+        command = f"git diff {start}..{tip}"
+        diff = _diff(vcs, repo, start, tip, from_merge_base=False)
+        diffs.append(
+            f"### The fix-ups of the red gates\n\nThe gates were red on the commit `{start}`. "
+            f"These commits fix them.\n\n`{command}`\n\n" + _fenced_diff(diff)
+        )
     return _sections(
         ("## Task", "\n\n".join(tasks)),
         ("## Diff", "\n\n".join(diffs)),
-        ("## Gates", _bash("\n".join(gate_commands))),
+        ("## Gates", gates_text if gates_text is not None else _bash("\n".join(gate_commands))),
     ) + finding_labels_section()
 
 
@@ -345,6 +390,7 @@ def fixup_brief(
     authorised: str | None = None,
     stacks: Sequence[str] = (),
     gate_commands: Sequence[str] | None = None,
+    gates_text: str | None = None,
 ) -> str:
     """The scoped brief: the findings verbatim, the delta, and the gates.
 
@@ -353,7 +399,8 @@ def fixup_brief(
     command instead of producing a brief that hides the loss.
 
     The gates come from the delegation doc of the repository. `gate_commands`
-    replaces them, as in `full_brief`.
+    replaces them, as in `full_brief`. `gates_text` replaces the whole text of
+    the `## Gates` section, as in `chain_brief`.
     """
     with _vcs_errors():
         vcs.commit_of(Path(repo), rejected)
@@ -379,7 +426,9 @@ def fixup_brief(
     if authorised:
         pairs.append(("## Coordinator-authorised additions", authorised))
     pairs.append(("## Delta", f"`{command}`\n\n" + _fenced_diff(delta)))
-    if gate_commands is None:
+    if gates_text is not None:
+        gates = gates_text
+    elif gate_commands is None:
         gates = read_gates(repo, _changed_files(vcs, repo, rejected, branch, from_merge_base=False), stacks)
     else:
         gates = _bash("\n".join(gate_commands))
@@ -408,6 +457,8 @@ def specialist_brief(
     report_path: str | Path,
     rejected: str | None = None,
     findings: str | None = None,
+    red_gates: bool = False,
+    gates_at_chain_end: bool = False,
 ) -> str:
     """The brief the engine sends a specialist: the ticket, the file boundary, the foreground rule, the gates, the report path.
 
@@ -417,7 +468,13 @@ def specialist_brief(
 
     With `rejected` and `findings` the brief is a fix-up brief. It adds the
     findings verbatim and the rejected commit, and it tells the specialist to
-    add the fix as a new commit on top of the rejected commit.
+    add the fix as a new commit on top of the rejected commit. With `red_gates`,
+    the findings are the output of the gates that were red on the rejected
+    commit, and not the findings of a verifier.
+
+    With `gates_at_chain_end`, the engine runs the gates once, on the tip of an
+    `economy` chain, and not after this ticket. The specialist runs the tests of
+    what it changes.
     """
     if hotspots:
         reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
@@ -435,17 +492,20 @@ def specialist_brief(
     pairs = [("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}")]
     if rejected is not None and findings is not None:
         pairs.append(("## Findings to fix", findings.rstrip("\n")))
+        cause = (
+            f"The gates of the engine are red on the commit `{rejected}`. Fix the cause of each red gate above in this worktree."
+            if red_gates else f"A verifier rejected the commit `{rejected}`. Fix the findings above in this worktree."
+        )
         pairs.append((
             "## Rejected commit",
-            f"A verifier rejected the commit `{rejected}`. Fix the findings above in this worktree. "
-            f"Add the fix as a new commit on top of `{rejected}`. "
+            f"{cause} Add the fix as a new commit on top of `{rejected}`. "
             "Do not amend, rebase or reset: a verifier reads only the delta from the rejected commit, "
             "and the engine refuses a branch that no longer holds it.",
         ))
     pairs += [
         ("## File boundary", boundary),
         ("## Commands", FOREGROUND_RULE),
-        ("## Gates", "The engine runs these gates itself after you finish.\n\n" + _bash("\n".join(gates))),
+        ("## Gates", (GATES_AT_CHAIN_END if gates_at_chain_end else GATES_AFTER_YOU) + "\n\n" + _bash("\n".join(gates))),
         ("## Report", report),
     ]
     return _sections(*pairs)
@@ -462,6 +522,7 @@ def continuation_brief(
     reason: str,
     resumed: bool,
     gate_output: str | None = None,
+    gates_at_chain_end: bool = False,
 ) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
@@ -490,7 +551,7 @@ def continuation_brief(
     section = _sections(("## Continuation", "\n".join(lines)))
     if resumed:
         return section
-    return specialist_brief(ticket, text, worktree, hotspots, gates, report_path) + "\n" + section
+    return specialist_brief(ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end) + "\n" + section
 
 
 def report_correction_brief(
@@ -529,23 +590,29 @@ def report_correction_brief(
     )
 
 
-def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str) -> str:
+def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, engine_gates: bool = False) -> str:
     """The sections the engine adds to a verifier brief: the working copy, the report rule, the foreground rule, and the report path.
 
     `copy` is the temporary copy of the branch that the engine prepared. `mode`
-    is `full` or `fix-up`, and the report must name it.
+    is `full` or `fix-up`, and the report must name it. With `engine_gates`, the
+    brief gives the output of the gates that the engine ran green, and the
+    verifier does not run them.
     """
     working_copy = (
         f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
         "You may break the copy to prove a test red. Never push.\n\n" + _report_rule("copy", report_path)
+    )
+    gate_output = (
+        "`gate_output` holds the gate output that the brief gives, and the output of each test that you ran, as one string. "
+        if engine_gates else "`gate_output` holds the output of the gates that you ran, as one string. "
     )
     report = _report_shape(
         report_path,
         _field_list(VERIFIER_REQUIRED, {"verdict": VERIFIER_VERDICTS}),
         None,
         f"`mode` is `{mode}`. "
-        "`gate_output` holds the output of the gates that you ran, as one string. "
-        "A REJECT lists at least one finding in `findings`. "
+        + gate_output
+        + "A REJECT lists at least one finding in `findings`. "
         "Write each finding as one string with its file, its line and its text, not as an object. "
         "`unverified` lists what you could not verify.",
         verifier_example(mode),

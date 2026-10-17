@@ -6,8 +6,8 @@ the modification time of the log file of a gate that runs, with no reader. The r
 the `activity` method of the harness adapter of the run, so this module never
 imports an adapter. The snapshot gives the progress, the ETA, the tokens, and
 the activity of each agent. In `economy` mode it also gives the phase of the
-verification of the chain, which counts in the progress and the ETA as one more
-unit of the run. When the command has no reader for the adapter of
+verification of the chain (its gates, its verifier, or a fix-up), which counts
+in the progress and the ETA as one more unit of the run. When the command has no reader for the adapter of
 the run, the snapshot has the progress and the ETA, and no tokens and no
 activity. A stream that the reader cannot read gives no tokens and no activity
 for its agent, and is not an error. It needs no workflow file, and no tool
@@ -109,7 +109,11 @@ PHASE_OF_EVENT: dict[str, str] = {
 PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
 
 # The phase of the verification of an `economy` chain that an event starts. In `economy` mode only the chain verifies.
-PHASE_OF_CHAIN_EVENT: dict[str, str] = {"verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP}
+# A `gate-start` or a `gate-skip` starts the phase `gates` only when its phase is the phase of the chain gates.
+PHASE_OF_CHAIN_EVENT: dict[str, str] = {
+    "verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP,
+    "gate-start": domain.PHASE_GATES, "gate-skip": domain.PHASE_GATES,
+}
 
 # The events that end an agent run.
 AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
@@ -256,12 +260,15 @@ def _ticket(
 def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
     """The phase of the verification of an `economy` chain, and the seconds since it started. (None, 0) before it starts.
 
-    The verification starts at the first `verify-start`, and its phase follows the newest `verify-start` or `fixup-start`.
-    The gates of a fix-up round stay in the phase `fix-up`.
+    The verification starts with the first gate of the chain, and its phase follows the newest `gate-start` or `gate-skip`
+    of the chain gates (`gates`), `verify-start` (`verifier`), or `fixup-start` (`fix-up`). After a fix-up round, the
+    gates of the chain run again, so the phase is `gates` again.
     """
     phase, started = None, None
     for event in events:
         kind = str(event["event"])
+        if kind in ("gate-start", "gate-skip") and event.get("phase") != domain.GATES_OF_CHAIN:
+            continue  # the gates of one ticket are not the gates of the chain
         if kind in PHASE_OF_CHAIN_EVENT:
             phase, started = PHASE_OF_CHAIN_EVENT[kind], started or _time(event)
     return phase, _seconds(started, now) if started else 0

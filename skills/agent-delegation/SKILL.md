@@ -533,15 +533,17 @@ differs between them.
 | Branch starts from | base branch | previous ticket |
 | Specialist tier | `strong` | `standard` |
 | Verifier tier | `verifier` | `verifier` |
-| Fix-up rounds | 2 | 1 |
+| Fix-up rounds | 2 | 2 |
 | Continuations | 2 | 1 |
 
 - `assure` gives up tokens and wall-clock time. It verifies each branch after
   the rebase and before the next ticket builds on it, so a defect is found
   early. Choose it when a defect in one ticket would spoil the tickets that
   follow.
-- `economy` gives up early discovery. A defect in the first ticket shows only
-  at the end of the chain, after the later tickets built on it. A second REJECT
+- `economy` gives up early discovery. The engine runs the gates once for each
+  stack, on the chain tip, and not after each ticket. A defect in the first
+  ticket shows only at the end of the chain, after the later tickets built on
+  it. Red gates and a REJECT share the two fix-up rounds, and a third problem
   fails the run. Choose it for a long chain of small tickets, when the fewest
   tokens matter more than the feedback time.
 - The verifier tier is the same in both modes. A cheaper mode never means a
@@ -572,15 +574,20 @@ branch moves only on ACCEPT.
 
 - A finding carries the label of a ticket id in square brackets. A finding with
   an unknown label is recorded as unmapped, and the engine does not drop it.
-- A REJECT gets one fix-up round: a new commit on the chain tip, and then a
-  fresh scoped verifier.
+- The engine runs the gates of each stack once, on the chain tip, before the
+  verifier. The verifier brief holds the output of the green gates, and the
+  verifier does not run them again.
+- Red gates and a REJECT each start a fix-up round: a new commit on the chain
+  tip, then the gates, then a fresh verifier. The two causes share two rounds.
 - The rule to verify each branch immediately, after the rebase and before the
   next ticket builds on it, is the `assure` rule. It does not apply to
   `economy`, and `economy` does not break it.
 
 ### Continuation under the engine
-A specialist that ends capped or failed, or leaves red gates, continues in the
-same worktree. The commits that it already made stay.
+A specialist that ends capped or failed, or leaves red gates in `assure` mode,
+continues in the same worktree. The commits that it already made stay. In
+`economy` mode the gates run only on the chain tip, and red gates there start a
+fix-up round.
 
 - If the harness supports resume, the adapter resumes the harness session.
   Otherwise the engine starts a new agent in the same worktree, with a

@@ -79,7 +79,7 @@ All fields except `ticket-start` and `tier-overrides` are required. A field that
 | Mode | Meaning |
 |---|---|
 | `assure` | The engine verifies each branch at once, after the [**specialist**](../glossary.md#specialist) finishes it. |
-| `economy` | The engine builds a [**chain**](../glossary.md#chain), and verifies once for each stack at the end. Each ticket branch starts from the previous ticket. The specialists run on `standard`. Each [**REJECT**](../glossary.md#reject) gets one [**fix-up**](../glossary.md#fix-up) round. See [the run reference](run.md#the-economy-chain). |
+| `economy` | The engine builds a [**chain**](../glossary.md#chain). It runs no [**gate**](../glossary.md#gate) for one ticket. At the end, for each stack, it runs the gates once on the chain tip, and verifies once. Each ticket branch starts from the previous ticket. The specialists run on `standard`. Red gates and a [**REJECT**](../glossary.md#reject) each start a [**fix-up**](../glossary.md#fix-up) round, up to two rounds together for each stack. See [the run reference](run.md#the-chain-verification). |
 
 ## Ticket start
 

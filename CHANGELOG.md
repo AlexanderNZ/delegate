@@ -4,6 +4,12 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- In `economy` mode, the engine runs no gate for one ticket. A valid report with the status `committed`, on a branch with a commit of the ticket, builds the step. At the end of the chain, for each stack, the engine runs the gates once on the chain tip. Red gates start a fix-up round with the output of the red gates, and the gates then run again. Green gates go on to the verifier of the chain. Its brief holds the gate commands, the commit and the output of the green gates, and it tells the verifier not to run the gates again. A REJECT starts a fix-up round, then the gates, then a scoped verifier. The rounds of red gates and of a REJECT count together against the fix-up limit of `economy` mode, which goes from 1 to 2. Before, the engine ran the gates after each ticket, and the verifier of the chain ran them again. `assure` mode does not change.
+- The gate events on the tip of an `economy` chain have the phase `chain`. The `fixup-start` event of a chain also has `stack`, `tickets`, and `trigger` (`gates-red` or `reject`).
+- In `economy` mode, `delegate status` shows the phase `gates` for the run while the gates of the chain run. The percentage and the ETA count the gates as part of the verification of the chain.
+
 ## [1.2.0] - 2026-10-17
 
 ### Added

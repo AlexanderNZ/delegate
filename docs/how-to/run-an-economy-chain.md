@@ -66,10 +66,11 @@ delegate run workflow.toml
 The engine does these things:
 
 1. It makes the [**run branch**](../glossary.md#run-branch) `run/chain`.
-2. It builds ticket `1` in a worktree. It runs the [**gates**](../glossary.md#gate) itself.
+2. It builds ticket `1` in a worktree. It runs no [**gate**](../glossary.md#gate) for one ticket.
 3. It builds ticket `2` on the branch of ticket `1`, and ticket `3` on the branch of ticket `2`.
-4. It starts one [**blind**](../glossary.md#blind) verifier for the stack. The verifier gets the text of the three tickets and the diff of each ticket.
-5. On [**ACCEPT**](../glossary.md#accept), it moves the run branch to the end of the chain.
+4. It runs the gates of the stack once, on the end of the chain.
+5. It starts one [**blind**](../glossary.md#blind) verifier for the stack. The verifier gets the text of the three tickets, the diff of each ticket, and the output of the green gates.
+6. On [**ACCEPT**](../glossary.md#accept), it moves the run branch to the end of the chain.
 
 The command prints `run <run id>` and `journal <path>`. It exits 0 when every ticket is built and accepted.
 
@@ -89,9 +90,13 @@ The engine never merges to your [**base branch**](../glossary.md#base-branch). T
 git merge --ff-only run/chain
 ```
 
-## When the verifier rejects the chain
+## When the gates are red or the verifier rejects the chain
 
-A [**REJECT**](../glossary.md#reject) starts one [**fix-up**](../glossary.md#fix-up) round. The fix-up is a new commit on the end of the chain. A fresh verifier then checks the new commit and the [**findings**](../glossary.md#finding). A second REJECT fails the stack, and the run branch does not move.
+Red gates at the end of the chain start a [**fix-up**](../glossary.md#fix-up) round. The fix-up specialist gets the output of the red gates. The fix-up is a new commit on the end of the chain, and the engine then runs the gates again.
+
+A [**REJECT**](../glossary.md#reject) also starts a fix-up round. The engine runs the gates on the new commit, and a fresh verifier then checks the new commit and the [**findings**](../glossary.md#finding).
+
+Red gates and a REJECT share two fix-up rounds for each stack. A third problem fails the stack, and the run branch does not move.
 
 The verifier starts each finding with the id of its ticket in square brackets. For example, the finding `[2] The header row is missing.` is about ticket `2`. The engine uses the label to name the ticket. See [the chain verification](../reference/run.md#the-chain-verification) for the rules of the finding map.
 

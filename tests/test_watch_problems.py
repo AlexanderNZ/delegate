@@ -54,15 +54,16 @@ def test_a_step_that_ends_blocked_or_partial_is_a_problem_that_names_the_ticket_
 
 
 def test_a_step_whose_gates_are_not_green_is_a_problem_that_names_the_ticket_and_the_gate(tmp_path, capsys, git_identity):
-    # The gate needs feature.txt. The specialist writes another file, so the gate is red after the first build and after the one continuation of economy mode.
+    # The gate needs feature.txt. The specialist and the fix-up specialist write other files, so in economy mode the gate
+    # on the tip of the chain is red, and red again after each of the two fix-up rounds.
     workflow = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')
 
     code, out, err, _ = build_then_watch(tmp_path, capsys, ScriptedAdapter(files={"other.txt": "x\n"}), workflow)
 
     assert (code, err) == (PROBLEM, "")
     assert problem_line(out) == "watch: problem: ticket a: the gates are not green: test -f feature.txt"
-    continuations = [line for line in out.splitlines() if line.split()[2:3] == ["continuation"]]
-    assert len(continuations) == 1  # the first continuation is not a problem
+    fixups = [line for line in out.splitlines() if line.split()[2:3] == ["fixup-start"]]
+    assert len(fixups) == 2  # a fix-up round of red gates is not a problem
 
 
 def test_an_agent_that_ends_failed_is_a_problem_that_names_the_ticket_and_the_end_state(tmp_path, capsys, git_identity):

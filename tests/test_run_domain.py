@@ -44,9 +44,15 @@ def test_the_verifier_tier_is_the_same_in_every_mode():
 # The limits
 
 
-@pytest.mark.parametrize(("mode", "rounds"), [("assure", 2), ("economy", 1)])
-def test_the_fixup_round_limit_depends_on_the_mode(mode, rounds):
+@pytest.mark.parametrize(("mode", "rounds"), [("assure", 2), ("economy", 2)])
+def test_the_fixup_round_limit_of_each_mode_is_two_rounds(mode, rounds):
+    # In `economy` mode the two rounds cover red gates on the tip of the chain and a REJECT together.
     assert domain.fixup_round_limit(mode) == rounds
+
+
+@pytest.mark.parametrize(("mode", "each_ticket"), [("assure", True), ("economy", False)])
+def test_only_assure_mode_runs_the_gates_after_each_ticket(mode, each_ticket):
+    assert domain.gates_each_ticket(mode) is each_ticket
 
 
 @pytest.mark.parametrize(("mode", "count"), [("assure", 2), ("economy", 1)])
@@ -190,7 +196,7 @@ def test_the_two_verdicts_are_accept_and_reject():
 
 def test_a_run_that_starts_at_round_zero_has_every_round_up_to_the_limit():
     assert list(domain.verification_rounds("assure", 0)) == [0, 1, 2]
-    assert list(domain.verification_rounds("economy", 0)) == [0, 1]
+    assert list(domain.verification_rounds("economy", 0)) == [0, 1, 2]
 
 
 def test_a_resume_goes_on_at_the_round_the_journal_holds():
@@ -199,7 +205,7 @@ def test_a_resume_goes_on_at_the_round_the_journal_holds():
 
 def test_a_resume_with_more_verifier_runs_than_the_limit_allows_has_no_rounds_and_a_reason():
     assert list(domain.verification_rounds("economy", 3)) == []
-    assert domain.rounds_used_up_reason("economy", 3) == "the 3 verifier runs of the stopped run use up the 1 fix-up rounds"
+    assert domain.rounds_used_up_reason("economy", 3) == "the 3 verifier runs of the stopped run use up the 2 fix-up rounds"
 
 
 def test_a_resume_within_the_limit_has_no_reason_to_fail():
@@ -213,14 +219,16 @@ def test_a_reject_after_the_last_round_gives_the_findings_in_the_reason():
     assert reason == "the verifier rejected the branch after 2 fix-up rounds: one; two"
 
 
-def test_the_reason_says_round_in_the_singular_for_one_round():
-    assert domain.rejection_reason("economy", ["bad"]) == "the verifier rejected the branch after 1 fix-up round: bad"
-
-
 def test_a_reject_of_a_chain_gives_its_own_reason_for_each_ticket():
     reason = domain.chain_rejection_reason("economy", ["bad"])
 
-    assert reason == "the verifier rejected the chain after 1 fix-up round: bad"
+    assert reason == "the verifier rejected the chain after 2 fix-up rounds: bad"
+
+
+def test_red_gates_on_the_tip_of_a_chain_after_the_last_round_give_the_red_gates_in_the_reason():
+    reason = domain.chain_gates_reason("economy", ["pytest", "ruff check"])
+
+    assert reason == "gates red on the tip of the chain after 2 fix-up rounds: pytest; ruff check"
 
 
 def test_a_ticket_of_a_stack_after_the_failed_one_is_not_verified():

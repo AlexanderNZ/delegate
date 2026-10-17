@@ -297,6 +297,11 @@ def chain_fixup_starts(run: Run, seconds: float) -> None:
     run.agent_start(seconds, "b", "fix-up", run.stream("chain.fixup.stream.jsonl", ""), 1)
 
 
+def chain_gates_start(run: Run, seconds: float, round_number: int) -> None:
+    """The gates of the chain start on its tip at `seconds`. The journal names them for b, the last ticket of the stack python."""
+    run.add(seconds, "gate-start", ticket="b", round=round_number, phase="chain", command="pytest", gate_log=str(run.streams / "gate.log"))
+
+
 def block_of(frame: list[str]) -> list[str]:
     """The live block of a frame of `watch`: the lines above the first blank line."""
     return frame[: frame.index("")] if "" in frame else frame
@@ -318,6 +323,14 @@ def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
 @pytest.mark.parametrize(
     ("chain", "phase", "eta"),
     [
+        pytest.param(lambda run: chain_gates_start(run, 901, 0), "gates", 450 - 99, id="gates"),
+        pytest.param(
+            lambda run: (chain_gates_start(run, 901, 0), chain_verifier_starts(run, 950, 0)), "verifier", 450 - 99, id="verifier-after-the-gates",
+        ),
+        pytest.param(
+            lambda run: (chain_gates_start(run, 901, 0), chain_verifier_starts(run, 920, 0), chain_fixup_starts(run, 950), chain_gates_start(run, 980, 1)),
+            "gates", 450 - 99, id="gates-after-a-fix-up",
+        ),
         pytest.param(lambda run: chain_verifier_starts(run, 901, 0), "verifier", 450 - 99, id="verifier"),
         pytest.param(lambda run: (chain_verifier_starts(run, 901, 0), chain_fixup_starts(run, 950)), "fix-up", 450 - 99, id="fix-up"),
         pytest.param(

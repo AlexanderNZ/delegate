@@ -58,7 +58,7 @@ def test_each_branch_starts_from_the_tip_of_the_previous_ticket(tmp_path, capsys
     assert tip(repo, "run/demo-a~1") == main_tip
     assert tip(repo, "run/demo-b~1") == tip(repo, "run/demo-a")
     assert tip(repo, "run/demo-c~1") == tip(repo, "run/demo-b")
-    # The tickets b and c write no feature.txt. Their gate passes only because the branch holds the work of ticket a.
+    # The tickets b and c write no feature.txt. The gate on the tip of the chain passes only because the branch holds the work of ticket a.
     assert git(repo, "ls-tree", "-r", "--name-only", "run/demo-c").split() == ["b.txt", "c.txt", "feature.txt", "seed.txt", "workflow.toml"]
     bases = {e["ticket"]: e["base_commit"] for e in read_journal(out) if e["event"] == "step-start"}
     assert bases == {"a": main_tip, "b": tip(repo, "run/demo-a"), "c": tip(repo, "run/demo-b")}
@@ -66,7 +66,7 @@ def test_each_branch_starts_from_the_tip_of_the_previous_ticket(tmp_path, capsys
 
 def test_a_ticket_that_failed_is_not_part_of_the_chain(tmp_path, capsys, scripted):
     scripted.failing_tickets = {"a"}
-    scripted.files_by_ticket["b"] = {"feature.txt": "b\n"}  # the gate needs feature.txt, and ticket a does not make it
+    scripted.files_by_ticket["b"] = {"feature.txt": "b\n"}  # the gate of the chain needs feature.txt, and ticket a does not make it
     scripted.files_by_ticket["c"] = {"c.txt": "c\n"}
     repo = make_repo(tmp_path, THREE_TICKETS.replace('blocked-by = ["a"]', 'blocked-by = []'))
     main_tip = tip(repo, "main")
@@ -220,7 +220,7 @@ def test_a_reject_gets_one_fixup_round_as_a_new_commit_on_the_chain_tip_and_a_fr
     assert [e["event"] for e in events if e["event"] in ("fixup-start", "fixup-report")] == ["fixup-start", "fixup-report"]
 
 
-def test_a_second_reject_fails_the_run_after_exactly_one_fixup_round_and_the_run_branch_does_not_move(tmp_path, capsys, scripted):
+def test_a_third_reject_fails_the_run_after_exactly_two_fixup_rounds_and_the_run_branch_does_not_move(tmp_path, capsys, scripted):
     scripted.verdict = "REJECT"
     scripted.verdict_findings = [FINDING_B]
     repo = make_repo(tmp_path, THREE_TICKETS)
@@ -229,8 +229,8 @@ def test_a_second_reject_fails_the_run_after_exactly_one_fixup_round_and_the_run
     code, out, err = run(repo, capsys)
 
     assert code == 1
-    assert "Traceback" not in err and "after 1 fix-up round:" in err
-    assert len(scripted.fixup_calls) == 1 and len(scripted.verifier_calls) == 2
+    assert "Traceback" not in err and "after 2 fix-up rounds:" in err
+    assert len(scripted.fixup_calls) == 2 and len(scripted.verifier_calls) == 3
     assert tip(repo, "run/demo") == main_tip
     events = read_journal(out)
     assert "run-branch-advance" not in event_names(events)
@@ -295,7 +295,7 @@ def test_a_stack_that_follows_a_rejected_stack_is_not_verified_and_its_tickets_f
     code, out, err = run(repo, capsys)
 
     assert code == 1
-    assert [call.agent for call in scripted.verifier_calls] == ["python-verifier"] * 2  # the first pass and the fix-up pass of one stack
+    assert [call.agent for call in scripted.verifier_calls] == ["python-verifier"] * 3  # the first pass and the two fix-up passes of one stack
     events = read_journal(out)
     ends = {e["ticket"]: e for e in events if e["event"] == "step-end"}
     assert ends["a"]["state"] == "failed" and ends["b"]["state"] == "failed" and ends["c"]["state"] == "built"

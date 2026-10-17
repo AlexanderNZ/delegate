@@ -35,7 +35,12 @@ VERIFIER_TIER: str = "verifier"
 # A REJECT starts at most this many fix-up rounds. Each round is one fix-up
 # commit and one fresh verifier. The limit depends on the mode: `assure` verifies
 # each ticket, and `economy` verifies each stack once, at the end of the chain.
-FIXUP_ROUND_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 1}
+# In `economy` mode, red gates on the tip of the chain also start a fix-up round,
+# and the rounds of red gates and of a REJECT count together against the limit.
+FIXUP_ROUND_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 2}
+
+# The `phase` of a gate run on the tip of an `economy` chain, in the journal.
+GATES_OF_CHAIN: str = "chain"
 
 # The specialist of a ticket continues in the same worktree at most this many
 # times after it ends capped or failed, or after the gates are red. One count
@@ -67,6 +72,15 @@ def role_tier(mode: str, role: str, overrides: Mapping[str, str]) -> str:
 def fixup_round_limit(mode: str) -> int:
     """The number of fix-up rounds that a REJECT can start in the mode."""
     return FIXUP_ROUND_LIMIT[mode]
+
+
+def gates_each_ticket(mode: str) -> bool:
+    """Tell whether the engine runs the gates after the build of each ticket.
+
+    In `assure` mode it does. In `economy` mode it runs the gates once for each
+    stack, on the tip of the chain, before the verifier of the stack.
+    """
+    return mode == ASSURE
 
 
 def continuation_limit(mode: str) -> int:
@@ -202,6 +216,11 @@ def chain_rejection_reason(mode: str, findings: Sequence[str]) -> str:
     return f"the verifier rejected the chain after {_rounds_text(mode)}: " + "; ".join(findings)
 
 
+def chain_gates_reason(mode: str, red: Sequence[str]) -> str:
+    """The reason a ticket of a chain fails when the gates on the tip of the chain are red after the last fix-up round."""
+    return f"gates red on the tip of the chain after {_rounds_text(mode)}: " + "; ".join(red)
+
+
 def unverified_chain_reason(stack: str) -> str:
     """The reason a ticket of a later stack fails when the verification of `stack` failed first."""
     return f"not verified: the chain ended when the verification of the stack {stack!r} failed"
@@ -228,8 +247,9 @@ ENDED_TENTHS: int = 10
 def chain_units(mode: str) -> int:
     """The units of the progress of a run that are not tickets: 1 for the verification of the chain in `economy` mode.
 
-    In `economy` mode the verifier of the chain runs after the last ticket ended. For the percentage and the ETA, the
-    verification of the chain is one more unit of the run, as a ticket is: it ends only when the run ends.
+    In `economy` mode the gates and the verifier of the chain run after the last ticket ended. For the percentage and the
+    ETA, the verification of the chain, with its gates, is one more unit of the run, as a ticket is: it ends only when the
+    run ends.
     """
     return 1 if mode == ECONOMY else 0
 

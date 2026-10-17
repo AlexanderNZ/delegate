@@ -81,7 +81,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens` | integer or `null` | The tokens of the run: the sum of `tokens` of all tickets. A ticket whose `tokens` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
-| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in [**`assure`**](../glossary.md#assure) mode. |
+| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in [**`assure`**](../glossary.md#assure) mode. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
@@ -102,7 +102,7 @@ The phase of a running ticket follows its newest event:
 | `step-start`, [**`continuation`**](../glossary.md#continuation), or `agent-start` with the role `specialist` | `specialist` |
 | `report-validation` that is valid, `rebase`, or `gate-start`, `gate-result` or `gate-skip` of the phase `build` or `rebase` | `gates` |
 | `verify-start`, or `agent-start` with the role `verifier` | `verifier` |
-| `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round stay in the phase `fix-up`. |
+| `fixup-start`, or `agent-start` with the role `fix-up` | `fix-up`. The gates of a fix-up round of [**`assure`**](../glossary.md#assure) mode stay in the phase `fix-up`. |
 
 The tokens and the time of the newest event come from the method `activity` of the adapter of the run. See [the adapter interface](run.md#the-adapter-interface), and the activity of [the `claude-code` adapter](claude-code-adapter.md#the-activity) and [the `opencode` adapter](opencode-adapter.md#the-activity).
 
@@ -161,14 +161,14 @@ The ETA:
 
 ### The verification of an `economy` chain
 
-In [**`economy`**](../glossary.md#economy) mode the verification of the [**chain**](../glossary.md#chain) runs after the last ticket ends. For the percentage and the ETA, the verification is one more unit of the run, as a ticket is:
+In [**`economy`**](../glossary.md#economy) mode the verification of the [**chain**](../glossary.md#chain) runs after the last ticket ends: the gates on the chain tip, the verifier, and the fix-up rounds. For the percentage and the ETA, the verification, with its gates, is one more unit of the run, as a ticket is:
 
 - The verification counts 0 until the journal holds `run-end`. After `run-end` it counts 1. Thus the percentage stays below 100 until the run ends.
-- The verification starts at the first `verify-start`. While it runs, `phase` of the snapshot follows the newest `verify-start` (`verifier`) or `fixup-start` (`fix-up`). The gates of a fix-up round stay in the phase `fix-up`.
-- The ETA estimates the verification as one mean ticket: M. R holds the time from the first `verify-start` to `time`.
+- The verification starts at the first `gate-start` or `gate-skip` of the phase `chain`, or at the first `verify-start` when the journal holds no such gate event. While it runs, `phase` of the snapshot follows the newest `gate-start` or `gate-skip` of the phase `chain` (`gates`), `verify-start` (`verifier`), or `fixup-start` (`fix-up`). After a fix-up round the gates of the chain run again, so the phase is `gates` again.
+- The ETA estimates the verification as one mean ticket: M. R holds the time from the start of the verification to `time`.
 - The tickets of the chain stay `built`, with the `phase` `null`. The last ticket of each stack shows the tokens and the `idle_seconds` of the verifier of its stack.
 
-For example, two tickets of 600 and 300 seconds ended, and the verifier of the chain started 99 seconds ago. The percentage is 2 ÷ 3 × 100, rounded down: 66. The ETA is `time` + 450 × 1 − 99.
+For example, two tickets of 600 and 300 seconds ended, and the gates of the chain started 99 seconds ago. The percentage is 2 ÷ 3 × 100, rounded down: 66. The ETA is `time` + 450 × 1 − 99.
 
 ## `delegate watch`
 

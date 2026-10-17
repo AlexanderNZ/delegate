@@ -3,7 +3,7 @@
 For each ticket the engine makes a worktree from the base branch (or from the
 run branch, when the workflow sets `ticket-start = "run-branch"`), installs the
 push guard in it (see `guards.py`), spawns the stack's specialist through the adapter, checks the specialist's report, runs
-the stack's gates itself, and records each event in the journal. After the
+the stack's gates itself (in `assure` mode), and records each event in the journal. After the
 specialist reports `committed`, and before any gate runs, the engine compares
 the changed paths with the hotspot patterns of the stack. A match fails the
 step, and no verifier runs (see `guards.py`). A fix-up gets the same check.
@@ -30,12 +30,16 @@ violation: the journal records it with the changes, and the run halts. The
 engine removes the temporary copy after every verifier run.
 
 In `economy` mode each ticket branch starts from the tip of the previous built
-ticket, and the engine does not verify a ticket by itself. After the last
-ticket, `_ChainRun` verifies once for each stack, over the commits of the
-tickets of that stack. A REJECT gets one fix-up round, as a new commit on the
-chain tip, and then a fresh scoped verifier. A finding maps to a ticket by its
-label, and a finding with no known label is recorded as unmapped. When every
-stack is accepted, the engine fast-forwards the run branch to the chain tip.
+ticket, and the engine runs no gate and no verifier for a ticket by itself: a
+valid report that says committed, on a branch with a commit, builds the step.
+After the last ticket, `_ChainRun` runs the gates of each stack once on the
+chain tip, and then verifies once for each stack, over the commits of the
+tickets of that stack. Red gates and a REJECT each start a fix-up round, as a
+new commit on the chain tip. The gates then run again, and green gates go on
+to a fresh verifier. The rounds of both causes count together against the
+fix-up limit. A finding maps to a ticket by its label, and a finding with no
+known label is recorded as unmapped. When every stack is accepted, the engine
+fast-forwards the run branch to the chain tip.
 
 A run holds many tickets, which the engine takes in dependency order. A failed
 step does not end the run. A ticket whose blocker failed or was skipped is
@@ -92,8 +96,8 @@ from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
-    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, report_correction_brief,
-    specialist_brief, verifier_run_brief, verifier_run_sections,
+    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
+    report_correction_brief, specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
@@ -120,10 +124,16 @@ ROLE_FIXUP: str = "fix-up"
 ROLE_VERIFIER: str = "verifier"
 
 # The `phase` of a gate result in the journal: the gates after the specialist
-# built the ticket, after the rebase onto the run branch, and after a fix-up.
+# built the ticket, after the rebase onto the run branch, after a fix-up, and on
+# the tip of an `economy` chain.
 PHASE_BUILD: str = "build"
 PHASE_REBASE: str = "rebase"
 PHASE_FIXUP: str = "fixup"
+PHASE_CHAIN: str = domain.GATES_OF_CHAIN
+
+# The `trigger` of a `fixup-start` of a chain: red gates on the tip of the chain, or a REJECT.
+TRIGGER_GATES_RED: str = "gates-red"
+TRIGGER_REJECT: str = "reject"
 
 # The `trigger` of a `continuation` whose report check failed on a branch with work: it asks only for a corrected report.
 TRIGGER_REPORT_INVALID: str = "report-invalid"
@@ -713,9 +723,11 @@ def _build_with_continuations(
     branch holds commits already, the first prompt is a continuation brief.
 
     The specialist continues when it ends capped or failed, or when its gates
-    are red. A report that is there but not valid, on a branch that holds a
-    commit, gets a continuation that asks only for a corrected report and names
-    each problem of the check. Return None when the report is valid and the
+    are red. In `economy` mode the engine runs no gate here: a valid report that
+    says committed, on a branch with a commit, builds the step. A report that
+    is there but not valid, on a branch that holds a commit, gets a
+    continuation that asks only for a corrected report and names each problem
+    of the check. Return None when the report is valid and the
     branch holds green work, or the reason the step fails. A report that is
     missing, that is not valid on a branch with no commit, or that does not say
     committed fails the step with no continuation. After `CONTINUATION_LIMIT`
@@ -723,13 +735,16 @@ def _build_with_continuations(
     """
     stack = workflow.stacks[ticket.stack]
     limit = domain.continuation_limit(workflow.mode)
-    prompt = specialist_brief(ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path)
+    each_ticket = domain.gates_each_ticket(workflow.mode)
+    prompt = specialist_brief(
+        ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket
+    )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
-                "the run was interrupted", resumed=False,
+                "the run was interrupted", resumed=False, gates_at_chain_end=not each_ticket,
             )
     resume_session: str | None = None
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -774,6 +789,8 @@ def _build_with_continuations(
                 stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
                 if stop:
                     return stop
+                if not each_ticket:
+                    return None  # `economy` mode: the gates run once, on the tip of the chain (see `_ChainRun`)
                 outcomes = [(gate, *_run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
                 red = [(gate, output) for gate, green, output in outcomes if not green]
                 if not red:
@@ -797,7 +814,7 @@ def _build_with_continuations(
         else:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
-                resumed=resume_session is not None, gate_output=gate_output,
+                resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
             )
 
 
@@ -955,23 +972,40 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     """Run one fix-up round and return the scoped brief for the fresh verifier.
 
     The engine writes the findings to a file and sends the specialist a fix-up
-    brief in the same worktree. The fix must be a new commit on top of the
-    rejected commit, which the brief generator checks. The engine then runs the
-    gates itself.
+    brief in the same worktree (see `_run_fixup`). The fix must be a new commit
+    on top of the rejected commit, which the brief generator checks. The engine
+    then runs the gates itself.
+    """
+    findings_text = _run_fixup(step, round_number, rejected, _findings_text(findings))
+    brief = _checked_fixup_brief(step, round_number, rejected, findings_text)
+    _fixup_gates(step, round_number)
+    return brief
+
+
+def _run_fixup(
+    step: _Step, round_number: int, rejected: str, findings: str, red_gates: bool = False, fields: dict[str, object] | None = None
+) -> str:
+    """Write the findings to a file, and run the fix-up specialist in the worktree of the step. Return the findings text.
+
+    `findings` are the findings of a REJECT, or with `red_gates` the output of
+    the gates that were red on `rejected`. `fields` go in the `fixup-start`
+    event too. Raise `_StepFailed` when the fix-up specialist does not end with
+    a valid report that says committed.
     """
     ticket = step.ticket
     tier, model = step.roles["specialist"]
     findings_path = step.run_dir / "findings" / f"{ticket.id}.fixup-{round_number}.md"
     findings_path.parent.mkdir(parents=True, exist_ok=True)
-    findings_path.write_text(_findings_text(findings))
+    findings_path.write_text(findings)
     findings_text = findings_path.read_text()
     step.journal.append(
         "fixup-start", ticket=ticket.id, round=round_number, rejected_commit=rejected, findings_file=str(findings_path),
-        agent=step.stack.specialist, tier=tier, model=model,
+        agent=step.stack.specialist, tier=tier, model=model, **(fields or {}),
     )
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
     prompt = specialist_brief(
-        ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text
+        ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text,
+        red_gates=red_gates,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -998,9 +1032,7 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the fix-up specialist")
     if unfinished:
         raise _StepFailed(unfinished)
-    brief = _checked_fixup_brief(step, round_number, rejected, findings_text)
-    _fixup_gates(step, round_number)
-    return brief
+    return findings_text
 
 
 def _findings_text(findings: list[str]) -> str:
@@ -1008,12 +1040,13 @@ def _findings_text(findings: list[str]) -> str:
     return "".join(f"- {finding}\n" for finding in findings)
 
 
-def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings_text: str) -> str:
+def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings_text: str, gates_text: str | None = None) -> str:
     """Check the fix-up commit of a round, and return the scoped brief for the fresh verifier.
 
     The paths that the fix-up changed must match no hotspot, and the brief
     generator must accept the fix as a new commit on top of the rejected commit.
-    Raise `_StepFailed` otherwise.
+    Raise `_StepFailed` otherwise. `gates_text` is the text of the gates section
+    of the brief when the engine ran the gates green (see `green_gates_text`).
     """
     ticket = step.ticket
     stop = _hotspot_stop(
@@ -1022,7 +1055,7 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
     if stop:
         raise _StepFailed(stop)
     try:
-        return fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates)
+        return fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text)
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
@@ -1038,12 +1071,18 @@ def _fixup_gates(step: _Step, round_number: int) -> None:
         raise _StepFailed("gates red: " + "; ".join(red))
 
 
-def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> VerifierReport:
+def _verify_round(
+    step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None
+) -> VerifierReport:
     """Run one fresh verifier in a new temporary copy and return its valid verdict report.
 
-    Round 0 is the full pass. A later round gets the fix-up brief in `fixup_body`.
+    With no `fixup_body` the pass is full. A fix-up round gets the fix-up brief in `fixup_body`.
     The verifier gets the task or the findings, and the diff or the delta, and
     the gates. It never gets the report of the specialist.
+
+    For a chain, `gates_text` gives the output of the gates that the engine ran
+    green on the tip, so the verifier does not run them, and `fixups` gives the
+    fix-up commits of red gates that the full pass must see (see `chain_brief`).
     """
     ticket = step.ticket
     tier, model = step.roles["verifier"]
@@ -1061,8 +1100,11 @@ def _verify_round(step: _Step, round_number: int, fixup_body: str | None) -> Ver
                 step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
-                first_pass = chain_brief(step.vcs, copy, step.segments, step.stack.gates) if fixup_body is None else fixup_body + finding_labels_section()
-                prompt = first_pass + verifier_run_sections(copy, report_path, mode)
+                first_pass = (
+                    chain_brief(step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups)
+                    if fixup_body is None else fixup_body + finding_labels_section()
+                )
+                prompt = first_pass + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
             elif fixup_body is None:
                 prompt = verifier_run_brief(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path
@@ -1205,20 +1247,25 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str) -> str | None:
 
 
 class _ChainRun:
-    """The verification at the end of an `economy` chain.
+    """The gates and the verification at the end of an `economy` chain.
 
     The chain holds the tickets that were built, in the order of the plan. Each
     ticket branch starts from the tip of the previous one, so the last branch
     holds all the work. For each stack of the chain, in the order of its first
-    ticket, the engine spawns one verifier over the commits of the tickets of
-    that stack: the brief holds a diff for each of those tickets, and none for a
-    ticket of another stack. The verifier works in a copy of the tip.
+    ticket, the engine first runs the gates of the stack once, on the chain tip,
+    in the worktree of the last ticket. Red gates start a fix-up round with the
+    output of the red gates, and the gates run again. Green gates go on to one
+    verifier over the commits of the tickets of that stack: the brief holds a
+    diff for each of those tickets, none for a ticket of another stack, and the
+    output of the green gates. The verifier works in a copy of the tip.
 
-    A REJECT gets one fix-up round (`FIXUP_ROUND_LIMIT`): a new commit on the
-    chain tip, in the worktree of the last ticket, and a fresh scoped verifier. A
-    second REJECT fails the stack. A finding maps to a ticket by its label (see
-    `map_findings`). The tickets that the findings name fail with their
-    findings. When no finding names a ticket, every ticket of the stack fails.
+    A REJECT starts a fix-up round too: a new commit on the chain tip, in the
+    worktree of the last ticket, then the gates, then a fresh scoped verifier.
+    The rounds of red gates and of a REJECT count together against
+    `FIXUP_ROUND_LIMIT`. Red gates or a REJECT after the last round fail the
+    stack. A finding maps to a ticket by its label (see `map_findings`). The
+    tickets that the findings name fail with their findings. When no finding
+    names a ticket, or the gates stay red, every ticket of the stack fails.
     The stacks that the engine did not verify yet fail too: their tickets are
     not verified, so no one may rely on them. The run branch then does not move.
 
@@ -1254,13 +1301,20 @@ class _ChainRun:
             self.failed.append(ticket_id)
             self.failures[ticket_id] = reason
 
-    def _segments(self) -> dict[str, ChainSegment]:
-        """For each ticket of the chain, the commits that it added: from where its branch started to its tip now."""
-        events = read_events(self.journal.path)
+    def _segments(self, events: list[dict[str, object]]) -> dict[str, ChainSegment]:
+        """For each ticket of the chain, the commits that it added: from where its branch started to its tip.
+
+        The tip is the tip of the branch now. For the last ticket of the chain,
+        a resume after a fix-up takes the commit that the first fix-up of the
+        chain started from, so the diff of the ticket holds no fix-up commit.
+        """
+        fixups = [e for e in events if e["event"] == "fixup-start" and "stack" in e]
         segments: dict[str, ChainSegment] = {}
         for ticket in self.chain:
             base = [str(e["base_commit"]) for e in events if e["event"] == "step-start" and e["ticket"] == ticket.id][-1]
             tip = _tip(self.vcs, self.repo, _ticket_branch(self.workflow, ticket))
+            if fixups and ticket is self.chain[-1]:
+                tip = str(fixups[0]["rejected_commit"])
             segments[ticket.id] = ChainSegment(ticket.id, ticket.text, base, tip)
         return segments
 
@@ -1269,7 +1323,7 @@ class _ChainRun:
         if any(e["event"] == "run-branch-advance" for e in events):
             return []  # a resume after the run branch moved: nothing is left to verify
         tip_ticket = self.chain[-1]
-        segments = self._segments()
+        segments = self._segments(events)
         stacks = list(dict.fromkeys(ticket.stack for ticket in self.chain))
         last: _Step | None = None
         for position, name in enumerate(stacks):
@@ -1282,10 +1336,8 @@ class _ChainRun:
             last = step
             if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
-            # A verifier run that ended with no verdict does not count against the fix-up limit.
-            first_round = len(verdicts)
             try:
-                _accepted_commit(step, first_round)
+                self._verify_stack(step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name])
             except _StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
@@ -1293,6 +1345,63 @@ class _ChainRun:
         if reason:
             self._fail({ticket.id: reason for ticket in self.chain})
         return []
+
+    def _verify_stack(self, step: _Step, fixup_starts: list[dict[str, object]]) -> None:
+        """Run the gates of one stack on the chain tip, the fix-up rounds, and the verifiers, until a verifier accepts.
+
+        Red gates start a fix-up round with the gate output. Green gates go on to
+        the verifier: the full verifier when no verifier rejected the stack, and
+        else the scoped verifier of the delta from the rejected commit. A REJECT
+        starts a fix-up round. Raise `_Rejected` when the verifier rejects after
+        the last fix-up round, and `_StepFailed` for any other cause, also for
+        red gates after the last round.
+
+        A resume gives the `fixup-start` events of the stack in `fixup_starts`:
+        each counts as a round. The resume goes on at the gates, and its first
+        verifier is a full pass, which also sees the fix-up commits.
+        """
+        mode = self.workflow.mode
+        limit = domain.fixup_round_limit(mode)
+        round_number = len(fixup_starts)
+        used_up = domain.rounds_used_up_reason(mode, round_number)
+        if used_up:
+            raise _StepFailed(used_up)
+        # The full verifier also sees each fix-up commit beyond this commit: the tip before the first fix-up of the stack.
+        start = str(fixup_starts[0]["rejected_commit"]) if fixup_starts else _tip(self.vcs, self.repo, step.branch)
+        rejected: str | None = None  # the commit that the last verifier rejected
+        findings: list[str] = []
+        while True:
+            tip = _tip(self.vcs, self.repo, step.branch)
+            outcomes = [
+                (gate, *_run_gate_with_output(step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN))
+                for gate in step.stack.gates
+            ]
+            red = [(gate, output) for gate, green, output in outcomes if not green]
+            if red:
+                if round_number >= limit:
+                    raise _StepFailed(domain.chain_gates_reason(mode, [gate for gate, _ in red]))
+                round_number += 1
+                self._fixup(step, round_number, tip, _red_gates_text(tip, red), True)
+                continue
+            gates_text = green_gates_text(tip, [(gate, output) for gate, _, output in outcomes])
+            if rejected is None:
+                report = _verify_round(step, round_number, None, gates_text, (start, tip) if start != tip else None)
+            else:
+                body = _checked_fixup_brief(step, round_number, rejected, _findings_text(findings), gates_text)
+                report = _verify_round(step, round_number, body, gates_text)
+            if domain.is_accepted(report.verdict):
+                return
+            if round_number >= limit:
+                raise _Rejected(domain.rejection_reason(mode, report.findings), report.findings)
+            rejected, findings = tip, report.findings
+            round_number += 1
+            self._fixup(step, round_number, tip, _findings_text(findings), False)
+
+    def _fixup(self, step: _Step, round_number: int, rejected: str, findings: str, red_gates: bool) -> None:
+        """Run one fix-up round on the chain tip, and check its commit. The gates of the chain run after it."""
+        trigger = TRIGGER_GATES_RED if red_gates else TRIGGER_REJECT
+        findings_text = _run_fixup(step, round_number, rejected, findings, red_gates, {**step.chain_fields, "trigger": trigger})
+        _checked_fixup_brief(step, round_number, rejected, findings_text)
 
     def _reject(self, failed: _StepFailed, tickets: list[Ticket], unverified: list[str]) -> list[str]:
         """Fail the tickets of a stack that did not pass, and the tickets of the stacks after it. Return the unmapped findings."""
@@ -1311,6 +1420,13 @@ class _ChainRun:
                 reasons[ticket.id] = domain.unverified_chain_reason(stack)
         self._fail(reasons)
         return unmapped
+
+
+def _red_gates_text(commit: str, red: list[tuple[str, str]]) -> str:
+    """The findings of a fix-up round for red gates: each red gate on `commit`, and its output."""
+    gates = "".join(f"- The gate `{gate}` is red.\n" for gate, _ in red)
+    output = "\n\n".join(f"$ {gate}\n{text.rstrip(chr(10))}" for gate, text in red)
+    return f"The engine ran the gates on the tip of the chain, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
 
 
 def _chain_text(tickets: list[Ticket]) -> str:
@@ -1336,12 +1452,14 @@ def _run_gate_with_output(
 ) -> tuple[bool, str]:
     """Run one gate command as `_run_gate` does. Return whether it is green, and the tail of its output.
 
+    `phase` can also be PHASE_CHAIN: the gates on the tip of an `economy` chain.
+
     A gate runs at most once green on one commit. When the journal holds a green
     `gate-result` of the same command on the commit that the worktree has
     checked out, the engine does not run the gate again: it writes `gate-skip`
     with that commit and the `seq` of the green result, and the gate counts as
     green. A rebase that keeps the commit, and a resume after a stop, so cost no
-    second gate run.
+    second gate run. The output of a skipped gate is the output of that green result.
 
     Before a gate runs, the engine makes an empty log file for it and writes
     `gate-start` with the path of the file. The gate runner appends the output
@@ -1349,13 +1467,14 @@ def _run_gate_with_output(
     see the activity of a long gate.
     """
     commit = _head(vcs, worktree)
-    green_seq = _green_result(journal, command, commit)
-    if green_seq is not None:
+    green = _green_result(journal, command, commit)
+    if green is not None:
+        green_seq = int(green["seq"])  # type: ignore[call-overload]
         journal.append(
             "gate-skip", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit, green_seq=green_seq,
             reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})",
         )
-        return True, ""
+        return True, str(green.get("output_tail", ""))
     log = _gate_log_path(journal, ticket, phase, round_number)
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
     result = gates.run(command, worktree, log=log)
@@ -1386,9 +1505,9 @@ def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int)
         return path
 
 
-def _green_result(journal: Journal, command: str, commit: str) -> int | None:
-    """The `seq` of the first green `gate-result` of `command` on `commit` in the journal, or None when it holds none."""
+def _green_result(journal: Journal, command: str, commit: str) -> dict[str, object] | None:
+    """The first green `gate-result` of `command` on `commit` in the journal, or None when it holds none."""
     for event in read_events(journal.path):
         if event["event"] == "gate-result" and event["green"] and event["command"] == command and event.get("commit") == commit:
-            return int(event["seq"])  # type: ignore[call-overload]
+            return event
     return None
