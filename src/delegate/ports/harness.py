@@ -42,6 +42,21 @@ class AdapterError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class McpServer:
+    """One MCP server that a stack gives its agents, in a form that no harness owns.
+
+    A local server has `command`: the program and its arguments. The harness
+    starts it with its own environment. A remote server has `url` instead. A
+    server has exactly one of the two. The adapter writes the server in the
+    configuration form of its harness.
+    """
+
+    name: str
+    command: tuple[str, ...] = ()
+    url: str | None = None
+
+
+@dataclass(frozen=True)
 class AdapterRequest:
     """What the engine gives an adapter for one agent run.
 
@@ -60,6 +75,10 @@ class AdapterRequest:
     check of the engine: it reads the report at `report_path` and tells whether
     the report is valid. An adapter that cannot end a session ignores the two
     fields.
+
+    `mcp_servers` holds the MCP servers of the stack of the agent. An empty
+    tuple means that the stack names none. An adapter gives the agent these
+    servers, and it gives no other server where its harness allows that.
     """
 
     agent: str
@@ -71,6 +90,7 @@ class AdapterRequest:
     resume_session: str | None = None
     idle_timeout: float | None = None
     report_valid: Callable[[], bool] | None = None
+    mcp_servers: tuple[McpServer, ...] = ()
 
 
 @dataclass(frozen=True)

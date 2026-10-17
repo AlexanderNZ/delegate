@@ -13,7 +13,7 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --agent <agent> --disallowedTools Monitor,TaskStop [--settings <path>] [--permission-mode <mode>] [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --agent <agent> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] --disallowedTools Monitor,TaskStop [--resume <session id>]
 ```
 
 The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
@@ -25,6 +25,8 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--verbose` | The harness needs it to write the events with `--print` and `--output-format stream-json`. |
 | `--model <model>` | The model from the `claude-code` column of the [**tier table**](../glossary.md#tier-table). The adapter never chooses a model. A `--tiers` file changes it. |
 | `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
+| `--strict-mcp-config` | Ignore every MCP configuration other than `--mcp-config`: the servers of the user, of the project, and of the plugins. See [what the agent gets](#what-the-agent-gets). |
+| `--mcp-config <servers>` | Only when the stack names MCP servers in its `mcp-servers` table. One JSON object, `{"mcpServers": {...}}`: a local server as `command` and `args`, a remote server as `type` `http` and `url`. |
 | `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
 | `--settings <path>` | Only when the host sets `DELEGATE_AGENT_SETTINGS`. See [the settings of a host](#the-settings-of-a-host). |
 | `--permission-mode <mode>` | Only when the host sets `DELEGATE_PERMISSION_MODE`. See [the settings of a host](#the-settings-of-a-host). |
@@ -33,7 +35,7 @@ The environment of the command is the environment of the [**engine**](../glossar
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
-With no setting of the host, the adapter passes no permission option other than `--disallowedTools`. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [the settings of a host](#the-settings-of-a-host) and [what the adapter does not set](#what-the-adapter-does-not-set).
+With no setting of the host, the adapter passes no permission option other than `--disallowedTools`. The option `--mcp-config` takes more than one value, so the adapter puts `--disallowedTools` after it to end its values. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [the settings of a host](#the-settings-of-a-host) and [what the adapter does not set](#what-the-adapter-does-not-set).
 
 ## The settings of a host
 
@@ -55,6 +57,31 @@ The adapter reads each tool result of the stream. An error result (`is_error` tr
 Each agent runs every command in the foreground. Under `--print`, the notification of a background task or of a monitor does not come to the agent. An agent that waits for one polls with sleep commands and uses its turns. A monitor that stays open keeps the [**session**](../glossary.md#session) alive after the agent writes its [**report**](../glossary.md#report), and the engine waits for the session to end.
 
 The adapter therefore removes these tools for every agent, and the specialist brief and the verifier brief tell the agent to run every command in the foreground. Measured on Claude Code 2.1.287 on 2026-10-17: with `--disallowedTools Monitor,TaskStop`, the `init` event lists neither tool. With `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, the Bash tool has no `run_in_background` parameter.
+
+## What the agent gets
+
+The adapter starts each specialist and each verifier with a small context. The agent gets:
+
+- **MCP servers**: only the servers of its [**stack**](../glossary.md#stack). By default that is none. `--strict-mcp-config` makes the harness ignore the MCP servers of the user, of the project, and of the installed plugins. A stack that needs a server names it in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)), and the adapter passes it with `--mcp-config`.
+- **Tools**: the built-in tools that the agent definition allows (all of them when the definition has no `tools` field), less `Monitor` and `TaskStop`. The adapter removes no other tool.
+- **Hooks**: the hooks in the frontmatter of the agent definition, for example the Bash guard of the verifier. `--strict-mcp-config` does not change them.
+- [**Skills**](../glossary.md#skill): every skill that the harness finds, not only the skills of the agent definition. See below.
+
+The harness gives no way to load only the skills of the agent definition. Measured on Claude Code 2.1.287 on 2026-10-18:
+
+- `--disable-slash-commands` removes every skill and the `Skill` tool. An agent then cannot load the skills of its own definition. With it, the first turn was larger, not smaller. The adapter does not use it.
+- `--bare` and `--safe-mode` also skip the hooks, so the guard of the verifier would not run. The adapter does not use them.
+- `--setting-sources` without `user` drops the user settings, and the permission rules and the environment in them. The adapter does not use it.
+
+The measurement: one `claude --print` call with model `haiku`, agent `delegate-specialist` of this repository, and the prompt "Reply with the single word OK. Do not use a tool.", in a setup with five user MCP servers. The first turn is the input, the cache writes, and the cache reads of its `usage`.
+
+| Command | Tools | MCP tools | MCP servers | Skills | First turn (tokens) |
+|---|---|---|---|---|---|
+| Before: no `--strict-mcp-config` | 92 | 64 | 5 | 104 | 20023 |
+| After: `--strict-mcp-config` | 28 | 0 | 0 | 104 | 17655 |
+| `--strict-mcp-config --disable-slash-commands` | 27 | 0 | 0 | 0 | 19806 |
+
+The harness of this version loads the tools of an MCP server on demand, so their names, not their schemas, are in the first turn. A call with `--strict-mcp-config` and the agent `delegate-verifier` still refused the command `whoami` with the message of the [**verifier guard**](../glossary.md#verifier-guard), so the hooks of the agent definition still apply. A call with `--strict-mcp-config` and `--mcp-config` that named two servers listed those two servers in its `init` event, and no other.
 
 ## How the adapter selects the agent
 
@@ -139,6 +166,6 @@ The [**contract tests**](../glossary.md#contract-test) replay these streams thro
 1. The adapter ran with the prompt "Reply with the single word PINEAPPLE on the second line." The result was `finished`, exit status 0. The reply was `SMOKE-AGENT-ACTIVE` and then `PINEAPPLE`. The first word comes only from the agent body, so `--agent` selected the agent.
 2. The adapter ran again with `resume_session` set to the session id of the first run, and the prompt "Which word did I ask for? Answer with that word only." The result was `finished`, exit status 0, with the same session id. The reply was `PINEAPPLE`, so the session kept its context.
 
-Not measured: a run in which the agent writes files and commits. The permission posture is open. See [what the adapter does not set](#what-the-adapter-does-not-set). Not measured: the hooks in the frontmatter of a rendered agent under `--agent`.
+Not measured: a run in which the agent writes files and commits. The permission posture is open. See [what the adapter does not set](#what-the-adapter-does-not-set). The hooks in the frontmatter of a rendered agent under `--agent` were measured later, on 2026-10-18: see [what the agent gets](#what-the-agent-gets).
 
 The command shape comes from mattpocock/sandcastle `src/AgentProvider.ts` (MIT), with `--verbose` and `--agent` added after the measurement.

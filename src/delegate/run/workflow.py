@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..ports.harness import McpServer
 from ..shared.tiers import Tiers
 from . import domain
 from .domain import ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
@@ -37,6 +38,7 @@ class Stack:
     verifier: str
     gates: list[str]
     hotspots: list[str]
+    mcp_servers: tuple[McpServer, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -198,7 +200,8 @@ class _Reader:
 TOP_LEVEL_FIELDS: tuple[str, ...] = (
     "base-branch", "run-branch", "mode", "adapter", "ticket-start", "tier-overrides", "stacks", "tickets",
 )
-STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots")
+STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots", "mcp-servers")
+MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
 
 
@@ -217,9 +220,36 @@ def _read_stacks(reader: _Reader, value: object) -> dict[str, Stack]:
         verifier = reader.string(stack, "verifier", f"{field}.verifier")
         gates = reader.string_list(stack, "gates", f"{field}.gates", at_least_one=True)
         hotspots = reader.string_list(stack, "hotspots", f"{field}.hotspots", at_least_one=False)
-        if None not in (specialist, verifier, gates, hotspots):
-            stacks[name] = Stack(name, specialist, verifier, gates, hotspots)  # type: ignore[arg-type]
+        servers = _read_mcp_servers(reader, stack.get("mcp-servers", {}), f"{field}.mcp-servers")
+        if None not in (specialist, verifier, gates, hotspots, servers):
+            stacks[name] = Stack(name, specialist, verifier, gates, hotspots, servers)  # type: ignore[arg-type]
     return stacks
+
+
+def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpServer, ...] | None:
+    """The MCP servers of a stack: a table of server tables, each with exactly one of `command` and `url`."""
+    table = reader.table(value, field)
+    if table is None:
+        return None
+    servers: list[McpServer] = []
+    problems = len(reader.problems)
+    for name, raw in table.items():
+        server_field = f"{field}.{name}"
+        server = reader.table(raw, server_field)
+        if server is None:
+            continue
+        reader.refuse_unknown(server, MCP_SERVER_FIELDS, server_field)
+        if ("command" in server) == ("url" in server):
+            reader.problems.append(f"{server_field}: needs exactly one of command and url")
+        elif "command" in server:
+            command = reader.string_list(server, "command", f"{server_field}.command", at_least_one=True)
+            if command is not None:
+                servers.append(McpServer(name, command=tuple(command)))
+        else:
+            url = reader.string(server, "url", f"{server_field}.url")
+            if url is not None:
+                servers.append(McpServer(name, url=url))
+    return tuple(servers) if len(reader.problems) == problems else None
 
 
 def _read_tickets(reader: _Reader, value: object, root: Path) -> list[Ticket]:

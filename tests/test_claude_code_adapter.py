@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from delegate import adapters
-from delegate.ports.harness import Activity, AdapterError, AdapterRequest
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
 
 from . import claude_fake, harness_fake
 from .harness_fake import wrote
@@ -183,6 +183,45 @@ def test_every_run_disallows_the_monitor_and_the_background_tasks(tmp_path, monk
     # The `run_in_background` parameter of the Bash and subagent tools is no tool name, so only this variable removes it.
     assert call["env"].get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS") == "1"
     assert argv[argv.index("--agent") + 1] == agent
+
+
+@pytest.mark.parametrize("agent, resume_session", [
+    ("python-specialist", None),
+    ("python-verifier", None),
+    ("python-specialist", "af2a3741-3f76-4944-91f5-3d5102c79b6b"),
+])
+def test_by_default_the_command_ignores_every_mcp_configuration_and_gives_the_agent_no_mcp_server(tmp_path, monkeypatch, agent, resume_session):
+    # The MCP servers of the user and of the project are not for the agent: each turn reads their tools again.
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path, agent=agent, resume_session=resume_session))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv.count("--strict-mcp-config") == 1
+    assert not any(arg.startswith("--mcp-config") for arg in argv)
+
+
+def test_the_mcp_servers_of_the_request_are_the_only_mcp_servers_on_the_command(tmp_path, monkeypatch):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    servers = (
+        McpServer("browser", command=("npx", "@playwright/mcp@latest", "--headless")),
+        McpServer("tracker", url="https://mcp.example.invalid/mcp"),
+    )
+
+    adapters.get("claude-code").run(request(tmp_path, mcp_servers=servers))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv.count("--strict-mcp-config") == 1
+    assert argv.count("--mcp-config") == 1
+    assert json.loads(argv[argv.index("--mcp-config") + 1]) == {"mcpServers": {
+        "browser": {"command": "npx", "args": ["@playwright/mcp@latest", "--headless"]},
+        "tracker": {"type": "http", "url": "https://mcp.example.invalid/mcp"},
+    }}
+    # `--mcp-config` takes more than one value, so an option must end its values: the prompt is on stdin.
+    assert argv[argv.index("--mcp-config") + 2].startswith("--")
+    assert argv[argv.index("--agent") + 1] == "python-specialist"
 
 
 def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):

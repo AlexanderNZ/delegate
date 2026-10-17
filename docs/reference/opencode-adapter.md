@@ -28,6 +28,20 @@ The prompt goes on standard input. It is never in the arguments of the command, 
 
 The adapter passes no permission option. The permission rules of the repository and of the user decide which tools the agent can use. The variables `DELEGATE_AGENT_SETTINGS` and `DELEGATE_PERMISSION_MODE` of the `claude-code` adapter have no effect here: OpenCode has no option that takes a settings file or a permission mode. When either is set, the adapter writes one line for each to standard error, which names the variable and `OPENCODE_CONFIG`. A host that must give every agent its own permission rules sets `OPENCODE_CONFIG` to the path of an OpenCode configuration file with a `permission` block. The environment of the command is the environment of the [**engine**](../glossary.md#engine), so OpenCode reads that variable itself. Measured on OpenCode 1.15.10 on 2026-10-18: with `OPENCODE_CONFIG` set, `opencode debug config` shows the `permission` block of that file, and with no variable it shows none. The adapter does not read refused tools from the OpenCode stream.
 
+When the stack names MCP servers, the environment of the command is the environment of the [**engine**](../glossary.md#engine) with the servers added to `OPENCODE_CONFIG_CONTENT`. See [what the agent gets](#what-the-agent-gets). Otherwise the environment is the environment of the engine.
+
+## What the agent gets
+
+The agent gets:
+
+- **MCP servers**: the servers of its [**stack**](../glossary.md#stack), and also the MCP servers of the user and of the project. A stack names its servers in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)). The adapter writes them in the `mcp` field of the inline configuration `OPENCODE_CONFIG_CONTENT`: a local server as `type` `local` and `command`, a remote server as `type` `remote` and `url`. The harness merges that configuration with its other configuration. When the environment of the engine already holds `OPENCODE_CONFIG_CONTENT`, the adapter keeps its fields and adds the servers. When it is not a JSON object, the adapter raises `AdapterError`.
+- **Tools and permissions**: the tools and the permission map of the agent definition. The adapter removes no tool.
+- [**Skills**](../glossary.md#skill): every skill that the harness finds. The agent loads the skills of its definition with the skill tool.
+
+The harness gives no way to start an agent without the MCP servers of the user and of the project. Measured on OpenCode 1.15.10 on 2026-10-18: `opencode --help` and `opencode run --help` show no MCP option, and `--pure` removes only the external plugins. The configuration can turn off a server only by its name, and the adapter does not know the names of the servers of the user. With `OPENCODE_CONFIG_CONTENT` that named one server, `opencode mcp list` listed that server and the three servers of the user.
+
+The harness also gives no option that loads only the skills of the agent definition. The skills of an agent definition are in the same skill directories as the other skills, so a variable that turns off a skill directory also removes the skills of the agent. The adapter sets none.
+
 ## The model
 
 The adapter reads the `opencode` column of the tier table, so a `--tiers` file changes the model for this adapter. Two options change the column from the command line: `--opencode-model` and `--opencode-allow`. Put them after `run`. Both can be repeated. [The options of the run reference](run.md#options) list them.

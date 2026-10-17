@@ -724,13 +724,13 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
 
 
 def _request(
-    agent: str, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path, report_valid: Callable[[], bool],
-    resume_session: str | None = None,
+    agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
+    report_valid: Callable[[], bool], resume_session: str | None = None,
 ) -> AdapterRequest:
-    """The request for one agent run, with the idle timeout of the run and the check of its report."""
+    """The request for one agent run of the stack, with the idle timeout of the run, the check of its report, and the MCP servers of the stack."""
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
-        idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid,
+        idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
     )
 
 
@@ -907,7 +907,7 @@ def _build_with_continuations(
             spawned, result = False, None
         else:
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
-            result = adapter.run(_request(stack.specialist, model, prompt, worktree, report_path, stream, report_valid, resume_session))
+            result = adapter.run(_request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session))
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
@@ -1164,7 +1164,7 @@ def _run_fixup(
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
-    result = step.adapter.run(_request(step.stack.specialist, model, prompt, step.worktree, report_path, stream, report_valid))
+    result = step.adapter.run(_request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid))
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
@@ -1278,7 +1278,7 @@ def _verify_round(
         # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
         in_scratch = report_path
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
-        result = step.adapter.run(_request(step.stack.verifier, model, prompt, copy, report_path, stream, report_valid))
+        result = step.adapter.run(_request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid))
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:

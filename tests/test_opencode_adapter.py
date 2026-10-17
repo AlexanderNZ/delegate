@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from delegate import adapters
-from delegate.ports.harness import Activity, AdapterError, AdapterRequest
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
 
 from . import harness_fake, opencode_fake
 from .harness_fake import wrote
@@ -177,6 +177,58 @@ def test_a_continuation_resumes_the_session_of_the_last_run(tmp_path, monkeypatc
     argv = call["argv"]
     assert argv[argv.index("--session") + 1] == "ses_ee2d28a59ffevBJM22I2ZGtbFd"
     assert result.end_state == "finished"
+
+
+def test_by_default_the_adapter_adds_no_configuration_to_the_harness(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("opencode").run(request(tmp_path))
+
+    (call,) = fake.calls()
+    assert "OPENCODE_CONFIG_CONTENT" not in call["env"]
+
+
+def test_the_mcp_servers_of_the_request_go_to_the_harness_in_the_inline_configuration(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    servers = (
+        McpServer("browser", command=("npx", "@playwright/mcp@latest")),
+        McpServer("tracker", url="https://mcp.example.invalid/mcp"),
+    )
+
+    adapters.get("opencode").run(request(tmp_path, mcp_servers=servers))
+
+    (call,) = fake.calls()
+    assert json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"]) == {"mcp": {
+        "browser": {"type": "local", "command": ["npx", "@playwright/mcp@latest"]},
+        "tracker": {"type": "remote", "url": "https://mcp.example.invalid/mcp"},
+    }}
+    assert not any("playwright" in arg for arg in call["argv"])
+
+
+def test_the_mcp_servers_of_the_request_keep_the_inline_configuration_of_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", json.dumps({"share": "disabled", "mcp": {"own": {"type": "remote", "url": "https://own.example.invalid"}}}))
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("opencode").run(request(tmp_path, mcp_servers=(McpServer("browser", command=("npx", "@playwright/mcp@latest")),)))
+
+    (call,) = fake.calls()
+    assert json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"]) == {"share": "disabled", "mcp": {
+        "own": {"type": "remote", "url": "https://own.example.invalid"},
+        "browser": {"type": "local", "command": ["npx", "@playwright/mcp@latest"]},
+    }}
+
+
+@pytest.mark.parametrize("content", ["not json", "[1, 2]"])
+def test_mcp_servers_with_an_inline_configuration_that_is_not_a_json_object_raise_and_name_the_variable(tmp_path, monkeypatch, content):
+    monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", content)
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    with pytest.raises(AdapterError, match="OPENCODE_CONFIG_CONTENT"):
+        adapters.get("opencode").run(request(tmp_path, mcp_servers=(McpServer("browser", command=("npx", "@playwright/mcp@latest")),)))
+
+    assert fake.calls() == []
 
 
 def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):

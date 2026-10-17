@@ -1,9 +1,13 @@
 """The Claude Code adapter: drive `claude` in headless mode.
 
 The command is `claude --print --output-format stream-json --verbose --model
-<model> --agent <agent> --disallowedTools Monitor,TaskStop`, with
+<model> --agent <agent> --strict-mcp-config [--mcp-config <servers>]
+--disallowedTools Monitor,TaskStop`, with
 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in its environment, so each agent runs
-every command in the foreground. A host can give every agent a settings file and
+every command in the foreground. `--strict-mcp-config` makes the harness ignore
+the MCP servers of the user, of the project, and of the plugins, so the agent
+gets only the MCP servers of its stack: none, or the servers that
+`--mcp-config` names. A host can give every agent a settings file and
 a permission mode: `DELEGATE_AGENT_SETTINGS` adds `--settings <path>`, and
 `DELEGATE_PERMISSION_MODE` adds `--permission-mode <mode>`. With neither set, the
 command does not change. An error tool result that says that a permission mode
@@ -35,12 +39,13 @@ the cache writes, and the output) and the cache reads.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
+from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
 from .process import run_harness
 from .streams import read_events
 
@@ -75,6 +80,17 @@ NEW_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "o
 
 # The fields of a `usage` object that its count of cache tokens adds: the cache reads.
 CACHE_FIELDS: tuple[str, ...] = ("cache_read_input_tokens",)
+
+
+def _mcp_config(servers: tuple[McpServer, ...]) -> str:
+    """The `--mcp-config` value of the servers: one JSON object in the form of the harness configuration."""
+    entries: dict[str, dict[str, object]] = {}
+    for server in servers:
+        if server.url is not None:
+            entries[server.name] = {"type": "http", "url": server.url}
+        else:
+            entries[server.name] = {"command": server.command[0], "args": list(server.command[1:])}
+    return json.dumps({"mcpServers": entries})
 
 
 def _is_work_with_no_time(event: dict[str, object]) -> bool:
@@ -166,10 +182,13 @@ class ClaudeCodeAdapter:
     def run(self, request: AdapterRequest) -> AdapterResult:
         command = [
             COMMAND, "--print", "--output-format", "stream-json", "--verbose",
-            "--model", request.model, "--agent", request.agent,
-            "--disallowedTools", ",".join(DISALLOWED_TOOLS),
+            "--model", request.model, "--agent", request.agent, "--strict-mcp-config",
             *_host_permissions(),
         ]
+        if request.mcp_servers:
+            command += ["--mcp-config", _mcp_config(request.mcp_servers)]
+        # `--mcp-config` takes more than one value, so this option ends its values.
+        command += ["--disallowedTools", ",".join(DISALLOWED_TOOLS)]
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
         stream = request.event_stream

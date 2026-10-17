@@ -4,6 +4,10 @@ The command is `opencode run --format json --model <model> --agent <agent>
 --dir <working directory>`. The harness takes its project from the PWD variable
 that a caller inherits, not from the working directory of the process, so the
 command names the directory.
+The MCP servers of the stack go to the harness in the variable
+`OPENCODE_CONFIG_CONTENT`, an inline configuration that the harness merges
+with its other configuration. The harness has no option that removes the MCP
+servers of the user or of the project, so the agent also gets those.
 The prompt goes on standard input, never in argv, so a long brief meets no
 argument limit and shows in no process list. The harness writes one JSON event
 on each line of standard output. The adapter copies that stream to the file
@@ -22,12 +26,13 @@ no `cache` field has no cache reads and no cache writes.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult
+from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
 from .process import run_harness
 from .streams import read_events
 
@@ -42,8 +47,36 @@ TIER_COLUMN: str = "opencode"
 # other reason (for example `tool-calls`) means the stream ended inside the work.
 STEP_REASON_END_STATE: dict[str, str] = {"stop": FINISHED, "length": CAPPED}
 
+# The environment variable that holds an inline configuration, which the harness merges with its other configuration.
+CONFIG_VARIABLE: str = "OPENCODE_CONFIG_CONTENT"
+
 # The fields of `part.tokens` of a `step_finish` event that the count of new tokens adds. Each step has them.
 NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
+
+
+def _environment(servers: tuple[McpServer, ...]) -> dict[str, str] | None:
+    """The environment of the harness: the environment of the engine, with the servers added to the inline configuration.
+
+    `None` (the environment of the engine, unchanged) when there is no server.
+    An inline configuration that the engine already has keeps its other fields
+    and its own servers. Raise AdapterError when that configuration is not a
+    JSON object.
+    """
+    if not servers:
+        return None
+    try:
+        config = json.loads(os.environ.get(CONFIG_VARIABLE) or "{}")
+    except json.JSONDecodeError:
+        config = None
+    if not isinstance(config, dict) or not isinstance(config.get("mcp", {}), dict):
+        raise AdapterError(f"{CONFIG_VARIABLE} must hold a JSON object to add the MCP servers of the stack")
+    mcp = config.setdefault("mcp", {})
+    for server in servers:
+        if server.url is not None:
+            mcp[server.name] = {"type": "remote", "url": server.url}
+        else:
+            mcp[server.name] = {"type": "local", "command": list(server.command)}
+    return {**os.environ, CONFIG_VARIABLE: json.dumps(config)}
 
 
 def _tokens_of(event: dict[str, object], stream: Path) -> tuple[int, int]:
@@ -105,7 +138,7 @@ class OpenCodeAdapter:
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
-        process = run_harness(command, request)
+        process = run_harness(command, request, env=_environment(request.mcp_servers))
         if not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"

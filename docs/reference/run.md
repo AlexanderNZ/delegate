@@ -422,6 +422,7 @@ The adapter has the method `run(request)`.
 | `resume_session` | The session id of the last run, when the engine resumes that session for a continuation. Otherwise `None`. The engine sets it only for an adapter with `supports_resume` set to true. |
 | `idle_timeout` | The idle timeout in seconds: 900 for each agent run. See [the end of an agent session](#the-end-of-an-agent-session). |
 | `report_valid` | The check of the report: a function with no argument. It reads the report at `report_path`, and gives true when the report is valid. |
+| `mcp_servers` | The MCP servers of the stack, from its `mcp-servers` table: a tuple of `McpServer` values, each with a `name` and one of `command` and `url`. The tuple is empty when the stack names no server. The specialist and the verifier of the stack get the same servers. See [the workflow reference](workflow.md#mcp-servers). |
 
 `run` returns a result.
 

@@ -129,7 +129,7 @@ The verifier tier never goes down, in any mode. The `verifier` entry must name a
 
 ## Stacks
 
-Each `[stacks.<name>]` table describes one stack. All four fields are required.
+Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The field `mcp-servers` is optional.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -137,6 +137,26 @@ Each `[stacks.<name>]` table describes one stack. All four fields are required.
 | `verifier` | string | The name of the verifier agent for this stack. |
 | [**`gates`**](../glossary.md#gate) | list of strings | The gate commands. The engine runs them. At least one is required. |
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
+| `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
+
+### MCP servers
+
+The table `[stacks.<name>.mcp-servers]` holds one table for each MCP server. The name of the table is the name of the server. The specialist and the verifier of the stack get these servers, and the agents of the other stacks do not. Each server has exactly one of these fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `command` | list of strings | A local server: the program and its arguments. At least one entry is required. The harness starts the program with its own environment. |
+| `url` | string | A remote server: the URL of its endpoint. |
+
+```toml
+[stacks.web.mcp-servers.browser]
+command = ["npx", "@playwright/mcp@latest"]
+
+[stacks.web.mcp-servers.tracker]
+url = "https://mcp.example.com/mcp"
+```
+
+The adapter gives the servers to the harness in the form of that harness. Without the table, an agent gets no MCP server where the harness allows that. See [what the agent gets](claude-code-adapter.md#what-the-agent-gets) for the `claude-code` adapter, and [what the agent gets](opencode-adapter.md#what-the-agent-gets) for the `opencode` adapter.
 
 ## Tickets
 
@@ -169,3 +189,4 @@ Ticket text is about behaviour and holds no file paths. The engine adds the [**f
 | Tickets wait on each other. | Every ticket in the cycle. A ticket that blocks itself is a cycle. |
 | Two tickets have one id. | The id. |
 | A `text-file` does not exist. | The ticket and the path. |
+| An MCP server has both `command` and `url`, or neither. | The server, for example `stacks.web.mcp-servers.browser`. |
