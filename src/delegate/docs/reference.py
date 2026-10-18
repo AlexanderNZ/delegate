@@ -132,7 +132,8 @@ def guard_table() -> str:
         f"| git reads | {_commands(git_reads)} |",
         f"| shell reads | {_commands(shell_reads)} |",
         f"| temp writes | {_commands(render.VERIFIER_TEMP_WRITE_COMMANDS)} — each one only when every path argument starts with {temp_paths}. "
-        "A redirection target obeys the same rule, in every segment. |",
+        "A redirection target obeys the same rule, in every segment, but it can also be exactly `/dev/null`, "
+        "which writes no file: `2>/dev/null` is permitted. |",
         f"| temp destination | {_commands(render.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
         "The earlier path arguments are sources, and a read of any path is a read. |",
     ])
