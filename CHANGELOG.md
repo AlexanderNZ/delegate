@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-18
+
 ### Added
 
 - A host can give every agent a Claude Code settings file and a permission mode, with no change to a workflow file. The `claude-code` adapter adds `--settings <path>` when `DELEGATE_AGENT_SETTINGS` is set, and `--permission-mode <mode>` when `DELEGATE_PERMISSION_MODE` is set, for each specialist and each verifier. A settings path that is relative or not a file stops the adapter before an agent starts. The settings file must not turn off hooks, because the verifier guard is a hook. With neither variable, the command does not change. For OpenCode, a host sets `OPENCODE_CONFIG`, which OpenCode reads itself; the `opencode` adapter writes a warning when either variable is set.
