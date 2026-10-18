@@ -233,6 +233,18 @@ def test_every_live_read_block_is_one_plain_command(repo):
         assert "=" not in command.split()[0], f"a block opens with an assignment: {command!r}"
 
 
+def test_the_context_skill_states_the_source_of_the_load_time_block_rule(repo):
+    # No Claude Code documentation states the rule, so the skill names its
+    # evidence: the ADR of the kit, the version measured, and the modes measured.
+    assert main(_args(repo)) == 0
+    prose = " ".join(_paths(repo)["skill"].read_text().split())
+    assert "`docs/adr/0006-load-time-blocks-are-one-plain-command.md`" in prose
+    assert "Claude Code 2.1.283" in prose
+    assert "2026-09-26" in prose
+    assert "the manual, acceptEdits and auto permission modes" in prose
+    assert "No Claude Code documentation states this rule" in prose
+
+
 def test_live_read_block_prints_a_reference_of_200_lines_in_full(repo):
     assert main(_args(repo)) == 0
     block = _blocks(_paths(repo)["skill"].read_text())[0]

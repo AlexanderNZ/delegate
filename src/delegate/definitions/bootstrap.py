@@ -103,7 +103,8 @@ def live_read(repo: Path, path: str) -> tuple[str, str]:
     The command is one plain command. Claude Code runs a load-time block only
     when it can analyse the command: $(...), ;, if or a pipe stops a subagent
     from starting in the manual, acceptEdits and auto permission modes
-    (measured on Claude Code 2.1.283, 2026-09-26). So the choice between the full
+    (measured on Claude Code 2.1.283, 2026-09-26; ADR 0006 records the
+    evidence, and no Claude Code documentation states the rule). So the choice between the full
     text and the heading index is made here, when the skill is written, and
     not in the block.
 

@@ -101,6 +101,8 @@ delegate bootstrap --repo <dir> --name <name> --domain <text> --tier <tier> --sk
 
 <!-- generated:end bootstrap-options -->
 
+Each load-time block of the context skill is one plain command. A block with `$(...)`, `;`, `if` or a pipe stopped a subagent from starting with each of the `--permission-mode` values `default` (manual), `acceptEdits` and `auto`, measured on Claude Code 2.1.283 on 2026-09-26. No Claude Code documentation states this rule: it is a measured behaviour. [**ADR**](../glossary.md#adr) 0006, `docs/adr/0006-load-time-blocks-are-one-plain-command.md`, records the measurements and their source. See [the decision records](../explanation/decision-records.md). The context skill carries the same note.
+
 ## `delegate brief`
 
 ```
