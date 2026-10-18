@@ -996,3 +996,46 @@ def test_rendered_verifiers_tell_the_agent_what_its_shell_permits(rendered):
     oc = _fm(rendered / "opencode" / "java-spring-verifier.md")[1].lower()
     assert "permission.bash" in oc
     assert "does not divide a command at" in oc
+
+
+#: A redirection to /dev/null writes no file, so the redirection test accepts that exact target (#105).
+REDIRECTION_TO_DEV_NULL = [
+    "ls src >/dev/null",
+    "ls src 2>/dev/null",
+    "ls src > /dev/null",
+    "ls src 2> /dev/null",
+    "ls src &>/dev/null",
+    "ls src >>/dev/null",
+    "ls src >/dev/null 2>&1",
+]
+
+#: A target that only looks like /dev/null, or another device, stays a write outside a temp directory.
+REDIRECTION_TO_ANOTHER_DEVICE = [
+    "ls src >/dev/nullx",
+    "ls src >/dev/null/../x",
+    "ls src > /dev/sda",
+    "ls src >/dev/stdout",
+    "ls src 2>/dev/null/x",
+]
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", REDIRECTION_TO_DEV_NULL)
+def test_a_redirection_to_dev_null_is_permitted(command, shell):
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
+@pytest.mark.parametrize("command", REDIRECTION_TO_ANOTHER_DEVICE)
+def test_a_redirection_to_another_device_or_a_path_under_dev_null_is_denied(command, shell):
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("command", ["cp src/a /dev/null", "tee /dev/null"])
+def test_a_write_command_with_dev_null_as_its_path_is_as_before(command, shell):
+    # Only the redirection test accepts /dev/null. A write command keeps the temp rule of its path argument.
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)

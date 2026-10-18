@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- The verifier guard permits a redirection to `/dev/null`, such as `ls src 2>/dev/null` and `> /dev/null`. Before, it denied the target as a write outside a temp directory. Only the exact path counts: `/dev/nullx`, a path under `/dev/null` and another device stay denied, and a write command such as `cp` or `tee` keeps the temp rule (#105).
+
 ## [1.4.0] - 2026-10-18
 
 ### Changed
