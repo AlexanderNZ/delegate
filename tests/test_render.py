@@ -1016,6 +1016,12 @@ REDIRECTION_TO_ANOTHER_DEVICE = [
     "ls src > /dev/sda",
     "ls src >/dev/stdout",
     "ls src 2>/dev/null/x",
+    # Each target of a word counts, not only the last one: in each shell these write the file x (#105).
+    "ls src >x>/dev/null",
+    "ls src >x>/tmp/y",
+    "ls src >x 2>/dev/null",
+    "ls src >x 2>/tmp/y",
+    "ls src >>x>/dev/null",
 ]
 
 

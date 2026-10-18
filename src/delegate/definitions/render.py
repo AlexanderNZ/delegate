@@ -297,7 +297,11 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         f'case "$t" in *\'>\'*) deny "$seg" "{to_file}" ;; esac; '
         f'if [ -z "$v" ]; then r=2; else isfd "$v" || deny "$seg" "{to_file}"; fi ;; '
         "'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>') r=1 ;; "
-        f'*\'>\'*) isout "${{a##*>}}" || deny "$seg" "{redirect}" ;; '
+        # Each target of the word counts, not only the last: in `>x>/dev/null` the shell writes x too. zsh does not
+        # divide the segment into words, so there the word is the whole segment.
+        # An empty piece between two signs is `>>`; an empty last piece is a sign with no target.
+        f'*\'>\'*) w=${{a#*>}}; while :; do x=${{w%%>*}}; [ -z "$x" ] || isout "$x" || deny "$seg" "{redirect}"; '
+        f'case "$w" in *\'>\'*) w=${{w#*>}} ;; *) [ -n "$x" ] || deny "$seg" "{redirect}"; break ;; esac; done ;; '
         "esac; "
         "done; "
         f'[ "$r" = 0 ] || deny "$seg" "{no_target}"; '
