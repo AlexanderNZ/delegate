@@ -28,8 +28,8 @@ One test checks the tree against a private list of terms. The list is not in the
 The repository has a Nix flake for people who use Nix. Nothing needs it: the setup above, CI's test jobs and every command of the kit run without it. The flake gives four things:
 
 - **A development shell.** `nix develop` gives the pinned Python with the test dependencies, and sets `PYTHONPATH` to `src`. With direnv, run `direnv allow` once, and the shell loads in this directory.
-- **The package.** `nix build` builds the three commands. `package.nix` reads the version from `pyproject.toml`.
-- **A check.** `nix flake check` builds the package and runs the test suite inside the build. The build holds only the package, its tests and `pyproject.toml`, so the tests of the docs skip there. CI runs this check on Linux.
+- **The package.** `nix build` builds the three commands, and runs no test: CI and the release job run the suite before each tag, so a configuration that installs the package does not run it again. `package.nix` reads the version from `pyproject.toml`.
+- **A check.** `nix flake check` builds the package, and runs the test suite in parallel (`-n auto`) inside the build of the check `tests`. The build holds only the package, its tests and `pyproject.toml`, so the tests of the docs skip there. CI runs this check on Linux. To run the suite with a private neutrality denylist, build `agent-definitions.override { neutralityDenylist = <path>; runTests = true; }`.
 - **The skills.** `lib.skills` gives the paths of the two skills, for a Nix configuration that installs them.
 
 ## Find your way around

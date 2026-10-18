@@ -28,11 +28,20 @@
         }
       );
 
-      # The package build runs the pytest suite. With no denylist, the
-      # neutrality test skips with a notice.
-      checks = forAllSystems (pkgs: {
-        agent-definitions = self.packages.${pkgs.stdenv.hostPlatform.system}.agent-definitions;
-      });
+      # The package builds with no tests (see runTests in package.nix). The check
+      # `tests` builds it with the full pytest suite, in parallel, so
+      # `nix flake check` and CI run the suite. With no denylist, the neutrality
+      # test skips with a notice.
+      checks = forAllSystems (
+        pkgs:
+        let
+          agent-definitions = self.packages.${pkgs.stdenv.hostPlatform.system}.agent-definitions;
+        in
+        {
+          inherit agent-definitions;
+          tests = agent-definitions.override { runTests = true; };
+        }
+      );
 
       # The shell runs the working copy, so an edit is live with no rebuild.
       # The three commands are thin wrappers. The shellHook puts the src

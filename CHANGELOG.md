@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- The Nix package builds with no tests. `package.nix` takes `runTests` (default `false`); the flake check `tests` sets it and runs the suite in parallel, so `nix flake check` and CI still run it. A configuration that installs the package, such as a system rebuild with a new `delegate` input, no longer runs the suite: on a developer Mac that took about 30 minutes. To run the suite with a private denylist, build `agent-definitions.override { neutralityDenylist = <path>; runTests = true; }`.
+
 ## [1.3.0] - 2026-10-18
 
 ### Added

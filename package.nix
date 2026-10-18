@@ -10,11 +10,19 @@
 # for its terms. The build copies only the package, its tests and its example
 # (not the skills or the docs), so the kit comes in as a second source.
 # Without it, the neutrality test skips with a notice.
+#
+# runTests decides whether the build runs the pytest suite. It is false by
+# default: CI and the release job run the suite before each tag, so a consumer
+# that builds or installs the package runs no test. The flake check `tests`
+# sets it, and runs the suite in parallel with pytest-xdist (-n auto). A
+# consumer that wants the suite with its own denylist builds
+# `agent-definitions.override { neutralityDenylist = <path>; runTests = true; }`.
 {
   lib,
   python3,
   git,
   neutralityDenylist ? null,
+  runTests ? false,
 }:
 let
   kit = lib.fileset.toSource {
@@ -49,14 +57,21 @@ python3.pkgs.buildPythonApplication {
   build-system = [ python3.pkgs.setuptools ];
   dependencies = [ python3.pkgs.pyyaml ];
 
+  # The Python builder runs pytestCheckHook in the install check, and doCheck sets it.
+  doCheck = runTests;
   nativeCheckInputs = [
     python3.pkgs.pytestCheckHook
+    python3.pkgs.pytest-xdist
     git
   ];
   pythonImportsCheck = [ "delegate" ];
   # -rs prints the reason of each skipped test, so a skipped neutrality check
-  # shows in the build log.
-  pytestFlags = [ "-rs" ];
+  # shows in the build log. -n auto runs the suite in parallel.
+  pytestFlags = [
+    "-rs"
+    "-n"
+    "auto"
+  ];
 
   env = lib.optionalAttrs (neutralityDenylist != null) {
     AGENT_DEFINITIONS_DENYLIST = "${neutralityDenylist}";
