@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- `delegate status` and `delegate watch` follow a run that ended and was resumed. Before, `status` gave the old result and `100%`, and the retried ticket as `failed`, and `watch` exited at once at the old `run-end`. Now a `run-end` that a `resume` follows does not end the run, a ticket with a `retry` event is `running`, and `watch` treats the events before the last `resume` as history (#103).
+
 ## [1.4.0] - 2026-10-18
 
 ### Changed

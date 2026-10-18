@@ -242,6 +242,11 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
     return result
 
 
+def _resumed_at(events: list[dict[str, object]]) -> int:
+    """The `seq` of the last `resume` event, or 0 when the run was not resumed."""
+    return max((int(e["seq"]) for e in events if e["event"] == "resume"), default=0)  # type: ignore[call-overload]
+
+
 def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
     started = time.monotonic()
@@ -250,20 +255,28 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     files: set[Path] = set()  # the event streams and the gate logs that the journal names
     last_event: dict[str, object] | None = None
     first_read = True
+    resumed_at = 0
     while True:
         events, offset = read_new_events(journal, offset, next_seq)
         next_seq += len(events)
         if first_read and next_seq - 1 < options.from_position:
             raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {options.from_position} is beyond its end")
+        if first_read:
+            resumed_at = _resumed_at(events)
         first_read = False
         for event in events:
             last_event = event
             seq = int(event["seq"])  # type: ignore[call-overload]
             files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
+            # A run that ended and was resumed works again. Its events before the last `resume` are its history: a
+            # problem or a `run-end` there does not end the watch.
+            history = seq < resumed_at
+            if history:
+                problem = None
             if seq <= options.from_position:
                 sink.event(event, False, None)
-                if event["event"] == "run-end":
+                if event["event"] == "run-end" and not history:
                     return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
                 continue
             position = seq
@@ -273,7 +286,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             if options.until == UNTIL_VERDICT and event["event"] == "verdict":
                 sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
-            if event["event"] == "run-end":
+            if event["event"] == "run-end" and not history:
                 return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
         if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
             sink.stall(options.stall_minutes, last_event)

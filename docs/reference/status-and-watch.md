@@ -31,7 +31,7 @@ delegate status [run-id] [--repo <dir>] [--json]
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
@@ -51,7 +51,7 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 
 | Part | Meaning |
 |---|---|
-| `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`), `built`, `failed`, or `skipped`. |
+| `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`; or a `retry` after the `step-end`), `built`, `failed`, or `skipped`. |
 | [**`verdict`**](../glossary.md#verdict) | The verdict of the newest `verdict` event of the ticket, or `-` when there is none. A verdict of a [**chain**](../glossary.md#chain) in [**`economy`**](../glossary.md#economy) mode covers each ticket in its `tickets` field. |
 | `branch` | The branch of the ticket, from `step-start`, or `-` when the ticket has no [**step**](../glossary.md#step). |
 | `last event` | The time of the newest event of the ticket, or `-` when there is none. |
@@ -290,6 +290,8 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 Code 2 is also the code that `argparse` gives for a usage error.
 
 `watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem.
+
+A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the last `resume` are the history of the run: `watch` prints them, but a problem or a `run-end` there does not end the watch. `watch` then follows the resumed run to its new `run-end`.
 
 ### The problem events
 

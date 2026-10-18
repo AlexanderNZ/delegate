@@ -45,12 +45,23 @@ SKIPPED: str = "skipped"
 NONE: str = "-"
 
 
+def _end_of(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The `run-end` event of a run that ended, or None. A run that ended and was resumed works again, so its old
+    `run-end` does not end it when a `resume` follows."""
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return None
+        if event["event"] == "run-end":
+            return event
+    return None
+
+
 def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
     """The lines of the report for a run, from its journal events and its snapshot."""
     start = events[0]
     if start["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
-    end = next((e for e in reversed(events) if e["event"] == "run-end"), None)
+    end = _end_of(events)
     lines = [
         f"run {start['run_id']}: {end['result'] if end else RUNNING} (mode {start['mode']}, adapter {start['adapter']})",
         f"progress: {_run_progress(snap)}", f"journal {journal}",
@@ -66,6 +77,8 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
                 state = RUNNING
             elif kind == "step-end":
                 state, reason = str(event["state"]), event["reason"]
+            elif kind == "retry":
+                state, reason = RUNNING, None
             elif kind == "skip":
                 state, reason = SKIPPED, event["reason"]
         # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
@@ -221,6 +234,8 @@ def _ticket(
             state, started = RUNNING, started or _time(event)
         elif kind == "step-end":
             state, ended, live, gate = str(event["state"]), ended or _time(event), None, None
+        elif kind == "retry":
+            state, ended = RUNNING, None
         elif kind == "skip":
             state = SKIPPED
         if kind == "agent-start":
@@ -321,7 +336,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
     start = events[0]
-    end = next((e for e in reversed(events) if e["event"] == "run-end"), None)
+    end = _end_of(events)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     now = now.replace(microsecond=0)
