@@ -243,8 +243,18 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
 
 
 def _resumed_at(events: list[dict[str, object]]) -> int:
-    """The `seq` of the last `resume` event, or 0 when the run was not resumed."""
-    return max((int(e["seq"]) for e in events if e["event"] == "resume"), default=0)  # type: ignore[call-overload]
+    """The `seq` of the last `resume` event that follows a `run-end`, or 0 when the run did not end and resume.
+
+    A run that stopped with no `run-end` (a crash) and was resumed keeps its events: a problem there still counts.
+    """
+    ended = False
+    at = 0
+    for event in events:
+        if event["event"] == "run-end":
+            ended = True
+        elif event["event"] == "resume" and ended:
+            at = int(event["seq"])  # type: ignore[call-overload]
+    return at
 
 
 def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
@@ -270,7 +280,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
             # A run that ended and was resumed works again. Its events before the last `resume` are its history: a
-            # problem or a `run-end` there does not end the watch.
+            # problem, a verdict or a `run-end` there does not end the watch.
             history = seq < resumed_at
             if history:
                 problem = None
@@ -283,7 +293,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             sink.event(event, True, problem)
             if problem is not None:
                 return WatchResult(EXIT_PROBLEM, position)
-            if options.until == UNTIL_VERDICT and event["event"] == "verdict":
+            if options.until == UNTIL_VERDICT and event["event"] == "verdict" and not history:
                 sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
             if event["event"] == "run-end" and not history:

@@ -291,7 +291,7 @@ Code 2 is also the code that `argparse` gives for a usage error.
 
 `watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem.
 
-A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the last `resume` are the history of the run: `watch` prints them, but a problem or a `run-end` there does not end the watch. `watch` then follows the resumed run to its new `run-end`.
+A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the last `resume` are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still ends the watch. `watch` then follows the resumed run to its new `run-end`.
 
 ### The problem events
 

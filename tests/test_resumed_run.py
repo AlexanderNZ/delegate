@@ -110,3 +110,37 @@ def test_watch_of_a_run_that_ended_and_was_not_resumed_still_exits_at_once_with_
 
     assert code == 0
     assert time.monotonic() - started < 5
+
+
+def test_watch_of_a_resumed_run_that_never_ended_still_exits_3_at_its_old_problem(tmp_path, capsys):
+    # A run that stopped with no `run-end` (a crash) and was resumed: its problem before the `resume` still ends the watch.
+    repo = bare_repo(tmp_path)
+    write_journal(
+        repo, "r1", run_start("r1", "a", "b"), step_start("a"), step_end("a", "failed", "boom"), resume("a"), step_start("b"),
+    )
+
+    code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
+
+    assert code == 3
+    assert "watch: problem: ticket a:" in out
+
+
+def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_the_old_run_end(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    verdict = ("verdict", {"ticket": "a", "round": 0, "mode": "full", "verdict": "REJECT", "findings": ["x"], "report": "/w/v.json"})
+    path = write_journal(
+        repo, "r1", run_start("r1", "a"), step_start("a"), verdict, step_end("a", "failed", "rejected"),
+        run_end("failed", [], ["a"]), resume("a"), retry("a"),
+    )
+
+    def append_later():
+        time.sleep(0.2)
+        append_events(path, ("verdict", {**verdict[1], "verdict": "ACCEPT", "findings": []}))
+
+    writer = threading.Thread(target=append_later)
+    writer.start()
+    code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "--until", "verdict", "r1")
+    writer.join()
+
+    assert code == 4
+    assert "ACCEPT" in out and "REJECT" not in out.split("resume", 1)[1]
