@@ -62,7 +62,8 @@ def test_claude_code_verifier_is_read_only_and_shares_skills(rendered):
     spec, _ = _fm(rendered / "claude-code" / "java-spring-specialist.md")
     ver, body = _fm(rendered / "claude-code" / "java-spring-verifier.md")
     assert ver["name"] == "java-spring-verifier"
-    assert [t.strip() for t in ver["tools"].split(",")] == ["Read", "Grep", "Glob", "Bash"]
+    # Write is for the verdict; a guard hook keeps each Write in a temp directory (#98).
+    assert [t.strip() for t in ver["tools"].split(",")] == ["Read", "Grep", "Glob", "Bash", "Write"]
     assert ver["skills"] == spec["skills"]
     assert "isolation" not in ver, "a verifier writes nothing, so it needs no worktree"
     assert "blind" in body
@@ -96,7 +97,9 @@ def test_opencode_files_carry_tier_model_and_permissions(rendered, tiers):
     first = next(iter(ver["permission"].items()))
     assert first == ("*", "deny"), "catch-all deny must be the first rule"
     assert ver["permission"]["read"] == "allow"
-    assert "edit" not in ver["permission"]
+    # The verifier writes its verdict only outside the project, and only in a temp directory (#98).
+    assert ver["permission"]["edit"] == {"*": "deny", "../*": "allow"}
+    assert next(iter(ver["permission"]["external_directory"].items())) == ("*", "deny")
     bash_map = ver["permission"]["bash"]
     assert next(iter(bash_map.items())) == ("*", "deny"), "the bash map needs its own catch-all deny first"
     assert "skill tool" in sbody and "skill tool" in vbody, "OpenCode cannot preload, so the body says to load them"
@@ -131,7 +134,7 @@ def test_single_read_only_agent_renders_without_twin(tiers):
     out = render(agents, tiers)
     assert list(out["claude-code"]) == ["docs-verifier.md"]
     fm = split_frontmatter(out["claude-code"]["docs-verifier.md"])[0]
-    assert fm["tools"] == "Read, Grep, Glob, Bash"
+    assert fm["tools"] == "Read, Grep, Glob, Bash, Write"
     assert fm["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
 
 

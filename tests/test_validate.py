@@ -191,7 +191,7 @@ def test_opencode_verifier_keeps_the_outer_catch_all_deny_first(rendered, tiers)
 
 def test_verifier_without_tools_allowlist_fails(rendered, tiers):
     p = rendered / "claude-code" / "java-spring-verifier.md"
-    _rewrite(p, "tools: Read, Grep, Glob, Bash\n", "")
+    _rewrite(p, "tools: Read, Grep, Glob, Bash, Write\n", "")
     assert "VERIFIER_NOT_READONLY" in _codes(validate_claude_code_dir(rendered / "claude-code", tiers))
 
 
@@ -205,7 +205,7 @@ def test_opencode_verifier_deny_must_come_first(rendered, tiers):
 
 def test_opencode_verifier_allowing_edit_fails(rendered, tiers):
     p = rendered / "opencode" / "java-spring-verifier.md"
-    _rewrite(p, "  list: allow\n", "  list: allow\n  edit: allow\n")
+    _edit_frontmatter(p, lambda fm: fm["permission"].__setitem__("edit", "allow"))
     assert "VERIFIER_WRITE_TOOL" in _codes(validate_opencode_dir(rendered / "opencode", tiers))
 
 

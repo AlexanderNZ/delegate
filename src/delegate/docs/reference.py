@@ -126,6 +126,8 @@ def guard_table() -> str:
     shell_reads = [c for c in render.VERIFIER_READ_COMMANDS if not c.startswith("git ")]
     prefixes = list(render.VERIFIER_TEMP_PATH_PREFIXES)
     temp_paths = ", ".join(f"`{p}`" for p in prefixes[:-1]) + f", or `{prefixes[-1]}`"
+    write_prefixes = list(render.VERIFIER_WRITE_PATH_PREFIXES)
+    write_paths = ", ".join(f"`{p}`" for p in write_prefixes[:-1]) + f", or `{write_prefixes[-1]}`"
     return "\n".join([
         "| Group | Commands |",
         "|---|---|",
@@ -136,6 +138,8 @@ def guard_table() -> str:
         "which writes no file: `2>/dev/null` is permitted. |",
         f"| temp destination | {_commands(render.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
         "The earlier path arguments are sources, and a read of any path is a read. |",
+        f"| Write tool | `Write` — only when `file_path` is an absolute path that starts with {write_paths}, "
+        "or with the value of `$TMPDIR` in the environment of the hook, and has no `..` component. |",
     ])
 
 

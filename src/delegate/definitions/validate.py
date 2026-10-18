@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from .render import VERIFIER_GUARD_MARKER
+from .render import VERIFIER_GUARD_MARKER, VERIFIER_WRITE_GUARD_MARKER, VERIFIER_WRITE_PATH_PREFIXES
 from ..shared.tiers import Tiers
 
 CLAUDE_CODE_KEYS = {
@@ -27,6 +27,10 @@ OPENCODE_KEYS = {
 }
 CLAUDE_CODE_WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"}
 OPENCODE_WRITE_TOOLS = {"edit", "write", "bash", "patch"}
+# The OpenCode permissions that write a file. OpenCode matches each one against
+# the path relative to the worktree, so a pattern that starts with "../" opens
+# only a path outside the project.
+OPENCODE_FILE_WRITE_TOOLS = ("edit", "write", "patch")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 # OpenCode escapes these characters before it turns the glob into a regular
@@ -76,26 +80,36 @@ def opencode_pattern_matches(command: str, pattern: str) -> bool:
     return re.fullmatch(escaped, normalized, re.DOTALL) is not None
 
 
-def opencode_bash_action(permission: dict, command: str) -> str | None:
-    """Resolve the action that OpenCode applies to one bash command.
+def opencode_permission_action(permission: dict, tool: str, target: str) -> str | None:
+    """Resolve the action that OpenCode applies to one call of one permission.
 
-    OpenCode flattens the permission map into rules in key order and keeps the
-    last rule whose tool name and whose pattern both match. A deny that comes
-    before the catch-all is therefore shadowed and does nothing.
+    `tool` is the permission name (`bash`, `edit`, `external_directory`), and
+    `target` is the text that OpenCode matches against the patterns of that
+    permission: the command for `bash`, the path relative to the worktree for
+    `edit`, and the absolute parent directory with `/*` for
+    `external_directory`. OpenCode flattens the permission map into rules in
+    key order and keeps the last rule whose permission name and whose pattern
+    both match. A rule that comes before the catch-all is therefore shadowed
+    and does nothing.
     """
     action = None
     if not isinstance(permission, dict):
         return None
     for key, value in permission.items():
-        if not opencode_pattern_matches("bash", str(key)):
+        if not opencode_pattern_matches(tool, str(key)):
             continue
         if isinstance(value, dict):
             for pattern, sub in value.items():
-                if opencode_pattern_matches(command, str(pattern)):
+                if opencode_pattern_matches(target, str(pattern)):
                     action = sub
         else:
             action = value
     return action
+
+
+def opencode_bash_action(permission: dict, command: str) -> str | None:
+    """Resolve the action that OpenCode applies to one bash command."""
+    return opencode_permission_action(permission, "bash", command)
 
 
 #: Every code that the validator writes, with its meaning. The finding-code
@@ -109,8 +123,11 @@ FINDING_CODES: dict[str, str] = {
     "MISSING_TWIN": "a `-specialist` without its `-verifier`, or the reverse",
     "DUPLICATE_NAME": "two files declare one name; the harness picks one by filesystem read order",
     "VERIFIER_WRITE_TOOL": (
-        "a verifier lists Edit, Write, MultiEdit, NotebookEdit, or an unguarded Bash; on OpenCode it permits a write tool "
-        "with `allow` or `ask`, or its `bash` map does not open with `\"*\": deny`, or that map resolves a write command to allow"
+        "a verifier lists Edit, MultiEdit, NotebookEdit, an unguarded Bash, or a Write with no `PreToolUse` hook on Write whose command "
+        "carries `# agent-definitions:verifier-write-guard`; on OpenCode it permits a write tool with `allow` or `ask`, except an "
+        "`edit` map that opens with `\"*\": deny` and allows only patterns that start with `../`, beside an `external_directory` map "
+        "that opens with `\"*\": deny` and allows only temp prefixes; or its `bash` map does not open with `\"*\": deny`, "
+        "or that map resolves a write command to allow"
     ),
     "VERIFIER_BASH_UNGUARDED": (
         "a Claude Code verifier lists `Bash` with no `PreToolUse` hook on Bash whose command carries `# agent-definitions:verifier-guard`"
@@ -183,15 +200,15 @@ def _pair_findings(names: set[str], where: str) -> list[Finding]:
     return out
 
 
-def _matcher_selects_bash(matcher) -> bool:
+def _matcher_selects(matcher, tool: str) -> bool:
     """Claude Code matches a hook matcher against the tool name as a regular
     expression. An absent or empty matcher selects every tool."""
     if matcher is None or matcher == "" or matcher == "*":
         return True
     try:
-        return re.search(str(matcher), "Bash") is not None
+        return re.search(str(matcher), tool) is not None
     except re.error:
-        return str(matcher) == "Bash"
+        return str(matcher) == tool
 
 
 def _claude_code_blocks_push(fm: dict) -> bool:
@@ -202,7 +219,7 @@ def _claude_code_blocks_push(fm: dict) -> bool:
     if not isinstance(hooks, dict):
         return False
     for entry in hooks.get("PreToolUse") or []:
-        if not isinstance(entry, dict) or not _matcher_selects_bash(entry.get("matcher")):
+        if not isinstance(entry, dict) or not _matcher_selects(entry.get("matcher"), "Bash"):
             continue
         for hook in entry.get("hooks") or []:
             if isinstance(hook, dict) and "push" in str(hook.get("command", "")):
@@ -210,20 +227,53 @@ def _claude_code_blocks_push(fm: dict) -> bool:
     return False
 
 
-def _claude_code_bash_guarded(fm: dict) -> bool:
-    """A guarded Bash is a PreToolUse hook that selects Bash and whose command
-    carries the guard marker. The marker is the stable evidence: the hook text
-    itself changes each time the allow list changes."""
+def _claude_code_guarded(fm: dict, tool: str, marker: str) -> bool:
+    """A guarded tool is a PreToolUse hook that selects the tool and whose
+    command carries the guard marker of that tool: VERIFIER_GUARD_MARKER for
+    Bash, VERIFIER_WRITE_GUARD_MARKER for Write. The marker is the stable
+    evidence: the hook text itself changes each time the allow list changes."""
     hooks = fm.get("hooks")
     if not isinstance(hooks, dict):
         return False
     for entry in hooks.get("PreToolUse") or []:
-        if not isinstance(entry, dict) or not _matcher_selects_bash(entry.get("matcher")):
+        if not isinstance(entry, dict) or not _matcher_selects(entry.get("matcher"), tool):
             continue
         for hook in entry.get("hooks") or []:
-            if isinstance(hook, dict) and VERIFIER_GUARD_MARKER in str(hook.get("command", "")):
+            if isinstance(hook, dict) and marker in str(hook.get("command", "")):
                 return True
     return False
+
+
+def _opencode_outside_only(value) -> bool:
+    """An OpenCode file-write map that opens only a path outside the project.
+
+    It opens with its own catch-all deny, and each other rule is a deny or an
+    allow whose pattern starts with "../". OpenCode matches the rule against
+    the path relative to the worktree, and a path in the project never starts
+    with "../". An ask is not accepted: `--auto` turns it into an allow."""
+    if not isinstance(value, dict) or not value:
+        return False
+    keys = list(value)
+    if keys[0] != "*" or value["*"] != "deny":
+        return False
+    return all(action == "deny" or (action == "allow" and str(pattern).startswith("../")) for pattern, action in value.items())
+
+
+def _opencode_temp_only(value) -> bool:
+    """An OpenCode external_directory map that opens only a temp directory.
+
+    It opens with its own catch-all deny, and each allow pattern starts with a
+    fixed temp prefix and has no ".." component."""
+    if not isinstance(value, dict) or not value:
+        return False
+    keys = list(value)
+    if keys[0] != "*" or value["*"] != "deny":
+        return False
+    return all(
+        action == "deny"
+        or (action == "allow" and str(pattern).startswith(VERIFIER_WRITE_PATH_PREFIXES) and ".." not in str(pattern).split("/"))
+        for pattern, action in value.items()
+    )
 
 
 def _opencode_blocks_push(fm: dict) -> bool:
@@ -274,13 +324,17 @@ def validate_claude_code_dir(d: Path, tiers: Tiers) -> list[Finding]:
                 findings.append(Finding("VERIFIER_NOT_READONLY", f.name, "verifier has no tools allowlist, so it inherits write tools"))
             # Bash on a verifier is legal only beside the guard hook. Without
             # the guard the verifier has a full shell, so both findings fire.
-            guarded = _claude_code_bash_guarded(fm)
+            guarded = _claude_code_guarded(fm, "Bash", VERIFIER_GUARD_MARKER)
             if "Bash" in tools and not guarded:
                 findings.append(Finding("VERIFIER_BASH_UNGUARDED", f.name, f"verifier lists Bash with no PreToolUse hook on Bash that carries {VERIFIER_GUARD_MARKER!r}"))
-            write_tools = CLAUDE_CODE_WRITE_TOOLS - {"Bash"} if guarded else CLAUDE_CODE_WRITE_TOOLS
+            # Write on a verifier is legal only beside the Write guard, which
+            # keeps each Write in a temp directory.
+            write_guarded = _claude_code_guarded(fm, "Write", VERIFIER_WRITE_GUARD_MARKER)
+            write_tools = CLAUDE_CODE_WRITE_TOOLS - ({"Bash"} if guarded else set()) - ({"Write"} if write_guarded else set())
             bad = sorted(set(tools) & write_tools)
             if bad:
-                findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"verifier lists write-capable tools {bad}"))
+                unguarded = f"; Write needs a PreToolUse hook on Write that carries {VERIFIER_WRITE_GUARD_MARKER!r}" if "Write" in bad else ""
+                findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"verifier lists write-capable tools {bad}{unguarded}"))
     findings.extend(_pair_findings(set(seen), str(d)))
     if desc_chars > tiers.description_budget_chars:
         findings.append(Finding("DESCRIPTION_BUDGET", str(d), f"combined descriptions are {desc_chars} chars; budget is {tiers.description_budget_chars}"))
@@ -323,8 +377,15 @@ def validate_opencode_dir(d: Path, tiers: Tiers) -> list[Finding]:
                 first_key, first_val = next(iter(perm.items()))
                 if first_key != "*" or first_val != "deny":
                     findings.append(Finding("VERIFIER_NOT_READONLY", f.name, 'the first permission rule must be "*": deny; the last matching rule wins'))
+                outside = False
                 for t in sorted(OPENCODE_WRITE_TOOLS):
                     v = perm.get(t)
+                    if t in OPENCODE_FILE_WRITE_TOOLS and _opencode_outside_only(v):
+                        # A file write outside the project only. The
+                        # external_directory check below keeps it in a temp
+                        # directory.
+                        outside = outside or any(a == "allow" for a in v.values())
+                        continue
                     if t == "bash" and isinstance(v, dict):
                         # A guarded bash map: its own catch-all deny first, then
                         # read patterns. The probes resolve the map the way
@@ -338,6 +399,12 @@ def validate_opencode_dir(d: Path, tiers: Tiers) -> list[Finding]:
                         continue
                     if v == "allow" or v == "ask" or (isinstance(v, dict) and any(x in ("allow", "ask") for x in v.values())):
                         findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"verifier permits {t!r}; build read-only from deny, never ask"))
+                if outside and not _opencode_temp_only(perm.get("external_directory")):
+                    findings.append(Finding(
+                        "VERIFIER_WRITE_TOOL", f.name,
+                        "the verifier writes outside the project, and its external_directory map does not open with "
+                        '"*": deny and allow only temp prefixes, so it can write outside a temp directory',
+                    ))
     findings.extend(_pair_findings(set(seen), str(d)))
     return findings
 

@@ -16,6 +16,9 @@ from .declaration import GATE_COMMAND, Agent
 from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
+#: The tools of a Claude Code verifier: the read tools, the guarded Bash, and
+#: the Write tool, which a guard hook limits to a temp directory.
+VERIFIER_TOOLS = [*READ_ONLY_TOOLS, "Write"]
 OPENCODE_READ_TOOLS = ["read", "grep", "glob", "list"]
 
 # --- The verifier's guarded Bash --------------------------------------------
@@ -391,6 +394,86 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
 VERIFIER_BASH_HOOK = _verifier_bash_hook()
 
 
+# --- The verifier's guarded Write -------------------------------------------
+#
+# The verifier writes its verdict to a file in a temp directory. A Bash write of
+# a verdict often fails: the Bash guard refuses a heredoc, and each backtick and
+# each $( of a command, also inside quotes, and a verdict names code. So the
+# verifier also has the Write tool, and this guard limits it to a temp
+# directory (#98).
+
+#: The marker that makes the Write guard identifiable in a rendered file. It is
+#: not a substring of VERIFIER_GUARD_MARKER, and the reverse is also true.
+VERIFIER_WRITE_GUARD_MARKER = "# agent-definitions:verifier-write-guard"
+
+#: The fixed temp prefixes of the Write guard: the prefixes of the Bash guard
+#: without the variable. The Write tool does not expand a variable, so the guard
+#: reads $TMPDIR from its own environment instead.
+VERIFIER_WRITE_PATH_PREFIXES: tuple[str, ...] = tuple(p for p in VERIFIER_TEMP_PATH_PREFIXES if "$" not in p)
+
+
+def _verifier_write_hook() -> str:
+    """Build the verifier's Write guard as one shell line.
+
+    The hook reads `tool_input.file_path` with python3. It permits the Write
+    only when the path is absolute, has no ".." component, and starts with a
+    fixed temp prefix or with the value of $TMPDIR in the environment of the
+    hook. A $TMPDIR that is not absolute, or that is "/", adds no prefix. The
+    guard reads the path as text, as the Bash guard does: it does not resolve a
+    symbolic link.
+
+    python3 prints the reason of a deny and exits 3. Any other status that is
+    not 0 (no python3, a body that is not JSON, no file path, a file path that
+    is not text) ends at exit 2 with the fail-closed message.
+    """
+    # The script holds no single quote, so a single-quoted shell word holds it
+    # as a literal. The text of the path reaches the shell only as the value of
+    # $r, inside double quotes, so the shell does not read it as a command.
+    prefixes = ",".join(f'"{p}"' for p in VERIFIER_WRITE_PATH_PREFIXES)
+    script = (
+        "import json,os,sys; "
+        'p=json.load(sys.stdin)["tool_input"]["file_path"]; '
+        "isinstance(p,str) or sys.exit(4); "
+        't=os.environ.get("TMPDIR","").rstrip("/"); '
+        f'q=({prefixes})+((t+"/",) if t.startswith("/") else ()); '
+        'ok=p.startswith("/") and ".." not in p.split("/") and p.startswith(q); '
+        'sys.stdout.write("" if ok else "the file path ["+p+"] is not permitted. '
+        'A verifier writes only to an absolute path in a temp directory, with no .. component."); '
+        "sys.exit(0 if ok else 3)"
+    )
+    return (
+        f"r=$(python3 -c '{script}' 2>/dev/null); "
+        "case $? in 0) exit 0 ;; "
+        '3) echo "verifier write guard: $r" >&2; exit 2 ;; '
+        "*) echo 'verifier write guard: no file path, or python3 is absent. The guard fails closed.' >&2; exit 2 ;; "
+        f"esac {VERIFIER_WRITE_GUARD_MARKER}"
+    )
+
+
+VERIFIER_WRITE_HOOK = _verifier_write_hook()
+
+#: The OpenCode `edit` map of a verifier. OpenCode matches an `edit` rule
+#: against the path relative to the worktree (packages/opencode/src/tool/write.ts
+#: @ tag v1.18.31), so a path in the project never starts with "../". The one
+#: allow therefore opens only a path outside the project, and the
+#: `external_directory` map below limits that path to a temp directory.
+VERIFIER_OPENCODE_EDIT: dict[str, str] = {"*": "deny", "../*": "allow"}
+
+
+def verifier_external_directory_permission() -> dict[str, str]:
+    """The OpenCode `external_directory` map of a verifier: deny first, then each fixed temp prefix.
+
+    OpenCode asks this permission for a path outside the project, with the
+    absolute parent directory and "/*" as the target
+    (packages/opencode/src/tool/external-directory.ts @ tag v1.18.31). An
+    OpenCode pattern holds no environment variable, so $TMPDIR is not in the map.
+    """
+    perm: dict[str, str] = {"*": "deny"}
+    for prefix in VERIFIER_WRITE_PATH_PREFIXES:
+        perm[f"{prefix}*"] = "allow"
+    return perm
+
+
 def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     """The OpenCode permission.bash map for a verifier.
 
@@ -487,7 +570,7 @@ def render_claude_code(agent: Agent, tiers: Tiers) -> dict[str, str]:
                 f"{agent.key} verifier. {agent.description} Use it to review a diff in this domain. "
                 "It is read-only and blind. It returns ACCEPT or REJECT with evidence."
             )
-            fm["tools"] = ", ".join(READ_ONLY_TOOLS)
+            fm["tools"] = ", ".join(VERIFIER_TOOLS)
         else:
             fm["description"] = (
                 f"{agent.key} specialist. {agent.description} Use it for one implementation task in this domain. "
@@ -512,9 +595,12 @@ def render_claude_code(agent: Agent, tiers: Tiers) -> dict[str, str]:
         )
         if not read_only:
             fm["isolation"] = "worktree"
-        fm["hooks"] = {
-            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": guard}]}]
-        }
+        pre_tool_use = [{"matcher": "Bash", "hooks": [{"type": "command", "command": guard}]}]
+        if read_only:
+            # The verifier writes its verdict with Write, and this guard keeps
+            # every Write in a temp directory.
+            pre_tool_use.append({"matcher": "Write", "hooks": [{"type": "command", "command": VERIFIER_WRITE_HOOK}]})
+        fm["hooks"] = {"PreToolUse": pre_tool_use}
         files[f"{name}.md"] = _frontmatter(fm) + _body(f"claude-code-{role}", agent, name, twin if agent.pair else "")
     return files
 
@@ -547,6 +633,11 @@ def render_opencode(agent: Agent, tiers: Tiers) -> dict[str, str]:
             # after it. It does not replace the outer deny: without that outer
             # rule every other tool becomes available again.
             perm["bash"] = verifier_bash_permission(tuple(agent.gate_commands))
+            # The write tool for the verdict: a path outside the project, and
+            # that path only in a temp directory. Both maps open with their
+            # own catch-all deny.
+            perm["edit"] = dict(VERIFIER_OPENCODE_EDIT)
+            perm["external_directory"] = verifier_external_directory_permission()
             fm["permission"] = perm
         else:
             # Catch-all first here too: OpenCode keeps the last matching rule,

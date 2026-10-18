@@ -242,21 +242,30 @@ def _report_rule(place: str, report_path: str | Path) -> str:
     )
 
 
-# How a verifier writes its verdict (#98). The verifier has no Write tool, and the verifier guard refuses a heredoc
-# (it reads each line of the body as a command), a here-string, `tee` with no input, and each `$(` and backtick of a
-# command, also inside quotes. It reads a `<`, `>` or `&` in the text as a redirection or a divider. A JSON escape
-# keeps each of these characters out of the command text, and a JSON parser reads it back as the same character.
-VERDICT_WRITE_RULE = (
-    "Write the report with one Bash command of this form, with the whole JSON object on one line:\n\n"
-    "```bash\nprintf '%s\\n' '<the JSON object>' > <the absolute report path>\n```\n\n"
-    "Do not use a heredoc or a here-string: the verifier guard refuses them. "
-    "The guard also refuses some characters in the command text, also inside quotes. "
-    "So in the JSON text, write each `$` as `\\u0024`, each backtick as `\\u0060`, each apostrophe as `\\u0027`, "
-    "each `<` as `\\u003c`, each `>` as `\\u003e`, and each `&` as `\\u0026`. "
-    "A JSON parser reads each escape back as the same character, so the report keeps your text. "
-    "Then end your final message with the same JSON object, as written in the file, in a `json` code fence. "
-    "When the harness refuses the command that writes the file, the engine reads the verdict from that object."
-)
+# How a verifier writes its verdict (#98). The first way is the Write tool: the renderer gives each verifier the Write
+# tool, and a guard limits it to an absolute path in a temp directory. The second way is one Bash command, for a
+# verifier with no Write tool or a harness that refuses the Write. The verifier guard refuses a heredoc (it reads each
+# line of the body as a command), a here-string, `tee` with no input, and each `$(` and backtick of a command, also
+# inside quotes. It reads a `<`, `>` or `&` in the text as a redirection or a divider. A JSON escape keeps each of these
+# characters out of the command text, and a JSON parser reads it back as the same character. The last way is the final
+# message: when no file is written, the engine reads the verdict from the final text.
+def _verdict_write_rule(report_path: str | Path) -> str:
+    """The text that tells a verifier how to write its verdict at `report_path`: the Write tool first, then the printf form."""
+    return (
+        f"Write the report with the Write tool, with `file_path` `{report_path}`. "
+        "Give the absolute path as it is: the guard of the Write tool permits only an absolute path in a temp directory.\n\n"
+        "If you have no Write tool, or the harness refuses the Write, "
+        "write the report with one Bash command of this form, with the whole JSON object on one line:\n\n"
+        "```bash\nprintf '%s\\n' '<the JSON object>' > <the absolute report path>\n```\n\n"
+        "Do not use a heredoc or a here-string: the verifier guard refuses them. "
+        "The guard also refuses some characters in the command text, also inside quotes. "
+        "So in the JSON text, write each `$` as `\\u0024`, each backtick as `\\u0060`, each apostrophe as `\\u0027`, "
+        "each `<` as `\\u003c`, each `>` as `\\u003e`, and each `&` as `\\u0026`. "
+        "A JSON parser reads each escape back as the same character, so the report keeps your text.\n\n"
+        "In each case, end your final message with the same JSON object, as written in the file, in a `json` code fence. "
+        "When the harness refuses each way to write the file, the engine reads the verdict from that object."
+    )
+
 
 FOREGROUND_RULE = (
     "Run every command in the foreground. Do not use background tasks or a monitor tool. "
@@ -643,7 +652,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         "`unverified` lists what you could not verify.",
         verifier_example(mode),
     )
-    report += "\n\n" + VERDICT_WRITE_RULE
+    report += "\n\n" + _verdict_write_rule(report_path)
     return "\n" + _sections(("## Working copy", working_copy), ("## Commands", FOREGROUND_RULE), ("## Report", report))
 
 

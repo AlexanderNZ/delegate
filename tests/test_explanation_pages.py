@@ -302,6 +302,8 @@ LIMIT_PHRASES = [
     "destination-flag",
     "`..`",
     "does not examine it",
+    "write guard reads",
+    "no `$tmpdir` prefix",
     "no `cp` rule",
     "`getonlycommands`",
     "no `nix develop` rule",
