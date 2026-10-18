@@ -7,6 +7,8 @@ from delegate.definitions.declaration import load_declaration
 from delegate.definitions.render import render
 from delegate.shared.tiers import load_tiers
 
+from . import git_processes
+
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
 
@@ -114,3 +116,39 @@ def no_host_settings(monkeypatch):
     """Remove the host variables of the engine from the environment of every test."""
     for name in HOST_VARIABLES:
         monkeypatch.delenv(name, raising=False)
+
+
+# The name of the count of `git` processes that the test code of one test starts (see `tests/git_processes.py`).
+GIT_PROCESSES = "git processes of the test code"
+
+_first_count: int = 0
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Note the count before the setup of the test, so the count of the test holds its fixtures too."""
+    global _first_count
+    _first_count = git_processes.started()
+    yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Give the report of the teardown the count of `git` processes that the test code of the test started."""
+    outcome = yield
+    if call.when == "teardown":
+        outcome.get_result().user_properties.append((GIT_PROCESSES, git_processes.started() - _first_count))
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Write the sum of the counts, also from each worker of `pytest -n`."""
+    counts = [
+        value
+        for reports in terminalreporter.stats.values()
+        for report in reports
+        if getattr(report, "when", None) == "teardown"
+        for name, value in getattr(report, "user_properties", ())
+        if name == GIT_PROCESSES
+    ]
+    if counts:
+        terminalreporter.write_line(f"{GIT_PROCESSES}: {sum(counts)} in {len(counts)} tests")
