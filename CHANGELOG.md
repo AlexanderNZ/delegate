@@ -9,6 +9,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - `delegate status` and `delegate watch` follow a run that ended and was resumed. Before, `status` gave the old result and `100%`, and the retried ticket as `failed`, and `watch` exited at once at the old `run-end`. Now a `run-end` that a `resume` follows does not end the run, a ticket with a `retry` event is `running`, and `watch` treats the events before the first `resume` after the newest `run-end` that a `resume` follows as history (#103).
 - When the verifier guard denies a file descriptor as the last word inside quotes, such as `bash -c "ls 2>&1"`, its message now tells the agent to put a space before the closing quote: under bash and `/bin/sh`, `bash -c "ls 2>&1 "` is permitted. The guard still denies the first form, because a quote after the descriptor can make the target a file name: `ls >&1")"` writes the file `1)` (#104).
 - The verifier guard permits a redirection to `/dev/null`, such as `ls src 2>/dev/null` and `> /dev/null`. Before, it denied the target as a write outside a temp directory. Only the exact path counts: `/dev/nullx`, a path under `/dev/null` and another device stay denied, and a write command such as `cp` or `tee` keeps the temp rule (#105).
+- The verifier guard checks each redirection target of a word, not only the last one. Before, `ls >x>/tmp/y` passed in bash, `/bin/sh` and zsh, and `ls >x 2>/tmp/y` passed in zsh, and each one wrote the file `x` outside a temp directory (#105).
 
 ## [1.4.0] - 2026-10-18
 
