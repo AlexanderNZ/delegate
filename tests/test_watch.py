@@ -8,8 +8,12 @@ scripted adapter, which is removed before `watch` starts, so no case has an
 adapter installed when `watch` runs.
 """
 
+import json
 import threading
 import time
+from datetime import datetime, timedelta
+
+import pytest
 
 from delegate.cli import delegate
 
@@ -71,15 +75,110 @@ def test_watch_prints_events_as_they_are_appended_and_exits_when_the_run_ends(tm
     assert [line.split()[2] for line in out.splitlines()[:4]] == ["run-start", "step-start", "step-end", "run-end"]
 
 
-def test_watch_without_a_run_id_follows_the_newest_run(tmp_path, capsys):
+def test_watch_without_a_run_id_follows_the_newest_run_while_it_goes_on(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     write_journal(repo, "old", run_start("old", "a"), run_end("failed", [], ["a"]))
-    write_journal(repo, "new", run_start("new", "b"), run_end("built", ["b"]))
+    path = write_journal(repo, "new", run_start("new", "b"))
+    # The run ends while watch waits after its first read of the journal.
+    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, run_end("built", ["b"])))
 
     code, out, _ = watch(repo, capsys)
 
     assert code == 0
     assert "run_id=new" in out and "run_id=old" not in out
+    assert lines_of(out, "run-end")
+
+
+@pytest.fixture
+def twelve_hours_east(monkeypatch):
+    """Set the local time zone of the process to a fixed zone 12 hours east of UTC, and set it back after the case."""
+    monkeypatch.setenv("TZ", "XYZ-12")
+    time.tzset()
+    yield timedelta(hours=12)
+    monkeypatch.undo()
+    time.tzset()
+
+
+def local_end_time(path, offset: timedelta) -> str:
+    """The time of the run-end event of a journal, in the zone `offset` east of UTC, as the line of watch gives it."""
+    run_end_event = [json.loads(line) for line in path.read_text().splitlines()][-1]
+    assert run_end_event["event"] == "run-end"
+    return (datetime.fromisoformat(run_end_event["time"]).replace(tzinfo=None) + offset).strftime("%Y-%m-%d %H:%M")
+
+
+def test_watch_without_a_run_id_reports_a_newest_run_that_failed_in_one_line_with_its_first_problem_and_exits_1(
+    tmp_path, capsys, twelve_hours_east
+):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "old", run_start("old", "a"), run_end("built", ["a"]))
+    path = write_journal(
+        repo, "new", run_start("new", "a", "b"), step_start("a"), step_end("a", "failed", "no commit"),
+        step_start("b"), step_end("b", "failed", "the gates are red"), run_end("failed", [], ["a", "b"]),
+    )
+
+    code, out, err = watch(repo, capsys)
+
+    assert (code, err) == (1, "")
+    assert out == (
+        f"no run is active; the newest run new ended failed at {local_end_time(path, twelve_hours_east)}; "
+        "first problem: ticket a: the step failed: no commit\n"
+    )
+
+
+def test_watch_without_a_run_id_reports_a_newest_run_that_built_in_one_line_and_exits_0(tmp_path, capsys, twelve_hours_east):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "old", run_start("old", "a"), run_end("failed", [], ["a"]))
+    path = write_journal(repo, "new", run_start("new", "b"), step_start("b"), step_end("b"), run_end("built", ["b"]))
+
+    code, out, err = watch(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert out == f"no run is active; the newest run new ended built at {local_end_time(path, twelve_hours_east)}\n"
+
+
+def test_watch_without_a_run_id_reports_a_newest_run_that_failed_with_no_problem_in_one_line_with_no_reason(tmp_path, capsys):
+    # A skip is no problem event, so the run-end is the only record of the failure.
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "new", run_start("new", "a"), run_end("failed", [], ["a"]))
+
+    code, out, _ = watch(repo, capsys)
+
+    assert code == 1
+    assert out.startswith("no run is active; the newest run new ended failed at ")
+    assert out.count("\n") == 1 and "problem" not in out
+
+
+def test_watch_with_the_run_id_of_a_run_that_ended_replays_its_journal_as_before(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "new", run_start("new", "a"), step_start("a"), step_end("a", "failed", "no commit"), run_end("failed", [], ["a"]))
+
+    code, out, err = watch(repo, capsys, "new")
+
+    assert (code, err) == (3, "")
+    assert [line.split()[2] for line in out.splitlines()[:3]] == ["run-start", "step-start", "step-end"]
+    assert out.splitlines()[3:] == ["watch: problem: ticket a: the step failed: no commit", "position 3"]
+    assert "no run is active" not in out
+
+
+def test_watch_without_a_run_id_and_with_from_goes_on_after_the_position_as_before(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "new", run_start("new", "a"), step_start("a"), step_end("a", "failed", "no commit"), run_end("failed", [], ["a"]))
+
+    code, out, _ = watch(repo, capsys, "--from", "3")
+
+    assert code == 1
+    assert [line.split()[2] for line in out.splitlines()[:1]] == ["run-end"]
+    assert out.splitlines()[1:] == ["position 4"]
+
+
+def test_watch_without_a_run_id_and_with_from_0_replays_the_journal_as_before(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "new", run_start("new", "a"), run_end("built", ["a"]))
+
+    code, out, _ = watch(repo, capsys, "--from", "0")
+
+    assert code == 0
+    assert [line.split()[2] for line in out.splitlines()[:2]] == ["run-start", "run-end"]
 
 
 def test_watch_of_an_unknown_run_exits_2_and_names_the_run_id(tmp_path, capsys):

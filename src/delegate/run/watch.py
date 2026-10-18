@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -88,6 +89,53 @@ class WatchResult:
 
     code: int
     position: int
+
+
+@dataclass(frozen=True)
+class EndedRun:
+    """A run whose journal holds `run-end`: its id, its result, the time of the `run-end`, and its first problem.
+
+    `problem` is `ticket <id>: <reason>` for the first problem event of the journal, or None when it has none.
+    """
+
+    run_id: str
+    result: str
+    ended: datetime
+    problem: str | None
+
+    @property
+    def code(self) -> int:
+        """The exit code of the result of the run."""
+        return _result_code(self.result)
+
+    def line(self) -> str:
+        """The one line of `watch` for a newest run that ended, with the time of its end in the local time zone."""
+        line = f"no run is active; the newest run {self.run_id} ended {self.result} at {self.ended.astimezone().strftime('%Y-%m-%d %H:%M')}"
+        if self.result != "built" and self.problem is not None:
+            line += f"; first problem: {self.problem}"
+        return line
+
+
+def ended_run(journal: Path) -> EndedRun | None:
+    """The run of `journal` when its journal holds `run-end`, or None when the run goes on.
+
+    The run id is the name of the directory of the journal. Raise JournalError when the journal is not valid.
+    """
+    events, _ = read_new_events(journal, 0, 1)
+    tracker = _Tracker()
+    problem: str | None = None
+    for event in events:
+        reason = tracker.problem(event)
+        if problem is None and reason is not None:
+            problem = f"ticket {event.get('ticket')}: {reason}"
+        if event["event"] == "run-end":
+            return EndedRun(journal.parent.name, str(event["result"]), datetime.fromisoformat(str(event["time"])), problem)
+    return None
+
+
+def _result_code(result: object) -> int:
+    """The exit code of the result of a `run-end` event."""
+    return EXIT_SUCCEEDED if result == "built" else EXIT_FAILED
 
 
 def format_event(event: dict[str, object]) -> str:
@@ -289,7 +337,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             if seq <= options.from_position:
                 sink.event(event, False, None)
                 if event["event"] == "run-end" and not history:
-                    return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
+                    return WatchResult(_result_code(event["result"]), position)
                 continue
             position = seq
             sink.event(event, True, problem)
@@ -299,7 +347,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
             if event["event"] == "run-end" and not history:
-                return WatchResult(EXIT_SUCCEEDED if event["result"] == "built" else EXIT_FAILED, position)
+                return WatchResult(_result_code(event["result"]), position)
         if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
             sink.stall(options.stall_minutes, last_event)
             return WatchResult(EXIT_STALL, position)

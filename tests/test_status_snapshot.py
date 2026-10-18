@@ -641,7 +641,8 @@ def test_watch_of_a_run_that_ended_draws_it_once_and_exits_with_no_wait(tmp_path
     run.add(640, "step-end", ticket="b", state="built", reason=None)
     run.add(641, "run-end", result="built", built=["first-ticket-with-a-long-id", "b"], failed=[], skipped=[])
 
-    code, drawn, waits = follow(repo, monkeypatch, run)
+    # With no run id, a newest run that ended gets one line, so the case names the run.
+    code, drawn, waits = follow(repo, monkeypatch, run, "20261016T030000Z-abcd")
 
     assert (code, waits, len(drawn)) == (0, [], 1)
     assert drawn[0][0].startswith("run 20261016T030000Z-abcd built 100%")

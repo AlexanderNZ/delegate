@@ -66,6 +66,14 @@ delegate watch --raw
 
 See [the raw lines](../reference/status-and-watch.md#the-raw-lines).
 
+When the newest run has ended, `watch` with no run id shows none of its events. It prints one line with the result of that run, and exits. To see the events of a run that ended, give its run id:
+
+```bash
+delegate watch <run-id> --raw
+```
+
+See [the newest run that ended](../reference/status-and-watch.md#the-newest-run-that-ended).
+
 ### 3. Act on the exit code
 
 The exit code of `watch` tells you why it stopped: the run succeeded, the run failed, a [**step**](../glossary.md#step) has a problem, or a limit is reached. See [the exit codes of `watch`](../reference/status-and-watch.md#exit-codes) for each code.

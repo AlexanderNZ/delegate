@@ -207,6 +207,8 @@ delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--
 
 The exit codes, the options, and the last line `position <seq>` are the same in the two forms. The position is the `seq` of the last event that `watch` reported.
 
+With no run id, `watch` follows the newest run of the repository. When that run has ended, `watch` prints one line and no event. See [the newest run that ended](#the-newest-run-that-ended).
+
 On a terminal, `watch` also shows the progress of the run in the title of the terminal, in the two forms. See [the terminal title](#the-terminal-title).
 
 <!-- generated:begin watch-options -->
@@ -224,6 +226,18 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 | `--raw` | Print the raw line of each event, as to a standard output that is not a terminal; default on a terminal is the live view. |
 
 <!-- generated:end watch-options -->
+
+### The newest run that ended
+
+When `watch` gets no run id and no `--from`, and the journal of the newest run holds `run-end`, no run is active. `watch` then shows no event of that run. It prints one line, and no line `position <seq>`:
+
+```
+no run is active; the newest run 20261016T030000Z-abcd ended failed at 2026-10-16 17:06; first problem: ticket a: the step failed: no commit
+```
+
+The line gives the run id, the result, and the local date and time of the `run-end` event. When the run failed and its journal holds a [problem](#the-problem-events), the line also gives the ticket and the reason of the first problem. Then `watch` exits with the code of the result: 0 for `built`, and 1 for `failed`. See [the exit codes](#exit-codes). The line is the same on a terminal and with `--raw`, and `watch` draws no live view.
+
+To see the events of a run that ended, give its run id or `--from`. `watch` then replays the journal, as it does for a run that goes on. When the repository has no run, `watch` exits 2.
 
 ### The live view
 
@@ -289,7 +303,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 
 Code 2 is also the code that `argparse` gives for a usage error.
 
-`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem.
+`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result.
 
 A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the first `resume` after its newest `run-end` that a `resume` follows are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still ends the watch. `watch` then follows the resumed run to its new `run-end`.
 

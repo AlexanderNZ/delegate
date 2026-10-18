@@ -74,26 +74,33 @@ def registered():
 
 
 @outside_the_package
-def test_the_page_shows_the_state_of_a_finished_run_and_follows_its_journal_to_the_end_and_from_a_position(
+def test_the_page_shows_the_state_of_a_finished_run_and_its_journal_by_run_id_to_the_end_and_from_a_position(
     tmp_path, monkeypatch, git_identity, registered
 ):
     registered(ScriptedAdapter(files_by_ticket=FILES))
     repo = a_repo(tmp_path)
 
     started = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
+    run_id = run_id_of(started)
     watched = follow(PAGE, repo, monkeypatch, only=containing("delegate status"))
     raw = follow(PAGE, repo, monkeypatch, only=containing("delegate watch --raw"))
+    by_run_id = follow(PAGE, repo, monkeypatch, only=containing("delegate watch <run-id>"), replace={"<run-id>": run_id})
     from_position = follow(PAGE, repo, monkeypatch, only=containing("--from"), replace={"<position>": "2"})
 
-    steps = started + watched + raw + from_position
+    steps = started + watched + raw + by_run_id + from_position
     assert [(step.code, step.err) for step in steps] == [(0, "")] * len(steps)
     status = next(step for step in watched if step.command == "delegate status")
     assert "ticket 1: state built, verdict ACCEPT" in status.out and "ticket 2: state built, verdict ACCEPT" in status.out
+    # The run has ended, so a watch with no run id prints one line, and no event.
     watch = next(step for step in watched if step.command.startswith("delegate watch"))
-    assert watch.out.splitlines()[0].startswith("1 ") and " run-start " in watch.out.splitlines()[0]
-    assert watch.out.splitlines()[-2].endswith("run-end result=built") and watch.out.splitlines()[-1] == "position 32"  # each of the two gate runs adds gate-start
     assert [step.command for step in raw] == ["delegate watch --raw"]
-    assert raw[0].out.splitlines()[0].startswith("1 ") and raw[0].out.splitlines()[-1] == "position 32"
+    for step in (watch, raw[0]):
+        assert step.out.startswith(f"no run is active; the newest run {run_id} ended built at ") and step.out.count("\n") == 1
+    # With its run id, watch prints each event of the run that ended.
+    assert [step.command for step in by_run_id] == [f"delegate watch {run_id} --raw"]
+    replayed = by_run_id[0].out.splitlines()
+    assert replayed[0].startswith("1 ") and " run-start " in replayed[0]
+    assert replayed[-2].endswith("run-end result=built") and replayed[-1] == "position 32"  # each of the two gate runs adds gate-start
     # Going on from position 2 prints the events after it, and no event at or before it.
     printed = [line for line in from_position[0].out.splitlines() if line[:1].isdigit() and " " in line]
     assert printed[0].startswith("3 ") and printed[-1].endswith("run-end result=built")

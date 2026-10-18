@@ -8,6 +8,9 @@ the sink prints the raw line of each event.
 
 When standard output is a terminal, this module also sets the title of the terminal (`delegate.cli.title`): the short
 run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
+
+With no run id and no `--from`, a newest run that ended gets one line (`delegate.run.watch.EndedRun`) and the exit
+code of its result, and no replay of its journal.
 """
 
 from __future__ import annotations
@@ -72,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0",
     )
     parser.add_argument(
-        "--from", type=_position, default=0, metavar="POSITION", dest="from_position",
+        "--from", type=_position, default=None, metavar="POSITION", dest="from_position",
         help="go on after the event with this position, which an earlier watch printed; no event is reported twice",
     )
     parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
@@ -161,9 +164,16 @@ class _Titled:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, args.from_position, args.poll_seconds)
+    from_position = 0 if args.from_position is None else args.from_position
+    options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, from_position, args.poll_seconds)
     try:
         journal = journal_of(args.repo, args.run_id, GitVersionControl())
+        # With no run id and no `--from`, a newest run that ended gets one line, not a replay of its journal.
+        ended = watch.ended_run(journal) if args.run_id is None and args.from_position is None else None
+        if ended is not None:
+            Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(ended.run_id)}{SEPARATOR}{ended.result}")
+            print(ended.line())
+            return ended.code
         sink: watch.Sink = watch.RawSink(_emit)
         if not args.raw and sys.stdout.isatty():
             screen = _Screen(sys.stdout)

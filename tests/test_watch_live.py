@@ -148,7 +148,7 @@ def local_zone(monkeypatch):
 def watch(
     repo: Path, monkeypatch, *extra: str, terminal: bool = True, columns: int = 200, rows: int = 50, then=None, sleep=None
 ) -> tuple[int, str]:
-    """Run `delegate watch` with standard output to a terminal or to a pipe.
+    """Run `delegate watch r1` with standard output to a terminal or to a pipe.
 
     The first wait calls `then`, and a later wait fails the case. A case that waits more than once gives its own `sleep`.
     """
@@ -164,7 +164,7 @@ def watch(
         then()
 
     monkeypatch.setattr(time, "sleep", sleep or wait_once)
-    code = delegate.main(["watch", "--repo", str(repo), *extra])
+    code = delegate.main(["watch", "r1", "--repo", str(repo), *extra])
     return code, out.getvalue()
 
 
@@ -477,6 +477,23 @@ def test_each_end_reason_has_the_exit_code_and_the_position_of_before_on_a_termi
     if raw is not None:
         assert raw_out == raw.format(dir=run.dir)
     assert re.fullmatch(feed_end, frames(live_out)[-1][-1]), frames(live_out)[-1]
+
+
+def test_watch_with_no_run_id_of_a_newest_run_that_ended_draws_no_frame_on_a_terminal_and_prints_one_line(
+    tmp_path, monkeypatch, local_zone
+):
+    local_zone("NZT-13")  # 13 hours east of UTC: the run ends at 04:06:40 UTC, which is 17:06 local time
+    repo = bare_repo(tmp_path)
+    run = a_live_run(repo)
+    ticket_b_ends(run)
+    out = Terminal()
+    monkeypatch.setattr(sys, "stdout", out)
+
+    code = delegate.main(["watch", "--repo", str(repo)])
+
+    assert code == 0
+    assert frames(out.getvalue()) == []
+    assert without_titles(out.getvalue()) == "no run is active; the newest run r1 ended built at 2026-10-16 17:06\n"
 
 
 def test_watch_of_an_unknown_run_on_a_terminal_exits_2_as_before(tmp_path, monkeypatch, capsys):
