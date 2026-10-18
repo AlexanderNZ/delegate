@@ -27,11 +27,14 @@ def test_package_nix_holds_no_literal_version_and_reads_it_from_pyproject():
 # CI runs the suite before each tag, and on a developer Mac the serial suite in the Nix sandbox took about 30 minutes.
 ROOT = PACKAGE_NIX.parent
 NIX = shutil.which("nix")
+# A machine can have nix with the flakes feature off.
+FLAKES = ("--extra-experimental-features", "nix-command flakes")
+SKILL = ROOT / "skills" / "agent-definitions" / "SKILL.md"
 
 
 def _eval(attribute: str) -> object:
     result = subprocess.run(
-        ["nix", "eval", "--json", f"{ROOT}#{attribute}"], capture_output=True, text=True, check=True, cwd=ROOT,
+        ["nix", *FLAKES, "eval", "--json", f"{ROOT}#{attribute}"], capture_output=True, text=True, check=True, cwd=ROOT,
     )
     return json.loads(result.stdout)
 
@@ -40,7 +43,7 @@ def _eval(attribute: str) -> object:
 @pytest.mark.skipif(NIX is None, reason="nix is not installed, so the flake cannot be evaluated")
 def test_the_package_runs_no_tests_and_the_tests_check_runs_the_suite_in_parallel():
     system = subprocess.run(
-        ["nix", "eval", "--impure", "--raw", "--expr", "builtins.currentSystem"], capture_output=True, text=True, check=True,
+        ["nix", *FLAKES, "eval", "--impure", "--raw", "--expr", "builtins.currentSystem"], capture_output=True, text=True, check=True,
     ).stdout
 
     assert _eval(f"packages.{system}.agent-definitions.doInstallCheck") is False
@@ -48,3 +51,13 @@ def test_the_package_runs_no_tests_and_the_tests_check_runs_the_suite_in_paralle
     flags = _eval(f"checks.{system}.tests.pytestFlags")
     assert "-rs" in flags
     assert flags[flags.index("-n") + 1] == "auto"
+    # The suite runs in parallel only when pytest-xdist is a build input of the check.
+    assert any("pytest-xdist" in path for path in _eval(f"checks.{system}.tests.nativeBuildInputs"))
+
+
+@outside_the_package
+def test_the_skill_page_names_the_flake_check_that_runs_the_suite():
+    text = SKILL.read_text()
+
+    assert "runs in `nix flake check` as the `tests` check" in text
+    assert "as the `agent-definitions` check" not in text

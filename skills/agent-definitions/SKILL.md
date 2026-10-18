@@ -80,7 +80,7 @@ Exit conditions. `full` exits 1 when the three-dot diff is empty. `fixup` exits 
 
 Why a command and not a prose instruction: the mode of the brief sets the mode of the verifier (below), and the diff form decides what the verifier reads. Both are easy to get wrong by hand and impossible to see afterwards.
 
-The package lives in `src/delegate/`, and its tests in `tests/`. Its pytest suite runs in `nix flake check` as the `agent-definitions` check. The suite needs `git`, a `nativeCheckInput` in `package.nix`. The guard tests run the rendered hooks with `python3` as the only tool on `PATH`, so the suite needs no `jq`.
+The package lives in `src/delegate/`, and its tests in `tests/`. Its pytest suite runs in `nix flake check` as the `tests` check, which builds the package with `runTests = true`. The package itself runs no tests. The suite needs `git` and `pytest-xdist`, two `nativeCheckInputs` in `package.nix`. The guard tests run the rendered hooks with `python3` as the only tool on `PATH`, so the suite needs no `jq`.
 
 ## Bootstrap
 
