@@ -148,6 +148,11 @@ FINDING_CODES: dict[str, str] = {
     "CROSS_HARNESS_MISMATCH": "an agent present for one harness and absent for the other",
     "MISSING_SKILL": "a preloaded skill absent from `--skills-dir`",
     "DESCRIPTION_BUDGET": "combined Claude Code descriptions exceed the budget in `tiers.toml`",
+    "LOAD_BLOCK_NOT_PLAIN": (
+        "a load-time block (`` ```! ``) of a preloaded skill holds, outside quotes, `$(`, a backtick, `;`, `&&`, a double pipe, "
+        "a pipe, `if` or a redirection; Claude Code cannot analyse the command, so a subagent that preloads the skill does not "
+        "start (ADR 0006). The finding gives the file and the line"
+    ),
 }
 
 
@@ -156,13 +161,15 @@ class Finding:
     code: str
     file: str
     message: str
+    line: int | None = None
 
     def __post_init__(self) -> None:
         if self.code not in FINDING_CODES:
             raise ValueError(f"finding code {self.code!r} is not in FINDING_CODES, so the reference would not list it")
 
     def __str__(self) -> str:
-        return f"{self.code} {self.file}: {self.message}"
+        where = self.file if self.line is None else f"{self.file}:{self.line}"
+        return f"{self.code} {where}: {self.message}"
 
 
 def split_frontmatter(text: str) -> tuple[dict | None, str, str | None]:
@@ -438,6 +445,105 @@ def _names(d: Path, harness: str) -> set[str]:
     return out
 
 
+def _refused_forms(command: str) -> list[str]:
+    """The shell forms of one command line that make it more than one plain command.
+
+    A sign in single quotes is text. In double quotes only `$(` and a backtick
+    keep their meaning. A backslash outside single quotes escapes the next sign.
+    """
+    forms: list[str] = []
+    unquoted: list[str] = []
+
+    def add(form: str) -> None:
+        if form not in forms:
+            forms.append(form)
+
+    quote = None
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+            unquoted.append(" ")
+            i += 1
+            continue
+        if c == "\\":
+            unquoted.append("  ")
+            i += 2
+            continue
+        if command.startswith("$(", i):
+            add("`$(`")
+        elif c == "`":
+            add("a backtick")
+        if quote == '"':
+            quote = None if c == '"' else quote
+            unquoted.append(" ")
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            unquoted.append(" ")
+            i += 1
+            continue
+        if command.startswith(("&&", "||"), i):
+            add(f"`{command[i:i + 2]}`")
+            unquoted.append("  ")
+            i += 2
+            continue
+        if c == "|":
+            add("`|`")
+        elif c == ";":
+            add("`;`")
+        elif c in "<>":
+            add("a redirection")
+        unquoted.append(c)
+        i += 1
+    if "if" in re.split(r"[\s;&|<>()]+", "".join(unquoted)):
+        add("`if`")
+    return forms
+
+
+def load_time_block_findings(skill: Path) -> list[Finding]:
+    """One LOAD_BLOCK_NOT_PLAIN finding for each load-time block of a skill that is not one plain command.
+
+    A load-time block is a fenced block that opens with ```! . Claude Code runs
+    its command when it loads the skill, and only when it can analyse the
+    command: a block with shell syntax stops a subagent that preloads the skill
+    from starting (ADR 0006). The finding gives the first line of the block
+    that holds a refused form. The content of another fenced block is not a
+    command, so the check skips it.
+    """
+    findings: list[Finding] = []
+    in_fence = False
+    load_time = False
+    forms: list[str] = []
+    first = None
+    for number, line in enumerate(skill.read_text().splitlines(), start=1):
+        stripped = line.strip()
+        if not in_fence:
+            if stripped.startswith("```"):
+                in_fence = True
+                load_time = stripped[3:].strip() == "!"
+                forms, first = [], None
+            continue
+        if stripped == "```":
+            if load_time and forms:
+                findings.append(Finding(
+                    "LOAD_BLOCK_NOT_PLAIN", str(skill),
+                    f"the load-time block holds {', '.join(forms)}; Claude Code cannot analyse it, "
+                    "so a subagent that preloads this skill does not start. Write one plain command (ADR 0006)",
+                    line=first,
+                ))
+            in_fence = False
+            continue
+        if load_time:
+            found = _refused_forms(line)
+            if found and first is None:
+                first = number
+            forms += [f for f in found if f not in forms]
+    return findings
+
+
 def validate_set(
     tiers: Tiers,
     claude_code_dir: Path | None = None,
@@ -457,6 +563,7 @@ def validate_set(
         for n in sorted(b - a):
             findings.append(Finding("CROSS_HARNESS_MISMATCH", n, "present for OpenCode, absent for Claude Code"))
     if skills_dir is not None and claude_code_dir is not None:
+        checked: set[Path] = set()
         for f in sorted(Path(claude_code_dir).glob("*.md")):
             fm, _b, err = split_frontmatter(f.read_text())
             if err:
@@ -464,6 +571,12 @@ def validate_set(
             for s in fm.get("skills", []) or []:
                 in_project = (Path(skills_dir) / s / "SKILL.md").exists()
                 in_user = user_skills_dir is not None and (Path(user_skills_dir) / s / "SKILL.md").exists()
+                # Each copy of the skill is checked: the harness loads one of them.
+                for root, present in ((skills_dir, in_project), (user_skills_dir, in_user)):
+                    path = Path(root) / s / "SKILL.md" if present else None
+                    if path is not None and path not in checked:
+                        checked.add(path)
+                        findings += load_time_block_findings(path)
                 if not in_project and not in_user:
                     if user_skills_dir is not None:
                         findings.append(Finding(

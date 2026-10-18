@@ -246,6 +246,7 @@ Decision of 2026-09-19 ([ADR 0001](../../docs/adr/0001-effort-follows-the-model.
 | `CROSS_HARNESS_MISMATCH` | an agent present for one harness and absent for the other |
 | `MISSING_SKILL` | a preloaded skill absent from `--skills-dir` |
 | `DESCRIPTION_BUDGET` | combined Claude Code descriptions exceed the budget in `tiers.toml` |
+| `LOAD_BLOCK_NOT_PLAIN` | a load-time block (`` ```! ``) of a preloaded skill holds, outside quotes, `$(`, a backtick, `;`, `&&`, a double pipe, a pipe, `if` or a redirection; Claude Code cannot analyse the command, so a subagent that preloads the skill does not start (ADR 0006). The finding gives the file and the line |
 
 <!-- generated:end finding-codes -->
 
