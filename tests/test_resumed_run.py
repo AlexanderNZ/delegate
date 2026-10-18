@@ -144,3 +144,28 @@ def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_
 
     assert code == 4
     assert "ACCEPT" in out and "REJECT" not in out.split("resume", 1)[1]
+
+
+def test_watch_of_a_run_that_ended_resumed_crashed_and_resumed_again_exits_3_at_the_problem_after_the_first_resume(tmp_path, capsys):
+    # The history ends at the first `resume` after the last `run-end`. A problem after it is no history, also when a later
+    # `resume` follows a crash with no `run-end`.
+    repo = bare_repo(tmp_path)
+    write_journal(
+        repo, "r1", run_start("r1", "a", "b"), step_start("a"), step_end("a", "failed", "boom1"), run_end("failed", [], ["a"]),
+        resume("a"), retry("a"), step_start("a"), step_end("a", "failed", "boom2"), resume("a"), retry("a"), step_start("b"),
+    )
+
+    code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
+
+    assert code == 3
+    assert "boom2" in out and "boom1" not in out.split("watch: problem")[1]
+
+
+def test_watch_of_a_resumed_run_that_ended_again_exits_with_the_result_of_its_last_run_end(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", *ENDED_THEN_RESUMED, step_end("a"), run_end("built", ["a"]))
+
+    code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
+
+    assert code == 0
+    assert "result=built" in [line for line in out.splitlines() if line.split()[2:3] == ["run-end"]][-1]

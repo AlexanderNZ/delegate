@@ -243,17 +243,18 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
 
 
 def _resumed_at(events: list[dict[str, object]]) -> int:
-    """The `seq` of the last `resume` event that follows a `run-end`, or 0 when the run did not end and resume.
+    """The `seq` of the newest `resume` event that comes right after a `run-end`, or 0 when the run did not end and resume.
 
-    A run that stopped with no `run-end` (a crash) and was resumed keeps its events: a problem there still counts.
+    A run that stopped with no `run-end` (a crash) and was resumed keeps its events: a problem there still counts. So a
+    `resume` after a crash does not move the end of the history.
     """
-    ended = False
     at = 0
+    ended = False
     for event in events:
         if event["event"] == "run-end":
             ended = True
         elif event["event"] == "resume" and ended:
-            at = int(event["seq"])  # type: ignore[call-overload]
+            ended, at = False, int(event["seq"])  # type: ignore[call-overload]
     return at
 
 
