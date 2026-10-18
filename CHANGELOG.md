@@ -7,6 +7,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 ### Fixed
 
 - `delegate status` and `delegate watch` follow a run that ended and was resumed. Before, `status` gave the old result and `100%`, and the retried ticket as `failed`, and `watch` exited at once at the old `run-end`. Now a `run-end` that a `resume` follows does not end the run, a ticket with a `retry` event is `running`, and `watch` treats the events before the first `resume` after the newest `run-end` that a `resume` follows as history (#103).
+- When the verifier guard denies a file descriptor as the last word inside quotes, such as `bash -c "ls 2>&1"`, its message now tells the agent to put a space before the closing quote: `bash -c "ls 2>&1 "` is permitted. The guard still denies the first form, because a quote after the descriptor can make the target a file name: `ls >&1")"` writes the file `1)` (#104).
 
 ## [1.4.0] - 2026-10-18
 

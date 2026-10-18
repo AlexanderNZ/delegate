@@ -860,6 +860,17 @@ AMPERSAND_REDIRECTION_TO_A_FILE = [
     ("ls >&|cat", "ls >&"),
     ("ls &>|cat", "ls &>"),
     ("ls 2>|cat", "ls 2>"),
+    # Inside quotes: a quote after the descriptor can make the target a file name (#104).
+    ('bash -c "ls >&out"', 'bash -c "ls >&out"'),
+    ("bash -c 'ls 2>&f'", "bash -c 'ls 2>&f'"),
+    ('ls >&1")"', 'ls >&1")"'),
+    ("ls >&1')'", "ls >&1')'"),
+    ("ls >&1\"'\"", "ls >&1\"'\""),
+    ("ls >&1'\"'", "ls >&1'\"'"),
+    ('ls 2>&1")"', 'ls 2>&1")"'),
+    ('ls >&-")"', 'ls >&-")"'),
+    ('ls >&1" y"', 'ls >&1" y"'),
+    ("echo 'x'>&1' y'", "echo 'x'>&1' y'"),
 ]
 
 #: A redirection with "&" to a file descriptor number or to "-" writes no file.
@@ -876,7 +887,8 @@ AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR = [
     "grep -n '2.&1' src",
 ]
 
-#: The same rule with a space after the "&". zsh does not divide a segment
+#: The same rule with a space after the "&", or with a space between the
+#: descriptor and a closing quote. zsh does not divide a segment
 #: into words, so it denies these forms. SKILL.md records that difference, and
 #: a deny keeps the guard closed.
 AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE = [
@@ -884,6 +896,9 @@ AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE = [
     "ls >& 2",
     "ls >& -",
     f"cp -R {WORKTREE} /tmp/proof >& 2",
+    # The form that the deny message gives for a descriptor as the last word inside quotes (#104).
+    'bash -c "ls 2>&1 "',
+    "python3 -c 'x(\"ls 2>&1 \")'",
 ]
 
 
@@ -901,6 +916,16 @@ def test_a_redirection_with_an_ampersand_to_a_file_is_denied(command, segment, s
 def test_a_redirection_with_an_ampersand_to_a_descriptor_stays_permitted(command, shell):
     r = _run_guard(command, shell=shell, hook=_hook_for(command))
     assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
+@pytest.mark.parametrize("command", ['bash -c "ls 2>&1"', "python3 -c 'x(\"ls 2>&1\")'"])
+def test_a_descriptor_as_the_last_word_inside_quotes_is_denied_with_the_form_that_the_guard_permits(command, shell):
+    # The guard divides a segment at spaces, so the word holds the closing quote, and a quote there can make the target
+    # a file. The deny message names the form with a space before the closing quote, which the guard permits (#104).
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+    assert "put a space before the closing quote" in r.stderr, (shell, command, r.stderr)
 
 
 @pytest.mark.parametrize("shell", GUARD_SHELLS)

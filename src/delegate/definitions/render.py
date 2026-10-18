@@ -252,7 +252,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # first ">&" and no ">" before it.
     to_file = (
         "A redirection with & writes to a file when the word after the & is not a file descriptor number or -, "
-        "and >>& always writes to a file in zsh. To search for the text, write a . in place of the >."
+        "and >>& always writes to a file in zsh. To search for the text, write a . in place of the >. "
+        "When 2>&1 is the last word inside quotes, put a space before the closing quote."
     )
     # The divider cuts at each "|", but in ">|" and ">&|" the "|" is part of
     # the redirection, and the word after it is the file. So a segment that
