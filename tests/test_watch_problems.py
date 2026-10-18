@@ -158,6 +158,15 @@ def test_a_verifier_that_returns_no_result_is_a_problem_that_names_the_ticket(tm
             "fixup-report", {"round": 1, "valid": False, "path": "/r.json", "reason": "report /r.json not found"},
             "the fix-up specialist returned no valid result: report /r.json not found", id="fixup-no-report",
         ),
+        # A report event with no reason gives no reason text, not the text None.
+        pytest.param(
+            "fixup-report", {"round": 1, "valid": False, "path": "/r.json", "reason": None},
+            "the fix-up specialist returned no valid result", id="fixup-no-report-no-reason",
+        ),
+        pytest.param(
+            "report-validation", {"valid": False, "path": "/r.json", "reason": None},
+            "the specialist returned no valid result", id="specialist-no-report-no-reason",
+        ),
         pytest.param(
             "fixup-report", {"round": 1, "valid": True, "path": "/r.json", "reason": None, "status": "partial"},
             "the fix-up specialist ended partial", id="fixup-partial",

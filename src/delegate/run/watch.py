@@ -138,7 +138,8 @@ class _Tracker:
         elif kind in AGENT_REPORT_ROLES:
             role = AGENT_REPORT_ROLES[kind]
             if not event["valid"]:
-                return f"the {role} returned no valid result: {event['reason']}"
+                reason = event.get("reason")
+                return f"the {role} returned no valid result" + (f": {reason}" if reason else "")
             status, detail = event.get("status"), event.get("blocked_reason")
             if status is not None and status != "committed":
                 subject = "the step" if kind == "report-validation" else f"the {role}"

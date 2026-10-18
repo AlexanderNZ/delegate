@@ -766,10 +766,13 @@ SUBSTITUTION_DENIES = [
     "cat /tmp/$(rm -rf src)",
     "git log `rm -rf src`",
     # The shell removes a backslash-newline before it reads the command, so
-    # it does not hide the substitution. A review found this gap.
+    # it does not hide the substitution. A review found this gap. Each case
+    # here passes the guard when the guard does not remove a backslash-newline.
+    # The form ">\<newline>(" is not here: its word ends at ">\", so the
+    # redirection test denies it first (#89), and the case proves nothing
+    # about the backslash-newline rule.
     "echo $\\\n(rm -rf src)",
     "cat <\\\n(rm -rf src)",
-    "cat x >\\\n(rm -rf src)",
     "echo =\\\n(rm -rf src)",
 ]
 

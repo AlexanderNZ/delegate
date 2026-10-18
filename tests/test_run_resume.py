@@ -164,6 +164,30 @@ def test_a_run_that_has_ended_cannot_be_resumed(tmp_path, capsys, scripted):
     assert journal_path(repo, run_id).read_bytes() == before
 
 
+def test_a_failure_and_a_skip_with_no_reason_in_the_journal_do_not_print_the_text_none(tmp_path, capsys, scripted):
+    # The journal of a stopped run holds a failed step and a skip, each with a null reason.
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("c"))
+    run_id = finished_run(repo, capsys)
+    events = []
+    for event in read_journal_file(repo, run_id):
+        if event["event"] == "run-end" or event.get("ticket") == "c":
+            continue
+        if event["event"] == "step-end":
+            event = {**event, "state": "failed", "reason": None}
+        events.append(event)
+    events.append({"event": "skip", "ticket": "c", "blockers": [], "reason": None})
+    journal_path(repo, run_id).write_text("".join(json.dumps({**e, "seq": n}) + "\n" for n, e in enumerate(events, start=1)))
+    calls = len(scripted.calls)
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert code == 1 and "Traceback" not in err
+    assert "None" not in err
+    assert "delegate run: ticket a: the step failed\n" in err
+    assert "delegate run: ticket c: skipped: the journal gives no reason\n" in err
+    assert len(scripted.calls) == calls  # no step is open, so no agent starts
+
+
 def test_an_unknown_run_id_exits_one_and_names_the_id(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, HEAD + ticket("a"))
 

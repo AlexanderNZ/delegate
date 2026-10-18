@@ -361,11 +361,12 @@ def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = Fals
             else:
                 if ticket not in progress.failed:
                     progress.failed.append(ticket)
-                progress.failures[ticket] = str(event["reason"])
+                # A null reason gives a short text, not the text None.
+                progress.failures[ticket] = str(event.get("reason") or "the step failed")
             if started == ticket:
                 started = None
         elif kind == "skip":
-            progress.skipped[ticket] = str(event["reason"])
+            progress.skipped[ticket] = str(event.get("reason") or "the journal gives no reason")
     progress.open_ticket = started
     return progress
 
