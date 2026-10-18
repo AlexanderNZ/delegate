@@ -288,7 +288,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "set -- $seg; "
         "r=0; "
         'for a in "$@"; do '
-        f'if [ "$r" = 1 ]; then r=0; istmp "$a" || deny "$seg" "{redirect}"; continue; fi; '
+        f'if [ "$r" = 1 ]; then r=0; isout "$a" || deny "$seg" "{redirect}"; continue; fi; '
         f'if [ "$r" = 2 ]; then r=0; isfd "$a" || deny "$seg" "{to_file}"; continue; fi; '
         'case "$a" in '
         # A word with ">&": the text before the first ">&" holds no ">" (so
@@ -298,7 +298,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         f'case "$t" in *\'>\'*) deny "$seg" "{to_file}" ;; esac; '
         f'if [ -z "$v" ]; then r=2; else isfd "$v" || deny "$seg" "{to_file}"; fi ;; '
         "'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>') r=1 ;; "
-        f'*\'>\'*) istmp "${{a##*>}}" || deny "$seg" "{redirect}" ;; '
+        f'*\'>\'*) isout "${{a##*>}}" || deny "$seg" "{redirect}" ;; '
         "esac; "
         "done; "
         f'[ "$r" = 0 ] || deny "$seg" "{no_target}"; '
@@ -342,6 +342,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             f'istmp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
+            # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
+            # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
+            'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
             # A file descriptor number, or "-", which closes a descriptor.
             "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
             f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",
