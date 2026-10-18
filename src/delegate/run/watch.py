@@ -243,7 +243,7 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
 
 
 def _resumed_at(events: list[dict[str, object]]) -> int:
-    """The `seq` of the newest `resume` event that comes right after a `run-end`, or 0 when the run did not end and resume.
+    """The `seq` of the first `resume` after the newest `run-end` that a `resume` follows, or 0 when there is none.
 
     A run that stopped with no `run-end` (a crash) and was resumed keeps its events: a problem there still counts. So a
     `resume` after a crash does not move the end of the history.
@@ -280,8 +280,9 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             seq = int(event["seq"])  # type: ignore[call-overload]
             files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
-            # A run that ended and was resumed works again. Its events before the last `resume` are its history: a
-            # problem, a verdict or a `run-end` there does not end the watch.
+            # A run that ended and was resumed works again. Its events before the first `resume` after its newest
+            # `run-end` that a `resume` follows are its history: a problem, a verdict or a `run-end` there does not
+            # end the watch.
             history = seq < resumed_at
             if history:
                 problem = None
