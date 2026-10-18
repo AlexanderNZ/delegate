@@ -288,7 +288,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "set -- $seg; "
         "r=0; "
         'for a in "$@"; do '
-        f'if [ "$r" = 1 ]; then r=0; isout "$a" || deny "$seg" "{redirect}"; continue; fi; '
+        f'if [ "$r" = 1 ]; then r=0; outs "$a" || deny "$seg" "{redirect}"; continue; fi; '
         f'if [ "$r" = 2 ]; then r=0; isfd "$a" || deny "$seg" "{to_file}"; continue; fi; '
         'case "$a" in '
         # A word with ">&": the text before the first ">&" holds no ">" (so
@@ -300,9 +300,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "'>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>') r=1 ;; "
         # Each target of the word counts, not only the last: in `>x>/dev/null` the shell writes x too. zsh does not
         # divide the segment into words, so there the word is the whole segment.
-        # An empty piece between two signs is `>>`; an empty last piece is a sign with no target.
-        f'*\'>\'*) w=${{a#*>}}; while :; do x=${{w%%>*}}; [ -z "$x" ] || isout "$x" || deny "$seg" "{redirect}"; '
-        f'case "$w" in *\'>\'*) w=${{w#*>}} ;; *) [ -n "$x" ] || deny "$seg" "{redirect}"; break ;; esac; done ;; '
+        f'*\'>\'*) outs "${{a#*>}}" || deny "$seg" "{redirect}" ;; '
         "esac; "
         "done; "
         f'[ "$r" = 0 ] || deny "$seg" "{no_target}"; '
@@ -349,6 +347,12 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
+            # The text after a redirection sign: each piece between two signs is a target. An empty piece between two
+            # signs is `>>`; an empty last piece is a sign with no target. The word after a lone sign is checked the
+            # same way, so in `> /tmp/y>x` the target x counts too.
+            # It uses its own variable names: x holds the command, and the exact-gate test reads it.
+            "outs() { ow=$1; while :; do ox=${ow%%>*}; if [ -n \"$ox\" ]; then isout \"$ox\" || return 1; fi; "
+            "case \"$ow\" in *'>'*) ow=${ow#*>} ;; *) [ -n \"$ox\" ] || return 1; return 0 ;; esac; done; }",
             # A file descriptor number, or "-", which closes a descriptor.
             "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
             f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",

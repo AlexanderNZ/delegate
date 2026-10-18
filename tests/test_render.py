@@ -1047,12 +1047,27 @@ REDIRECTION_TO_ANOTHER_DEVICE = [
     "ls src >x 2>/dev/null",
     "ls src >x 2>/tmp/y",
     "ls src >>x>/dev/null",
+    # The word after a lone sign holds a second redirection: the shell writes x too (#105).
+    "ls src > /tmp/y>x",
+    "ls src 2> /tmp/y>x",
+    "ls src >> /tmp/y&>x",
+    "cp src/a /tmp/c > /tmp/y>x",
 ]
+
+#: The forms with no space that zsh, which does not divide a segment into words, also permits (#105).
+REDIRECTION_TO_DEV_NULL_WITH_NO_SPACE = ["ls src >/dev/null", "ls src 2>/dev/null", "ls src &>/dev/null", "ls src >>/dev/null"]
 
 
 @pytest.mark.parametrize("shell", GUARD_SHELLS)
 @pytest.mark.parametrize("command", REDIRECTION_TO_DEV_NULL)
 def test_a_redirection_to_dev_null_is_permitted(command, shell):
+    r = _run_guard(command, shell=shell)
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
+@pytest.mark.parametrize("command", REDIRECTION_TO_DEV_NULL_WITH_NO_SPACE)
+def test_a_redirection_to_dev_null_with_no_space_is_permitted_in_each_shell(command, shell):
     r = _run_guard(command, shell=shell)
     assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
 
