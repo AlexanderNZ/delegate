@@ -1238,7 +1238,8 @@ def _fixup_gates(step: _Step, round_number: int) -> None:
 
 
 def _verify_round(
-    step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None
+    step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None,
+    earlier_fixups: tuple[str, str] | None = None,
 ) -> VerifierReport:
     """Run one fresh verifier in a new temporary copy and return its valid verdict report.
 
@@ -1247,8 +1248,9 @@ def _verify_round(
     the gates. It never gets the report of the specialist.
 
     For a chain, `gates_text` gives the output of the gates that the engine ran
-    green on the tip, so the verifier does not run them, and `fixups` gives the
-    fix-up commits of red gates that the full pass must see (see `chain_brief`).
+    green on the tip, so the verifier does not run them, `fixups` gives the
+    fix-up commits of red gates that the full pass must see, and `earlier_fixups`
+    gives the fix-up commits of the stacks verified before (see `chain_brief`).
     """
     ticket = step.ticket
     tier, model = step.roles["verifier"]
@@ -1267,7 +1269,7 @@ def _verify_round(
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
-                    chain_brief(step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups)
+                    chain_brief(step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups)
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
                 prompt = first_pass + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
@@ -1525,6 +1527,9 @@ class _ChainRun:
             return []  # a resume after the run branch moved: nothing is left to verify
         tip_ticket = self.chain[-1]
         segments = self._segments(every_event, events)
+        # The chain tip before the first fix-up of any stack. The fix-ups from here to the start of a stack are the
+        # fix-ups of the stacks before it, and its full verifier sees those that change a file of its tickets (#93).
+        chain_start = segments[tip_ticket.id].tip
         stacks = list(dict.fromkeys(ticket.stack for ticket in self.chain))
         last: _Step | None = None
         for position, name in enumerate(stacks):
@@ -1538,7 +1543,7 @@ class _ChainRun:
             if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
             try:
-                self._verify_stack(step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name])
+                self._verify_stack(step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name], chain_start)
             except _StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
@@ -1547,7 +1552,7 @@ class _ChainRun:
             self._fail({ticket.id: reason for ticket in self.chain})
         return []
 
-    def _verify_stack(self, step: _Step, fixup_starts: list[dict[str, object]]) -> None:
+    def _verify_stack(self, step: _Step, fixup_starts: list[dict[str, object]], chain_start: str) -> None:
         """Run the gates of one stack on the chain tip, the fix-up rounds, and the verifiers, until a verifier accepts.
 
         Red gates start a fix-up round with the gate output. Green gates go on to
@@ -1560,6 +1565,10 @@ class _ChainRun:
         A resume gives the `fixup-start` events of the stack in `fixup_starts`:
         each counts as a round. The resume goes on at the gates, and its first
         verifier is a full pass, which also sees the fix-up commits.
+
+        The full verifier also sees the fix-up commits of the stacks before this
+        stack, from `chain_start` to the start of this stack, when they change a
+        file of a ticket of this stack (see `chain_brief`).
         """
         mode = self.workflow.mode
         limit = domain.fixup_round_limit(mode)
@@ -1569,6 +1578,7 @@ class _ChainRun:
             raise _StepFailed(used_up)
         # The full verifier also sees each fix-up commit beyond this commit: the tip before the first fix-up of the stack.
         start = str(fixup_starts[0]["rejected_commit"]) if fixup_starts else _tip(self.vcs, self.repo, step.branch)
+        earlier = (chain_start, start) if chain_start != start else None
         rejected: str | None = None  # the commit that the last verifier rejected
         findings: list[str] = []
         while True:
@@ -1586,7 +1596,7 @@ class _ChainRun:
                 continue
             gates_text = green_gates_text(tip, [(gate, output) for gate, _, output in outcomes])
             if rejected is None:
-                report = _verify_round(step, round_number, None, gates_text, (start, tip) if start != tip else None)
+                report = _verify_round(step, round_number, None, gates_text, (start, tip) if start != tip else None, earlier)
             else:
                 body = _checked_fixup_brief(step, round_number, rejected, _findings_text(findings), gates_text)
                 report = _verify_round(step, round_number, body, gates_text)

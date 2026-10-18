@@ -191,6 +191,41 @@ def reject_once(scripted, *findings):
     scripted.verdict_findings = list(findings) or [FINDING_B]
 
 
+def test_a_fixup_of_the_first_stack_that_changes_a_file_of_the_second_stack_is_in_the_diff_of_the_second_verifier(tmp_path, capsys, scripted):
+    reject_once(scripted, "[a] The CSV file is empty.")
+    scripted.fixup_files = {"b.txt": "b, changed by the python fix-up\n"}  # b.txt is the file of the ticket b of the docs stack
+    repo = make_repo(tmp_path, TWO_STACKS)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    (fixup,) = scripted.fixup_calls
+    assert fixup.agent == "python-specialist"
+    assert [call.agent for call in scripted.verifier_calls] == ["python-verifier", "python-verifier", "docs-verifier"]
+    docs_prompt = scripted.verifier_calls[2].prompt
+    assert "## Findings under verification" not in docs_prompt  # the docs stack gets a full pass
+    diff = docs_prompt.split("## Diff")[1].split("## Gates")[0]
+    assert "+b, changed by the python fix-up" in diff
+    events = read_journal(out)
+    rejected = next(e["rejected_commit"] for e in events if e["event"] == "fixup-start")
+    assert f"git diff {rejected}..{tip(repo, 'run/demo-c')}" in diff
+    assert tip(repo, "run/demo") == tip(repo, "run/demo-c")
+
+
+def test_a_fixup_of_the_first_stack_that_changes_no_file_of_the_second_stack_is_not_in_the_diff_of_the_second_verifier(tmp_path, capsys, scripted):
+    reject_once(scripted, "[a] The CSV file is empty.")
+    scripted.fixup_files = {"feature.txt": "a, fixed\n"}  # feature.txt is the file of the ticket a of the python stack
+    repo = make_repo(tmp_path, TWO_STACKS)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    docs_prompt = scripted.verifier_calls[2].prompt
+    diff = docs_prompt.split("## Diff")[1].split("## Gates")[0]
+    assert "a, fixed" not in diff and "+++ b/feature.txt" not in diff
+    assert "+++ b/b.txt" in diff
+
+
 def test_a_reject_gets_one_fixup_round_as_a_new_commit_on_the_chain_tip_and_a_fresh_scoped_verifier(tmp_path, capsys, scripted):
     reject_once(scripted)
     repo = make_repo(tmp_path, THREE_TICKETS)

@@ -102,6 +102,12 @@ def _changed_files(vcs: VersionControl, repo: str | Path, since: str, until: str
         return vcs.changed_paths(Path(repo), since, until, from_merge_base=from_merge_base, follow_renames=True)
 
 
+def _paths(vcs: VersionControl, repo: str | Path, since: str, until: str, *, from_merge_base: bool) -> list[str]:
+    """The changed paths between two names. A renamed path counts as its old name and its new name."""
+    with _vcs_errors():
+        return vcs.changed_paths(Path(repo), since, until, from_merge_base=from_merge_base)
+
+
 def gate_blocks(text: str, gates_start: int) -> list[GateBlock]:
     """The stack blocks in the "Verification gates" section that opens at gates_start.
 
@@ -375,6 +381,7 @@ def chain_brief(
     gate_commands: Sequence[str],
     gates_text: str | None = None,
     fixups: tuple[str, str] | None = None,
+    earlier_fixups: tuple[str, str] | None = None,
 ) -> str:
     """The first-pass brief for a chain: the task and the three-dot diff of each ticket, and the gates.
 
@@ -388,9 +395,16 @@ def chain_brief(
     `green_gates_text`). `fixups` is the pair `(start, tip)` of the fix-up
     commits that red gates caused before the first verifier of the stack. The
     brief then holds their delta `git diff <start>..<tip>` too.
+
+    `earlier_fixups` is the pair `(start, tip)` of the fix-up commits of the
+    stacks that the engine verified before this stack. When they change a file
+    that a ticket in `segments` changed (by its old or its new name), the brief
+    holds their delta `git diff <start>..<tip>` and names those files. When
+    they change no such file, the brief does not hold them.
     """
     tasks: list[str] = []
     diffs: list[str] = []
+    files: set[str] = set()  # each file that a ticket of the stack changed
     for segment in segments:
         command = f"git diff {segment.base}...{segment.tip}"
         diff = _diff(vcs, repo, segment.base, segment.tip, from_merge_base=True)
@@ -398,6 +412,20 @@ def chain_brief(
             raise BriefError(f"{command} is empty. The ticket {segment.ticket} holds no change to verify.")
         tasks.append(f"Ticket {segment.ticket}\n\n{segment.text.rstrip(chr(10))}")
         diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n" + _fenced_diff(diff))
+        if earlier_fixups is not None:
+            files.update(_paths(vcs, repo, segment.base, segment.tip, from_merge_base=True))
+    if earlier_fixups is not None:
+        start, tip = earlier_fixups
+        shared = sorted(files.intersection(_paths(vcs, repo, start, tip, from_merge_base=False)))
+        if shared:
+            command = f"git diff {start}..{tip}"
+            names = ", ".join(f"`{name}`" for name in shared)
+            diffs.append(
+                "### The fix-ups of the stacks before this stack\n\n"
+                f"The fix-up commits of the stacks that the engine verified before this stack change these files of "
+                f"the tickets of this stack: {names}. Check these changes against the tickets of this stack.\n\n"
+                f"`{command}`\n\n" + _fenced_diff(_diff(vcs, repo, start, tip, from_merge_base=False))
+            )
     if fixups is not None:
         start, tip = fixups
         command = f"git diff {start}..{tip}"
