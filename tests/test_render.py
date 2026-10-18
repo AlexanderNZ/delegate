@@ -860,6 +860,12 @@ AMPERSAND_REDIRECTION_TO_A_FILE = [
     ("ls >&|cat", "ls >&"),
     ("ls &>|cat", "ls &>"),
     ("ls 2>|cat", "ls 2>"),
+    # Inside quotes: the closing quote does not make a file name a descriptor (#104).
+    ('bash -c "ls >&out"', 'bash -c "ls >&out"'),
+    ("bash -c 'ls 2>&f'", "bash -c 'ls 2>&f'"),
+    ('bash -c "ls 2>&1"x', 'bash -c "ls 2>&1"x'),
+    ("python3 -c 'x(\"ls >&out\")'", "python3 -c 'x(\"ls >&out\")'"),
+    ("grep -F '2>&out' src", "grep -F '2>&out' src"),
 ]
 
 #: A redirection with "&" to a file descriptor number or to "-" writes no file.
@@ -874,6 +880,10 @@ AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR = [
     "./gradlew test 2>&1 | tail -3",
     # The search form that the deny message gives: a "." in place of the ">".
     "grep -n '2.&1' src",
+    # A descriptor as the last word inside quotes: the word holds the closing quote (#104).
+    'bash -c "ls 2>&1"',
+    "bash -c 'ls >&2'",
+    "python3 -c 'x(\"ls 2>&1\")'",
 ]
 
 #: The same rule with a space after the "&". zsh does not divide a segment

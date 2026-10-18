@@ -341,8 +341,12 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             f'istmp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
-            # A file descriptor number, or "-", which closes a descriptor.
-            "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
+            # A file descriptor number, or "-", which closes a descriptor. The quotes and the closing parentheses at
+            # the end of the word are removed first: the guard divides a segment at spaces, so in `bash -c "ls 2>&1"`
+            # the word is `2>&1"`, and in `python3 -c 'x("ls 2>&1")'` it is `2>&1")'`. A quote at the start or in the
+            # middle stays, so `>&'1 x'` is not a descriptor.
+            "isfd() { d=$1; while :; do case \"$d\" in *\\\"|*\\\'|*')') d=${d%?};; *) break;; esac; done; "
+            "case \"$d\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
             f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",
             '[ -n "$cmd" ] || { echo "verifier guard: no command text, or python3 is absent. '
             'The guard fails closed." >&2; exit 2; }',

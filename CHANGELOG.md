@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- The verifier guard permits a file descriptor as the last word inside quotes again, as before 1.4.0: `bash -c "ls 2>&1"` and `python3 -c 'run("ls 2>&1")'`. The guard divides a segment at spaces, so the word held the closing quote, and the test of the descriptor refused it. A redirection to a file inside quotes stays denied (#104).
+
 ## [1.4.0] - 2026-10-18
 
 ### Changed
