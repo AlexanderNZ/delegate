@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from delegate.cli.agent_definitions import main
+from tests.support import TEMPLATE_GIT, copy_of
 
 DOMAIN = "acme-api is a Spring Boot service: controllers, JPA repositories, and Flyway migrations."
 
@@ -32,10 +33,7 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
-@pytest.fixture
-def repo(tmp_path):
-    """A git repository with two reference documents and two library skills."""
-    r = tmp_path / "acme-api"
+def _build_acme_api(r: Path) -> None:
     (r / "docs").mkdir(parents=True)
     (r / "docs" / "gates.md").write_text(SHORT_DOC)
     (r / "docs" / "operate.md").write_text(LONG_DOC)
@@ -44,8 +42,13 @@ def repo(tmp_path):
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(f"---\nname: {s}\ndescription: The {s} skill.\n---\n")
     (r / "prompt.md").write_text("Prove every change with the suite. Never push.\n")
-    _git(r, "init", "-q")
-    return r
+    _git(r, *TEMPLATE_GIT, "init", "-q")
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A git repository with two reference documents and two library skills. The process builds it once (see `copy_of`)."""
+    return copy_of(tmp_path / "acme-api", ("bootstrap-acme-api",), _build_acme_api)
 
 
 def _args(

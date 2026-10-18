@@ -20,6 +20,7 @@ from delegate.cli import agent_definitions as cli
 from delegate.cli import brief, delegate
 from tests.conftest import EXAMPLE
 from tests.pages import repository_root
+from tests.support import GIT_IDENTITY, TEMPLATE_GIT, copy_of
 
 DOMAIN = "acme-api is a Spring Boot service: controllers, JPA repositories, and Flyway migrations."
 
@@ -45,11 +46,10 @@ def snapshot(root: Path) -> dict[str, str]:
 
 def git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=Scratch", "-c", "user.email=scratch@example.invalid",
-         "-c", "commit.gpgsign=false", *args],
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
         capture_output=True,
         text=True,
-        env={"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "PATH": shutil.os.environ["PATH"]},
+        env={"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "PATH": shutil.os.environ["PATH"], **GIT_IDENTITY},
     )
     assert r.returncode == 0, (args, r.stdout, r.stderr)
     return r.stdout.strip()
@@ -110,18 +110,20 @@ def invoke_expecting_error(entry, argv, capsys):
     return type(caught.value).__name__, str(caught.value)
 
 
-@pytest.fixture
-def repo(tmp_path):
-    """A git repository that bootstrap can write into."""
-    r = tmp_path / "acme-api"
+def _build_acme_api(r: Path) -> None:
     (r / "docs").mkdir(parents=True)
     (r / "docs" / "gates.md").write_text("# Gates\nrun the suite\n")
     d = r / ".claude" / "skills" / "tdd"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: tdd\ndescription: The tdd skill.\n---\n")
     (r / "prompt.md").write_text("Prove every change with the suite. Never push.\n")
-    git(r, "init", "-q")
-    return r
+    git(r, *TEMPLATE_GIT, "init", "-q")
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A git repository that bootstrap can write into. The process builds it once (see `copy_of`)."""
+    return copy_of(tmp_path / "acme-api", ("delegate-acme-api",), _build_acme_api)
 
 
 def bootstrap_argv(repo: Path, *extra: str) -> list[str]:
@@ -166,12 +168,13 @@ def test_bootstrap_writes_the_files_the_standalone_command_writes(repo, tmp_path
     assert any(name.endswith("acme-api-context/SKILL.md") for name in standalone_files)
 
 
-@pytest.fixture
-def scratch(tmp_path):
-    """A repository with a base commit, a rejected commit and a fix-up commit."""
-    r = tmp_path / "scratch"
+# The rejected commit of the scratch template of this process. `_build_scratch` sets it once.
+_SCRATCH_REJECTED: dict[str, str] = {}
+
+
+def _build_scratch(r: Path) -> None:
     (r / "docs" / "agents").mkdir(parents=True)
-    git(r, "init", "-q", "-b", "main")
+    git(r, *TEMPLATE_GIT, "init", "-q", "-b", "main")
     (r / "docs" / "agents" / "delegation.md").write_text(
         "# Rules\n\n## Verification gates\n\n```\nmake check\n```\n\n## Hotspots\n"
     )
@@ -186,7 +189,13 @@ def scratch(tmp_path):
     (r / "feature.py").write_text("def answer():\n    return 42\n")
     git(r, "add", "feature.py")
     git(r, "commit", "-q", "-m", "correct the answer")
-    return r, rejected
+    _SCRATCH_REJECTED["rejected"] = rejected
+
+
+@pytest.fixture
+def scratch(tmp_path):
+    """A repository with a base commit, a rejected commit and a fix-up commit. The process builds it once (see `copy_of`)."""
+    return copy_of(tmp_path / "scratch", ("delegate-scratch",), _build_scratch), _SCRATCH_REJECTED["rejected"]
 
 
 def test_brief_full_prints_what_verifier_brief_full_prints(scratch, capsys):

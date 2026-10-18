@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -41,15 +42,43 @@ blocked-by = []
 """
 
 
+# The author and the committer of each commit that a test makes. They go to git in the environment: an argument
+# `-c user.name=…` or a `git config` process does not hold them.
+GIT_IDENTITY: dict[str, str] = {
+    f"GIT_{role}_{key}": value
+    for role in ("AUTHOR", "COMMITTER")
+    for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid"))
+}
+
+
 def git(repo: Path, *args: str) -> str:
+    """Run one git process in `repo`, and return its stdout. An identity in the environment comes before `GIT_IDENTITY`."""
     r = subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=Scratch", "-c", "user.email=scratch@example.invalid",
-         "-c", "commit.gpgsign=false", *args],
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
         capture_output=True,
         text=True,
+        env={**GIT_IDENTITY, **os.environ},
     )
     assert r.returncode == 0, (args, r.stdout, r.stderr)
     return r.stdout
+
+
+# The summary line of `git commit`: `[<branch> <sha>] <subject>`, with `(root-commit)` before the sha of a first
+# commit. With `core.abbrev=40` the sha is in full, so the scripted adapter needs no `rev-parse` after a commit.
+COMMIT_SUMMARY = re.compile(r"^\[(?P<branch>\S+)(?: \(root-commit\))? (?P<head>[0-9a-f]{40})\]", re.MULTILINE)
+
+
+def commit_head(repo: Path, *args: str) -> tuple[str, str]:
+    """Commit in `repo` with the `git commit` arguments `args`, and return the new HEAD and the branch.
+
+    The commit and its result are one git process. A summary line that the
+    pattern does not match (a detached HEAD) costs one `rev-parse` more.
+    """
+    match = COMMIT_SUMMARY.search(git(repo, "-c", "core.abbrev=40", "commit", *args))
+    if match is None:
+        head, branch = git(repo, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()
+        return head, branch
+    return match["head"], match["branch"]
 
 
 # The repositories that `copy_of` made in this process, by key. Each process of the suite (each worker of
@@ -146,9 +175,11 @@ class ScriptedAdapter:
     `verdict_findings`, or the `verifier_report_text` you give (a text, or a
     function of the request that gives the text or None for the default), or none.
     `during_verifier` runs while the verifier runs, so a test can change the
-    real repository then. `verifier_calls` holds every verifier request. `verifier_heads` and
-    `verifier_remotes` hold the HEAD commit and the remotes of the working
-    directory at the time of each call.
+    real repository then. `verifier_calls` holds every verifier request. When
+    `record_verifier_git` is set, `verifier_heads` and `verifier_remotes` hold
+    the HEAD commit and the remotes of the working directory at the time of
+    each call. They cost two git processes for each call, so they stay empty
+    by default.
 
     `files_by_ticket` replaces `files` for a ticket whose id it holds, and a
     ticket id in `failing_tickets` ends `failed` with exit status 1, so a test
@@ -217,6 +248,7 @@ class ScriptedAdapter:
     verifier_exit_status: int = 0
     during_verifier: Callable[[AdapterRequest], None] | None = None
     verifier_calls: list[AdapterRequest] = field(default_factory=list)
+    record_verifier_git: bool = False
     verifier_heads: list[str] = field(default_factory=list)
     verifier_remotes: list[list[str]] = field(default_factory=list)
     verdict_sequence: list[str] = field(default_factory=list)
@@ -271,10 +303,11 @@ class ScriptedAdapter:
                 (request.cwd / name).write_text(content)
             git(request.cwd, "add", "-A")
         if is_fixup and self.fixup_amend:
-            git(request.cwd, "commit", "-q", "--amend", "-m", "amended work")
+            head, branch = commit_head(request.cwd, "--amend", "-m", "amended work")
         elif (self.fixup_commit if is_fixup else self.commit) and files:
-            git(request.cwd, "commit", "-q", "-m", f"scripted work ({request.agent})")
-        head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()  # one process for both
+            head, branch = commit_head(request.cwd, "-m", f"scripted work ({request.agent})")
+        else:
+            head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()  # one process for both
         before = self._report_check(request)
         role = "fix-up" if is_fixup else "specialist"
         if (self.fixup_write_report if is_fixup else self.write_report):
@@ -310,8 +343,9 @@ class ScriptedAdapter:
     def _run_verifier(self, request: AdapterRequest) -> AdapterResult:
         turn = len(self.verifier_calls)
         self.verifier_calls.append(request)
-        self.verifier_heads.append(git(request.cwd, "rev-parse", "HEAD").strip())
-        self.verifier_remotes.append(git(request.cwd, "remote").split())
+        if self.record_verifier_git:
+            self.verifier_heads.append(git(request.cwd, "rev-parse", "HEAD").strip())
+            self.verifier_remotes.append(git(request.cwd, "remote").split())
         for name, content in self.verifier_files.items():
             (request.cwd / name).write_text(content)
         if self.during_verifier is not None:
@@ -377,7 +411,6 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     A specialist or a verifier call counts as one call each. Return the run id
     and the process id of the child.
     """
-    import os
     import signal
     import subprocess as sp
     import sys
@@ -386,9 +419,7 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     # The child must import the package under test (src/) and these helpers (tests/) first, and still
     # find the dependencies (pyyaml) that the parent finds through its own PYTHONPATH. A Nix build gives them in no other way.
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(root / "src"), str(root), os.environ.get("PYTHONPATH")]))}
-    for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
-        env[f"GIT_COMMITTER_{key}"] = value
-        env[f"GIT_AUTHOR_{key}"] = value
+    env.update(GIT_IDENTITY)
     child = sp.Popen(
         [sys.executable, "-c", KILL_SCRIPT, str(repo / "workflow.toml"), str(repo), str(kill_before_call)],
         cwd=root, env=env, stdout=sp.PIPE, stderr=sp.PIPE, text=True,

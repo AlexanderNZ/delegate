@@ -74,6 +74,18 @@ def test_the_setup_installs_with_pip_and_runs_pytest_and_names_no_nix_command():
 
 
 @outside_the_package
+def test_the_setup_tells_a_maintainer_to_cap_the_workers_of_n_auto_and_ci_keeps_n_auto():
+    # On a machine with endpoint security agents, the agents use about half of the cores, and each program start is slow (#101).
+    text = section("Set up")
+    pytest_runs = [command for command in ci_commands() if "pytest" in command]
+
+    assert "`PYTEST_XDIST_AUTO_NUM_WORKERS`" in text
+    assert "endpoint security" in text
+    assert pytest_runs and all("-n auto" in command for command in pytest_runs)
+    assert "PYTEST_XDIST_AUTO_NUM_WORKERS" not in CI.read_text()
+
+
+@outside_the_package
 def test_the_setup_lists_python_and_git_and_no_other_tool_because_ci_installs_no_other_tool():
     need = next(line for line in section("Set up").splitlines() if line.startswith("You need"))
 

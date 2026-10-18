@@ -19,7 +19,7 @@ def identity(git_identity):
 
 @pytest.fixture
 def registered():
-    adapter = ScriptedAdapter()
+    adapter = ScriptedAdapter(record_verifier_git=True)
     adapters.register("scripted", adapter)
     yield adapter
     adapters.unregister("scripted")

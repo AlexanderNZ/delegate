@@ -5,14 +5,13 @@ Each case writes a workflow file into a real temporary git repository and calls
 ticket's acceptance criteria, not from the code under test.
 """
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from delegate.cli import delegate
 
-from .support import TEMPLATE_GIT, copy_of
+from .support import TEMPLATE_GIT, copy_of, git
 
 VALID = """\
 base-branch = "main"
@@ -50,17 +49,6 @@ text = "First ticket."
 stack = "python"
 blocked-by = []
 """
-
-
-def git(repo: Path, *args: str) -> str:
-    r = subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=Scratch", "-c", "user.email=scratch@example.invalid",
-         "-c", "commit.gpgsign=false", *args],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, (args, r.stdout, r.stderr)
-    return r.stdout
 
 
 def make_repo(tmp_path: Path, workflow: str) -> Path:

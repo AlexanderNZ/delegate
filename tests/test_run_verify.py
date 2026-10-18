@@ -205,6 +205,7 @@ def test_the_verifier_works_in_a_temporary_copy_and_a_verifier_that_writes_chang
     tmp_path, capsys, scripted
 ):
     scripted.verifier_files = {"feature.txt": "broken by the verifier\n", "scratch.txt": "proof\n"}
+    scripted.record_verifier_git = True
     repo = make_repo(tmp_path)
 
     code, out, err = run(repo, capsys)
@@ -222,6 +223,7 @@ def test_the_verifier_works_in_a_temporary_copy_and_a_verifier_that_writes_chang
 
 
 def test_the_copy_of_the_verifier_has_no_remote_so_it_cannot_reach_the_real_repository(tmp_path, capsys, scripted):
+    scripted.record_verifier_git = True
     repo = make_repo(tmp_path)
 
     code, out, err = run(repo, capsys)

@@ -12,7 +12,7 @@ import pytest
 
 from delegate.cli import brief
 
-from .support import copy_of
+from .support import GIT_IDENTITY, copy_of
 
 # The scratch repository must not read the user's git configuration. A global
 # hook, a signing key, or a different default branch name would change what
@@ -21,6 +21,7 @@ GIT_ENV = {
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
+    **GIT_IDENTITY,
 }
 
 
@@ -73,9 +74,6 @@ _SCRATCH_COMMITS: dict[str, str] = {}
 def _build_scratch(r):
     (r / "docs" / "agents").mkdir(parents=True)
     _git(r, "init", "-b", "main")
-    _git(r, "config", "user.name", "Scratch Agent")
-    _git(r, "config", "user.email", "scratch@example.invalid")
-    _git(r, "config", "commit.gpgsign", "false")
     (r / "docs" / "agents" / "delegation.md").write_text(DELEGATION_DOC)
     _git(r, "add", "docs")
     base = _commit(r, "README.md", "base\n", "base")

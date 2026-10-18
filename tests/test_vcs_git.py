@@ -18,7 +18,7 @@ from delegate.adapters.git import GitVersionControl
 from delegate.ports import vcs as port
 from delegate.ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError, VersionControl
 
-from .support import git, make_repo
+from .support import commit_head, git, make_repo
 from .test_fsmonitor import alive, daemon_pid, why_no_daemon_can_start
 
 
@@ -41,8 +41,7 @@ def commit(repo: Path, name: str, content: str, message: str) -> str:
     """Write a file in a checkout, commit it, and return the id of the new commit."""
     (repo / name).write_text(content)
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", message)
-    return git(repo, "rev-parse", "HEAD").strip()
+    return commit_head(repo, "-m", message)[0]
 
 
 def sha(repo: Path, ref: str) -> str:

@@ -17,12 +17,13 @@ import pytest
 
 from delegate.cli import brief
 
-from .support import copy_of
+from .support import GIT_IDENTITY, commit_head, copy_of
 
 GIT_ENV = {
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
+    **GIT_IDENTITY,
 }
 
 
@@ -49,8 +50,7 @@ def _branch(repo, name, files, base="main"):
     _git(repo, "checkout", "-b", name, base)
     for path, text in files.items():
         _write(repo, path, text)
-    _git(repo, "commit", "-m", f"change on {name}")
-    sha = _git(repo, "rev-parse", "HEAD")
+    sha = commit_head(repo, "-m", f"change on {name}")[0]
     _git(repo, "checkout", "main")
     return sha
 
@@ -106,9 +106,6 @@ NO_CLAIM = (
 
 def _build_monorepo(r):
     _git(r, "init", "-b", "main")
-    _git(r, "config", "user.name", "Scratch Agent")
-    _git(r, "config", "user.email", "scratch@example.invalid")
-    _git(r, "config", "commit.gpgsign", "false")
     _write(r, "docs/agents/delegation.md", STACK_DOC)
     _write(r, "api/Main.java", "class Main {}\n")
     _write(r, "app/main.ts", "export {};\n")

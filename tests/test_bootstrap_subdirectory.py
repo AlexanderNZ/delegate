@@ -14,17 +14,22 @@ from pathlib import Path
 import pytest
 
 from delegate.cli.agent_definitions import main
+from tests.support import TEMPLATE_GIT, copy_of
 from tests.test_bootstrap import LONG_DOC, SHORT_DOC, _args, _blocks, _git, _paths
 
 # The heading index of LONG_DOC: line 1 is "# Operate", line 201 is "## Runbooks".
 LONG_DOC_INDEX = "1:# Operate\n201:## Runbooks\n"
 
-_COMMIT = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false")
+# The commit takes its author and its committer from the environment of the test (see `tests/conftest.py`).
+_COMMIT = ("-c", "commit.gpgsign=false")
 
 
 def _make_repo(tmp_path: Path, state: str) -> Path:
-    """A repository with two reference documents and a source tree under app/."""
-    r = tmp_path / "acme-api"
+    """A repository with two reference documents and a source tree under app/. The process builds it once for each state (see `copy_of`)."""
+    return copy_of(tmp_path / "acme-api", ("bootstrap-subdirectory", state), lambda r: _build(r, state))
+
+
+def _build(r: Path, state: str) -> None:
     (r / "docs").mkdir(parents=True)
     (r / "docs" / "gates.md").write_text(SHORT_DOC)
     (r / "docs" / "operate.md").write_text(LONG_DOC)
@@ -35,13 +40,12 @@ def _make_repo(tmp_path: Path, state: str) -> Path:
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(f"---\nname: {s}\ndescription: The {s} skill.\n---\n")
     (r / "prompt.md").write_text("Prove every change with the suite. Never push.\n")
-    _git(r, "init", "-q")
+    _git(r, *TEMPLATE_GIT, "init", "-q")
     if state == "tracked":
-        _git(r, "add", "-A")
-        _git(r, *_COMMIT, "commit", "-q", "-m", "docs")
+        _git(r, *TEMPLATE_GIT, "add", "-A")
+        _git(r, *TEMPLATE_GIT, *_COMMIT, "commit", "-q", "-m", "docs")
     elif state == "ignored":
         (r / ".gitignore").write_text("docs/\n")
-    return r
 
 
 @pytest.fixture(params=["tracked", "untracked", "ignored"])
