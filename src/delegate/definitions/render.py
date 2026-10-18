@@ -288,7 +288,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "set -- $seg; "
         "r=0; "
         'for a in "$@"; do '
-        f'if [ "$r" = 1 ]; then r=0; outs "$a" || deny "$seg" "{redirect}"; continue; fi; '
+        # After a lone sign, a word that starts with a sign is no target.
+        f'if [ "$r" = 1 ]; then r=0; case "$a" in \'>\'*) deny "$seg" "{redirect}" ;; esac; '
+        f'outs "$a" || deny "$seg" "{redirect}"; continue; fi; '
         f'if [ "$r" = 2 ]; then r=0; isfd "$a" || deny "$seg" "{to_file}"; continue; fi; '
         'case "$a" in '
         # A word with ">&": the text before the first ">&" holds no ">" (so

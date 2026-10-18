@@ -1052,6 +1052,10 @@ REDIRECTION_TO_ANOTHER_DEVICE = [
     "ls src 2> /tmp/y>x",
     "ls src >> /tmp/y&>x",
     "cp src/a /tmp/c > /tmp/y>x",
+    # A word that starts with a sign after a lone sign: the guard of 1.4.0 denied it, and it stays denied.
+    "ls src > >/tmp/y",
+    "ls src 2> >>/tmp/y",
+    "ls src &> >/dev/null",
 ]
 
 #: The forms with no space that zsh, which does not divide a segment into words, also permits (#105).
