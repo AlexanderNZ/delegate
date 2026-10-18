@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- When the verifier guard denies a file descriptor as the last word inside quotes, such as `bash -c "ls 2>&1"`, its message now tells the agent to put a space before the closing quote: `bash -c "ls 2>&1 "` is permitted. The guard still denies the first form, because a quote after the descriptor can make the target a file name: `ls >&1")"` writes the file `1)` (#104).
+
 ## [1.4.0] - 2026-10-18
 
 ### Changed
