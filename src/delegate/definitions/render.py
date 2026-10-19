@@ -102,7 +102,9 @@ def _temp_path_pattern() -> str:
 #: The python3 text that defines `top()`, the git toplevel of the working
 #: directory of a hook (#106), and `u`, which removes a `/private` prefix. It
 #: reads the hook input `j`: the working directory is the absolute `cwd` of the
-#: input, or else the working directory of the process. The toplevel is that
+#: input, or else the working directory of the process. Claude Code documents `cwd` as a common field of the hook
+#: input: "Current working directory when the hook is invoked" (code.claude.com/docs/en/hooks.md, read 2026-10-19).
+#: The toplevel is that
 #: directory or the nearest directory above it that holds a `.git` entry (a
 #: directory, or the pointer file of a worktree), with no `/private` prefix.
 #: It is empty when no such directory exists. The search reads the file system
