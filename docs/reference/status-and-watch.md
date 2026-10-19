@@ -33,38 +33,38 @@ With no run id, `status` shows the one active run, or the newest run when no run
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A run can stop before the [**engine**](../glossary.md#engine) reads the request: for example, after Ctrl-C, a kill or a crash. The request then stays until the next resume, and the run has no live process. Such a run is not `pausing`: the result is the state of its journal, for example `running`. A second line then gives the note `note: a pause request waits; delegate run --resume removes it`. The next line gives the progress of the run, and the line after it gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A run can stop before the [**engine**](../glossary.md#engine) reads the request: for example, after Ctrl-C, a kill or a crash. The request then stays until the next resume, and the run has no live process. Such a run is not `pausing`: the result is the state of its journal, for example `running`. A second line then gives the note `note: a pause request waits; delegate run --resume removes it`. The next line gives the progress of the run, and the line after it gives the path of the journal. Under these lines and a blank line, a table has one row for each [**ticket**](../glossary.md#ticket) of the run, in plan order. It is the ticket table of the [live view](#the-live-view) of `watch`, with three more columns: [**`verdict`**](../glossary.md#verdict), `branch` and `last event`. The example below is the output for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold the glyphs of the live view:
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
-progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 302k new, 9.7M cache
+progress: 45%, 1 of 4 ended, 18m20s used, ETA 21m40s, tokens 58k new, 0 cache
 journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
-ticket a: state built, verdict ACCEPT, branch run/demo-a, last event 2026-10-16T03:10:00+00:00
-  progress: 10m00s used, tokens 290k new, 9.5M cache
-ticket b: state running, verdict -, branch run/demo-b, last event 2026-10-16T03:10:00+00:00
-  progress: specialist, 50s used, tokens 12k new, 205k cache, last activity 12s ago
+
+#  plan     state    phase                                        verdict  branch        used  new  cache  last event
+1  * a      + built                                               ACCEPT   run/demo-a  10m00s  39k      0  2026-10-16T03:10:00+00:00
+2  \-> b    running  specialist +  gates +  verifier *  fix-up o           run/demo-b   8m20s  19k      0  2026-10-16T03:16:00+00:00  active 2m20s
+3    \-. c  pending
+4  . d      pending
 ```
 
-The line of a ticket has this form:
+The progress line comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta). It gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
 
-```
-ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time>
-```
+The columns of the table:
 
-| Part | Meaning |
+| Column | Meaning |
 |---|---|
+| `#` | The position of the ticket in the plan. |
+| `plan` | The tree of the [**blockers**](../glossary.md#blocker), the node glyph of the state, and the id of the ticket, as in the live view. |
 | `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`; or a `retry` after the `step-end`), `built`, `failed`, or `skipped`. |
-| [**`verdict`**](../glossary.md#verdict) | The verdict of the newest `verdict` event of the ticket, or `-` when there is none. A verdict of a [**chain**](../glossary.md#chain) in [**`economy`**](../glossary.md#economy) mode covers each ticket in its `tickets` field. |
-| `branch` | The branch of the ticket, from `step-start`, or `-` when the ticket has no [**step**](../glossary.md#step). |
-| `last event` | The time of the newest event of the ticket, or `-` when there is none. |
+| `phase` | For a running ticket, its phase track, as in the live view: `✓` for a phase that is done, `●` for the phase that runs, and `○` for a phase that is to come. For a ticket that failed or was skipped, the reason, with no path. In a paused run, the cell of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`. |
+| `verdict` | The verdict of the newest `verdict` event of the ticket. Empty when there is none. A verdict of a [**chain**](../glossary.md#chain) in [**`economy`**](../glossary.md#economy) mode covers each ticket in its `tickets` field. |
+| `branch` | The branch of the ticket, from `step-start`. Empty when the ticket has no [**step**](../glossary.md#step). |
+| `used` | The time that the ticket used. Empty when the ticket has no step. |
+| `new`, `cache` | The two [token counts](#the-token-counts) of the ticket. Empty when the ticket has no step, or has [a stream that cannot be read](#a-stream-that-cannot-be-read). For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no such columns. |
+| `last event` | The time of the newest event of the ticket in the journal. Empty when there is none. |
+| (no header) | The live tail of a running ticket: `active <time>` since the last activity of its agent, or `gate <name> · log <time> ago` while a gate runs. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`. `status` has no stall time, so the tail gives no `⚠ idle`. |
 
-The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
-
-- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
-- A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, tokens 19k new, 610k cache, gate python3 -m pytest -q, gate log changed 30s ago`.
-- A pending ticket and a skipped ticket have no progress line.
-
-A ticket that failed or was skipped has the line `  reason: <reason>`, after its progress line.
+Each column is as wide as its widest value, with 2 cells between two columns. The numbers align right. `status` does not cut a line to the width of the terminal, and drops no column. On a terminal, each cell of the table has the colour of its role, as in the live view, and the verdict word is bold. The header lines have no colour. When `NO_COLOR` is set and not empty, or when standard output is not a terminal, the output has no SGR code. The text of `status` is for a person, and it can change in a later version. A program reads `status --json`: see [the snapshot](#the-snapshot).
 
 On a terminal, `status` sets the title of the terminal to `delegate status`. See [the terminal title](#the-terminal-title).
 
@@ -93,7 +93,7 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | Ticket field | Type | Meaning |
 |---|---|---|
 | `id` | string | The id of the ticket. |
-| `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the lines of `status`. |
+| `state` | string | `pending`, `running`, `built`, `failed`, or `skipped`, as in the table of `status`. |
 | `phase` | string or `null` | For a running ticket, the phase of its [**step**](../glossary.md#step): [**`specialist`**](../glossary.md#specialist), [**`gates`**](../glossary.md#gate), [**`verifier`**](../glossary.md#verifier), or [**`fix-up`**](../glossary.md#fix-up). `null` for a ticket that does not run. |
 | `elapsed_seconds` | integer | The time that the ticket used: from its `step-start` to its first `step-end`, or to `time` while it runs. 0 for a ticket with no step. |
 | `tokens_new` | integer or `null` | The new tokens of all agents of the ticket: the input, the cache writes, and the output of each specialist run, each fix-up specialist, and each verifier. In [**`economy`**](../glossary.md#economy) mode, the verifier of a [**chain**](../glossary.md#chain) counts for the last ticket of its [**stack**](../glossary.md#stack). `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a ticket with [a stream that cannot be read](#a-stream-that-cannot-be-read). See [the token counts](#the-token-counts). |
@@ -115,12 +115,12 @@ The two token counts and the time of the newest event come from the method `acti
 
 #### The token counts
 
-`status` shows two token counts, for the run and for each ticket, in each form: the lines of `status`, the JSON, and the run line, the ticket table and the feed of the [live view](#the-live-view) of `watch`. It shows no cost.
+`status` shows two token counts, for the run and for each ticket, in each form: the progress line and the ticket table of `status`, the JSON, and the run line, the ticket table and the feed of the [live view](#the-live-view) of `watch`. It shows no cost.
 
 - **New** (`tokens_new`): the input tokens, the cache writes, and the output tokens, with the thinking tokens. These are the tokens that the model reads or writes for the first time.
 - **Cache** (`tokens_cache`): the cache reads. Each turn of an agent reads its whole context again from the cache, so this count grows with the number of turns times the size of the context. A long [**session**](../glossary.md#session) has many cache reads, and they do not mean that the run is expensive.
 
-The lines give the two counts in a short form: `tokens 302k new, 9.7M cache`. The feed of `watch` uses the same form. A count under 1000 shows as it is, a count under one million shows in thousands (`k`), and a larger count shows in millions (`M`) with one decimal.
+The progress line of `status` gives the two counts in a short form: `tokens 302k new, 9.7M cache`. The feed of `watch` uses the same form. The ticket tables give each count in its own column, in the same short form: `302k` and `9.7M`. A count under 1000 shows as it is, a count under one million shows in thousands (`k`), and a larger count shows in millions (`M`) with one decimal.
 
 Each adapter splits the counts of its stream:
 
@@ -147,7 +147,7 @@ The `status` process can have no reader of the streams of a run:
 - The adapter of the run is not known to the process. For example, a script registered the adapter in its own process.
 - The adapter has no method `activity`. For example, an adapter of an earlier version.
 
-Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens_new`, `tokens_cache` and `idle_seconds` are `null`, the lines of `status` have no tokens and no last activity, and the [live view](#the-live-view) of `watch` has no columns `new` and `cache` and no activity in the live tail. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
+Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens_new`, `tokens_cache` and `idle_seconds` are `null`, and the ticket table of `status` and of the [live view](#the-live-view) of `watch` has no columns `new` and `cache` and no activity in the live tail. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
 
 ### A stream that cannot be read
 
@@ -166,7 +166,7 @@ Each form of `status` then works, and exits 0. It shows the progress and the ETA
 - In the JSON, the `tokens_new` and the `tokens_cache` of its ticket are `null`. The counts of the other agents of the ticket would not be the counts of the ticket.
 - When the agent runs now, the `idle_seconds` of its ticket is `null`.
 - The `tokens_new` and the `tokens_cache` of the run are the sums of the other tickets.
-- The lines of `status` and the row of the ticket in the live view of `watch` show no tokens for the ticket. While the agent runs, they show no last activity for it.
+- The row of the ticket in the table of `status` and in the live view of `watch` shows no tokens for the ticket. While the agent runs, it shows no activity for it.
 
 Only `status` treats such a stream as no data. `delegate run` reads the stream of an agent for its [**end state**](../glossary.md#end-state), and a stream that it cannot read stays an error there.
 

@@ -581,6 +581,30 @@ FRAME_END = "\x1b[J"
 TITLE = re.compile("\x1b\\]2;([^\x07]*)\x07")
 
 
+def status_row(out: str, ticket: str) -> list[str]:
+    """The cells of the row of a ticket in the ticket table of `delegate status` (#117), with no empty cell.
+
+    Two columns are 2 spaces apart or more, so the cells split at each run of 2 spaces or more. A phase track has 2
+    spaces between its phases, so each phase of it is a cell of its own. The first cell is the position in the plan,
+    and the second cell ends with the ticket id.
+    """
+    for line in out.splitlines():
+        cells = re.split(r" {2,}", line.strip())
+        if len(cells) > 1 and cells[0].isdigit() and cells[1].split()[-1] == ticket:
+            return cells
+    raise AssertionError(f"the table of status has no row of ticket {ticket}:\n{out}")
+
+
+def state_and_verdict(out: str, ticket: str) -> tuple[str, str]:
+    """The state and the verdict of a ticket in the ticket table of `delegate status`, with no glyph.
+
+    The state cell has the glyph of the locale, as `✓ built` or `+ built`, so a case that reads only the state word
+    needs no locale. The verdict is `ACCEPT`, `REJECT`, or empty when the ticket has none.
+    """
+    cells = status_row(out, ticket)
+    return cells[2].split()[-1], next((cell for cell in cells[3:] if cell in ("ACCEPT", "REJECT")), "")
+
+
 def without_titles(out: str) -> str:
     """The output with no title sequence: the text that the terminal shows."""
     return TITLE.sub("", out)

@@ -1,0 +1,60 @@
+{
+  "run_id": "r1",
+  "state": "running",
+  "time": "2026-10-16T03:18:20+00:00",
+  "elapsed_seconds": 1100,
+  "tickets_total": 4,
+  "tickets_ended": 1,
+  "percent": 45,
+  "eta": "2026-10-16T03:40:00+00:00",
+  "tokens_new": 57978,
+  "tokens_cache": 0,
+  "phase": null,
+  "note": null,
+  "tickets": [
+    {
+      "id": "a",
+      "state": "built",
+      "phase": null,
+      "elapsed_seconds": 600,
+      "tokens_new": 38652,
+      "tokens_cache": 0,
+      "idle_seconds": null,
+      "gate": null,
+      "gate_idle_seconds": null
+    },
+    {
+      "id": "b",
+      "state": "running",
+      "phase": "verifier",
+      "elapsed_seconds": 500,
+      "tokens_new": 19326,
+      "tokens_cache": 0,
+      "idle_seconds": 140,
+      "gate": null,
+      "gate_idle_seconds": null
+    },
+    {
+      "id": "c",
+      "state": "pending",
+      "phase": null,
+      "elapsed_seconds": 0,
+      "tokens_new": 0,
+      "tokens_cache": 0,
+      "idle_seconds": null,
+      "gate": null,
+      "gate_idle_seconds": null
+    },
+    {
+      "id": "d",
+      "state": "pending",
+      "phase": null,
+      "elapsed_seconds": 0,
+      "tokens_new": 0,
+      "tokens_cache": 0,
+      "idle_seconds": null,
+      "gate": null,
+      "gate_idle_seconds": null
+    }
+  ]
+}

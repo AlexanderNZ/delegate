@@ -11,7 +11,7 @@ import time
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, run_end, run_start, step_end, step_start, write_journal
+from .support import append_events, bare_repo, run_end, run_start, state_and_verdict, step_end, step_start, write_journal
 
 POLL = ["--poll-seconds", "0.02"]
 
@@ -47,8 +47,7 @@ def test_status_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retried_ti
 
     assert code == 0
     assert out.splitlines()[0].startswith("run r1: running ")
-    (line,) = [line for line in out.splitlines() if line.startswith("ticket a:")]
-    assert line.startswith("ticket a: state running,")
+    assert state_and_verdict(out, "a") == ("running", "")
 
 
 def test_status_json_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retried_ticket_as_running(tmp_path, capsys):

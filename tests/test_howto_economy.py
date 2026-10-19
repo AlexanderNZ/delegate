@@ -11,7 +11,7 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter, git
+from .support import ScriptedAdapter, git, state_and_verdict
 
 PAGE = HOW_TO / "run-an-economy-chain.md"
 
@@ -52,7 +52,6 @@ def test_following_the_economy_page_builds_a_chain_from_one_ticket_to_the_next_a
     # Each ticket branch starts from the previous ticket.
     assert subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", "run/chain-1", "run/chain-2"]).returncode == 0
     assert subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", "run/chain-2", "run/chain-3"]).returncode == 0
-    for ticket in "123":
-        assert f"ticket {ticket}: state built, verdict ACCEPT" in delegate_steps["status"].out
+    assert [state_and_verdict(delegate_steps["status"].out, ticket) for ticket in "123"] == [("built", "ACCEPT")] * 3
     # The last step of the page merged the run branch into main.
     assert {"test_read.py", "test_header.py", "test_quote.py"} <= set(git(repo, "ls-tree", "-r", "--name-only", "main").split())

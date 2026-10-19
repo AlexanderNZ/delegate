@@ -17,7 +17,7 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, Block, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter, git
+from .support import ScriptedAdapter, git, state_and_verdict
 
 PAGE = HOW_TO / "watch-and-resume-a-run.md"
 ROOT = Path(__file__).resolve().parents[1]  # the child imports `tests` from here and the package from src/
@@ -90,7 +90,7 @@ def test_the_page_shows_the_state_of_a_finished_run_and_its_journal_by_run_id_to
     steps = started + watched + raw + by_run_id + from_position
     assert [(step.code, step.err) for step in steps] == [(0, "")] * len(steps)
     status = next(step for step in watched if step.command == "delegate status")
-    assert "ticket 1: state built, verdict ACCEPT" in status.out and "ticket 2: state built, verdict ACCEPT" in status.out
+    assert [state_and_verdict(status.out, ticket) for ticket in "12"] == [("built", "ACCEPT")] * 2
     # The run has ended, so a watch with no run id prints one line, and no event.
     watch = next(step for step in watched if step.command.startswith("delegate watch"))
     assert [step.command for step in raw] == ["delegate watch --raw"]
@@ -125,7 +125,8 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
     assert "running" in state[0].out.splitlines()[0]  # the run has no end, so it is still "running"
     assert [(step.code, step.err) for step in resumed] == [(0, "")]
     assert [call.cwd.name for call in adapter.calls] == ["1", "2"]  # ticket 1 once before the stop; ticket 2 once after it
-    assert "ticket 2: state built, verdict ACCEPT" in follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0].out
+    status = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0]
+    assert state_and_verdict(status.out, "2") == ("built", "ACCEPT")
 
 
 KILL = """\
@@ -196,4 +197,5 @@ def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lo
     assert [(step.code, step.err) for step in resumed] == [(0, "")]
     # The specialist of ticket 1 ended before the pause, so the resume does not spawn it again.
     assert [call.cwd.name for call in adapter.calls] == ["1", "2"]
-    assert "ticket 2: state built, verdict ACCEPT" in follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0].out
+    status = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0]
+    assert state_and_verdict(status.out, "2") == ("built", "ACCEPT")

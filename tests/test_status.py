@@ -10,24 +10,30 @@ adapter.
 
 import re
 
+import pytest
+
 from delegate import adapters
 from delegate.cli import delegate
 
 from .support import (
-    ScriptedAdapter, bare_repo, make_repo, read_journal, run_end, run_start, step_end, step_start, write_journal,
+    ScriptedAdapter, bare_repo, make_repo, read_journal, run_end, run_start, status_row, step_end, step_start, write_journal,
 )
 from .test_run_multi import HEAD, ticket
+
+# A time of the journal: the time of the newest event of a ticket, in the column `last event`.
+TIME = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+\+00:00"
+
+
+@pytest.fixture(autouse=True)
+def utf8_locale(monkeypatch):
+    """A UTF-8 locale, so the ticket table has the Unicode glyph set (`delegate.run.output.glyphs`)."""
+    monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
 
 
 def status(repo, capsys, *extra):
     code = delegate.main(["status", "--repo", str(repo), *extra])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
-
-
-def ticket_line(out: str, ticket_id: str) -> str:
-    (line,) = [line for line in out.splitlines() if line.startswith(f"ticket {ticket_id}:")]
-    return line
 
 
 def test_status_of_a_finished_run_prints_every_ticket_with_its_final_state_verdict_branch_and_last_event_time(tmp_path, capsys, git_identity):
@@ -46,10 +52,14 @@ def test_status_of_a_finished_run_prints_every_ticket_with_its_final_state_verdi
 
     assert (code, err) == (0, "")
     assert out.splitlines()[0] == f"run {run_id}: failed (mode assure, adapter scripted)"
-    assert re.fullmatch(r"ticket a: state failed, verdict -, branch run/demo-a, last event \S+", ticket_line(out, "a"))
-    assert ticket_line(out, "b").startswith("ticket b: state skipped, verdict -, branch -, last event ")
-    assert ticket_line(out, "c") == f"ticket c: state built, verdict ACCEPT, branch run/demo-c, last event {last_c}"
-    assert "  reason: blocked by a, which failed" in out.splitlines()
+    # The cells of a row: the position, the plan, the state, the phase or the reason, the verdict, the branch, the time
+    # used, and the last event. The scripted adapter has no stream reader, so the table has no tokens.
+    a, b, c = (status_row(out, t) for t in "abc")
+    assert a[:3] == ["1", "✗ a", "failed"] and a[4] == "run/demo-a"
+    assert re.fullmatch(r"\d+s", a[5]) and re.fullmatch(TIME, a[6]) and len(a) == 7  # a has no verdict
+    assert b[:4] == ["2", "└─– b", "skipped", "blocked by a, which failed"]  # b has no step: no branch, no time used
+    assert re.fullmatch(TIME, b[4]) and len(b) == 5
+    assert c[:3] == ["3", "● c", "✓ built"] and c[3:5] == ["ACCEPT", "run/demo-c"] and c[6] == last_c and len(c) == 7
 
 
 def test_status_without_a_run_id_selects_the_newest_run_of_the_repository(tmp_path, capsys):
@@ -62,8 +72,9 @@ def test_status_without_a_run_id_selects_the_newest_run_of_the_repository(tmp_pa
 
     assert (code, err) == (0, "")
     assert out.splitlines()[0] == "run 20250101T000000Z-aaaa: running (mode assure, adapter scripted)"
-    assert ticket_line(out, "x").startswith("ticket x: state running, verdict -, branch run/demo-x, last event ")
-    assert ticket_line(out, "y") == "ticket y: state pending, verdict -, branch -, last event -"
+    x = status_row(out, "x")
+    assert x[:3] == ["1", "▶ x", "running"] and x[-3] == "run/demo-x" and re.fullmatch(TIME, x[-1])
+    assert status_row(out, "y") == ["2", "· y", "pending"]
 
 
 def test_status_shows_the_verdict_of_the_last_round(tmp_path, capsys):
@@ -78,7 +89,7 @@ def test_status_shows_the_verdict_of_the_last_round(tmp_path, capsys):
     code, out, err = status(repo, capsys, "r1")
 
     assert (code, err) == (0, "")
-    assert ticket_line(out, "a").startswith("ticket a: state built, verdict ACCEPT, ")
+    assert status_row(out, "a")[2:5] == ["✓ built", "ACCEPT", "run/demo-a"]
 
 
 def test_status_shows_the_verdict_of_a_chain_for_every_ticket_that_the_verdict_covers(tmp_path, capsys):
@@ -96,9 +107,9 @@ def test_status_shows_the_verdict_of_a_chain_for_every_ticket_that_the_verdict_c
     code, out, err = status(repo, capsys, "r1")
 
     assert (code, err) == (0, "")
-    assert [ticket_line(out, t).split(", branch")[0] for t in "abcd"] == [
-        "ticket a: state built, verdict REJECT", "ticket b: state failed, verdict REJECT",
-        "ticket c: state built, verdict REJECT", "ticket d: state pending, verdict -",
+    # b failed with the reason `no header`, in its phase cell. d has no verdict.
+    assert [status_row(out, t)[2:5] for t in "abcd"] == [
+        ["✓ built", "REJECT", "run/demo-a"], ["failed", "no header", "REJECT"], ["✓ built", "REJECT", "run/demo-c"], ["pending"],
     ]
 
 

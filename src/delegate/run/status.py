@@ -20,10 +20,11 @@ resume, or the result of its `run-end`. A pause request of a run that is not
 active stays until the next resume: the run then keeps the state of its
 journal, and the snapshot has the note `PAUSE_REQUEST_NOTE`.
 
-The report (`report`) gives the lines of `delegate status`: the state, the
-verdict and the branch of each ticket from the journal, with the progress of
-the snapshot. `view_lines` draws the snapshot for the live view of `delegate
-watch`: the run line and the ticket table of frame 2a of the design (#116).
+The report (`report`) gives the lines of `delegate status`: the header lines of
+the run, and the ticket table of frame 1i of the design (#117), with the verdict,
+the branch and the last event of each ticket from the journal. `view_lines` draws
+the snapshot for the live view of `delegate watch`: the run line and the ticket
+table of frame 2a of the design (#116). The two tables share their columns.
 
 `active_line` gives the one line of an active run (see `delegate.run.runs`):
 `delegate status` and `delegate watch` with no run id list the active runs in
@@ -61,12 +62,18 @@ PAUSED: str = "paused"
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
 PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
 
-# What the line of a ticket shows for a value that the journal does not hold.
+# What a line shows for a value that it does not have: the ETA before the first ticket ends.
 NONE: str = "-"
 
 
 def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
-    """The lines of the report for a run, from its journal events and its snapshot."""
+    """The lines of the report for a run, from its journal events and its snapshot.
+
+    The header lines give the run, the note when there is one, the progress, and the journal. Under them and a blank
+    line, the ticket table of frame 1i of the design (#117): the table of the live view (`view_lines`), with the columns
+    `verdict`, `branch` and `last event`. A cell that the journal has no value for is empty. The table is not cut to
+    the width of the terminal, and no column drops.
+    """
     start = events[0]
     if start["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
@@ -75,34 +82,23 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         *([f"note: {snap.note}"] if snap.note else []),
         f"progress: {_run_progress(snap)}", f"journal {journal}",
     ]
-    progress = {t.id: t for t in snap.tickets}
+    states = {t.id: t.state for t in snap.tickets}
+    facts: dict[str, dict[str, str]] = {}
     for ticket in plan_ids(events):
         own = [e for e in events if e.get("ticket") == ticket]
-        state, reason = PENDING, None
-        for event in own:
-            kind = event["event"]
-            if kind == "step-start":
-                state = RUNNING
-            elif kind == "step-end":
-                state, reason = str(event["state"]), event["reason"]
-            elif kind == "retry":
-                state, reason = RUNNING, None
-            elif kind == "skip":
-                state, reason = SKIPPED, event["reason"]
         # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
         verdicts = [
             str(e["verdict"]) for e in events
             if e["event"] == "verdict" and (e.get("ticket") == ticket or ticket in e.get("tickets", []))  # type: ignore[operator]
         ]
-        branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), NONE)
-        last = str(own[-1]["time"]) if own else NONE
-        lines.append(f"ticket {ticket}: state {state}, verdict {verdicts[-1] if verdicts else NONE}, branch {branch}, last event {last}")
-        if branch != NONE:  # a ticket with a step has a time used
-            found = progress[ticket]
-            lines.append("  progress: " + (f"{found.phase}, " if found.phase else "") + _ticket_progress(found))
-        if reason:
-            lines.append(f"  reason: {reason}")
-    return lines
+        branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), "")
+        facts[ticket] = {
+            "verdict": output.styled("bold", verdicts[-1]) if verdicts else "",
+            "branch": branch if states[ticket] == RUNNING else output.styled("dim", branch),
+            "last event": output.styled("dim", str(own[-1]["time"])) if own else "",
+        }
+    table = _table(snap, dict(plan_tree(events)), frozenset(), False, None, output.glyphs(), STATUS_HEADER, facts)
+    return [*lines, "", *table]
 
 
 def report(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> list[str]:
@@ -487,23 +483,6 @@ def _run_progress(snap: Snapshot) -> str:
     return ", ".join(parts)
 
 
-def _ticket_progress(ticket: TicketSnapshot) -> str:
-    """The progress of a ticket: the time used, the tokens when the snapshot has them, and the time since the last activity.
-
-    While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed.
-    """
-    parts = [f"{format_duration(ticket.elapsed_seconds)} used"]
-    if ticket.tokens_new is not None and ticket.tokens_cache is not None:
-        parts.append(format_token_counts(ticket.tokens_new, ticket.tokens_cache))
-    if ticket.idle_seconds is not None:
-        parts.append(f"last activity {format_duration(ticket.idle_seconds)} ago")
-    if ticket.gate is not None:
-        parts.append(f"gate {ticket.gate}")
-    if ticket.gate_idle_seconds is not None:
-        parts.append(f"gate log changed {format_duration(ticket.gate_idle_seconds)} ago")
-    return ", ".join(parts)
-
-
 # The run line of the live view draws the bar only on a terminal of this many columns or more, and the bar has 16 cells.
 BAR_COLUMNS: int = 100
 BAR_CELLS: int = 16
@@ -512,6 +491,10 @@ BAR_CELLS: int = 16
 # live tail is the last column and has no header.
 TABLE_HEADER: tuple[str, ...] = ("#", "plan", "state", "phase", "used", "new", "cache", "")
 TABLE_NUMBERS: frozenset[str] = frozenset({"#", "used", "new", "cache"})
+
+# The columns of the ticket table of `delegate status` (frame 1i, #117): the columns of the live view, with `verdict`
+# and `branch` after `phase`, and `last event` before the live tail.
+STATUS_HEADER: tuple[str, ...] = ("#", "plan", "state", "phase", "verdict", "branch", "used", "new", "cache", "last event", "")
 
 # The steps of the fit to the width, in the order of components.md: each step drops more. The bar of the run line
 # goes first, by `BAR_COLUMNS`. Then `new` and `cache`, then the labels of the phase track, then `used`.
@@ -570,10 +553,15 @@ def _run_line(snap: Snapshot, width: int, glyph: output.Glyphs) -> str:
 
 
 def _table(
-    snap: Snapshot, depths: dict[str, int], dropped: frozenset[str], fold: bool, idle_limit: int | None, glyph: output.Glyphs
+    snap: Snapshot, depths: dict[str, int], dropped: frozenset[str], fold: bool, idle_limit: int | None, glyph: output.Glyphs,
+    header: tuple[str, ...] = TABLE_HEADER, facts: dict[str, dict[str, str]] | None = None,
 ) -> list[str]:
-    """The lines of the ticket table: the header, and a row for each ticket in plan order, or the fold line of the built rows."""
-    names = [name for name in TABLE_HEADER if name not in dropped and (snap.tokens_new is not None or name not in ("new", "cache"))]
+    """The lines of the ticket table: the header, and a row for each ticket in plan order, or the fold line of the built rows.
+
+    `header` names the columns. `facts` gives, for each ticket id, the cells of the columns that the live view does not
+    have: `verdict`, `branch` and `last event` of `delegate status`.
+    """
+    names = [name for name in header if name not in dropped and (snap.tokens_new is not None or name not in ("new", "cache"))]
     rows = [[output.styled("dim", name) for name in names]]
     folded = [t.id for t in snap.tickets if fold and t.state == BUILT]
     fold_at = None
@@ -582,6 +570,7 @@ def _table(
             fold_at = len(rows) if fold_at is None else fold_at
             continue
         cells = _row(snap, ticket, position, depths.get(ticket.id, 0), "labels" not in dropped, idle_limit, glyph)
+        cells.update((facts or {}).get(ticket.id, {}))
         rows.append([cells[name] for name in names])
     lines = [line.rstrip(" ") for line in output.columns(rows, right={i for i, name in enumerate(names) if name in TABLE_NUMBERS})]
     if fold_at is not None:

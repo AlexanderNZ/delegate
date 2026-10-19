@@ -24,7 +24,7 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
-from .support import Terminal, bare_repo, frames, journal_path
+from .support import Terminal, bare_repo, frames, journal_path, status_row
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -452,15 +452,16 @@ def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activ
 
     # The mean of the ended tickets is 600, and b used 50 seconds: the ETA is 550 seconds from now.
     # The tokens: new 19326 and cache 0 for a, and new 11824 and cache 13970 for the one turn of b so far. The run:
-    # new 31150 and cache 13970. b had its last activity on 2026-10-08.
+    # new 31150 and cache 13970. b had its last activity on 2026-10-08. The ticket table of #117 has the progress of
+    # each ticket in its row. No ticket has a verdict yet.
     assert lines == [
         "run r1: running (mode assure, adapter claude-code)",
         "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
         f"journal {run.path}",
-        f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
-        "  progress: 10m00s used, tokens 19k new, 0 cache",
-        f"ticket b: state running, verdict -, branch run/demo-b, last event {at(600)}",
-        "  progress: specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
+        "",
+        "#  plan  state    phase" + " " * 38 + "  verdict  branch        used  new  cache  last event",
+        "1  ● a   ✓ built  " + " " * 43 + "  " + " " * 7 + f"  run/demo-a  10m00s  19k      0  {at(600)}",
+        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○  " + " " * 7 + f"  run/demo-b     50s  12k    14k  {at(600)}  active 7d07h",
     ]
 
 
@@ -478,10 +479,9 @@ def test_each_form_of_status_shows_the_new_tokens_and_the_cache_tokens_of_the_ru
     assert (snap["tokens_new"], snap["tokens_cache"]) == (19326 + 11824, 13970)
     assert [(t["id"], t["tokens_new"], t["tokens_cache"]) for t in snap["tickets"]] == [("a", 19326, 0), ("b", 11824, 13970)]
     assert lines[1].endswith(", tokens 31k new, 14k cache")
-    assert [line for line in lines if line.startswith("  progress: ")] == [
-        "  progress: 10m00s used, tokens 19k new, 0 cache",
-        "  progress: specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
-    ]
+    # The cells `new` and `cache` of each row in the table of status.
+    assert status_row("\n".join(lines), "a")[5:7] == ["19k", "0"]
+    assert status_row("\n".join(lines), "b")[9:11] == ["12k", "14k"]
     assert block == [
         "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s  31k new · 14k cache",
         "#  plan  state    phase                                          used  new  cache",
@@ -501,11 +501,12 @@ def test_plain_status_of_a_run_that_ended_shows_its_progress_with_no_eta(tmp_pat
     lines = plain_status(repo, capsys)
 
     assert lines[:2] == ["run r1: built (mode assure, adapter claude-code)", "progress: 100%, 2 of 2 ended, 10m10s used, tokens 19k new, 0 cache"]
+    # The skipped ticket has its reason in the phase cell, and no branch, no time used and no tokens.
     assert lines[3:] == [
-        f"ticket a: state built, verdict -, branch run/demo-a, last event {at(600)}",
-        "  progress: 10m00s used, tokens 19k new, 0 cache",
-        f"ticket b: state skipped, verdict -, branch -, last event {at(601)}",
-        "  reason: blocked by x",
+        "",
+        "#  plan  state    phase" + " " * 7 + "  verdict  branch        used  new  cache  last event",
+        "1  ● a   ✓ built  " + " " * 12 + "  " + " " * 7 + f"  run/demo-a  10m00s  19k      0  {at(600)}",
+        "2  – b   skipped  blocked by x  " + " " * 7 + "  " + " " * 10 + "  " + " " * 6 + "  " + " " * 3 + "  " + " " * 5 + f"  {at(601)}",
     ]
 
 
@@ -562,7 +563,12 @@ def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_an
     lines = plain_status(repo, capsys)
 
     assert lines[1] == "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s"
-    assert [line for line in lines if line.startswith("  progress: ")] == ["  progress: 10m00s used", "  progress: specialist, 50s used"]
+    # The table has no columns `new` and `cache`, and the live tail of b gives no activity.
+    assert lines[4] == "#  plan  state    phase" + " " * 38 + "  verdict  branch        used  last event"
+    assert status_row("\n".join(lines), "a") == ["1", "● a", "✓ built", "run/demo-a", "10m00s", at(600)]
+    assert status_row("\n".join(lines), "b") == [
+        "2", "▶ b", "running", "specialist ●", "gates ○", "verifier ○", "fix-up ○", "run/demo-b", "50s", at(600),
+    ]
 
 
 def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
@@ -793,13 +799,18 @@ def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens
     lines = plain_status(repo, capsys)
 
     good = GOOD_TOKENS[adapter][1]
+    new = good.split()[1]  # the short form of the new tokens of a, as `19k`
     # Ended: a (600 s) and b (30 s) ended, so the ETA of c is their mean, 315 s. Live: a ended (600 s), and b used 50 s.
+    # The row of b has no tokens, and while its agent runs, no activity.
     expected = {
-        "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", "  progress: 30s used"),
-        "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", "  progress: specialist, 50s used"),
+        "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", ["2", "● b", "✓ built", "run/demo-b", "30s", at(630)]),
+        "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", [
+            "2", "▶ b", "running", "specialist ●", "gates ○", "verifier ○", "fix-up ○", "run/demo-b", "50s", at(600),
+        ]),
     }[where]
-    progress = [line for line in lines if line.startswith("  progress: ")]
-    assert (lines[1], progress) == (expected[0], [f"  progress: 10m00s used, {good}", expected[1]])
+    out = "\n".join(lines)
+    assert (lines[1], status_row(out, "b")) == expected
+    assert status_row(out, "a") == ["1", "● a", "✓ built", "run/demo-a", "10m00s", new, "0", at(600)]
 
 
 @pytest.mark.parametrize(("kind", "where"), BAD_STREAM_CASES)
@@ -925,8 +936,10 @@ def test_plain_status_shows_the_running_gate_and_the_time_since_its_log_changed(
 
     lines = plain_status(repo, capsys)
 
-    assert [line for line in lines if line.startswith("  progress: ")] == [
-        f"  progress: gates, 3m50s used, tokens 19k new, 0 cache, gate {GATE}, gate log changed 30s ago",
+    # The live tail gives the short name of the gate and the time since its log changed.
+    assert status_row("\n".join(lines), "a") == [
+        "1", "▶ a", "running", "specialist ✓", "gates ●", "verifier ○", "fix-up ○", "run/demo-a", "3m50s", "19k", "0", at(110),
+        "gate pytest · log 30s ago",
     ]
 
 

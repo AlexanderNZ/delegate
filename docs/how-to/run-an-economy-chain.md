@@ -80,7 +80,7 @@ The command prints `run <run id>` and `journal <path>`. It exits 0 when every ti
 delegate status
 ```
 
-Each ticket has one line. The state `built` and the [**verdict**](../glossary.md#verdict) `ACCEPT` mean that the ticket is done and checked. The verdict of the stack covers each ticket in the chain.
+Each ticket has one row in the ticket table. The state `built` and the [**verdict**](../glossary.md#verdict) `ACCEPT` mean that the ticket is done and checked. The verdict of the stack covers each ticket in the chain.
 
 ### 5. Take the work
 
