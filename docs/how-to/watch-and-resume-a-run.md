@@ -1,6 +1,6 @@
 # How to watch and resume a run
 
-Use this page to follow a [**run**](../glossary.md#run) while it works, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run) while it works, to pause it, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
@@ -88,9 +88,27 @@ Each `watch` prints a line `position <seq>` before it exits. To go on from that 
 delegate watch --from <position> --stall-minutes 30
 ```
 
+## Pause a run
+
+A pause stops a run at its next [**step**](../glossary.md#step) boundary. It cuts off no agent, so no work in progress is lost.
+
+### 1. Ask for the pause
+
+In a second terminal, in the same repository, give the run id.
+
+```bash
+delegate pause <run-id>
+```
+
+The run stops after the current step, or before the next gate or [**verifier**](../glossary.md#verifier). `delegate status` shows `pausing` until the run stops, and then `paused`. `delegate run` then exits 3, and `watch` exits 7. See [the pause](../reference/run.md#the-pause).
+
+### 2. Go on after the pause
+
+Resume the paused run with the same command as after Ctrl-C. See [resume after Ctrl-C](#1-resume-after-ctrl-c). Before you resume, you can add a ticket, or change a ticket that has not started. See [the plan change](../reference/run.md#the-plan-change).
+
 ## Resume a run
 
-A run stops when you press Ctrl-C, or when its process is killed. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`.
+A run stops when you press Ctrl-C, or when its process is killed. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`. A paused run has no `run-end` too, and `delegate status` shows `paused`.
 
 ### 1. Resume after Ctrl-C
 
@@ -124,4 +142,4 @@ The command prints `run <run id>` and `log <path>`, and exits at once. The run g
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. A background task has no terminal, so `watch` prints the raw lines, as with `--raw`. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).
 3. **Show `delegate status` as it is.** Each time the coordinator tells the person the state, it shows the output of `delegate status`, as it is. The coordinator does not write its own script to read the journal or an event stream.
 4. **Report a stall at once.** A stalled agent is an agent with no activity for the stall limit, the time that `--stall-minutes` sets. `watch` then exits with the reason `stall`, as [the stall](../reference/status-and-watch.md#the-stall) tells. The coordinator tells the person at once, and gives the output of `delegate status`.
-5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --detach --resume <run-id>`. The resume takes over the lock of the same run when its process no longer exists, as in [the resume after a kill](#2-resume-after-a-kill). If the lock belongs to another run and to a process that no longer exists, the coordinator adds `--break-lock`.
+5. **Resume a stopped run.** When the run process stops before the run ends, the coordinator goes on with `delegate run --detach --resume <run-id>`. The resume takes over the lock of the same run when its process no longer exists, as in [the resume after a kill](#2-resume-after-a-kill). If the lock belongs to another run and to a process that no longer exists, the coordinator adds `--break-lock`. A paused run goes on with the same command.

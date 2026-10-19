@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import agent_definitions, brief, docs_command, run_command, status, watch
+from . import agent_definitions, brief, docs_command, pause, run_command, status, watch
 from .title import Title
 
 # Subcommands that the `agent-definitions` command owns, with the line that
@@ -32,6 +32,10 @@ BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
 # The subcommand that `delegate.cli.run_command` owns.
 RUN_COMMAND: str = "run"
 RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
+
+# The subcommand that `delegate.cli.pause` owns.
+PAUSE_COMMAND: str = "pause"
+PAUSE_HELP: str = "ask a run to stop at its next step boundary; go on later with `run --resume <run-id>`"
 
 # The subcommand that `delegate.cli.status` owns.
 STATUS_COMMAND: str = "status"
@@ -63,6 +67,7 @@ def _help_parser() -> argparse.ArgumentParser:
         sub.add_parser(name, help=f"{text} (as agent-definitions {name})", add_help=False)
     sub.add_parser(BRIEF_COMMAND, help=f"{BRIEF_HELP} (as verifier-brief)", add_help=False)
     sub.add_parser(RUN_COMMAND, help=f"{RUN_HELP} (as delegate run)", add_help=False)
+    sub.add_parser(PAUSE_COMMAND, help=f"{PAUSE_HELP} (as delegate pause)", add_help=False)
     sub.add_parser(STATUS_COMMAND, help=f"{STATUS_HELP} (as delegate status)", add_help=False)
     sub.add_parser(WATCH_COMMAND, help=f"{WATCH_HELP} (as delegate watch)", add_help=False)
     sub.add_parser(DOCS_COMMAND, help=f"{DOCS_HELP} (as delegate docs)", add_help=False)
@@ -119,6 +124,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         _set_title(command)
         return run_command.main(args[at + 1 :])
+    if command == PAUSE_COMMAND:
+        if at:
+            print(
+                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {PAUSE_COMMAND}",
+                file=sys.stderr,
+            )
+            return 2
+        _set_title(command)
+        return pause.main(args[at + 1 :])
     if command == STATUS_COMMAND:
         if at:
             print(
@@ -145,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         _set_title(command)
         return docs_command.main(args[at + 1 :])
-    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, STATUS_COMMAND, WATCH_COMMAND, DOCS_COMMAND])
+    known = ", ".join([*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, PAUSE_COMMAND, STATUS_COMMAND, WATCH_COMMAND, DOCS_COMMAND])
     print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
     return 2
 

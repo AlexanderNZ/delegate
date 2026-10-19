@@ -83,6 +83,13 @@ covers the built tickets whose work the run branch does not hold. The journal
 records `retry`, and then a new `step-end` and a new `run-end`. The newest of
 each wins.
 
+A run can pause. `delegate pause` writes a request file in the directory of the
+run (see `pause.py`), and the engine reads it at each step boundary: before a
+step starts, before a gate runs, and before a verifier starts (see
+`_pause_point`). It stops there and does not cut off an agent. The journal
+records `pause-requested` and `paused`, the run writes no `run-end`, and a
+resume goes on from the boundary as from a stop.
+
 The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
 start of a ticket in a chain, and the handling of a verdict. The engine reads
 and writes the world, and asks that module what the rules say.
@@ -165,6 +172,14 @@ RETRY_GATES: str = "gates"
 RETRY_VERIFIER: str = "verifier"
 RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
 
+# The file in the directory of a run that asks the run to pause at its next step boundary (see `delegate.run.pause`).
+PAUSE_REQUEST_NAME: str = "pause-request"
+
+# The `before` of a `paused` event: the work that the pause did not start.
+PAUSED_BEFORE_STEP: str = "step"
+PAUSED_BEFORE_GATE: str = "gate"
+PAUSED_BEFORE_VERIFIER: str = "verifier"
+
 
 class EngineError(Exception):
     """The run cannot start or go on. The message names the input at fault."""
@@ -172,6 +187,10 @@ class EngineError(Exception):
 
 class _StepFailed(Exception):
     """A fix-up round or a verifier run cannot go on. The message is the reason the step fails."""
+
+
+class _Paused(Exception):
+    """A pause request stopped the run at a step boundary. The journal holds `paused`. The message tells where."""
 
 
 class _Rejected(_StepFailed):
@@ -193,6 +212,8 @@ class RunResult:
     unmapped: list[str] = field(default_factory=list)
     # The holder of a lock of this run whose process no longer exists, which the resume took over without `break_lock`.
     taken_over: LockHolder | None = None
+    # Where a pause request stopped the run, for example `before the verifier of ticket a`, or None when it did not pause.
+    paused: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -761,6 +782,8 @@ def _execute(
 ) -> RunResult:
     order = plan_order(workflow)
     plan: _RetryPlan | None = None
+    # A pause request from before this process is not for it: the run that it asked to pause has stopped.
+    (state_dir / "runs" / run_id / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     if not resuming:
         with _vcs_errors():
             run_base = vcs.commit_of(repo, workflow.base_branch)
@@ -808,6 +831,7 @@ def _execute(
                 skipped.pop(later.id, None)
     complete = {*built, *failed, *skipped}
     ended_early = False
+    paused: str | None = None
     for position, ticket in enumerate(order):
         if ticket.id in complete:
             continue
@@ -819,12 +843,17 @@ def _execute(
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
         start = _start_ref(workflow, order, built, ticket, run_base)
         try:
+            _pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
             if plan is not None and ticket.id == plan.ticket:
                 reason = _retry_ticket(
                     _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason, start
                 )
             else:
                 reason = _build_ticket(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, start, prior)
+        except _Paused as stop:
+            # The step stays open, or does not start: a resume goes on with it.
+            paused = str(stop)
+            break
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
             # step unknown, so the run ends here. The journal says why. A verifier
@@ -848,13 +877,46 @@ def _execute(
         else:
             built.append(ticket.id)
     unmapped: list[str] = []
-    if workflow.mode == "economy" and built and not ended_early:
+    if workflow.mode == "economy" and built and not ended_early and paused is None:
         chain = _ChainRun(workflow, order, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, built, failed, failures)
-        unmapped = chain.verify()
+        try:
+            unmapped = chain.verify()
+        except _Paused as stop:
+            paused = str(stop)
+    if paused is not None:
+        # A paused run has no `run-end`: a resume goes on with it.
+        return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused)
     journal.append(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
     )
+    # A request after the last step boundary finds no boundary: the run ended, and the request goes.
+    (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
+
+
+def _pause_point(journal: Journal, ticket: str, before: str, where: str, **fields: object) -> None:
+    """A step boundary: stop the run here when the directory of the run holds a pause request. Do nothing when it holds none.
+
+    Write `pause-requested` with the time of the request, and `paused` with the
+    ticket, the work that does not start (`before`, one of the `PAUSED_BEFORE_`
+    values) and `fields`. Remove the request, and raise `_Paused` with `where`,
+    the text that tells where the run stopped. The engine calls it only between
+    two pieces of work, so a pause never cuts off an agent or a gate.
+    """
+    request = journal.path.parent / PAUSE_REQUEST_NAME
+    try:
+        text = request.read_text()
+    except FileNotFoundError:
+        return
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = None
+    requested_at = data.get("time") if isinstance(data, dict) else None
+    journal.append("pause-requested", ticket=ticket, requested_at=requested_at)
+    journal.append("paused", ticket=ticket, before=before, **fields)
+    request.unlink(missing_ok=True)
+    raise _Paused(where)
 
 
 def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.PlanCheck, progress: _Progress) -> None:
@@ -1490,6 +1552,8 @@ def _verify_round(
     gives the fix-up commits of the stacks verified before (see `chain_brief`).
     """
     ticket = step.ticket
+    where = f"stack {ticket.stack}" if step.segments is not None else f"ticket {ticket.id}"
+    _pause_point(step.journal, ticket.id, PAUSED_BEFORE_VERIFIER, f"before the verifier of {where}", round=round_number, **step.chain_fields)
     tier, model = step.roles["verifier"]
     mode = "full" if fixup_body is None else "fix-up"
     verified = _tip(step.vcs, step.repo, step.branch)
@@ -1727,6 +1791,8 @@ class _ChainRun:
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket
             return self._verify_stacks()
+        except _Paused:
+            raise  # a pause is no failure of the chain: `_execute` ends the run process with no `run-end`
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             halted = isinstance(error, InvariantViolation)
             reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
@@ -1928,6 +1994,7 @@ def _run_gate_with_output(
             reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})",
         )
         return True, str(green.get("output_tail", ""))
+    _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{command}` of ticket {ticket}", command=command, phase=phase)
     log = _gate_log_path(journal, ticket, phase, round_number)
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
     result = gates.run(command, worktree, log=log)

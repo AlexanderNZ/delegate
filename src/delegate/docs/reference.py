@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..cli import agent_definitions, brief, docs_command, run_command, status, watch
+from ..cli import agent_definitions, brief, docs_command, pause, run_command, status, watch
 from ..definitions import render, validate
 from ..run import watch as run_watch
 
@@ -163,6 +163,7 @@ def generated_sections_table() -> str:
 
 SECTIONS: tuple[Section, ...] = (
     Section(RUN_PAGE, "run-options", "The argument parser of `delegate run`.", lambda: options_table(run_command.build_parser())),
+    Section(RUN_PAGE, "pause-options", "The argument parser of `delegate pause`.", lambda: options_table(pause.build_parser())),
     Section(
         STATUS_PAGE, "status-options", "The argument parser of `delegate status`.", lambda: options_table(status.build_parser())
     ),

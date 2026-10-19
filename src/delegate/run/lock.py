@@ -71,6 +71,21 @@ def _refuse(path: Path, run_branch: str, holder: LockHolder, run_id: str, break_
         )
 
 
+def live_holder(state_dir: Path, run_branch: str) -> LockHolder | None:
+    """The holder of the lock of the run branch when its process is alive, or None when there is no lock or its process is gone.
+
+    Raise LockError when the lock file cannot be read. `delegate pause` uses it to find a run that works now.
+    """
+    path = _lock_path(state_dir, run_branch)
+    try:
+        holder = _read_holder(path)
+    except LockError:
+        if not path.exists():
+            return None  # no lock, or the run released it while this function read it
+        raise
+    return holder if _alive(holder.pid) else None
+
+
 def check_free(state_dir: Path, run_branch: str, run_id: str, *, break_stale: bool = False) -> None:
     """Raise LockError, as `run_lock` does, when the lock of the run branch is held. Create nothing.
 

@@ -3,8 +3,9 @@
 `--dry-run` validates the file and prints the plan in dependency order. It
 creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
-with a run that stopped, from its journal. `--retry <ticket>` with it goes on
-with one failed step of that run, also when the run ended.
+with a run that stopped or paused, from its journal. `--retry <ticket>` with it goes on
+with one failed step of that run, also when the run ended. A run that `delegate
+pause` stopped at a step boundary exits with `EXIT_PAUSED`.
 
 A resume with a workflow whose tickets differ from the newest plan of the run is
 a plan change. `--reviewed <ids>` names the later tickets that the coordinator
@@ -40,6 +41,9 @@ from .title import SEPARATOR, Title, short_run_id
 
 # The name of the log file of a detached run, in the directory of the run.
 LOG_NAME: str = "run.log"
+
+# The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
+EXIT_PAUSED: int = 3
 
 # The program of a detached run process: it imports the package from the import path of the command that started it
 # (argv[1]), then runs `delegate` with the rest of its arguments. A Nix wrapper puts the package on the import path of
@@ -257,6 +261,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: unmapped finding: {finding}", file=sys.stderr)
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
+        if result.paused is not None:
+            print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
+            return EXIT_PAUSED
         return 0 if result.ok else 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")

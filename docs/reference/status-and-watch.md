@@ -31,7 +31,7 @@ delegate status [run-id] [--repo <dir>] [--json]
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run, and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
@@ -58,7 +58,7 @@ ticket <id>: state <state>, verdict <verdict>, branch <branch>, last event <time
 
 The progress comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta):
 
-- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
+- The progress line of the run gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
 - A ticket with a [**step**](../glossary.md#step) has a line `  progress: ...` under its line. It gives the phase of a running ticket, the time used, and the tokens. While an agent of the ticket runs, it also gives the time since the last activity of the agent. While a gate of the ticket runs, it also gives `gate <command>` and `gate log changed <time> ago`: the gate command, and the time since the log file of the gate last changed. For example: `  progress: gates, 3m50s used, tokens 19k new, 610k cache, gate python3 -m pytest -q, gate log changed 30s ago`.
 - A pending ticket and a skipped ticket have no progress line.
 
@@ -75,16 +75,16 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | Field | Type | Meaning |
 |---|---|---|
 | `run_id` | string | The id of the run. |
-| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. |
-| `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. |
+| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. `pausing` while a pause request waits, and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). |
+| `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. For a paused run, it is the time of `paused`. |
 | `elapsed_seconds` | integer | The time that the run used: from `run-start` to `time`. |
 | `tickets_total` | integer | The number of [**tickets**](../glossary.md#ticket) of the run. |
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta). |
+| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends and while the run is paused. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens_new` | integer or `null` | The new tokens of the run: the sum of `tokens_new` of all tickets. A ticket whose `tokens_new` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). See [the token counts](#the-token-counts). |
 | `tokens_cache` | integer or `null` | The cache tokens of the run: the sum of `tokens_cache` of all tickets. A ticket whose `tokens_cache` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
-| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, and in [**`assure`**](../glossary.md#assure) mode. |
+| `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, while the run is paused, and in [**`assure`**](../glossary.md#assure) mode. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
@@ -262,7 +262,7 @@ run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, tok
 
 The live block is the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
 
-- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-`. A run that ended shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
+- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-`. A run that ended or paused shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
 - A ticket line gives the id, the state, the phase of a running ticket, the time used, and the two token counts. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the lines of `status` do.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
 
@@ -300,6 +300,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 | 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
 | 6 | time limit | `--max-minutes` is set and the time is used. |
+| 7 | run paused | The journal holds `paused`: a pause request stopped the run at a step boundary. |
 
 <!-- generated:end watch-exit-codes -->
 
@@ -308,6 +309,8 @@ Code 2 is also the code that `argparse` gives for a usage error.
 `watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result.
 
 A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the first `resume` after its newest `run-end` that a `resume` follows are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still ends the watch. `watch` then follows the resumed run to its new `run-end`.
+
+A `paused` event ends the watch with the code 7: a pause request stopped the run process at a step boundary. See [the pause](run.md#the-pause). A `paused` that another event follows, for example the `resume` of the run, is history, and it does not end the watch.
 
 ### The problem events
 

@@ -31,6 +31,7 @@ EXIT_PROBLEM: int = 3
 EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
+EXIT_PAUSED: int = 7
 
 # The condition of each exit code, for the reference page of `watch`, which generates its exit-code table from this
 # table and from `EXIT_CODES`. The links point into that page.
@@ -45,6 +46,7 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_VERDICT: "`--until verdict` is set and the journal holds a `verdict` event.",
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
+    EXIT_PAUSED: "The journal holds `paused`: a pause request stopped the run at a step boundary.",
 }
 
 # The meaning of each exit code. The reference page of `watch` lists the same table.
@@ -56,6 +58,7 @@ EXIT_CODES: dict[int, str] = {
     EXIT_VERDICT: "verdict",
     EXIT_STALL: "stall",
     EXIT_TIME_LIMIT: "time limit",
+    EXIT_PAUSED: "run paused",
 }
 
 # The role that each adapter-result event and each report event belongs to.
@@ -141,16 +144,16 @@ def ended_run(journal: Path) -> EndedRun | None:
 def _superseded(events: list[dict[str, object]]) -> set[object]:
     """The `seq` of each event of `events` that a later event of `events` makes history.
 
-    A `run-end` that another event follows is history: a retry continues the run. An event of a ticket that a later
-    `retry` of the same ticket follows is history: the retry continues the step of that ticket, so a problem of that
-    ticket before the retry is not a problem of the run. A history event is reported, but it does not end a watch.
+    A `run-end` or a `paused` that another event follows is history: a retry or a resume continues the run. An event
+    of a ticket that a later `retry` of the same ticket follows is history: the retry continues the step of that ticket,
+    so a problem of that ticket before the retry is not a problem of the run. A history event is reported, but it does not end a watch.
     """
     superseded: set[object] = set()
     retried: set[str] = set()
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
         kind, ticket = event["event"], event.get("ticket")
-        if (kind == "run-end" and index < len(events) - 1) or (ticket is not None and str(ticket) in retried):
+        if (kind in RUN_STOPS and index < len(events) - 1) or (ticket is not None and str(ticket) in retried):
             superseded.add(event["seq"])
         if kind == "retry":
             retried.add(str(ticket))
@@ -160,6 +163,15 @@ def _superseded(events: list[dict[str, object]]) -> set[object]:
 def _result_code(result: object) -> int:
     """The exit code of the result of a `run-end` event."""
     return EXIT_SUCCEEDED if result == "built" else EXIT_FAILED
+
+
+# The events that stop the run process, and so end a watch: the end of the run, and a pause at a step boundary.
+RUN_STOPS: tuple[str, ...] = ("run-end", "paused")
+
+
+def _stop_code(event: dict[str, object]) -> int:
+    """The exit code of an event of `RUN_STOPS`."""
+    return EXIT_PAUSED if event["event"] == "paused" else _result_code(event["result"])
 
 
 def format_event(event: dict[str, object]) -> str:
@@ -261,7 +273,7 @@ class Sink(Protocol):
         """The events of one read of the journal are told, and the watch goes on."""
 
     def end(self) -> None:
-        """The watch ends. It comes after the reason to end, or after the `run-end` event."""
+        """The watch ends. It comes after the reason to end, or after the `run-end` or the `paused` event."""
 
 
 class RawSink:
@@ -360,11 +372,11 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             history = seq < resumed_at or seq in superseded
             if history:
                 problem = None
-            ends = event["event"] == "run-end" and not history
+            ends = event["event"] in RUN_STOPS and not history
             if seq <= options.from_position:
                 sink.event(event, False, None)
                 if ends:
-                    return WatchResult(_result_code(event["result"]), position)
+                    return WatchResult(_stop_code(event), position)
                 continue
             position = seq
             sink.event(event, True, problem)
@@ -374,7 +386,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
             if ends:
-                return WatchResult(_result_code(event["result"]), position)
+                return WatchResult(_stop_code(event), position)
         if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
             sink.stall(options.stall_minutes, last_event)
             return WatchResult(EXIT_STALL, position)

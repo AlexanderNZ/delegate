@@ -167,3 +167,32 @@ def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_t
     assert resumed[0].err.startswith(f"delegate run: took over the lock of run/demo from run {run_id}, process ")
     assert resumed[0].err.rstrip().endswith("which no longer exists")
     assert [call.cwd.name for call in adapter.calls] == ["2"]
+
+
+@outside_the_package
+def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lost(tmp_path, monkeypatch, git_identity, registered):
+    adapter = ScriptedAdapter(files_by_ticket=FILES)
+    registered(adapter)
+    repo = a_repo(tmp_path)
+    paused: list = []
+
+    def pause_from_a_second_terminal(request):
+        if not paused:  # the pause comes while the specialist of ticket 1 works
+            run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
+            paused.extend(follow(PAGE, repo, monkeypatch, only=containing("delegate pause"), replace={"<run-id>": run_id}))
+
+    adapter.on_specialist = pause_from_a_second_terminal
+    run = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
+    run_id = run_id_of(run)
+    adapter.on_specialist = None
+
+    state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))
+    resumed = follow(PAGE, repo, monkeypatch, only=containing("--resume"), replace={"<run-id>": run_id})
+
+    assert [(step.command, step.code, step.err) for step in paused] == [(f"delegate pause {run_id}", 0, "")]
+    assert run[0].code == 3 and f"go on with delegate run --resume {run_id}" in run[0].out
+    assert state[0].out.splitlines()[0].startswith(f"run {run_id}: paused ")
+    assert [(step.code, step.err) for step in resumed] == [(0, "")]
+    # The specialist of ticket 1 ended before the pause, so the resume does not spawn it again.
+    assert [call.cwd.name for call in adapter.calls] == ["1", "2"]
+    assert "ticket 2: state built, verdict ACCEPT" in follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0].out

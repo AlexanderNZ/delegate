@@ -127,6 +127,8 @@ class _Titled:
         self._events.append(event)
         if event["event"] == "run-end":
             self._result = str(event["result"])
+        elif event["event"] == "paused":
+            self._result = "paused"
         elif problem is not None:
             self._result = "problem"
         self._sink.event(event, reported, problem)

@@ -22,8 +22,8 @@ outside_the_package = pytest.mark.skipif(
 
 
 def test_each_reason_to_exit_has_its_own_exit_code():
-    assert len(set(watch.EXIT_CODES)) == len(watch.EXIT_CODES) == 7
-    assert sorted(watch.EXIT_CODES) == [0, 1, 2, 3, 4, 5, 6]
+    assert len(set(watch.EXIT_CODES)) == len(watch.EXIT_CODES) == 8
+    assert sorted(watch.EXIT_CODES) == [0, 1, 2, 3, 4, 5, 6, 7]
 
 
 @outside_the_package

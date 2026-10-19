@@ -1,14 +1,16 @@
 ---
 man: DELEGATE-RUN(1)
-man_name: "delegate-run — build the tickets of a workflow"
-synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--reviewed <ids>] [--retry <ticket>] [--break-lock] [--detach] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+man_name: "delegate-run, delegate-pause — build the tickets of a workflow, and pause a run"
+synopsis:
+  - "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--reviewed <ids>] [--retry <ticket>] [--break-lock] [--detach] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+  - "delegate pause <run-id> [--repo <repo>]"
 ---
 
 # Reference: `delegate run`
 
 `delegate run <workflow>` builds the [**tickets**](../glossary.md#ticket) of a [**workflow**](../glossary.md#workflow). For each ticket, the [**engine**](../glossary.md#engine) makes a [**worktree**](../glossary.md#worktree), spawns the [**specialist**](../glossary.md#specialist) of the [**stack**](../glossary.md#stack) through a [**harness**](../glossary.md#harness) [**adapter**](../glossary.md#adapter), checks the specialist report, runs the [**gates**](../glossary.md#gate) itself, and records each event in a [**journal**](../glossary.md#journal). In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode), the engine then verifies the branch with a [**blind**](../glossary.md#blind) [**verifier**](../glossary.md#verifier), and moves the [**run branch**](../glossary.md#run-branch) to the branch only on [**ACCEPT**](../glossary.md#accept). A [**REJECT**](../glossary.md#reject) starts a [**fix-up**](../glossary.md#fix-up) round, up to two rounds. In [**`economy`**](../glossary.md#economy) mode, the engine builds a [**chain**](../glossary.md#chain) of branches, runs no gate for one ticket, and at the end runs the gates once and verifies once for each stack. See [the economy chain](#the-economy-chain) and [the chain verification](#the-chain-verification). A specialist that ends capped or failed, whose gates are red, or whose report is not valid after it committed work, continues in the same worktree, up to the limit of the mode. A ticket that passes all of these is in the built state.
 
-A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To go on with one failed step of a run, add `--retry <ticket>`. See [the retry](#the-retry). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
+A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary.md#run) and go on later with `--resume <run-id>`. See [the resume](#the-resume). To stop a run at its next step boundary, and cut off no agent, use `delegate pause <run-id>`. See [the pause](#the-pause). To go on with one failed step of a run, add `--retry <ticket>`. See [the retry](#the-retry). To see the state of a run, or to follow it, use `delegate status` and `delegate watch`. See [the reference of status and watch](status-and-watch.md).
 
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
@@ -109,7 +111,7 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped. A run stops when its process is killed, or is interrupted with Ctrl-C. Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
+`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
 
 The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a plan change, and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
@@ -133,9 +135,48 @@ An open step goes on as follows:
 - The continuations that the journal holds count against the limit of the mode.
 - In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of [**verdicts**](../glossary.md#verdict) that the journal holds, and the limit of two fix-up rounds counts across the stop. A verifier run that ended with no verdict does not count: for example, a verifier that a stop or the time limit of a harness killed. The resume runs that round again.
 
+## The pause
+
+`delegate pause <run-id>` asks a run to stop at its next step boundary. The run does not cut off an agent or a gate, so the work that runs now is not lost. To stop a run at once, press Ctrl-C or stop its process. See [the resume](#the-resume).
+
+```
+delegate pause <run-id> [--repo <repo>]
+```
+
+<!-- generated:begin pause-options -->
+<!-- Generated by `delegate docs`. Do not edit this section by hand. -->
+
+| Option | Meaning |
+|---|---|
+| `<run-id>` | The run to pause; it must have a live process. Required. |
+| `--repo <repo>` | The git repository that holds the run; default is the current directory. |
+
+<!-- generated:end pause-options -->
+
+The command writes the request file `pause-request` in the directory of the run, beside its journal. It sends no signal, so it works from any shell on the same host. It prints `run <run id>: pause requested; the run stops at its next step boundary` and the path of the request, and exits 0. A second request before the engine reads the first one writes the file again.
+
+The engine reads the request at each step boundary:
+
+- Before the step of a ticket starts. In `economy` mode, the step of a ticket ends when the specialist reports, so a pause during a specialist lets the step end, and the next step does not start.
+- Before a gate runs. In `assure` mode, the gates come after the specialist, so a pause during a specialist stops after its valid report, before its gates. A gate that does not run again (`gate-skip`) is not a boundary.
+- Before a verifier starts. In the verification of an `economy` chain, a pause during the gates of the chain stops after the gates, before the verifier.
+
+At the boundary, the engine writes `pause-requested` with the time of the request, then `paused` with the ticket and the work that did not start. It removes the request file. The run writes no `run-end`. It releases the [**run lock**](../glossary.md#run-lock), and the command prints `paused <where>; go on with delegate run --resume <run-id>` and exits 3. A run with no step boundary left ends as usual, and the engine removes the request file.
+
+`delegate status` shows the run as `pausing` while the request waits, and as `paused` after `paused`. See [the reference of status and watch](status-and-watch.md#delegate-status). `delegate watch` exits with the code 7 at `paused`.
+
+To go on, use `delegate run --resume <run-id>`. The resume goes on from the boundary as from a stop: an open step continues in its worktree, a specialist with a valid report is not spawned again, and a gate that the journal holds green on the same commit does not run again. See [the resume](#the-resume). The resume accepts a plan change under its rules. So you can pause a run, add or change a ticket that has not started, and go on. See [the plan change](#the-plan-change). The resume removes a request that a process before it did not read.
+
+The command refuses these runs, and writes no file. It exits 1, and the message names the run:
+
+- A run that has ended: it has a `run-end`, and no `resume` after it.
+- A run that is paused already.
+- A run whose process stopped: no live process holds the lock of its run branch. Such a run needs no pause. Go on with `delegate run --resume <run-id>`.
+- An unknown run id, or a journal that is not valid.
+
 ## The plan change
 
-A resume can add tickets to a run, and change or remove tickets that have not started. The built work of the run stays. To change the plan, stop the run, or let it end. Edit the workflow file. Then run `delegate run --resume <run-id> --dry-run` to see the change, and `delegate run --resume <run-id> --reviewed <ids> --detach` to go on.
+A resume can add tickets to a run, and change or remove tickets that have not started. The built work of the run stays. To change the plan, pause the run, stop it, or let it end. See [the pause](#the-pause). Edit the workflow file. Then run `delegate run --resume <run-id> --dry-run` to see the change, and `delegate run --resume <run-id> --reviewed <ids> --detach` to go on.
 
 The plan of a run is the tickets in plan order, with the id, the stack, the `blocked-by` and the text of each ticket. `run-start` records it in the field `plan`, with the SHA-256 of each text. A resume compares the workflow with the newest plan of the run: the `plan` of the newest `plan-change`, or else the `plan` of `run-start`. When the plan is the same, the resume goes on as usual. When it differs, the engine applies these rules:
 
@@ -420,7 +461,7 @@ The command makes the directory of the run and the log before the run starts. A 
 
 ## Output and exit codes
 
-On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket.
+On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout.
 
 With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. See [the detached run](#the-detached-run).
 
@@ -431,6 +472,7 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 | 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
 | 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
+| 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
 
 ## Why a step fails
 
@@ -560,6 +602,8 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `plan-change` | `added` (the ids of the new tickets), `changed` (the ids of the changed tickets), `fields` (for each changed ticket, the names of its changed fields: `text`, `stack`, `blocked-by`), `removed` (the ids of the removed tickets), `order` (the new order of the ticket ids), `reviewed` (the later tickets that `--reviewed` covered), `plan` (the new plan, in the form of `plan` of `run-start`). See [the plan change](#the-plan-change). |
 | `retry` | `ticket`, `phase` (where the step goes on: `gates`, `verifier`, or `scoped-verifier` in `assure` mode; `specialist` or `gates` in `economy` mode), `round` (the verifier round of the retry; 0 in `economy` mode), `reason` (the reason the step failed before). See [the retry](#the-retry). |
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
+| `pause-requested` | `ticket` (the ticket of the step boundary), `requested_at` (the time that `delegate pause` wrote in the request, or `null` when the request file cannot be read). The engine writes it at the step boundary where it reads the request. See [the pause](#the-pause). |
+| `paused` | `ticket`, `before` (the work that did not start: `step`, `gate`, or `verifier`). Before a gate also `command` and `phase`, as in `gate-start`. Before a verifier also `round`, and in a chain verification `stack` and `tickets`. The run process then ends with no `run-end`. |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |

@@ -13,7 +13,9 @@ activity. A stream that the reader cannot read gives no tokens and no activity
 for its agent, and is not an error. It needs no workflow file, and no tool
 beyond git, which finds the state directory. The tickets are the tickets of the
 newest plan of the run (see `journal.plan_ids`), so the progress and the ETA
-count a ticket that a plan change added.
+count a ticket that a plan change added. The state of the run is `running`,
+`pausing` while a pause request waits in the directory of the run, `paused`
+from its `paused` event until a resume, or the result of its `run-end`.
 
 The report (`report`) gives the lines of `delegate status`: the state, the
 verdict and the branch of each ticket from the journal, with the progress of
@@ -32,6 +34,7 @@ from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain
 from .journal import JournalError, plan_ids, read_new_events
+from .pause import is_paused, pause_requested
 from .runs import journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
@@ -42,6 +45,11 @@ RUNNING: str = "running"
 BUILT: str = "built"
 FAILED: str = "failed"
 SKIPPED: str = "skipped"
+
+# The states of a run that has no `run-end`, beside `running`. A run is `pausing` from a pause request until the engine
+# reads it at a step boundary, and `paused` from its `paused` event until a resume (see `delegate.run.pause`).
+PAUSING: str = "pausing"
+PAUSED: str = "paused"
 
 # What the line of a ticket shows for a value that the journal does not hold.
 NONE: str = "-"
@@ -63,9 +71,8 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
     start = events[0]
     if start["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
-    end = _end_of(events)
     lines = [
-        f"run {start['run_id']}: {end['result'] if end else RUNNING} (mode {start['mode']}, adapter {start['adapter']})",
+        f"run {start['run_id']}: {snap.state} (mode {start['mode']}, adapter {start['adapter']})",
         f"progress: {_run_progress(snap)}", f"journal {journal}",
     ]
     progress = {t.id: t for t in snap.tickets}
@@ -167,7 +174,8 @@ class TicketSnapshot:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """One snapshot of a run. `time` is the time of the snapshot: now, or the time of `run-end` for a run that ended.
+    """One snapshot of a run. `time` is the time of the snapshot: now, the time of `run-end` for a run that ended, or the
+    time of `paused` for a run that is paused. `state` is the result of a run that ended, `paused`, `pausing`, or `running`.
 
     `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
 
@@ -338,14 +346,19 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
     start = events[0]
     end = _end_of(events)
+    paused = end is None and is_paused(events)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
+    elif paused:
+        now = _time(next(e for e in reversed(events) if e["event"] == "paused"))  # and the clock of a paused run at its pause
     now = now.replace(microsecond=0)
+    # No agent and no gate works in a run that ended or paused.
+    stopped = end is not None or paused
     activity = reader_of(str(start["adapter"]))
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
     for ticket in plan_ids(events):
-        found, duration = _ticket(ticket, [e for e in events if e.get("ticket") == ticket], activity, now, end is not None)
+        found, duration = _ticket(ticket, [e for e in events if e.get("ticket") == ticket], activity, now, stopped)
         tickets.append(found)
         if duration is not None:
             durations.append(duration)
@@ -353,18 +366,27 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     running = [t for t in tickets if t.state == RUNNING]
     # The verification of an `economy` chain is one more unit: it ends with the run, and while it runs it counts 0.
     chain = domain.chain_units(str(start["mode"]))
-    chain_phase, chain_seconds = _chain(events, now) if chain and end is None else (None, 0)
+    chain_phase, chain_seconds = _chain(events, now) if chain and not stopped else (None, 0)
     units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
     return Snapshot(
-        run_id=str(start["run_id"]), state=str(end["result"]) if end else RUNNING, time=now,
+        run_id=str(start["run_id"]), state=_state(end, paused, journal), time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
-        eta=None if to_end is None else now + timedelta(seconds=to_end),
+        eta=None if to_end is None or paused else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase,
     )
+
+
+def _state(end: dict[str, object] | None, paused: bool, journal: Path) -> str:
+    """The state of a run: the result of its `run-end`, `paused`, `pausing` while a pause request waits, or `running`."""
+    if end is not None:
+        return str(end["result"])
+    if paused:
+        return PAUSED
+    return PAUSING if pause_requested(journal) else RUNNING
 
 
 def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> Snapshot:
@@ -417,7 +439,7 @@ def _run_progress(snap: Snapshot) -> str:
     eta = _duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
     parts = [snap.phase] if snap.phase else []
     parts += [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{_duration(snap.elapsed_seconds)} used"]
-    if snap.state == RUNNING:
+    if snap.state in (RUNNING, PAUSING):
         parts.append(f"ETA {eta}")
     if snap.tokens_new is not None and snap.tokens_cache is not None:
         parts.append(format_token_counts(snap.tokens_new, snap.tokens_cache))
