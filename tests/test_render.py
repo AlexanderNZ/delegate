@@ -996,8 +996,8 @@ def test_opencode_verifier_bash_map_comes_from_the_same_table(rendered, java_spr
     (agent,) = java_spring
     assert perm["bash"] == verifier_bash_permission(tuple(agent.gate_commands))
     for c in VERIFIER_READ_COMMANDS:
-        # echo and printf are only in the Claude Code list (#123).
-        expected = "deny" if c in ("echo", "printf") else "allow"
+        # echo and printf are only in the Claude Code list (#123), and so is git grep (#140).
+        expected = "deny" if c in ("git grep", "echo", "printf") else "allow"
         assert opencode_bash_action(perm, c) == expected, c
 
 

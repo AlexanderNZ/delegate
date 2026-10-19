@@ -41,6 +41,7 @@ VERIFIER_READ_COMMANDS: tuple[str, ...] = (
     "git diff",
     "git log",
     "git show",
+    "git grep",
     "git status",
     "git ls-files",
     "git ls-tree",
@@ -214,6 +215,68 @@ GET_ONLY_ARGUMENT_CHECK = (
     "done; "
     '[ "$k" = 0 ] || deny "$seg" "An output flag needs a path argument."'
 )
+
+
+#: The long option of `git diff`, `git log` and `git show` that writes a file
+#: (#140). Some git versions accept a unique prefix of a long option, so each
+#: prefix down to "--ou" is the same option. "--o" is with the run options
+#: below: it is also a prefix of --open-files-in-pager.
+GIT_OUTPUT_OPTION = "--output"
+
+#: The long option of `git grep` that runs a command on the files that match
+#: (#140). "-O" is its short form. Each prefix down to "--o" is the same
+#: option: git 2.54 runs the command for "--op=cat".
+GIT_PAGER_OPTION = "--open-files-in-pager"
+
+#: The short options of `git grep` that take an argument. In a cluster of short
+#: options, git reads the rest of the word after one of them as its argument,
+#: so an "O" after it is no option: "-eFOO" is the pattern FOO. An "O" before
+#: it is -O: "-iOcat" runs cat. A letter that is not in this text makes the
+#: guard read further, so a letter that is missing gives a deny, never a hole.
+GIT_GREP_ARGUMENT_SHORT_OPTIONS = "efmABC"
+
+
+def _prefixes(option: str, shortest: int) -> list[str]:
+    return [option[:n] for n in range(shortest, len(option) + 1)]
+
+
+def _git_read_argument_check(grep: bool) -> str:
+    """The shell text that examines the arguments of a git read command (#140).
+
+    It reads "$@", and it strips quote and backslash characters from each
+    word, as GET_ONLY_ARGUMENT_CHECK does. It denies --output in each form and
+    each prefix, unless its path is in a temp directory (`istmp`), by the rule
+    of a GET-only output flag. With `grep`, it also denies -O,
+    --open-files-in-pager in each form and each prefix, and a cluster of short
+    options that holds an "O" before an option that takes an argument. The
+    message names the option. A "--" does not end the test: a pathspec that
+    looks like an option gives a deny, never a hole.
+    """
+    output = "|".join(_prefixes(GIT_OUTPUT_OPTION, 4))
+    run = "The option $a runs a command on the files that match, so it is not permitted."
+    pager = (
+        f'{"|".join(["--o", *_prefixes(GIT_PAGER_OPTION, 4)])}) deny "$seg" "{run}" ;; '
+        "--*) ;; "
+        f'-[!-]*) gw=${{a#-}}; gw=${{gw%%[{GIT_GREP_ARGUMENT_SHORT_OPTIONS}]*}}; '
+        f'case "$gw" in *O*) deny "$seg" "{run}" ;; esac ;; '
+        if grep
+        else ""
+    )
+    return (
+        "k=0; "
+        'for a in "$@"; do '
+        'if [ "$k" = 1 ]; then k=0; istmp "$a" || deny "$seg" '
+        '"The option $go writes a file, so its path must be in a temp directory."; continue; fi; '
+        r"""a=${a//\"/}; a=${a//\'/}; a=${a//\\/}; """
+        'case "${a%%=*}" in '
+        f'{output}) case "$a" in *=*) istmp "${{a#*=}}" || deny "$seg" '
+        '"The option $a writes a file, so its path must be in a temp directory." ;; '
+        "*) k=1; go=$a ;; esac ;; "
+        f"{pager}"
+        "esac; "
+        "done; "
+        '[ "$k" = 0 ] || deny "$seg" "The option $go needs a path argument."'
+    )
 
 
 #: The shell text that divides the command text "$s" into the array "segs". It
@@ -471,6 +534,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "given as the full command, may hold one. To search for the text, put the dollar sign in brackets."
     )
     get_only_branch = f"{_exact_or_prefix(get_only)}) {GET_ONLY_ARGUMENT_CHECK} ;; " if get_only else ""
+    git_reads = tuple(c for c in VERIFIER_READ_COMMANDS if c.startswith("git ") and c != "git grep")
+    other_reads = tuple(c for c in VERIFIER_READ_COMMANDS if not c.startswith("git "))
     segment = (
         '[ -n "$seg" ] || continue; '
         "set -- $seg; "
@@ -510,7 +575,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "set -- $g; "
         'case "$g" in '
         f"{get_only_branch}"
-        f"{_exact_or_prefix(VERIFIER_READ_COMMANDS + prefix_gates)}) ;; "
+        # A git read command with an option that writes a file or runs a command is no read (#140).
+        f'"git grep"|"git grep "*) {_git_read_argument_check(grep=True)} ;; '
+        f"{_exact_or_prefix(git_reads)}) {_git_read_argument_check(grep=False)} ;; "
+        f"{_exact_or_prefix(other_reads + prefix_gates)}) ;; "
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
         'for a in "$@"; do '
         'if [ "$k" = 1 ]; then k=0; continue; fi; '
@@ -704,10 +772,15 @@ def verifier_external_directory_permission() -> dict[str, str]:
     return perm
 
 
-#: Read commands that the OpenCode verifier map leaves out (#123). A verifier
-#: needs them only to write, and the OpenCode map cannot deny each redirection:
-#: see VERIFIER_OPENCODE_WRITE_DENIES.
-VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("echo", "printf")
+#: Read commands that the OpenCode verifier map leaves out. A verifier needs
+#: echo and printf only to write, and the OpenCode map cannot deny each
+#: redirection: see VERIFIER_OPENCODE_WRITE_DENIES (#123). `git grep` runs a
+#: command with -O and --open-files-in-pager (#140). A glob reads the text of
+#: the command, and the shell makes the option from other text: "-iOcat" and
+#: "-'O'cat" are -O, "-eFOO" is not, and "--op" is the long option. A deny glob
+#: wide enough for each form also denies most searches, so the map has no
+#: `git grep` rule. The OpenCode verifier has its grep tool.
+VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("git grep", "echo", "printf")
 
 #: The deny rules that close the OpenCode verifier map (#123). They come after
 #: the read allows, because OpenCode keeps the last matching rule
@@ -734,8 +807,9 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     write denies come last, so they win over the read allows.
 
     This map is smaller than the Claude Code allow list on purpose. An OpenCode
-    pattern cannot examine a path argument, so the temp-write commands and the
-    GET-only commands stay out, and so do echo and printf.
+    pattern cannot examine a path argument or an option, so the temp-write
+    commands and the GET-only commands stay out, and so do the commands of
+    VERIFIER_OPENCODE_LEFT_OUT.
     """
     perm: dict[str, str] = {"*": "deny"}
     # An exact gate stays out: the map is a glob, and a glob cannot hold a

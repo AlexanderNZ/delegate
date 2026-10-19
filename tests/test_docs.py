@@ -146,7 +146,7 @@ def test_the_command_writes_the_options_of_render_validate_bootstrap_and_brief_i
 
 
 GUARD_ROWS = [
-    "| git reads | `git diff`, `git log`, `git show`, `git status`, `git ls-files`, `git ls-tree`, `git rev-parse`, `git merge-base`, `git worktree list`, `git branch --show-current` |",
+    "| git reads | `git diff`, `git log`, `git show`, `git grep`, `git status`, `git ls-files`, `git ls-tree`, `git rev-parse`, `git merge-base`, `git worktree list`, `git branch --show-current` |",
     "| shell reads | `ls`, `cat`, `head`, `tail`, `sed -n`, `grep`, `rg`, `find`, `wc`, `diff`, `jq`, `shasum`, `stat`, `readlink`, `file`, `which`, `env`, `pwd`, `echo`, `printf`, `date`, `mktemp`, `python3`, `bash -c` |",
     "| temp writes | `mkdir`, `mv`, `rm`, `tee`, `touch` — each one only when every path argument starts with `/tmp/`, `/private/tmp/`, `$TMPDIR`, or `/var/folders/`. A redirection target obeys the same rule, in every segment, but it can also be exactly `/dev/null`, which writes no file: `2>/dev/null` is permitted. |",
     "| temp destination | `cp`, `cd` — each one only when the last path argument is a temp path. The earlier path arguments are sources, and a read of any path is a read. "
