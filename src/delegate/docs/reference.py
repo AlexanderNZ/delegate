@@ -137,7 +137,9 @@ def guard_table() -> str:
         "A redirection target obeys the same rule, in every segment, but it can also be exactly `/dev/null`, "
         "which writes no file: `2>/dev/null` is permitted. |",
         f"| temp destination | {_commands(render.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
-        "The earlier path arguments are sources, and a read of any path is a read. |",
+        "The earlier path arguments are sources, and a read of any path is a read. A `cd` takes one path argument, "
+        "and it may also go to a directory in the git toplevel of the working directory, with no `..` component: "
+        "`cd api && ./gradlew test`. |",
         f"| Write tool | `Write` — only when `file_path` is an absolute path that starts with {write_paths}, "
         "or with the value of `$TMPDIR` in the environment of the hook, and has no `..` component. |",
         "| tree under review | No temp write, no `cp` destination, no redirection target, no output path and no `Write` "

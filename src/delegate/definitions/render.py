@@ -236,6 +236,33 @@ IN_TOPLEVEL_CHECK = " ".join(
 )
 
 
+#: The shell function `incd`. It returns 0 when its argument, the path of a
+#: `cd`, names the git toplevel $wt of the working directory or a directory in
+#: it (#121). A `cd` writes nothing, so it may go there. It returns 1 when $wt
+#: is empty. It reads the path as the shell will: it removes each quote and
+#: backslash. A path that holds a pattern or an expansion character (*, ?, [,
+#: { or $), or that starts with "~" or "=", can name a path outside the tree,
+#: so it returns 1. A ".." component returns 1. A relative path with no ".."
+#: component stays below the working directory, which is in the toplevel, so
+#: it returns 0. An absolute path loses a "/private" prefix, each "//" and
+#: "/./" becomes one "/", a trailing "/" or "/." goes, and the path must then
+#: be the toplevel or start with the toplevel and a "/". It reads text: it does
+#: not resolve a symbolic link. It starts no process.
+IN_TOPLEVEL_CD_CHECK = " ".join(
+    [
+        r"""incd() { [ -n "$wt" ] || return 1;""",
+        r"""wp=${1//\"/}; wp=${wp//\'/}; wp=${wp//\\/};""",
+        r"""case "$wp" in ''|'~'*|'='*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) return 1 ;; esac;""",
+        r"""case "$wp" in ..|../*|*/..|*/../*) return 1 ;; esac;""",
+        r"""case "$wp" in /*) ;; *) return 0 ;; esac;""",
+        r"""case "$wp" in /private/*) wp=${wp#/private} ;; esac;""",
+        r"""while :; do case "$wp" in *//*) wp=${wp%%//*}/${wp#*//} ;; */./*) wp=${wp%%/./*}/${wp#*/./} ;; *) break ;; esac; done;""",
+        r"""while :; do case "$wp" in */.) wp=${wp%/.} ;; */) wp=${wp%/} ;; *) break ;; esac; done;""",
+        r"""case "$wp" in "$wt"|"$wt"/*) return 0 ;; esac; return 1; }""",
+    ]
+)
+
+
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
@@ -262,6 +289,12 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     by its path. The subcommand after the path is still tested, so
     "git -C <path> push" stays a deny.
 
+    A segment that starts with "docker compose" loses each "-f <file>" and
+    "--file <file>" that comes directly after it, so "docker compose -f
+    compose.yml config" is tested as "docker compose config" (#121). The
+    subcommand after the options is still tested, so "docker compose -f x.yml
+    up" stays a deny.
+
     A segment that starts with "nix develop -c" or "nix develop <flake-ref> -c"
     (or --command) loses that prefix in the same way, so a gate that runs in a
     flake dev shell is tested as the gate command itself. Only a flake
@@ -284,6 +317,11 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     denies a method flag, a body flag, and an output flag whose path is not in
     a temp directory (GET_ONLY_ARGUMENT_CHECK). With no such command the
     branch is absent.
+
+    A "cd" takes one path argument: a temp path, or a directory in the git
+    toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A "cd"
+    writes nothing, and each later segment is tested on its own, so a relative
+    write target after the "cd" still fails the temp test.
 
     A temp path is a text prefix and a path with no ".." component. The guard
     rejects "..", it does not resolve it, because it reads the command as text
@@ -333,6 +371,11 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # options that start with "--t" are the target-directory pair, and -T with
     # --no-target-directory changes what the last path means.
     target_flag = "A flag that holds t or T can move the destination, so it is not permitted. Give the destination as the last path."
+    cd_one_path = "A cd takes one path argument."
+    cd_outside = (
+        "The path is outside a temp directory and outside the git toplevel $wt of the working directory, "
+        "or it holds .., ~ or an expansion character."
+    )
     prefix_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
     # An exact gate holds a double quote and a $( but never a single quote, so
     # a single-quoted case pattern holds it as a literal.
@@ -374,13 +417,18 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         'case "$g" in "nix develop "*) t=${g#nix develop }; '
         'case "$t" in -*) ;; *) t=${t#* } ;; esac; '
         'case "$t" in "-c "*|"--command "*) g=${t#* } ;; *) g="nix develop" ;; esac ;; esac; '
+        # A compose file is a read. Remove each "-f <file>" and "--file <file>" after "docker compose", as "-C <path>"
+        # after "git". "docker compose -f x.yml" with nothing after it becomes "docker compose", which is no gate.
+        'case "$g" in "docker compose "*) t=${g#docker compose }; '
+        'while :; do case "$t" in "-f "*|"--file "*) t=${t#* }; case "$t" in *" "*) t=${t#* } ;; *) t= ;; esac ;; '
+        '*) break ;; esac; done; g="docker compose${t:+ $t}" ;; esac; '
         # The write tests below read the arguments from $@: take them from the
         # command after the prefix, not from the segment.
         "set -- $g; "
         'case "$g" in '
         f"{get_only_branch}"
         f"{_exact_or_prefix(VERIFIER_READ_COMMANDS + prefix_gates)}) ;; "
-        f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; q=0; k=0; "
+        f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
         'for a in "$@"; do '
         'if [ "$k" = 1 ]; then k=0; continue; fi; '
         'case "$a" in '
@@ -390,12 +438,15 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "*'>'*|*'<'*) q=1; continue ;; "
         "esac; "
         f'[ "$q" = 0 ] || deny "$seg" "{after_redirect}"; '
-        "d=$a; "
+        "d=$a; m=$((m+1)); "
         "done; "
         '[ -n "$d" ] || deny "$seg" "This command needs a temp path argument."; '
-        # A cd writes nothing, so it may go to the git toplevel of the working directory.
-        'case "$g" in cd|"cd "*) istp "$d" ;; *) istmp "$d" ;; esac || '
-        'deny "$seg" "The last path argument is outside a temp directory." ;; '
+        # A cd writes nothing, so it may go to a temp path or to a directory in the git toplevel of the working
+        # directory (#121). bash 3.2 goes to the first of two paths, and zsh reads two paths as a substitution in the
+        # working directory, so a cd takes one path only.
+        f'case "$g" in cd|"cd "*) [ "$m" = 1 ] || deny "$seg" "{cd_one_path}"; '
+        f'istp "$d" || incd "$d" || deny "$seg" "{cd_outside}" ;; '
+        '*) istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; esac ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
         'if istmp "$a"; then n=$((n+1)); else deny "$seg" "A path argument is outside a temp directory."; fi; '
@@ -414,6 +465,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
             IN_TOPLEVEL_CHECK,
+            IN_TOPLEVEL_CD_CHECK,
             # A write target: a temp path that is not in the git toplevel of the working directory. A temp path in
             # that tree denies the command at once, with its own reason.
             f'istmp() {{ istp "$1" || return 1; inwt "$1" && deny "$seg" "{in_toplevel}"; return 0; }}',

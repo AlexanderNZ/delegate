@@ -29,7 +29,7 @@ You can copy a tree into a temp directory with `cp`, because only the last path 
 
 Do not go to the copy before you remove its `.git` entry. If you do, the copy is the git toplevel of your working directory, and the hook denies the removal.
 
-You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to a path that is not a temp path, and a write after `git -C <path>` stay denied.
+You can go with `cd` to a temp path, or to a directory in the git toplevel of your working directory, for example `cd api && ./gradlew test`. You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to another path or through `..`, and a write after `git -C <path>` stay denied.
 
 ## Your Write tool
 
