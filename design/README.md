@@ -1,5 +1,7 @@
 # Handoff: delegate docs theme ("2c — Guide + quiet reference")
 
+> **Terminal output:** the current design for the text that `delegate` prints on a terminal is in [`design_handoff_delegate_terminal_output/`](design_handoff_delegate_terminal_output/README.md) (#114). It supersedes each earlier decision about the terminal output. This file covers the docs site theme.
+
 ## Overview
 This is a new visual theme for the `delegate` docs site. The site is built with Zensical from `zensical.toml` and published to GitHub Pages. The theme is a tribute to classic open-source documentation. It takes cues from Asciidoctor and Spring reference guides: serif body text, light sans headings, numbered sections and a numbered table of contents. Reference pages also borrow a man-page structure: a header line, NAME and SYNOPSIS, and labelled, striped tables.
 
