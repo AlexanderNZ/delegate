@@ -113,9 +113,10 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
     adapter = Interrupted(files_by_ticket=FILES)  # the interrupt comes as the specialist of ticket 2 starts
     registered(adapter)
     repo = a_repo(tmp_path)
-    with pytest.raises(KeyboardInterrupt):
-        follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
+    stopped = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
+    assert [step.code for step in stopped] == [130]  # Ctrl-C ends the command as a shell ends it on SIGINT (#109)
     run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
+    assert f"Go on with delegate run --resume {run_id}" in stopped[0].err
 
     # The run has no end, so `watch` would wait for it: it is not run here.
     state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))

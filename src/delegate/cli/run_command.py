@@ -12,6 +12,10 @@ a plan change. `--reviewed <ids>` names the later tickets that the coordinator
 reviewed. `--resume <run-id> --dry-run` prints the old order, the new order and
 the verdict of each rule of a plan change, and changes nothing.
 
+Ctrl-C stops a run in the foreground at once. The engine releases the lock and records `interrupted` in the
+journal. The command prints `run <id>` and `journal <path>`, one line on stderr that tells how to resume, and exits
+`EXIT_INTERRUPTED` (130). `delegate pause` stays the way to stop a run at a step boundary.
+
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
@@ -32,8 +36,11 @@ from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
-from ..run.engine import EngineError, PlanReview, new_run_id, review_plan_change, run_workflow, state_directory, workflow_of_run
+from ..run.engine import (
+    EngineError, PlanReview, RunInterrupted, new_run_id, review_plan_change, run_workflow, state_directory, workflow_of_run,
+)
 from ..run.runs import RunsError, journal_of
+from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
@@ -247,6 +254,14 @@ def main(argv: list[str] | None = None) -> int:
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
+        except RunInterrupted as stop:
+            if stop.journal is None:
+                print("delegate: interrupted", file=sys.stderr)  # the run wrote no journal, so there is nothing to resume
+                return EXIT_INTERRUPTED
+            print(f"run {stop.run_id}")
+            print(f"journal {stop.journal}")
+            print(f"delegate run: interrupted; the run {stop.run_id} stopped. Go on with delegate run --resume {stop.run_id}", file=sys.stderr)
+            return EXIT_INTERRUPTED
         if result.taken_over is not None:
             print(
                 f"delegate run: took over the lock of {workflow.run_branch} from run {result.taken_over.run_id}, "

@@ -108,7 +108,7 @@ Resume the paused run with the same command as after Ctrl-C. See [resume after C
 
 ## Resume a run
 
-A run stops when you press Ctrl-C, or when its process is killed. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`. A paused run has no `run-end` too, and `delegate status` shows `paused`.
+A run stops when you press Ctrl-C, or when its process is killed. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`. After Ctrl-C, `delegate run` writes `interrupted` in the journal, prints the command that goes on with the run, and exits 130. See [Ctrl-C](../reference/run.md#ctrl-c). A paused run has no `run-end` too, and `delegate status` shows `paused`.
 
 ### 1. Resume after Ctrl-C
 

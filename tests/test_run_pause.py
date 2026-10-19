@@ -261,9 +261,8 @@ def test_a_pause_of_a_run_whose_process_stopped_is_refused_and_names_the_resume(
         raise KeyboardInterrupt
 
     scripted.during_verifier = interrupt
-    with pytest.raises(KeyboardInterrupt):
-        start(repo, capsys)
-    capsys.readouterr()
+    code, _, _ = start(repo, capsys)
+    assert code == 130  # Ctrl-C stops the run process (#109)
     run_id = run_id_of(repo)
 
     code, out, err = pause(repo, capsys, run_id)

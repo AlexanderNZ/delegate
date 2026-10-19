@@ -111,7 +111,7 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
+`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
 
 The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a plan change, and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
@@ -137,7 +137,7 @@ An open step goes on as follows:
 
 ## The pause
 
-`delegate pause <run-id>` asks a run to stop at its next step boundary. The run does not cut off an agent or a gate, so the work that runs now is not lost. To stop a run at once, press Ctrl-C or stop its process. See [the resume](#the-resume).
+`delegate pause <run-id>` asks a run to stop at its next step boundary. The run does not cut off an agent or a gate, so the work that runs now is not lost. To stop a run at once, press Ctrl-C or stop its process. See [Ctrl-C](#ctrl-c) and [the resume](#the-resume).
 
 ```
 delegate pause <run-id> [--repo <repo>]
@@ -473,6 +473,22 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 | 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 | 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
+| 130 | Ctrl-C stopped the run in the foreground. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c). |
+
+### Ctrl-C
+
+Ctrl-C stops a run in the foreground at once. It does not wait for a step boundary, so it can cut off an agent or a gate. To stop a run at its next step boundary, use `delegate pause`. See [the pause](#the-pause). After Ctrl-C, the command does these steps:
+
+1. It releases the [**run lock**](../glossary.md#run-lock) of the run branch.
+2. It writes `interrupted` in the journal. The run writes no `run-end`.
+3. It prints `run <run id>` and `journal <path>` on stdout, and one line on stderr. See the line below.
+4. It exits with the code 130, as a shell gives for SIGINT. It shows no traceback.
+
+```
+delegate run: interrupted; the run <run id> stopped. Go on with delegate run --resume <run id>
+```
+
+`delegate run --resume <run-id>` then goes on as after a crash. An open step continues in its worktree. See [the resume](#the-resume). When Ctrl-C comes before the run writes its journal, there is nothing to resume: the command prints `delegate: interrupted` on stderr and exits 130. A detached run has no terminal, so Ctrl-C in the shell does not stop it.
 
 ## Why a step fails
 
@@ -604,6 +620,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `pause-requested` | `ticket` (the ticket of the step boundary), `requested_at` (the time that `delegate pause` wrote in the request, or `null` when the request file cannot be read). The engine writes it at the step boundary where it reads the request. See [the pause](#the-pause). |
 | `paused` | `ticket`, `before` (the work that did not start: `step`, `gate`, or `verifier`). Before a gate also `command` and `phase`, as in `gate-start`. Before a verifier also `round`, and in a chain verification `stack` and `tickets`. The run process then ends with no `run-end`. |
+| `interrupted` | `run_id`. Ctrl-C stopped the run in the foreground. The run process then ends with no `run-end`, and a resume goes on as after a crash. See [Ctrl-C](#ctrl-c). |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |

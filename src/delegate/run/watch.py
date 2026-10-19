@@ -32,6 +32,8 @@ EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
 EXIT_PAUSED: int = 7
+# 128 + 2, the number of SIGINT: the exit status that a shell gives to a process that Ctrl-C stopped.
+EXIT_INTERRUPTED: int = 130
 
 # The condition of each exit code, for the reference page of `watch`, which generates its exit-code table from this
 # table and from `EXIT_CODES`. The links point into that page.
@@ -47,6 +49,7 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
     EXIT_PAUSED: "The journal holds `paused`: a pause request stopped the run at a step boundary.",
+    EXIT_INTERRUPTED: "Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c).",
 }
 
 # The meaning of each exit code. The reference page of `watch` lists the same table.
@@ -59,6 +62,7 @@ EXIT_CODES: dict[int, str] = {
     EXIT_STALL: "stall",
     EXIT_TIME_LIMIT: "time limit",
     EXIT_PAUSED: "run paused",
+    EXIT_INTERRUPTED: "interrupted",
 }
 
 # The role that each adapter-result event and each report event belongs to.
@@ -272,6 +276,9 @@ class Sink(Protocol):
     def poll(self) -> None:
         """The events of one read of the journal are told, and the watch goes on."""
 
+    def interrupted(self) -> None:
+        """Ctrl-C ends the watch. The run goes on."""
+
     def end(self) -> None:
         """The watch ends. It comes after the reason to end, or after the `run-end` or the `paused` event."""
 
@@ -311,6 +318,9 @@ class RawSink:
     def poll(self) -> None:
         return None
 
+    def interrupted(self) -> None:
+        return None  # the command prints the line of an interrupted watch on stderr
+
     def end(self) -> None:
         return None
 
@@ -320,6 +330,9 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
 
     `delegate.run.runs.journal_of` finds the journal of a run. Raise JournalError when the journal is not valid or
     `from_position` is beyond its end. Return the exit code and the `seq` of the last event that was reported.
+
+    Ctrl-C (`KeyboardInterrupt`) while the watch follows the journal ends the watch with `EXIT_INTERRUPTED`. The sink
+    gets `interrupted`, and then `end`, so it can draw its last frame.
     """
     result = _follow(options, journal, sink)
     sink.end()
@@ -351,47 +364,52 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     last_event: dict[str, object] | None = None
     first_read = True
     resumed_at = 0
-    while True:
-        events, offset = read_new_events(journal, offset, next_seq)
-        next_seq += len(events)
-        if first_read and next_seq - 1 < options.from_position:
-            raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {options.from_position} is beyond its end")
-        if first_read:
-            resumed_at = _resumed_at(events)
-        first_read = False
-        # An event that a later event of the same read supersedes (a retry continues the run) does not end the watch.
-        superseded = _superseded(events)
-        for event in events:
-            last_event = event
-            seq = int(event["seq"])  # type: ignore[call-overload]
-            files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
-            problem = tracker.problem(event)  # an event before the position still counts for the events after it
-            # A run that ended and was resumed works again. Its events before the first `resume` after its newest
-            # `run-end` that a `resume` follows are its history, and so is an event that a later event of the same
-            # read supersedes: a problem, a verdict or a `run-end` there does not end the watch.
-            history = seq < resumed_at or seq in superseded
-            if history:
-                problem = None
-            ends = event["event"] in RUN_STOPS and not history
-            if seq <= options.from_position:
-                sink.event(event, False, None)
+    try:
+        while True:
+            events, offset = read_new_events(journal, offset, next_seq)
+            next_seq += len(events)
+            if first_read and next_seq - 1 < options.from_position:
+                raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {options.from_position} is beyond its end")
+            if first_read:
+                resumed_at = _resumed_at(events)
+            first_read = False
+            # An event that a later event of the same read supersedes (a retry continues the run) does not end the watch.
+            superseded = _superseded(events)
+            for event in events:
+                last_event = event
+                seq = int(event["seq"])  # type: ignore[call-overload]
+                files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
+                problem = tracker.problem(event)  # an event before the position still counts for the events after it
+                # A run that ended and was resumed works again. Its events before the first `resume` after its newest
+                # `run-end` that a `resume` follows are its history, and so is an event that a later event of the same
+                # read supersedes: a problem, a verdict or a `run-end` there does not end the watch.
+                history = seq < resumed_at or seq in superseded
+                if history:
+                    problem = None
+                ends = event["event"] in RUN_STOPS and not history
+                if seq <= options.from_position:
+                    sink.event(event, False, None)
+                    if ends:
+                        return WatchResult(_stop_code(event), position)
+                    continue
+                sink.event(event, True, problem)
+                position = seq  # after the sink reported the event, so Ctrl-C during the report does not skip it
+                if problem is not None:
+                    return WatchResult(EXIT_PROBLEM, position)
+                if options.until == UNTIL_VERDICT and event["event"] == "verdict" and not history:
+                    sink.verdict(event)
+                    return WatchResult(EXIT_VERDICT, position)
                 if ends:
                     return WatchResult(_stop_code(event), position)
-                continue
-            position = seq
-            sink.event(event, True, problem)
-            if problem is not None:
-                return WatchResult(EXIT_PROBLEM, position)
-            if options.until == UNTIL_VERDICT and event["event"] == "verdict" and not history:
-                sink.verdict(event)
-                return WatchResult(EXIT_VERDICT, position)
-            if ends:
-                return WatchResult(_stop_code(event), position)
-        if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
-            sink.stall(options.stall_minutes, last_event)
-            return WatchResult(EXIT_STALL, position)
-        if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:
-            sink.time_limit(options.max_minutes)
-            return WatchResult(EXIT_TIME_LIMIT, position)
-        sink.poll()
-        time.sleep(options.poll_seconds)
+            if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
+                sink.stall(options.stall_minutes, last_event)
+                return WatchResult(EXIT_STALL, position)
+            if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:
+                sink.time_limit(options.max_minutes)
+                return WatchResult(EXIT_TIME_LIMIT, position)
+            sink.poll()
+            time.sleep(options.poll_seconds)
+    except KeyboardInterrupt:
+        # Ctrl-C: the watch ends, and the run goes on. `position` is the last event that the sink reported.
+        sink.interrupted()
+        return WatchResult(EXIT_INTERRUPTED, position)

@@ -7,6 +7,9 @@ command (`agent-definitions` or `verifier-brief`), so the exit code, the output
 and the files written match by construction, and the two standalone parsers
 stay the single source of every option. Only the top-level help, the two
 usage errors of the umbrella itself, and the title of the terminal (`delegate.cli.title`) are written here.
+
+Ctrl-C ends each subcommand with the exit status 130 (`EXIT_INTERRUPTED`) and no traceback. `watch` and `run` print
+their own line: the position to go on from, and the run to resume. Each other subcommand prints `delegate: interrupted`.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from ..run.watch import EXIT_INTERRUPTED
 from . import agent_definitions, brief, docs_command, pause, run_command, status, watch
 from .title import Title
 
@@ -94,6 +98,16 @@ def _set_title(command: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        return _dispatch(args)
+    except KeyboardInterrupt:
+        # Ctrl-C (SIGINT) before `watch` or `run` can handle it, or in any other subcommand: one line, no traceback.
+        print("delegate: interrupted", file=sys.stderr)
+        return EXIT_INTERRUPTED
+
+
+def _dispatch(args: list[str]) -> int:
+    """Give the arguments to the subcommand that they name, and return its exit code."""
     parser = _help_parser()
     at = _subcommand_index(args)
     if at >= len(args):

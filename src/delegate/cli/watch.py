@@ -11,6 +11,10 @@ run id, the percentage and the local time of the ETA while the watch goes on, an
 
 With no run id and no `--from`, a newest run that ended gets one line (`delegate.run.watch.EndedRun`) and the exit
 code of its result, and no replay of its journal.
+
+Ctrl-C ends the watch with `watch.EXIT_INTERRUPTED` (130), and the run goes on. The live view draws its last frame, and
+this module shows the cursor and sets the title to the reason `interrupted`. It then prints one line on stderr with the
+position to go on from, and no line `position <seq>`.
 """
 
 from __future__ import annotations
@@ -34,6 +38,10 @@ CLEAR_SCREEN: str = "\x1b[2J"
 HOME: str = "\x1b[H"
 CLEAR_LINE_END: str = "\x1b[K"
 CLEAR_DOWN: str = "\x1b[J"
+
+# The terminal control sequence that shows the cursor. Ctrl-C can come while a frame is written, so the command writes
+# it after the last frame.
+SHOW_CURSOR: str = "\x1b[?25h"
 
 
 def _positive(text: str) -> float:
@@ -145,6 +153,10 @@ class _Titled:
         self._result = "time limit"
         self._sink.time_limit(minutes)
 
+    def interrupted(self) -> None:
+        self._result = "interrupted"
+        self._sink.interrupted()
+
     def poll(self) -> None:
         self._title.set(self._progress())
         self._sink.poll()
@@ -177,7 +189,8 @@ def main(argv: list[str] | None = None) -> int:
             print(ended.line())
             return ended.code
         sink: watch.Sink = watch.RawSink(_emit)
-        if not args.raw and sys.stdout.isatty():
+        live_view = not args.raw and sys.stdout.isatty()
+        if live_view:
             screen = _Screen(sys.stdout)
             sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw)
         title = Title(sys.stdout)
@@ -187,5 +200,16 @@ def main(argv: list[str] | None = None) -> int:
     except (RunsError, JournalError) as error:
         print(f"delegate watch: {error}", file=sys.stderr)
         return watch.EXIT_ERROR
+    if result.code == watch.EXIT_INTERRUPTED:
+        if live_view:
+            sys.stdout.write(SHOW_CURSOR)
+            sys.stdout.flush()
+        run_id = journal.parent.name
+        print(
+            f"watch: stopped at position {result.position}; the run goes on. "
+            f"Resume with delegate watch {run_id} --from {result.position}",
+            file=sys.stderr,
+        )
+        return result.code
     print(f"position {result.position}")
     return result.code

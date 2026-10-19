@@ -90,6 +90,11 @@ step starts, before a gate runs, and before a verifier starts (see
 records `pause-requested` and `paused`, the run writes no `run-end`, and a
 resume goes on from the boundary as from a stop.
 
+Ctrl-C (SIGINT) stops a run at once, and does not wait for a step boundary. The
+engine releases the lock, records `interrupted` in the journal, and raises
+`RunInterrupted`. The run writes no `run-end`, so a resume goes on as after a
+crash.
+
 The rules of a run are in `domain.py`: the modes, the limits, the skip rule, the
 start of a ticket in a chain, and the handling of a verdict. The engine reads
 and writes the world, and asks that module what the rules say.
@@ -183,6 +188,18 @@ PAUSED_BEFORE_VERIFIER: str = "verifier"
 
 class EngineError(Exception):
     """The run cannot start or go on. The message names the input at fault."""
+
+
+class RunInterrupted(Exception):
+    """Ctrl-C (SIGINT) stopped the run. The lock of the run branch is released.
+
+    `journal` is the path of the journal, which holds `interrupted` as its last event, so a resume goes on. It is None
+    when the run stopped before it wrote its journal: then there is nothing to resume.
+    """
+
+    def __init__(self, run_id: str, journal: Path | None) -> None:
+        super().__init__(f"run {run_id} was interrupted")
+        self.run_id, self.journal = run_id, journal
 
 
 class _StepFailed(Exception):
@@ -747,6 +764,9 @@ def run_workflow(
     `on_start` gets the run id when the run holds its lock, before the first step: `delegate run` puts the id in the
     title of the terminal.
 
+    Ctrl-C (`KeyboardInterrupt`) stops the run at once. The run releases its lock, appends `interrupted` to its
+    journal, and raises RunInterrupted. A resume then goes on as after a crash.
+
     `run_id` is the id of a new run. The default is a new id from `new_run_id`. `delegate run --detach` gives the id
     that it printed before it started the run process. A resume uses the id `resume`, and ignores `run_id`.
 
@@ -767,12 +787,28 @@ def run_workflow(
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
             if on_start is not None:
                 on_start(run_id)
-            result = _execute(
-                workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry, reviewed
-            )
+            try:
+                result = _execute(
+                    workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
+                    reviewed,
+                )
+            except KeyboardInterrupt:
+                # The block of the lock ends with this exception, so the lock is released.
+                raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id)) from None
             return result if break_lock else replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
+
+
+def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
+    """Append `interrupted` to the journal of the run, and return its path. Return None when the run has no journal that can be read."""
+    path = state_dir / "runs" / run_id / "journal.jsonl"
+    try:
+        journal, _ = Journal.reopen(path)
+    except JournalError:
+        return None
+    journal.append("interrupted", run_id=run_id)
+    return path
 
 
 def _execute(

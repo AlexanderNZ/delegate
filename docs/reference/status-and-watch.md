@@ -66,7 +66,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 
 On a terminal, `status` sets the title of the terminal to `delegate status`. See [the terminal title](#the-terminal-title).
 
-`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. The message on stderr names the repository, the run id, or the journal. An event stream that cannot be read is not an error: see [a stream that cannot be read](#a-stream-that-cannot-be-read).
+`status` exits 0 when it printed the run. It exits 2 when the repository has no run, when the run id is unknown, or when the journal is not valid. The message on stderr names the repository, the run id, or the journal. Ctrl-C ends `status` with the code 130 and the line `delegate: interrupted` on stderr, and with no traceback. An event stream that cannot be read is not an error: see [a stream that cannot be read](#a-stream-that-cannot-be-read).
 
 ### The snapshot
 
@@ -301,6 +301,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
 | 6 | time limit | `--max-minutes` is set and the time is used. |
 | 7 | run paused | The journal holds `paused`: a pause request stopped the run at a step boundary. |
+| 130 | interrupted | Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c). |
 
 <!-- generated:end watch-exit-codes -->
 
@@ -342,12 +343,26 @@ The journal names the [**event stream**](../glossary.md#event-stream) of an agen
 
 ### The position
 
-`--max-minutes N` ends the watch before a [**harness**](../glossary.md#harness) kills the background task. The raw line is `watch: time limit: N minutes are used; the run is not at its end`. Each exit prints `position <seq>`. `watch --from <seq>` goes on after that event:
+`--max-minutes N` ends the watch before a [**harness**](../glossary.md#harness) kills the background task. The raw line is `watch: time limit: N minutes are used; the run is not at its end`. Each exit prints `position <seq>`, but Ctrl-C prints the position in its own line. See [Ctrl-C](#ctrl-c). `watch --from <seq>` goes on after that event:
 
 - It prints no event with a position of `<seq>` or less, so no event is reported twice.
 - It reads the earlier events for the problem rules. A step-end after the position still finds the red gate before the position.
 - If the journal ended at or before the position, it exits with the result of the run.
 - If the journal holds fewer events than `<seq>`, it exits 2.
+
+### Ctrl-C
+
+Ctrl-C stops the watch. It does not stop the run. `watch` then does these steps:
+
+1. On a terminal, it draws the last frame of the live view, shows the cursor, and sets the title to `delegate watch · <short run id> · interrupted`. Thus the terminal is clean also when Ctrl-C comes while `watch` draws a frame. See [the terminal title](#the-terminal-title).
+2. It prints one line on stderr, and no line `position <seq>`. See the line below.
+3. It exits with the code 130, as a shell gives for SIGINT. It shows no traceback.
+
+```
+watch: stopped at position <seq>; the run goes on. Resume with delegate watch <run id> --from <seq>
+```
+
+The position is the `seq` of the last event that `watch` reported. `watch <run id> --from <seq>` goes on after that event. See [the position](#the-position). When Ctrl-C comes before `watch` finds the run, `watch` prints `delegate: interrupted` on stderr and exits 130.
 
 ## The terminal title
 
@@ -355,7 +370,7 @@ When standard output is a terminal, each `delegate` command sets the title of th
 
 - `status` sets the title `delegate status`.
 - `watch` sets the title `delegate watch · <short run id> · <percent>% · ETA <HH:MM>` at each poll. It writes the title again only when the title changes. The percentage is the percentage of [the snapshot](#the-snapshot). The ETA is the local time of the estimated end of the run, or `-` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta).
-- When `watch` exits, the title is `delegate watch · <short run id> · <result>`. At the end of the run, the result is `built` or `failed`. When the watch ends before the run, the result is the reason: `problem`, `verdict`, `stall` or `time limit`.
+- When `watch` exits, the title is `delegate watch · <short run id> · <result>`. At the end of the run, the result is `built` or `failed`. When the watch ends before the run, the result is the reason: `problem`, `verdict`, `stall`, `time limit` or `interrupted`.
 - `delegate run` sets the title `delegate run · <short run id>`. See [the output of `delegate run`](run.md#output-and-exit-codes).
 - Each other subcommand of `delegate` sets the title `delegate <subcommand>`, for example `delegate render`.
 

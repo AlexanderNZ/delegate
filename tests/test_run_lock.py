@@ -133,10 +133,10 @@ def test_the_lock_is_gone_when_a_run_is_stopped_by_an_interrupt_and_it_can_be_re
             raise KeyboardInterrupt
 
     scripted.on_specialist = interrupt
-    with pytest.raises(KeyboardInterrupt):
-        delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    assert delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)]) == 130  # Ctrl-C, as a shell gives it (#109)
     capsys.readouterr()
     (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
     assert "run-end" not in event_names(read_journal_file(repo, run_dir.name))
     scripted.on_specialist = None
 

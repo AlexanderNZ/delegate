@@ -151,6 +151,9 @@ class LiveView:
         columns, rows = self._size()
         self._draw(self.frame(columns, rows, final=False))
 
+    def interrupted(self) -> None:
+        return None  # `end` draws the last frame; the command restores the terminal and prints the line
+
     def end(self) -> None:
         self._flush_all()
         columns, rows = self._size()

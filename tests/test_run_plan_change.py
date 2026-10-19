@@ -57,9 +57,8 @@ def stopped_at_the_verifier_of(repo, capsys, scripted, ticket_id: str) -> str:
             raise KeyboardInterrupt
 
     scripted.during_verifier = interrupt
-    with pytest.raises(KeyboardInterrupt):
-        start(repo, capsys)
-    capsys.readouterr()
+    code, _, _ = start(repo, capsys)
+    assert code == 130  # Ctrl-C stops the run process (#109)
     scripted.during_verifier = None
     clear_calls(scripted)
     return run_id_of(repo)
@@ -294,9 +293,8 @@ def test_plan_change_is_in_the_journal_a_second_resume_compares_with_the_newest_
             raise KeyboardInterrupt
 
     scripted.during_verifier = interrupt
-    with pytest.raises(KeyboardInterrupt):
-        resume_main(repo, capsys, run_id, "--reviewed", "b")
-    capsys.readouterr()
+    code, _, _ = resume_main(repo, capsys, run_id, "--reviewed", "b")
+    assert code == 130  # Ctrl-C stops the run process (#109)
     scripted.during_verifier = None
     (change,) = plan_changes(repo, run_id)
     assert (change["added"], change["order"], change["reviewed"]) == (["x"], ["a", "x", "b"], ["b"])
