@@ -5,7 +5,7 @@ A redesign of what `delegate` prints on a terminal: `delegate watch` (live view)
 
 The idea: the ticket table is the record. It is in plan order, flat: a rail joins a row to the one above when that is its blocker, an `after` column names the blocker otherwise, and each row carries state, time and tokens; the running ticket stacks its phases vertically beneath its row. Below a divider, the feed holds only the events of the ticket that runs now. Once a step ends, its row carries the result and the feed starts again with the next ticket.
 
-Repo: `AlexanderNZ/delegate`, branch `main`. Code that renders today: `src/delegate/run/live.py` (frame and feed), `src/delegate/run/status.py` (`view_lines`, `render`), `src/delegate/cli/watch.py`, `src/delegate/cli/status.py`, `plugins/claude-code/hooks/register.tsx`.
+Repo: `example/delegate`, branch `main`. Code that renders today: `src/delegate/run/live.py` (frame and feed), `src/delegate/run/status.py` (`view_lines`, `render`), `src/delegate/cli/watch.py`, `src/delegate/cli/status.py`, `plugins/claude-code/hooks/register.tsx`.
 
 ## About the design files
 `Delegate Watch v2.dc.html` is a design reference built in HTML. It is a picture of terminal frames, not code to copy. Open it in a browser with `support.js` beside it. Frame ids:

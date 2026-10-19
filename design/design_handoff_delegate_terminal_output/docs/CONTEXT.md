@@ -1,6 +1,6 @@
 # Delegate terminal views — design context
 
-Source repo: `AlexanderNZ/delegate` (main). Design docs here mirror `design/` in the repo; the repo is canonical.
+Source repo: `example/delegate` (main). Design docs here mirror `design/` in the repo; the repo is canonical.
 
 ## What we are designing
 The text that `delegate` prints on a terminal. Six surfaces, one vocabulary:
