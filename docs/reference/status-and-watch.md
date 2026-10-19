@@ -89,6 +89,7 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, while the run is paused, and in [**`assure`**](../glossary.md#assure) mode. |
 | `note` | string or `null` | `a pause request waits; delegate run --resume removes it` when a pause request waits in the directory of the run and the run is not [active](#the-run-with-no-run-id): its process stopped before the engine read the request. `null` otherwise. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
+| `plan` | list of objects or `null` | The newest plan of the run: one object for each ticket, in plan order, with its `id` (string) and its `blocked_by` (list of strings), the ids of its [**blockers**](../glossary.md#blocker) as the `plan` field of `run-start` or of the newest `plan-change` records them. A blocker that is not in the plan can be in the list. `null` for the journal of an earlier version of the engine, which records no plan. |
 
 | Ticket field | Type | Meaning |
 |---|---|---|

@@ -13,7 +13,13 @@ This plugin shows the progress of a `delegate` run of the repository in Claude C
   In the `gates` phase, the time since the last activity is the time since the last output of the gate.
 - **The warning.** When no agent activity occurs for `stall_minutes` minutes, the entry shows `⚠ idle 6m40s` in place of `active 18s`. A band above the prompt then shows the warning in the warning colour of the theme. The status line of Claude Code shows text only, so the colour is on the band.
 - **The toasts.** A toast shows when a ticket ends (`delegate 1638: ticket 60 built`), and when the run ends (`delegate 1638: the run ended, built`). The tickets that ended before the first poll of the session give no toast.
-- **The pane.** The `/delegate` command opens a pane with one row for each ticket: the state, the phase, the time used, and the tokens. The pane changes at each poll.
+- **The pane.** The `/delegate` command opens a pane with one row for each ticket, in plan order: the position in the plan, the tree of the blockers, the state, the phase, the time used, and the tokens. The tree comes from the `plan` field of the snapshot: a ticket with a blocker sits under its deepest blocker with `└─`, two cells deeper for each level. With no plan (a run of an earlier version), the tree is flat. The rows of the tickets that ended are dim. The pane changes at each poll.
+
+  ```text
+  1 ticket 90      built    -          57m22s  259k new · 10.9M cache
+  2 └─ ticket 92   built    -          9m42s   112k new · 1.9M cache
+  3   └─ ticket 60 running  specialist 3m29s   76k new · 1.0M cache
+  ```
 
 With no active run, the plugin shows nothing. When the command fails, or its output is not JSON with a `percent` field (an old version of `delegate`), the plugin shows nothing and gives no error.
 

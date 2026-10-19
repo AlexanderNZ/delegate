@@ -329,20 +329,88 @@ describe('the /delegate command', () => {
       const pane = await $.ui.mount({
         plugin: 'delegate', surface, component: 'Pane', requestId: 'delegate', props: PANE_PROPS,
       })
-      const rows = await pane.findAll({ type: 'Text', text: /^ticket / })
+      const rows = await pane.findAll({ type: 'Text', text: / ticket / })
 
       expect(seen.opened).toEqual(['delegate'])
       expect(reply).toEqual({ text: 'The pane of run 1638 is open.' })
-      expect(rows.map(row => row.text.split(/\s+/)[1])).toEqual(RECORDED_RUNNING.tickets.map(one => one.id))
-      expect((await pane.find({ key: 'ticket-60' }))?.text).toMatch(
-        /^ticket 60 +running +specialist +3m29s +76k new · 1\.0M cache$/,
+      // Each row starts with the position of the ticket in the plan. The recorded snapshot has no `plan`: no tree.
+      expect(rows.map(row => row.text.match(/^ *(\d+) ticket (\S+) /)?.slice(1))).toEqual(
+        RECORDED_RUNNING.tickets.map((one, index) => [String(index + 1), one.id]),
       )
-      expect((await pane.find({ key: 'ticket-90' }))?.text).toMatch(/^ticket 90 +built +- +57m22s +259k new · 10\.9M cache$/)
+      expect((await pane.find({ key: 'ticket-60' }))?.text).toMatch(
+        /^12 ticket 60 +running +specialist +3m29s +76k new · 1\.0M cache$/,
+      )
+      expect((await pane.find({ key: 'ticket-90' }))?.text).toMatch(/^ 1 ticket 90 +built +- +57m22s +259k new · 10\.9M cache$/)
       expect((await pane.find({ key: 'run' }))?.text).toBe(
         `run 20261017T185517Z-1638 · running · 84% · ETA ${clockTime(RECORDED_RUNNING.eta)} · 1.9M new · 53.0M cache`,
       )
     })
   }
+
+  // The `plan` field of `delegate status --json` (#120): 92 waits on 90, 89 on 92, 85 on 82 and 89, and 60 on 76 and
+  // on 99, which is not in the plan.
+  const BLOCKED_BY: Record<string, string[]> = { '92': ['90'], '89': ['92'], '85': ['82', '89'], '60': ['76', '99'] }
+  const WITH_PLAN = changed(snap => {
+    Object.assign(snap, { plan: snap.tickets.map(one => ({ id: one.id, blocked_by: BLOCKED_BY[one.id] ?? [] })) })
+  })
+
+  for (const surface of SURFACES) {
+    test(`draws the tree of the blockers in the plan column of each row on ${surface}`, async ($, on) => {
+      const clock = mock.clock(on)
+      host(on, { exitCode: 0, stdout: WITH_PLAN })
+      await start($, clock)
+
+      await typed($)
+      const pane = await $.ui.mount({
+        plugin: 'delegate', surface, component: 'Pane', requestId: 'delegate', props: PANE_PROPS,
+      })
+      const rows = await pane.findAll({ type: 'Text', text: / ticket / })
+
+      // A ticket sits one level under its deepest blocker in the plan, two cells for each level. The index and the
+      // plan column are 2 + 1 + 16 cells: the widest plan cell is the one of 85, at depth 3.
+      expect(rows.map(row => row.text.slice(0, 19).trimEnd())).toEqual([
+        ' 1 ticket 90',
+        ' 2 └─ ticket 92',
+        ' 3   └─ ticket 89',
+        ' 4 ticket 82',
+        ' 5     └─ ticket 85',
+        ' 6 ticket 84',
+        ' 7 ticket 81',
+        ' 8 ticket 86',
+        ' 9 ticket 87',
+        '10 ticket 80',
+        '11 ticket 76',
+        '12 └─ ticket 60',
+      ])
+      expect((await pane.find({ key: 'ticket-60' }))?.text).toBe(
+        '12 └─ ticket 60     running  specialist 3m29s   76k new · 1.0M cache',
+      )
+      expect((await pane.find({ key: 'ticket-85' }))?.text).toBe(
+        ' 5     └─ ticket 85 built    -          51m26s  238k new · 6.9M cache',
+      )
+      // The rows of the tickets that ended stay dim.
+      expect((await pane.find({ type: 'Text', text: / ticket 85 / }))?.props.dimColor).toBe(true)
+      expect((await pane.find({ type: 'Text', text: / ticket 60 / }))?.props.dimColor).toBe(false)
+    })
+  }
+
+  test('draws no tree when the plan is null: the journal of an earlier version records no plan', async ($, on) => {
+    const clock = mock.clock(on)
+    host(on, { exitCode: 0, stdout: changed(snap => {
+      Object.assign(snap, { plan: null })
+    }) })
+    await start($, clock)
+
+    await typed($)
+    const pane = await $.ui.mount({
+      plugin: 'delegate', surface: 'terminal', component: 'Pane', requestId: 'delegate', props: PANE_PROPS,
+    })
+    const rows = await pane.findAll({ type: 'Text', text: / ticket / })
+
+    expect(rows.map(row => row.text.slice(0, 12))).toEqual(
+      RECORDED_RUNNING.tickets.map((one, index) => `${String(index + 1).padStart(2)} ticket ${one.id}`),
+    )
+  })
 
   test('updates the pane on the next poll', async ($, on) => {
     const clock = mock.clock(on)
@@ -358,7 +426,7 @@ describe('the /delegate command', () => {
     }) }
     await clock.advance(POLL_MS)
 
-    expect((await pane.find({ key: 'ticket-60' }))?.text).toMatch(/^ticket 60 +running +gates /)
+    expect((await pane.find({ key: 'ticket-60' }))?.text).toMatch(/^12 ticket 60 +running +gates /)
   })
 })
 

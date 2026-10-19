@@ -13,6 +13,7 @@ the `claude-code` adapter.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import time
@@ -163,15 +164,67 @@ def test_the_status_of_a_paused_run_gives_paused_before_this_step_in_the_row_of_
 @pytest.mark.parametrize(("state", "make", "clock"), [
     ("running", a_running_run, 1100), ("ended", an_ended_run, 9000), ("paused", a_paused_run, 9000),
 ])
-def test_status_json_is_byte_identical_to_the_output_before_the_table(tmp_path, capsys, monkeypatch, state, make, clock):
-    """The golden files are the output of `status --json` of version 1.6.0 with #115 and #116, before #117."""
+def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the_plan_as_the_last_field(
+    tmp_path, capsys, monkeypatch, state, make, clock
+):
+    """The golden files are the output of `status --json` of version 1.6.0 with #115 and #116, before #117.
+
+    #120 adds the field `plan` after `tickets`. The text up to the end of `tickets` stays byte-identical.
+    """
     repo = bare_repo(tmp_path)
     make(repo)
     frozen(monkeypatch, clock)
 
     out = status(repo, capsys, "r1", "--json")
 
-    assert out == (ROOT / "tests" / "fixtures" / "status-json" / f"{state}.json").read_text()
+    golden = (ROOT / "tests" / "fixtures" / "status-json" / f"{state}.json").read_text()
+    assert golden.endswith("\n  ]\n}\n")
+    assert out.startswith(golden.removesuffix("\n}\n") + ",\n  \"plan\": ")
+    assert list(json.loads(out)) == [*json.loads(golden), "plan"]
+
+
+def test_status_json_gives_the_plan_of_the_run_with_the_blockers_of_each_ticket_in_plan_order(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    a_running_run(repo)
+    frozen(monkeypatch, 1100)
+
+    snap = json.loads(status(repo, capsys, "r1", "--json"))
+
+    assert snap["plan"] == [
+        {"id": "a", "blocked_by": []},
+        {"id": "b", "blocked_by": ["a"]},
+        {"id": "c", "blocked_by": ["b"]},
+        {"id": "d", "blocked_by": []},
+    ]
+
+
+def test_status_json_gives_the_plan_of_the_newest_plan_change(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a", "b", blocked_by={"b": ("a",)})
+    built(run, "a", 0)
+    run.add(600, "plan-change", added=["c"], changed=["b"], fields=["blocked-by"], removed=[], order=["a", "c", "b"],
+            reviewed=["b"], plan=[
+                {"id": t, "stack": "python", "blocked_by": blockers, "text_sha256": "0" * 64}
+                for t, blockers in (("a", []), ("c", ["a"]), ("b", ["c"]))
+            ])
+    frozen(monkeypatch, 700)
+
+    snap = json.loads(status(repo, capsys, "r1", "--json"))
+
+    assert [t["id"] for t in snap["tickets"]] == ["a", "c", "b"]
+    assert snap["plan"] == [{"id": "a", "blocked_by": []}, {"id": "c", "blocked_by": ["a"]}, {"id": "b", "blocked_by": ["c"]}]
+
+
+def test_status_json_gives_a_null_plan_for_the_journal_of_an_earlier_version_with_no_plan(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a", "b")
+    built(run, "a", 0)
+    frozen(monkeypatch, 700)
+
+    snap = json.loads(status(repo, capsys, "r1", "--json"))
+
+    assert [t["id"] for t in snap["tickets"]] == ["a", "b"]
+    assert snap["plan"] is None
 
 
 def on_a_terminal(repo: Path, monkeypatch) -> str:

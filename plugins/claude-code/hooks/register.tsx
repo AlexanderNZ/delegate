@@ -65,6 +65,32 @@ function idleSeconds(ticket: DelegateTicket): number | null {
   return numberOrNull(ticket.phase === GATES ? ticket.gate_idle_seconds : ticket.idle_seconds)
 }
 
+// The depth of each ticket in the tree of its blockers, from the `plan` field of the snapshot. The tickets are in plan
+// order, so each blocker comes before the tickets that it blocks. A ticket with blockers sits one level under its
+// deepest blocker. A blocker that is not in the plan does not count. With no plan (a journal of an earlier version, or
+// a version of delegate before #120), each ticket has depth 0.
+function depths(snap: DelegateSnapshot): Map<string, number> {
+  const blockers = new Map<string, string[]>()
+  for (const entry of Array.isArray(snap.plan) ? snap.plan : []) {
+    if (Array.isArray(entry?.blocked_by)) blockers.set(String(entry.id), entry.blocked_by.map(String))
+  }
+  const found = new Map<string, number>()
+  for (const ticket of snap.tickets) {
+    const levels = (blockers.get(ticket.id) ?? []).flatMap(blocker => {
+      const depth = found.get(blocker)
+      return depth === undefined ? [] : [depth + 1]
+    })
+    found.set(ticket.id, Math.max(0, ...levels))
+  }
+  return found
+}
+
+// The tree gutter of a ticket at a depth, as in the plan column of `delegate watch`: `└─` under its blocker, two
+// cells for each level.
+function gutter(depth: number): string {
+  return depth === 0 ? '' : `${'  '.repeat(depth - 1)}└─ `
+}
+
 function runningTickets(snap: DelegateSnapshot): DelegateTicket[] {
   return snap.tickets.filter(ticket => ticket.state === RUNNING)
 }
@@ -216,10 +242,15 @@ export const register: Register = (on, options) => {
     if (snap.state === RUNNING && snap.eta !== null) head.push(`ETA ${clockTime(snap.eta)}`)
     const counts = tokenCounts(snap)
     if (counts !== null) head.push(counts)
-    const idWidth = Math.max(...snap.tickets.map(ticket => ticket.id.length))
-    const row = (ticket: DelegateTicket) =>
+    // Each row starts with the position of the ticket in the plan, and its plan cell: the tree gutter and the id.
+    const depth = depths(snap)
+    const plan = (ticket: DelegateTicket) => `${gutter(depth.get(ticket.id) ?? 0)}ticket ${ticket.id}`
+    const indexWidth = String(snap.tickets.length).length
+    const planWidth = Math.max(...snap.tickets.map(ticket => plan(ticket).length))
+    const row = (ticket: DelegateTicket, index: number) =>
       [
-        `ticket ${ticket.id.padEnd(idWidth)}`,
+        String(index + 1).padStart(indexWidth),
+        plan(ticket).padEnd(planWidth),
         ticket.state.padEnd(8),
         (ticket.phase ?? '-').padEnd(10),
         duration(numberOrNull(ticket.elapsed_seconds) ?? 0).padEnd(7),
@@ -230,9 +261,9 @@ export const register: Register = (on, options) => {
         <Box key="run">
           <Text bold>{head.join(' · ')}</Text>
         </Box>
-        {snap.tickets.map(ticket => (
+        {snap.tickets.map((ticket, index) => (
           <Box key={`ticket-${ticket.id}`}>
-            <Text dimColor={ENDED.includes(ticket.state)}>{row(ticket)}</Text>
+            <Text dimColor={ENDED.includes(ticket.state)}>{row(ticket, index)}</Text>
           </Box>
         ))}
       </Box>

@@ -188,6 +188,9 @@ class Snapshot:
     `mode` is the mode of the run. `paused_before` is the ticket and the `before` field of the `paused` event of a run
     that is paused, and None otherwise. `to_json` leaves the two out.
 
+    `plan` is each ticket id of the newest plan, in plan order, with the blockers that the plan records for it. It is
+    None when the journal records no plan (an earlier version of the engine).
+
     `tokens_new` and `tokens_cache` are None when the snapshot has no reader of the streams. Otherwise each is the sum of
     the tickets that have tokens: a ticket with a stream that cannot be read adds nothing.
     """
@@ -207,9 +210,13 @@ class Snapshot:
     note: str | None = None
     mode: str = ""
     paused_before: tuple[str, str] | None = None
+    plan: tuple[tuple[str, tuple[str, ...]], ...] | None = None
 
     def to_json(self) -> dict[str, object]:
-        """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it."""
+        """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it.
+
+        `plan` is the last field (#120): a new field comes after the fields of earlier versions, which keep their bytes.
+        """
         return {
             "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
             "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
@@ -222,6 +229,7 @@ class Snapshot:
                 }
                 for t in self.tickets
             ],
+            "plan": None if self.plan is None else [{"id": ticket, "blocked_by": list(blockers)} for ticket, blockers in self.plan],
         }
 
 
@@ -402,7 +410,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase, note=note, mode=str(start["mode"]),
-        paused_before=None if pause is None else (str(pause.get("ticket")), str(pause.get("before"))),
+        paused_before=None if pause is None else (str(pause.get("ticket")), str(pause.get("before"))), plan=_plan(events),
     )
 
 
@@ -662,13 +670,31 @@ def plan_tree(events: list[dict[str, object]]) -> list[tuple[str, int]]:
     no blocker has depth 0, and a ticket with blockers sits one level under its deepest blocker. A blocker that is not
     in the plan does not count. A journal of an earlier version of the engine records no plan: each ticket has depth 0.
     """
-    records = [event.get("plan") for event in events if event["event"] == "plan-change"] or [events[0].get("plan")]
-    blockers = {str(r["id"]): [str(b) for b in r["blocked_by"]] for r in records[-1] or []}  # type: ignore[union-attr, index]
+    blockers = _newest_blockers(events) or {}
     depths: dict[str, int] = {}
     for ticket in plan_ids(events):
         # Plan order puts each blocker before the tickets that it blocks.
         depths[ticket] = max((depths[b] + 1 for b in blockers.get(ticket, []) if b in depths), default=0)
     return list(depths.items())
+
+
+def _newest_blockers(events: list[dict[str, object]]) -> dict[str, list[str]] | None:
+    """The blockers of each ticket in the `plan` field of the newest `plan-change`, or else of `run-start` (#107).
+
+    None when that event records no plan: an earlier version of the engine wrote only the ticket ids.
+    """
+    records = [event.get("plan") for event in events if event["event"] == "plan-change"] or [events[0].get("plan")]
+    if records[-1] is None:
+        return None
+    return {str(r["id"]): [str(b) for b in r["blocked_by"]] for r in records[-1]}  # type: ignore[union-attr, index]
+
+
+def _plan(events: list[dict[str, object]]) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
+    """The newest plan of a run for `status --json`: each ticket id in plan order, with its blockers as recorded."""
+    blockers = _newest_blockers(events)
+    if blockers is None:
+        return None
+    return tuple((ticket, tuple(blockers.get(ticket, ()))) for ticket in plan_ids(events))
 
 
 @dataclass(frozen=True)
