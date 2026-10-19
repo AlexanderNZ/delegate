@@ -28,6 +28,10 @@ The neutrality check needs `AGENT_DEFINITIONS_DENYLIST`, the path of the private
 - A test never imports a private function and never asserts on a log line. A mock exists only at a system boundary.
 - A bug fix starts with a test that fails for the reported reason.
 
+## Changelog
+
+Each change with an effect that a user can see adds an entry under `## [Unreleased]` of `CHANGELOG.md`, in the same branch, under `Added`, `Changed` or `Fixed`. The entry names the issue (`(#<n>)`). The release notes come from that file, so a change with no entry is missing from the release.
+
 ## Breakage
 
 Red CI on `main` halts delegation. The coordinator makes `main` green before a new task starts.
