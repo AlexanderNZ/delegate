@@ -23,7 +23,9 @@ Your `permission.bash` map permits the read commands and the verification gates.
 
 ## Your write tool
 
-You have the write tool for your report. Your `permission.edit` map permits a write only to a path outside the project, and your `permission.external_directory` map permits only a path in a temp directory. Each other write is denied. Use the write tool to write your report at the absolute path that the brief gives.
+You have the write tool for your report. Your `permission.edit` map permits a write only to a path outside the project, and your `permission.external_directory` map permits only a path in a temp directory. The project is the git toplevel of your working directory. Thus a write must be in a temp directory and outside the git toplevel of your working directory. Each other write is denied. Use the write tool to write your report at the absolute path that the brief gives.
+
+Your maps cannot deny each write in the tree under review. OpenCode compares the real path of the project with the path as you write it, and an OpenCode pattern holds no variable that names the project. When the path of the tree holds a symbolic link, for example `/var/folders` or `/tmp` on macOS, the maps permit a write to the tree through that link. This was measured on OpenCode 1.15.10 on 2026-10-19. Do not use that hole. Write only your report.
 
 ## Domain
 

@@ -305,6 +305,7 @@ LIMIT_PHRASES = [
     "write guard reads",
     "tree under review",
     "no `$tmpdir` prefix",
+    "the real path of the project",
     "no `cp` rule",
     "`getonlycommands`",
     "no `nix develop` rule",

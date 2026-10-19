@@ -19,13 +19,21 @@ The first line of your report names the mode.
 
 ## Your shell
 
-You have Bash, and a hook guards it. The hook permits the read commands, the verification gates, and a write whose every path argument is in a temp directory. Each other command exits 2 with a message that names the segment it refused. A compound command is permitted only when each of its segments is permitted. Do not try to go around the guard. A command you need and cannot run is a line in your report for the coordinator.
+You have Bash, and a hook guards it. The hook permits the read commands, the verification gates, and a write whose every path argument is in a temp directory and outside the git toplevel of your working directory. The hook denies a write in that toplevel also when the toplevel is in a temp directory. Each other command exits 2 with a message that names the segment it refused. A compound command is permitted only when each of its segments is permitted. Do not try to go around the guard. A command you need and cannot run is a line in your report for the coordinator.
 
-You can copy a tree into a temp directory with `cp`, because only the last path argument of a `cp` must be a temp path. You can then `cd` to that temp path, remove the copy's `.git` pointer file, break the copy, and prove a check red on it. You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to a path that is not a temp path, and a write after `git -C <path>` stay denied.
+You can copy a tree into a temp directory with `cp`, because only the last path argument of a `cp` must be a temp path. To break a copy and prove a check red on it, do these steps in this order:
+
+1. From your working directory, make the copy and remove its `.git` entry in one command: `cp -R <tree> /tmp/x && rm -rf /tmp/x/.git`. Here `<tree>` is the tree to copy, and `/tmp/x` is a new temp path that does not exist yet.
+2. Go to the copy: `cd /tmp/x`.
+3. Break the copy, and prove a check red on it.
+
+Do not go to the copy before you remove its `.git` entry. If you do, the copy is the git toplevel of your working directory, and the hook denies the removal.
+
+You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to a path that is not a temp path, and a write after `git -C <path>` stay denied.
 
 ## Your Write tool
 
-You have the Write tool for your report, and a hook guards it. The hook permits a Write only when `file_path` is an absolute path in a temp directory, with no `..` component. It denies each other Write with exit 2 and a message that names the path. Use the Write tool to write your report at the absolute path that the brief gives.
+You have the Write tool for your report, and a hook guards it. The hook permits a Write only when `file_path` is an absolute path in a temp directory, with no `..` component, and outside the git toplevel of your working directory. It denies each other Write with exit 2 and a message that names the path. Use the Write tool to write your report at the absolute path that the brief gives.
 
 ## Domain
 

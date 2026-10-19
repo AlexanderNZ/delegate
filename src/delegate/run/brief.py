@@ -715,10 +715,15 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
     brief gives the output of the gates that the engine ran green, and the
     verifier does not run them.
     """
+    # The second copy goes beside the copy, in the temp directory that the engine removes when the verifier ends.
+    proof = Path(copy).parent / "proof"
     working_copy = (
         f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
         "The verifier guards deny a write in the git toplevel of your working directory, and that toplevel is this copy. "
-        "To prove a test red, copy this copy to another temp directory, and break the second copy. "
+        "To prove a test red, break a second copy. From this copy, make the second copy and remove its `.git` entry "
+        f"in one command: `cp -R {copy} {proof} && rm -rf {proof}/.git`. Then go to it with `cd {proof}`, break it, "
+        "and run the test there. Do not go to the second copy before you remove its `.git` entry. If you do, the second copy is "
+        "the git toplevel of your working directory, and the guards deny the removal. "
         "Never push.\n\n" + _report_rule("copy", report_path)
     )
     gate_output = (
