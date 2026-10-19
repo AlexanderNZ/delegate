@@ -11,7 +11,7 @@ Colour is semantic and named by ANSI role, so it follows any terminal theme. The
 | `now` | cyan (36) | `#7dcfff` | `▶`, the running ticket id, `running`, the active phase `●`, `active 2s`, the waiting line |
 | `warn` | yellow (33) | `#e8c56a` | `REJECT`, `fix-up`, `continuation`, `cont 2/2`, `paused`/`pausing`, `⚠ idle`, `paused before this step` |
 | `bad` | red (31) | `#f07a7a` | `✗`, `failed`, `gates red` and the red gate's name, problem lines, `stall`, `run failed`, error lines on stderr |
-| `plan` | blue (34) | `#8ab4f8` | the tree glyphs `└─` in the plan column |
+| `plan` | blue (34) | `#8ab4f8` | the rail `│` and the ids in the `after` column |
 
 Rules
 - At most one accent colour per line besides `dim`; a line is `ok`, `now`, `warn`, `bad` or plain. Exception: a phase track mixes `ok` (done) and `now` (active), and a `gates red` parenthetical names the red gate in `bad`.
@@ -21,7 +21,7 @@ Rules
 - `NO_COLOR` set, or stdout not a terminal: no SGR codes at all.
 
 Glyphs
-`✓` built/accept · `✗` failed/problem · `▶` running · `·` pending, and the separator · `●` built node and active phase · `○` pending phase · `–` skipped · `█ ░` bar · `└─` tree (two cells per depth) · `─` divider · `⚠` idle past threshold.
+`✓` built/accept · `✗` failed/problem · `▶` running · `·` pending, and the separator · `●` built node and active phase · `○` pending phase · `–` skipped · `█ ░` bar · `│` rail (blocker is the row above) · `─` divider · `⚠` idle past threshold.
 ASCII fallback (no UTF-8 locale): `+ x > . * o - # . \-- - !`.
 
 Spacing

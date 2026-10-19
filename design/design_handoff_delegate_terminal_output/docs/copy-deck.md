@@ -12,7 +12,9 @@ New or changed strings
 | ticket row | — | plan index `12` | shows plan order |
 | running row | `last activity 2s ago` | `active 2s` | plugin wording; shorter |
 | running row, gate | `gate python3 -m pytest -q, gate log changed 30s ago` | `gate pytest · log 30s ago` | uses `gate_name()` already in live.py |
-| folded ended rows | — | `✓ 11 built  59 60 61 62 64 65 66 72 67 68 69` | fits small terminals |
+| folded pending tail (last row above the divider) | — | `· 11 pending` · `134–150` · `rows 30–40 folded` | the remaining work, always visible |
+| folded built rows (middle) | — | `✓ 17 built` · `104–120` · totals · `rows 4–20 folded` | only when the tail fold is not enough |
+| pause note on the next row | `paused before this step` | `pauses before this step` (live tail) | present tense while pausing; `paused before this step` once paused |
 | column headers | — | `#  ticket  state  phase  used  new · cache` | dim, one line |
 | idle past threshold | — | `⚠ idle 6m40s` | matches plugin |
 | no run active | unchanged | unchanged | contract-ish; coordinators read it |
