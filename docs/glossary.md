@@ -416,7 +416,7 @@ The team contract is what every agent gets, whatever its model: a role, the cont
 
 ## Temporary copy
 
-The temporary copy is a clone of the ticket branch that the engine makes for the verifier. The verifier can break the copy for a red proof, and the real worktree stays as it was.
+The temporary copy is a clone of the ticket branch that the engine makes for the verifier. The verifier guard keeps the copy read-only, so for a red proof the verifier breaks a second copy in another temp directory. The real worktree stays as it was.
 
 Not: verifier copy, copy.
 

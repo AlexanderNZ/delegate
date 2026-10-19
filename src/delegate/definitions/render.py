@@ -99,13 +99,36 @@ def _temp_path_pattern() -> str:
     return "|".join(f"'{p}'*" if "$" in p else f"{p}*" for p in VERIFIER_TEMP_PATH_PREFIXES)
 
 
-#: The shell text that prints the command of a hook input from stdin. It prints
-#: nothing when the input holds no command string, and the verifier guard then
-#: fails closed. A key that is absent, or a body that is not JSON, ends python3
-#: with a non-zero status and no output, which has the same result.
+#: The python3 text that defines `top()`, the git toplevel of the working
+#: directory of a hook (#106), and `u`, which removes a `/private` prefix. It
+#: reads the hook input `j`: the working directory is the absolute `cwd` of the
+#: input, or else the working directory of the process. The toplevel is that
+#: directory or the nearest directory above it that holds a `.git` entry (a
+#: directory, or the pointer file of a worktree), with no `/private` prefix.
+#: It is empty when no such directory exists. The search reads the file system
+#: in the python3 process that the guard starts anyway, so it starts no git
+#: process. The text holds no single quote, so a single-quoted shell word holds
+#: it as a literal.
+TOPLEVEL_FINDER = (
+    'u=lambda s: s[8:] if s.startswith("/private/") else s; '
+    'w=j.get("cwd"); '
+    "top=lambda: (lambda P: u(next((str(x) for x in (P,*P.parents) if (x/\".git\").exists()),\"\")))("
+    'pathlib.Path(os.path.normpath(w if isinstance(w,str) and w.startswith("/") else os.getcwd())))'
+)
+
+#: The shell text that reads a hook input from stdin for the verifier guard. It
+#: prints three parts: the git toplevel of TOPLEVEL_FINDER, a newline, the value
+#: of $TMPDIR without a trailing "/", a newline, and ":" with the command. The
+#: guard then fails closed when the command is empty: no command string, or a
+#: key that is absent, or a body that is not JSON, ends python3 with a
+#: non-zero status and no output. A toplevel or a $TMPDIR with a newline in it
+#: ends python3 in the same way.
 HOOK_COMMAND_READER = (
-    "python3 -c 'import json,sys; c=json.load(sys.stdin)[\"tool_input\"][\"command\"]; "
-    "sys.stdout.write(c if isinstance(c, str) else \"\")'"
+    "python3 -c 'import json,os,pathlib,sys; j=json.load(sys.stdin); c=j[\"tool_input\"][\"command\"]; "
+    f"{TOPLEVEL_FINDER}; r=top(); "
+    "t=os.environ.get(\"TMPDIR\",\"\").rstrip(\"/\"); "
+    "(\"\\n\" in r+t) and sys.exit(5); "
+    "sys.stdout.write(r+\"\\n\"+t+\"\\n:\"+(c if isinstance(c, str) else \"\"))'"
 )
 
 
@@ -183,6 +206,34 @@ COMMAND_DIVIDER = " ".join(
 )
 
 
+#: The shell function `inwt`. It returns 0 when its argument, a temp path as
+#: text, can name the git toplevel $wt of the working directory, a path in it,
+#: or a directory that holds it (#106). A remove or a move of such a directory
+#: changes the tree too. It returns 1 when $wt is empty. It reads the path as
+#: the shell will: it removes each quote and backslash, puts the value of
+#: $TMPDIR ($td) in place of a leading "$TMPDIR", and removes a "/private"
+#: prefix. It then makes each "//" and "/./" one "/". A path that still holds a
+#: pattern or an expansion character (*, ?, [, { or $) can name more than one
+#: path, so only the text before the first such character counts: the path
+#: matches when that text starts the toplevel or starts with it. Otherwise it
+#: removes a trailing "/" or "/.", and compares the full path. It starts no
+#: process.
+IN_TOPLEVEL_CHECK = " ".join(
+    [
+        r"""inwt() { [ -n "$wt" ] || return 1;""",
+        r"""wp=${1//\"/}; wp=${wp//\'/}; wp=${wp//\\/};""",
+        r"""case "$wp" in '$TMPDIR'*) wp=$td${wp#'$TMPDIR'} ;; esac;""",
+        r"""case "$wp" in /private/*) wp=${wp#/private} ;; esac;""",
+        r"""while :; do case "$wp" in *//*) wp=${wp%%//*}/${wp#*//} ;; */./*) wp=${wp%%/./*}/${wp#*/./} ;; *) break ;; esac; done;""",
+        r"""case "$wp" in *'*'*|*'?'*|*'['*|*'{'*|*'$'*)""",
+        r"""wh=${wp%%'*'*}; wh=${wh%%'?'*}; wh=${wh%%'['*}; wh=${wh%%'{'*}; wh=${wh%%'$'*};""",
+        r"""case "$wt/" in "$wh"*) return 0 ;; esac; case "$wh" in "$wt"/*) return 0 ;; esac; return 1 ;; esac;""",
+        r"""while :; do case "$wp" in */.) wp=${wp%/.} ;; */) wp=${wp%/} ;; *) break ;; esac; done;""",
+        r"""case "$wp" in "$wt"|"$wt"/*) return 0 ;; esac; case "$wt" in "$wp"/*) return 0 ;; esac; return 1; }""",
+    ]
+)
+
+
 def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
@@ -241,6 +292,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     """
     quote = '\'"\'*|"\'"*'  # a leading double quote or a leading single quote
     redirect = "A redirection writes outside a temp directory."
+    in_toplevel = (
+        "A write target is in the git toplevel $wt of the working directory, or holds it. "
+        "A verifier is read-only on the tree under review: copy the tree to another temp directory, and change the copy."
+    )
     # The shell removes a redirection before it runs the command, so a path
     # that comes after one is still a path argument. A scan that stopped at the
     # redirection read the source as the destination: "cp /tmp/a >/tmp/log
@@ -334,7 +389,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "d=$a; "
         "done; "
         '[ -n "$d" ] || deny "$seg" "This command needs a temp path argument."; '
-        'istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; '
+        # A cd writes nothing, so it may go to the git toplevel of the working directory.
+        'case "$g" in cd|"cd "*) istp "$d" ;; *) istmp "$d" ;; esac || '
+        'deny "$seg" "The last path argument is outside a temp directory." ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
         'if istmp "$a"; then n=$((n+1)); else deny "$seg" "A path argument is outside a temp directory."; fi; '
@@ -346,9 +403,13 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     return "; ".join(
         [
             'deny() { echo "verifier guard: the command segment [$1] is not permitted. $2" >&2; exit 2; }',
-            f'istmp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
+            f'istp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
+            IN_TOPLEVEL_CHECK,
+            # A write target: a temp path that is not in the git toplevel of the working directory. A temp path in
+            # that tree denies the command at once, with its own reason.
+            f'istmp() {{ istp "$1" || return 1; inwt "$1" && deny "$seg" "{in_toplevel}"; return 0; }}',
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
@@ -360,7 +421,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             "case \"$ow\" in *'>'*) ow=${ow#*>} ;; *) [ -n \"$ox\" ] || return 1; return 0 ;; esac; done; }",
             # A file descriptor number, or "-", which closes a descriptor.
             "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
-            f"cmd=$({HOOK_COMMAND_READER} 2>/dev/null)",
+            # The reader gives the git toplevel ($wt), the value of $TMPDIR ($td) and the command, in that order.
+            f"hi=$({HOOK_COMMAND_READER} 2>/dev/null)",
+            "wt=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; td=${hi%%$'\\n'*}; cmd=${hi#*$'\\n'}",
+            'case "$cmd" in :*) cmd=${cmd#:} ;; *) cmd= ;; esac',
             '[ -n "$cmd" ] || { echo "verifier guard: no command text, or python3 is absent. '
             'The guard fails closed." >&2; exit 2; }',
             # A tab becomes a space first: the prefix strips cut at a space,
@@ -431,15 +495,25 @@ def _verifier_write_hook() -> str:
     # $r, inside double quotes, so the shell does not read it as a command.
     prefixes = ",".join(f'"{p}"' for p in VERIFIER_WRITE_PATH_PREFIXES)
     script = (
-        "import json,os,sys; "
-        'p=json.load(sys.stdin)["tool_input"]["file_path"]; '
+        "import json,os,pathlib,sys; "
+        "j=json.load(sys.stdin); "
+        'p=j["tool_input"]["file_path"]; '
         "isinstance(p,str) or sys.exit(4); "
         't=os.environ.get("TMPDIR","").rstrip("/"); '
         f'q=({prefixes})+((t+"/",) if t.startswith("/") else ()); '
         'ok=p.startswith("/") and ".." not in p.split("/") and p.startswith(q); '
-        'sys.stdout.write("" if ok else "the file path ["+p+"] is not permitted. '
-        'A verifier writes only to an absolute path in a temp directory, with no .. component."); '
-        "sys.exit(0 if ok else 3)"
+        'm="" if ok else "the file path ["+p+"] is not permitted. '
+        'A verifier writes only to an absolute path in a temp directory, with no .. component."; '
+        # Only a temp path needs the toplevel. The Write tool expands no
+        # pattern and no variable, so the path is compared as it is.
+        f"{TOPLEVEL_FINDER}; "
+        'r=top() if ok else ""; '
+        'n=u(os.path.normpath(p)) if ok else ""; '
+        'ok and r and (n==r or n.startswith(r+"/") or r.startswith(n+"/")) and '
+        '(m:="the file path ["+p+"] is in the git toplevel ["+r+"] of the working directory, or holds it. '
+        'A verifier is read-only on the tree under review: write to another temp directory."); '
+        "sys.stdout.write(m); "
+        "sys.exit(3 if m else 0)"
     )
     return (
         f"r=$(python3 -c '{script}' 2>/dev/null); "

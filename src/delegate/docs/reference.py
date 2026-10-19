@@ -140,6 +140,10 @@ def guard_table() -> str:
         "The earlier path arguments are sources, and a read of any path is a read. |",
         f"| Write tool | `Write` — only when `file_path` is an absolute path that starts with {write_paths}, "
         "or with the value of `$TMPDIR` in the environment of the hook, and has no `..` component. |",
+        "| tree under review | No temp write, no `cp` destination, no redirection target, no output path and no `Write` "
+        "may be in the git toplevel of the working directory of the hook, or hold it. The working directory is the `cwd` "
+        "of the hook input, or else the working directory of the process. The guards compare the paths after they remove "
+        "a `/private` prefix on both sides, so a worktree in a temp directory stays read-only. A `cd` may go to that tree. |",
     ])
 
 
