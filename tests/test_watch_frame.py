@@ -224,25 +224,37 @@ FEED_OF_A_FIXUP = [
 ]
 
 
-def test_frame_1h_at_80_columns_and_24_rows_folds_the_built_rows_to_one_line_and_the_next_row_keeps_its_rail(tmp_path, monkeypatch):
+def test_frame_1h_at_80_columns_and_24_rows_folds_the_built_rows_in_the_middle_and_the_rail_runs_through_the_fold(
+    tmp_path, monkeypatch
+):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
     Clock(monkeypatch, 6600 + 560)
 
     frame = first_frame(repo, monkeypatch, run, columns=80)
 
+    # The table gets 15 rows (#144): 23 rows of the terminal, less the run line, the blank line, the header, the divider
+    # and 4 lines of the feed. The plan has 16. A fold of the tail (71) saves no row, so the built rows in the middle
+    # fold: the first three rows and the three rows before 70 stay. The row under the fold is after the row above, so
+    # the rail runs through the fold.
     assert frame == [
         "run abcd  running  90%  11/13 ended  1h59m used  ETA 10m40s  464k new · 0 cache",
         "",
         "  #      plan    state       phase          after        used",
-        "         ✓ 11 built                                            59 60 61 62 64 65",
+        "  1      ● 59    ✓ built                               10m00s",
+        "  2      ● 60    ✓ built                               10m00s",
+        "  3      ● 61    ✓ built                               10m00s",
+        "     │   ✓ 5 built                          62–72      50m00s  rows 4–8 folded",
+        "  9  │   ● 67    ✓ built                               10m00s",
+        " 10      ● 68    ✓ built                               10m00s",
+        " 11      ● 69    ✓ built                               10m00s",
         " 12  │   ▶ 70    running     specialist ✓               9m20s  active 1m20s",
         "     │                       gates ✓",
         "     │                       verifier ✓",
         "     │                       fix-up ● 1/2",
         " 13  │   · 71    pending",
         "─" * 80,
-        *FEED_OF_A_FIXUP,
+        *FEED_OF_A_FIXUP[1:],  # the feed gets the 7 rows that are left, and keeps its newest lines
     ]
     assert len(frame) < 24  # the last line of the terminal stays free for the cursor
 
@@ -254,18 +266,21 @@ def test_at_120_columns_and_24_rows_the_built_rows_fold_and_every_column_stays(t
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
-    assert frame[:9] == [
+    assert frame[:10] == [
         "run abcd  running  ██████████████░░ 90%  11/13 ended  1h59m used  ETA 10m40s  464k new · 0 cache",
         "",
         "  #      plan    state       phase          after        used    new   cache",
-        "         ✓ 11 built                                                           59 60 61 62 64 65 66 72 67 68 69",
-        " 12  │   ▶ 70    running     specialist ✓               9m20s    39k       0  active 1m20s",
-        "     │                       gates ✓",
-        "     │                       verifier ✓",
-        "     │                       fix-up ● 1/2",
-        " 13  │   · 71    pending",
+        "  1      ● 59    ✓ built                               10m00s    39k       0",
+        "  2      ● 60    ✓ built                               10m00s    39k       0",
+        "  3      ● 61    ✓ built                               10m00s    39k       0",
+        "     │   ✓ 5 built                          62–72      50m00s   193k       0  rows 4–8 folded",
+        "  9  │   ● 67    ✓ built                               10m00s    39k       0",
+        " 10      ● 68    ✓ built                               10m00s    39k       0",
+        " 11      ● 69    ✓ built                               10m00s    39k       0",
     ]
-    assert frame[10:] == FEED_OF_A_FIXUP
+    assert frame[10] == " 12  │   ▶ 70    running     specialist ✓               9m20s    39k       0  active 1m20s"
+    assert frame[14:16] == [" 13  │   · 71    pending", "─" * 120]
+    assert frame[16:] == FEED_OF_A_FIXUP[1:]
 
 
 def test_a_frame_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
@@ -608,21 +623,23 @@ def test_with_a_locale_that_is_not_utf8_the_frame_has_the_ascii_glyphs_in_the_sa
     ascii_frame = first_frame(ascii_repo, monkeypatch, ascii_run, columns=120)
 
     assert [len(line) for line in ascii_frame] == [len(line) for line in unicode]
-    assert ascii_frame[:9] == [
-        "run abcd  running  ##############.. 90%  11/13 ended  1h59m used  ETA 10m40s  464k new . 0 cache",
-        "",
-        "  #      plan    state       phase          after        used    new   cache",
-        "         + 11 built                                                           59 60 61 62 64 65 66 72 67 68 69",
+    assert ascii_frame[5:15] == [
+        "  3      * 61    + built                               10m00s    39k       0",
+        "     |   + 5 built                          62-72      50m00s   193k       0  rows 4-8 folded",
+        "  9  |   * 67    + built                               10m00s    39k       0",
+        " 10      * 68    + built                               10m00s    39k       0",
+        " 11      * 69    + built                               10m00s    39k       0",
         " 12  |   > 70    running     specialist +               9m20s    39k       0  active 1m20s",
         "     |                       gates +",
         "     |                       verifier +",
         "     |                       fix-up * 1/2",
         " 13  |   . 71    pending",
     ]
-    assert ascii_frame[9] == "-" * 120
+    assert ascii_frame[0] == "run abcd  running  ##############.. 90%  11/13 ended  1h59m used  ETA 10m40s  464k new . 0 cache"
+    assert ascii_frame[15] == "-" * 120
     # The run line, the table and the divider are ASCII. The feed keeps its joins (` · `).
-    assert all(line.isascii() for line in ascii_frame[:10])
-    assert ascii_frame[15:17] == ["17:58  #70  REJECT · 1 finding", "17:58  #70  fix-up round 1 started"]
+    assert all(line.isascii() for line in ascii_frame[:16])
+    assert ascii_frame[20:22] == ["17:58  #70  REJECT · 1 finding", "17:58  #70  fix-up round 1 started"]
 
 
 def test_the_feed_puts_the_id_on_its_own_track_and_the_waiting_line_gives_the_tokens_of_its_agent_in_dim(tmp_path, monkeypatch):

@@ -279,12 +279,10 @@ def test_a_frame_of_a_run_that_goes_on_fits_the_height_of_the_terminal_and_keeps
     _, out = watch(repo, monkeypatch, rows=11, then=lambda: ticket_b_ends(run))
 
     first, last = frames(out)
-    # The built row folds, and the feed keeps its newest line. The last line of the terminal stays free for the cursor.
+    # A plan of two tickets has no rows to fold: a fold of one row saves no row (#144). The feed keeps its newest line.
+    # The last line of the terminal stays free for the cursor.
     assert first == [
-        TABLE_AT_THE_FIRST_POLL[0],
-        "",
-        "  #      plan    state       phase          after        used    new   cache",
-        "         ✓ 1 built".ljust(78) + "a",
+        *TABLE_AT_THE_FIRST_POLL[:4],
         RUNNING_B,
         *SUB_ROWS_OF_B,
         "─" * 200,

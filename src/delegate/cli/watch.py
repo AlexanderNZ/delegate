@@ -124,7 +124,9 @@ class _Screen:
         self._drawn = False
 
     def size(self) -> tuple[int, int]:
-        size = shutil.get_terminal_size()
+        """The columns and the lines of the terminal. The lines are 0 when the terminal does not give its size: the live
+        view then does not fit the height (#144)."""
+        size = shutil.get_terminal_size(fallback=(80, 0))
         return size.columns, size.lines
 
     def draw(self, lines: list[str]) -> None:

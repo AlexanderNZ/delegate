@@ -51,6 +51,11 @@ SILENT: frozenset[str] = frozenset({"agent-start", "gate-start", "idle-timeout",
 # The kinds of a line that waits for the next event of its ticket, to join it.
 AGENT, GATES, VERDICT = "agent", "gates", "verdict"
 
+# The lines of the feed that the fit to the height keeps at the least (components.md § Ticket table (watch), Fit to
+# height, #144): the table has the rows of the terminal, less the run line, the blank line, its header, the divider and
+# these lines.
+FEED_LINES: int = 4
+
 # The minutes with no activity after which the live tail of a running ticket warns, when `watch` has no `--stall-minutes`.
 # The pane of the Claude Code plugin uses the same default.
 IDLE_WARNING_MINUTES: float = 5
@@ -123,7 +128,8 @@ class LiveView:
     """The sink of `follow` for a terminal. `frame` gives the lines to draw; `draw` gets them at each poll and at the end.
 
     `reader_of` gives the reader of the event streams for the adapter of the run, as for `delegate status`. `now` is the
-    clock, in UTC. `size` gives the columns and the lines of the terminal. `stall_minutes` is the `--stall-minutes` of
+    clock, in UTC. `size` gives the columns and the lines of the terminal, with 0 lines when the terminal does not give
+    its size. `stall_minutes` is the `--stall-minutes` of
     the watch: an agent with no activity for that time shows a warning in the table. With None, the time is
     `IDLE_WARNING_MINUTES`.
     """
@@ -185,11 +191,14 @@ class LiveView:
     def frame(self, columns: int, rows: int, final: bool) -> list[str]:
         """The lines to draw: the run line, a blank line, the table, the divider, and the feed, each cut to `columns`.
 
-        A frame fits in `rows`, with the last line free for the cursor: the built rows of the table fold first, and the
-        feed keeps its newest lines. The last frame keeps the whole feed, so the terminal scrolls it. A frame of a
-        watch that goes on also tells each agent that runs now; the last frame does not.
+        A frame fits in `rows`, with the last line free for the cursor. The table gets the rows that are left when the
+        feed keeps `FEED_LINES` lines, and the rows that do not fit fold (`status.view_lines`). The feed gets the rows
+        that the table does not use, and keeps its newest lines. The last frame keeps the whole feed, so the terminal
+        scrolls it. With 0 `rows`, the size of the terminal is not known: no row folds, and the frame keeps each line. A
+        frame of a watch that goes on also tells each agent that runs now; the last frame does not.
         """
         width = max(columns, 1)
+        known = rows > 0
         room = max(0, rows - 1)
         snap = self._snapshot()
         feed = [*self._feed, *(_Line(w.time, w.subject, w.spans) for w in self._waiting.values())]
@@ -197,11 +206,11 @@ class LiveView:
             feed += self._running(snap)
         block: list[str] = []
         if snap is not None:
-            height = room - 1 - len(feed) if feed else room
+            height = room - 1 - FEED_LINES if known else None
             block = status.view_lines(snap, status.plan_links(self._events), width, height, self._idle_limit)
         id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
         lines = [line.painted(id_cells) for line in feed]
-        if not final:
+        if not final and known:
             block = block[:room]
             space = max(0, room - len(block) - 1)
             lines = lines[-space:] if space else []

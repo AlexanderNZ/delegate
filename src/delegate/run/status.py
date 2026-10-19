@@ -24,9 +24,10 @@ The report (`report`) gives the lines of `delegate status`: the header lines of
 the run, and the ticket table of frame 1i of the design (#117), with the verdict,
 the branch and the last event of each ticket from the journal. `view_lines` draws
 the snapshot for the live view of `delegate watch`: the run line and the ticket
-table of frame 3a of the design (#143). The two tables share their tracks: the rows
-are flat and in plan order, and `plan_links` gives the rail and the `after` cell of
-each row, so the depth of the plan never makes the table wider.
+table of frame 3a of the design (#143), fitted to the height of the terminal as in
+frame 3b (#144). The two tables share their tracks: the rows are flat and in plan
+order, and `plan_links` gives the rail and the `after` cell of each row, so the depth
+of the plan never makes the table wider.
 
 When more than one run is active (see `delegate.run.runs`), `delegate status`
 and `delegate watch` with no run id show the run picker of frame 2b (#118):
@@ -103,7 +104,7 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
             "last event": output.styled("dim", str(own[-1]["time"])) if own else "",
         }
     rows = _rows(snap, plan_links(events), None, output.glyphs(), live=False, facts=facts)
-    table, _ = _table(snap, rows, STATUS_COLUMNS, STATUS_TRACKS, frozenset(), False, output.glyphs())
+    table, _ = _table(snap, rows, STATUS_COLUMNS, STATUS_TRACKS, frozenset(), output.glyphs())
     return [*lines, "", *table]
 
 
@@ -597,6 +598,18 @@ ECONOMY_TRACK: tuple[str, ...] = (domain.PHASE_SPECIALIST, domain.PHASE_GATES)
 # The reason of a ticket that a pause stopped before, by the `before` field of the `paused` event.
 PAUSED_CELL: dict[str, str] = {"step": "paused before this step", "gate": "paused before the gate", "verifier": "paused before the verifier"}
 
+# The live tail of the next row while the run is pausing (copy-deck.md): present tense until the engine reads the request.
+PAUSING_CELL: str = "pauses before this step"
+
+# The fit to the height (components.md § Ticket table (watch), Fit to height, #144). When the rows in the middle fold,
+# the tickets of the first `FOLD_KEEP` rows and the `FOLD_KEEP` tickets before the running ticket stay. The fold of the
+# tail alone is enough only when it keeps the `FOLD_NEAREST` tickets after the running ticket, or each ticket after it.
+FOLD_KEEP: int = 3
+FOLD_NEAREST: int = 3
+
+# The order of the states in the text of a fold row. The glyph of the fold row is the glyph of its first state.
+FOLD_STATES: tuple[str, ...] = (BUILT, FAILED, SKIPPED, RUNNING, PENDING)
+
 
 @dataclass(frozen=True)
 class _Row:
@@ -616,17 +629,16 @@ def view_lines(
 
     The spec is `design/design_handoff_delegate_terminal_output/docs/components.md`. `links` gives the rail and the
     `after` cell of each ticket (`plan_links`). The rows are flat and in plan order, and the running ticket has a
-    sub-row for each phase after its first. When the lines would be more than `height`, the built rows fold to one
-    line. When a line of the table is wider than `width`, the columns drop in the order of `FIT_STEPS`. An agent or a
-    gate log that has not changed for `idle_limit` seconds or more shows a warning in the live tail. The view names
-    only the run id, the ticket ids, the states, the phases, the reasons with no path, and the numbers. It shows no
-    tool call.
+    sub-row for each phase after its first. When the lines would be more than `height`, the rows fold (`_fit`): first
+    the tail, then the rows in the middle. With no `height`, no row folds. When a line of the table is wider than
+    `width`, the columns drop in the order of `FIT_STEPS`. An agent or a gate log that has not changed for
+    `idle_limit` seconds or more shows a warning in the live tail. The view names only the run id, the ticket ids, the
+    states, the phases, the reasons with no path, and the numbers. It shows no tool call.
     """
     glyph = output.glyphs()
-    rows = _rows(snap, links, idle_limit, glyph, live=True)
-    fold = height is not None and 3 + len(rows) > height and any(t.state == BUILT for t in snap.tickets)
+    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True), None if height is None else height - 3)
     for dropped in FIT_STEPS:
-        table, measured = _table(snap, rows, TABLE_COLUMNS, TRACKS, dropped, fold, glyph)
+        table, measured = _table(snap, rows, TABLE_COLUMNS, TRACKS, dropped, glyph)
         if measured <= width:
             break
     return [output.cut(line, max(width, 1)) for line in [_run_line(snap, width, glyph), "", *table]]
@@ -654,34 +666,152 @@ def _run_line(snap: Snapshot, width: int, glyph: output.Glyphs) -> str:
 
 
 def _table(
-    snap: Snapshot, rows: Sequence[_Row], columns: tuple[str, ...], tracks: dict[str, int], dropped: frozenset[str], fold: bool,
+    snap: Snapshot, rows: Sequence[_Row | _Fold], columns: tuple[str, ...], tracks: dict[str, int], dropped: frozenset[str],
     glyph: output.Glyphs,
 ) -> tuple[list[str], int]:
     """The lines of the ticket table, and the width that the fit to the width measures.
 
-    The lines are the header and the rows, with the built rows folded to one line when `fold` is true. Each column is
-    as wide as its track, or as its widest value when that is wider. The columns of `dropped` are not in the table, and
-    neither are `new` and `cache` when the snapshot has no tokens. The width is the widest line, without a reason in
-    the tail (`_Row.measured`).
+    The lines are the header and the rows, with a line for each fold (`_fold_line`). Each column is as wide as its
+    track, or as its widest value when that is wider. The columns of `dropped` are not in the table, and neither are
+    `new` and `cache` when the snapshot has no tokens. The width is the widest line, without a reason in the tail
+    (`_Row.measured`) and without a fold.
     """
     names = [name for name in columns if name not in dropped and (snap.tokens_new is not None or name not in ("new", "cache"))]
     header = [output.styled("dim", "" if name in (RAIL, TAIL) else name) for name in names]
-    kept = [row for row in rows if not (fold and row.state == BUILT)]
-    folded = [row.ticket for row in rows if fold and row.state == BUILT]
-    fold_at = next((index for index, row in enumerate(rows) if fold and row.state == BUILT), None)
+    kept = [row for row in rows if isinstance(row, _Row)]
+    totals = [_fold_totals(snap, row) for row in rows if isinstance(row, _Fold) and not row.tail]
     body = [[row.cells.get(name, "") for name in names] for row in kept]
-    widths = [max(tracks.get(name, 0), *(output.width(cells[index]) for cells in [header, *body])) for index, name in enumerate(names)]
+    widths = [
+        max(tracks.get(name, 0), *(output.width(cells[index]) for cells in [header, *body]), *(output.width(t.get(name, "")) for t in totals))
+        for index, name in enumerate(names)
+    ]
     right = {index for index, name in enumerate(names) if name in TABLE_NUMBERS}
-    lines = [line.rstrip(" ") for line in output.columns([header, *body], right=right, tracks=widths)]
+    drawn = iter(line.rstrip(" ") for line in output.columns([header, *body], right=right, tracks=widths))
+    lines = [next(drawn)]
+    for row in rows:
+        lines.append(next(drawn) if isinstance(row, _Row) else _fold_line(snap, row, names, widths, glyph))
     quiet = [[cells[index] if name != TAIL or row.measured else "" for index, name in enumerate(names)] for row, cells in zip(kept, body)]
     measured = max(output.width(line.rstrip(" ")) for line in output.columns([header, *quiet], right=right, tracks=widths))
-    if fold_at is not None:
-        start = {name: sum(widths[:index]) + len(output.GAP) * index for index, name in enumerate(names)}
-        line = " " * start["plan"] + output.styled("ok", glyph.built) + output.styled("dim", f" {len(folded)} built")
-        if TAIL in start:
-            line = line + " " * max(1, start[TAIL] - output.width(line)) + output.styled("dim", " ".join(folded))
-        lines.insert(1 + fold_at, line)
     return lines, measured
+
+
+@dataclass(frozen=True)
+class _Fold:
+    """One row of the ticket table that holds the rows of the tickets that do not fit the height of the terminal.
+
+    `tickets` are the tickets of the fold, in plan order, and `first` is the plan position of the first. `tail` is
+    true for the fold of the tail, the last row above the divider, and false for the fold in the middle. `rail` is the
+    rail cell of the fold: the rail runs through the fold in the middle when the row under it has the rail.
+    """
+
+    tickets: tuple[TicketSnapshot, ...]
+    first: int
+    tail: bool
+    rail: str = ""
+
+
+def _fit(snap: Snapshot, rows: list[_Row], room: int | None) -> list[_Row | _Fold]:
+    """The rows of the ticket table that fit in `room` rows, with a fold for the rows that do not (#144).
+
+    The spec is components.md § Ticket table (watch), Fit to height. The anchor is the running ticket, or else the
+    ticket that the pause stopped before, the first pending ticket, or the last ticket. Its rows never fold. When the
+    rows from the top to the anchor, the rows of `FOLD_NEAREST` tickets after it and a fold of the tail fit, the rows show from the
+    top in plan order and the tail folds into one last row. If not, the rows in the middle fold too: the first
+    `FOLD_KEEP` rows and the `FOLD_KEEP` rows before the anchor stay. The rows after the anchor that fit then show,
+    the nearest first, and the rest fold into the tail. The rows of one ticket fold together. With no `room`, or when
+    each row fits, no row folds.
+    """
+    if room is None or len(rows) <= room:
+        return list(rows)
+    blocks: list[list[_Row]] = []  # the rows of each ticket, in plan order
+    for row in rows:
+        if blocks and blocks[-1][0].ticket == row.ticket:
+            blocks[-1].append(row)
+        else:
+            blocks.append([row])
+    states = [block[0].state for block in blocks]
+    ids = [block[0].ticket for block in blocks]
+    paused = snap.paused_before[0] if snap.paused_before is not None else None
+    anchor = next((index for index, state in enumerate(states) if state == RUNNING), None)
+    if anchor is None:
+        anchor = ids.index(paused) if paused in ids else next((i for i, state in enumerate(states) if state == PENDING), len(blocks) - 1)
+    after = blocks[anchor + 1:]
+    shown = _nearest(after, room - sum(len(block) for block in blocks[:anchor + 1]))
+    middle = blocks[FOLD_KEEP:max(FOLD_KEEP, anchor - FOLD_KEEP)]
+    head: list[_Row | _Fold] = [row for block in blocks[:anchor + 1] for row in block]
+    if len(shown) < min(FOLD_NEAREST, len(after)) and len(middle) > 1:
+        before = blocks[anchor - FOLD_KEEP:anchor + 1]
+        fold = _Fold(_tickets_of(snap, middle), FOLD_KEEP + 1, tail=False, rail=before[0][0].cells.get(RAIL, ""))
+        head = [*(row for block in blocks[:FOLD_KEEP] for row in block), fold, *(row for block in before for row in block)]
+        shown = _nearest(after, room - len(head))
+    fitted = [*head, *(row for block in shown for row in block)]
+    if len(shown) < len(after):
+        fitted.append(_Fold(_tickets_of(snap, after[len(shown):]), anchor + 2 + len(shown), tail=True))
+    return fitted
+
+
+def _nearest(after: list[list[_Row]], room: int) -> list[list[_Row]]:
+    """The tickets after the anchor that fit in `room` rows, the nearest first: each one when they all fit, or else the
+    ones that fit with the fold of the tail."""
+    if sum(len(block) for block in after) <= room:
+        return after
+    shown: list[list[_Row]] = []
+    used = 1  # the fold of the tail
+    for block in after:
+        if used + len(block) > room:
+            break
+        shown.append(block)
+        used += len(block)
+    return shown
+
+
+def _tickets_of(snap: Snapshot, blocks: list[list[_Row]]) -> tuple[TicketSnapshot, ...]:
+    by_id = {ticket.id: ticket for ticket in snap.tickets}
+    return tuple(by_id[block[0].ticket] for block in blocks)
+
+
+def _fold_totals(snap: Snapshot, fold: _Fold) -> dict[str, str]:
+    """The cells `used`, `new` and `cache` of the fold in the middle: the sums of its tickets that have a step. A ticket
+    with no tokens adds nothing, as in the run line."""
+    stepped = [t for t in fold.tickets if t.state not in (PENDING, SKIPPED)]
+    if not stepped:
+        return {}
+    cells = {"used": output.styled("dim", format_duration(sum(t.elapsed_seconds for t in stepped)))}
+    if snap.tokens_new is not None and any(t.tokens_new is not None and t.tokens_cache is not None for t in stepped):
+        cells["new"] = output.styled("dim", format_tokens(sum(t.tokens_new or 0 for t in stepped)))
+        cells["cache"] = output.styled("dim", format_tokens(sum(t.tokens_cache or 0 for t in stepped)))
+    return cells
+
+
+def _fold_line(snap: Snapshot, fold: _Fold, names: list[str], widths: list[int], glyph: output.Glyphs) -> str:
+    """The line of a fold, on the tracks of the table.
+
+    In `plan` and `state`: the glyph of the first state and the count of each state, as `✓ 17 built` or
+    `· 11 pending`. In `after`: the range of the ids, as `104–120`. Then `rows <first>–<last> folded`: in the live
+    tail for the fold in the middle, which also gives its totals in `used`, `new` and `cache` (`_fold_totals`), and
+    from the first of these columns for the fold of the tail. The text is `dim`, and the rail is `plan`.
+    """
+    start = {name: sum(widths[:index]) + len(output.GAP) * index for index, name in enumerate(names)}
+    end = {name: start[name] + widths[index] for index, name in enumerate(names)}
+    counts = {state: sum(1 for t in fold.tickets if t.state == state) for state in FOLD_STATES}
+    first = next(state for state in FOLD_STATES if counts[state])
+    role, mark = {
+        BUILT: ("ok", glyph.built), FAILED: ("bad", glyph.failed), SKIPPED: ("dim", glyph.skipped),
+        RUNNING: ("now", glyph.running), PENDING: ("dim", glyph.pending),
+    }[first]
+    words = ", ".join(f"{counts[state]} {state}" for state in FOLD_STATES if counts[state])
+    summary = output.styled("dim", f"{mark} {words}") if role == "dim" else output.styled(role, mark) + output.styled("dim", f" {words}")
+    ids, last = (fold.tickets[0].id, fold.tickets[-1].id), fold.first + len(fold.tickets) - 1
+    pieces = [(start[RAIL], fold.rail)] if fold.rail and RAIL in start else []
+    pieces += [(start["plan"], summary), (start["after"], output.styled("dim", glyph.dash.join(ids) if ids[0] != ids[1] else ids[0]))]
+    if not fold.tail:
+        pieces += [(end[name] - output.width(text), text) for name, text in _fold_totals(snap, fold).items() if name in start]
+    folded = f"rows {fold.first}{glyph.dash}{last} folded" if last != fold.first else f"row {last} folded"
+    pieces.append((start[TAIL] if not fold.tail else min(start[name] for name in ("used", "new", "cache", TAIL) if name in start), output.styled("dim", folded)))
+    line = ""
+    for cell, text in pieces:
+        line += " " * max(1 if line else 0, cell - output.width(line)) + text
+    return line
 
 
 def _rows(
@@ -694,10 +824,12 @@ def _rows(
     The rail of a row joins it to the row above it: its one blocker is that row. A sub-row has the rail when the next
     row has it, so the rail runs through the sub-rows. `live` gives the live tail of the live view: the activity of the
     running ticket on its row, and the gate that runs on the sub-row of its phase. Without it, as in `delegate status`,
-    the tail has only the reason of a row. `facts` gives, for each ticket id, the cells of the columns that the live
+    the tail has only the reason of a row. While the run is pausing, the live tail of the next row gives
+    `PAUSING_CELL` (`_pausing_before`). `facts` gives, for each ticket id, the cells of the columns that the live
     view does not have: `verdict`, `branch` and `last event` of `delegate status`.
     """
     by_id = {link.id: link for link in links}
+    pausing = _pausing_before(snap) if live else None
     rows = []
     for position, ticket in enumerate(snap.tickets, start=1):
         link = by_id.get(ticket.id)
@@ -709,7 +841,7 @@ def _rows(
             if ticket.gate is not None:
                 at = active if 0 < active < len(details) else 0
                 details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(ticket, idle_limit, glyph)) if part)
-        reason = _reason(snap, ticket)
+        reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket)
         cells = _row(ticket, position, link, glyph)
         cells.update(phase=phases[0] if phases else "", **{TAIL: reason or details[0]})
         cells.update((facts or {}).get(ticket.id, {}))
@@ -740,6 +872,15 @@ def _row(ticket: TicketSnapshot, position: int, link: PlanLink | None, glyph: ou
         "new": output.styled("dim", format_tokens(ticket.tokens_new)) if tokens else "",  # type: ignore[arg-type]
         "cache": output.styled("dim", format_tokens(ticket.tokens_cache)) if tokens else "",  # type: ignore[arg-type]
     }
+
+
+def _pausing_before(snap: Snapshot) -> str | None:
+    """The ticket of the next row while the run is pausing: the first pending ticket after the running ticket in plan
+    order, or the first pending ticket when no ticket runs. None when the run is not pausing, or no ticket is pending."""
+    if snap.state != PAUSING:
+        return None
+    running = next((index for index, t in enumerate(snap.tickets) if t.state == RUNNING), 0)
+    return next((t.id for t in snap.tickets[running:] if t.state == PENDING), None)
 
 
 def _reason(snap: Snapshot, ticket: TicketSnapshot) -> str:

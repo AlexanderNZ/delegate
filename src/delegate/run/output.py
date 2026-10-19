@@ -92,7 +92,8 @@ def styled(roles: str, text: str, stream: TextIO | None = None) -> str:
 
 @dataclass(frozen=True)
 class Glyphs:
-    """The glyph set of tokens.md. The rail joins a row of the ticket table to the row above it (#143)."""
+    """The glyph set of tokens.md. The rail joins a row of the ticket table to the row above it (#143). The dash joins
+    the two ends of a range of the rows that fold to fit the height of the terminal, as `104–120` (#144)."""
 
     built: str      # built, ACCEPT
     failed: str     # failed, a problem
@@ -106,10 +107,11 @@ class Glyphs:
     rail: str       # the blocker of the row is the row directly above
     rule: str       # the divider
     idle: str       # idle past the threshold
+    dash: str       # a range of ticket ids or of rows
 
 
-UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠")
-ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!")
+UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠", "–")
+ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!", "-")
 
 
 def utf8_locale() -> bool:

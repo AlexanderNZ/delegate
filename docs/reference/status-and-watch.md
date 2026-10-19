@@ -362,10 +362,10 @@ The run line and the table come from the snapshot of `status` (see [the snapshot
 - The rail and `after` show the [**blockers**](../glossary.md#blocker) of the plan, from `blocked_by` in the plan of `run-start` or of the newest `plan-change`. When the one blocker of a ticket is the row directly above it, the rail `│` joins the two rows, and `after` is empty. Otherwise `after` gives the id of each blocker: a ticket after a row that is not the row above has no rail, and `after` names that row, as `66`. A join names each blocker, as `126 132`. The depth of the plan never makes the table wider: a chain of 40 tickets has the columns of a chain of 3. A journal of an earlier version of the engine records no plan, and then no row has a rail or an `after` cell.
 - The row of a running ticket gives its first phase, and each further phase is a sub-row under it, with only the rail, the phase and a detail in the live tail. The rail runs through the sub-rows when the next row has it. A phase shows `✓` when it is done, `●` when it runs, and `○` when it is to come. While a gate runs, the phase gives its count, as `gates ● 2/3`: the gate that runs, and the gates of the stack. The count shows when the journal holds an earlier run of the gates of the same stack that ended. A fix-up round shows its round and the limit, as `fix-up ● 1/2`. In `economy` mode a ticket has the phases `specialist` and `gates` only. Only phases go in the `phase` column.
 - The live tail of the row of a running ticket gives `active <time>` since the last activity of its agent. While a gate runs, the sub-row of its phase gives `gate <name> · log <time> ago` in its live tail. After an agent or a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
-- The live tail of a ticket that failed or was skipped gives the reason, with no path. In a paused run, the live tail of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`.
+- The live tail of a ticket that failed or was skipped gives the reason, with no path. While the run is `pausing`, the live tail of the next row gives `pauses before this step`: the first pending ticket after the running ticket, or the first pending ticket when no ticket runs. In a paused run, the live tail of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no columns `new` and `cache`, and the live tail gives no activity.
 
-Each column has the width of its track in the design: `#` 3 cells, the rail 2, `plan` 6, `state` 10, `phase` 13, `after` 8, `used` 7, `new` 5 and `cache` 6, so the live tail starts at the same cell for each plan. A column with a value that is wider than its track is as wide as its widest value. The live tail has no track. There are 2 cells between two columns. The numbers, and the headers `#`, `used`, `new` and `cache`, align right in their track. On a terminal of fewer than 100 columns, the run line has no bar. When a line of the table, with the live tail of a running ticket, is wider than the terminal, the columns drop in this order: `new` and `cache`, then `used`. A reason in the live tail does not make a column drop: the cut at the width of the terminal ends it.
+Each column has the width of its track in the design: `#` 3 cells, the rail 2, `plan` 6, `state` 10, `phase` 13, `after` 8, `used` 7, `new` 5 and `cache` 6, so the live tail starts at the same cell for each plan. A column with a value that is wider than its track is as wide as its widest value. The live tail has no track. There are 2 cells between two columns. The numbers, and the headers `#`, `used`, `new` and `cache`, align right in their track. The bar drops first: on a terminal of fewer than 100 columns, the run line has no bar. When a line of the table, with the live tail of a running ticket, is wider than the terminal, the columns drop in this order: `new` and `cache`, then `used`. The labels of the phases stay, because the phases stack. A reason in the live tail does not make a column drop: the cut at the width of the terminal ends it.
 
 The feed holds only the lines of the ticket that runs now. The `step-start` of a ticket, or a `retry`, starts the feed again. So the lines of a ticket that ended, and a problem of it, stay until the next ticket starts. Before the first step, the feed holds the line of the start of the run. In `economy` mode, the verification of the chain is one group, and its lines name the stack: `stack python verifier started (#a, #b)`. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. The ticket, or the stack, has a track as wide as the widest of the feed, and at least 3 cells, with 2 cells before and after it. A line with no ticket, as a problem, starts what happened on the track of the ticket. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
 
@@ -384,7 +384,39 @@ A [problem](#the-problem-events) and a [stall](#the-stall) are lines that start 
 
 Each part of the frame has the colour of its role, from the 16 ANSI colours of the theme of the terminal: green for a result that is good (`✓`, `●` built, `gates green`, the done phases, the bar), cyan for the ticket that runs now, yellow for `REJECT`, a fix-up, a continuation, a pause and `⚠ idle`, red for a failure, a problem and `gates red`, and blue for the rail and the ids in `after`. Faint text (SGR 2) is for the facts to read second: the times, the tokens, the header, the divider, and the rows that ended or are pending. Bold marks the short run id, the ticket that runs now, the verdict word, and the result of the run. The view sets no background colour. Each state also has a glyph or a word, so the view reads the same with no colour. When `NO_COLOR` is set and not empty, the frame has no SGR code. When the locale is not UTF-8 (`LC_ALL`, `LC_CTYPE`, `LANG`), the run line, the table, the divider and the glyph of a problem line use the ASCII glyphs `+ x > . * o - # . | - !`, in the same columns. The ids in `after` stay as they are. The lines of the feed and the title keep the separator `·`.
 
-The view cuts each line to the width of the terminal. A frame fits the height of the terminal, with the last line free for the cursor. When the run line, the table and the feed do not fit, the rows of the built tickets fold to one line: `✓ <count> built` in the `plan` column, and the ids of the folded tickets, in plan order, in the live tail. The rows of a running ticket, its sub-rows, and the rows of a pending ticket do not fold, and a row under a folded row keeps its rail. Then the feed keeps its newest lines. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.
+The view cuts each line to the width of the terminal. A frame fits the height of the terminal, with the last line free for the cursor. The table gets the rows that are left after the run line, the blank line, the header, the divider and 4 lines of the feed. When the plan has more rows than that, rows fold:
+
+1. The rows show from the top, in plan order, and the rows of the tail fold into one last row, directly above the divider. The row gives the count and the state of the folded tickets, as `· 13 pending`, the range of their ids in `after`, as `126–144`, and the range of their rows, as `rows 28–40 folded`.
+2. When the tail fold does not keep 3 rows after the running ticket (or each row after it), the rows in the middle also fold into one row. The first 3 rows and the 3 rows before the running ticket stay. The fold row gives `✓ <count> built`, the range of the ids in `after`, the sums of `used`, `new` and `cache`, and the range of the rows in the live tail, as `rows 4–20 folded`. A fold of one row saves no row, so a fold holds 2 rows or more. The rail runs through it when the row under it has the rail. Then the rows after the running ticket show, the nearest first, as many as fit, and the rest fold into the tail.
+
+The rows of the running ticket and its sub-rows never fold. When no ticket runs, the ticket that the pause stopped before, or else the first pending ticket, takes its place. When a fold holds tickets in more than one state, it gives the count of each state, as `✓ 15 built, 1 failed, 1 skipped`. With the ASCII glyphs, a range is `104-120`. The example below is a plan of 40 tickets on a terminal of 120 columns and 24 rows, with the ASCII glyphs:
+
+```
+run a41f  running  #########....... 59%  23/40 ended  3h56m used  ETA 2h44m  908k new . 0 cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      * 101   + built                               10m00s    39k       0
+  2  |   * 102   + built                               10m00s    39k       0
+  3  |   * 103   + built                               10m00s    39k       0
+     |   + 17 built                         104-120     2h50m   657k       0  rows 4-20 folded
+ 21  |   * 121   + built                               10m00s    39k       0
+ 22  |   * 122   + built                               10m00s    39k       0
+ 23  |   * 123   + built                               10m00s    39k       0
+ 24  |   > 124   running     specialist +               6m00s    19k       0
+     |                       gates * 2/3                                      gate types . log 4s ago
+     |                       verifier o
+     |                       fix-up o
+ 25  |   . 125   pending
+ 26      . 131   pending                    124
+ 27  |   . 132   pending
+         . 13 pending                       126-144   rows 28-40 folded
+------------------------------------------------------------------------------------------------------------------------
+19:50  #124  started · python-specialist
+19:55  #124  specialist finished · 5m · tokens 19k new, 0 cache · report ok
+19:55  #124  gates green (lint 20s)
+```
+
+Then the feed gets the rows that the table does not use, and keeps its newest lines. When the terminal does not give its size, no row folds, and the frame keeps each line of the feed. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.
 
 ### The raw lines
 
