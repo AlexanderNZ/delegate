@@ -229,13 +229,15 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 
 ### The newest run that ended
 
-When `watch` gets no run id and no `--from`, and the journal of the newest run holds `run-end`, no run is active. `watch` then shows no event of that run. It prints one line, and no line `position <seq>`:
+When `watch` gets no run id and no `--from`, and the newest event of the journal of the newest run is `run-end`, no run is active. `watch` then shows no event of that run. It prints one line, and no line `position <seq>`:
 
 ```
 no run is active; the newest run 20261016T030000Z-abcd ended failed at 2026-10-16 17:06; first problem: ticket a: the step failed: no commit
 ```
 
-The line gives the run id, the result, and the local date and time of the `run-end` event. When the run failed and its journal holds a [problem](#the-problem-events), the line also gives the ticket and the reason of the first problem. Then `watch` exits with the code of the result: 0 for `built`, and 1 for `failed`. See [the exit codes](#exit-codes). The line is the same on a terminal and with `--raw`, and `watch` draws no live view.
+The line gives the run id, the result, and the local date and time of the newest `run-end` event. When the run failed and its journal holds a [problem](#the-problem-events), the line also gives the ticket and the reason of the first problem. Then `watch` exits with the code of the result: 0 for `built`, and 1 for `failed`. See [the exit codes](#exit-codes). The line is the same on a terminal and with `--raw`, and `watch` draws no live view.
+
+A retry continues a run that ended: the journal gets `retry`, then a new `step-end` and a new `run-end`, and the newest of each wins, as for `delegate status`. While a retry goes on, an event follows the newest `run-end`, so the run is active, and `watch` follows it. When `watch` follows or replays a journal, a `run-end` that another event follows does not end the watch. An event of a ticket that a later `retry` of the same ticket follows is no problem: the retry continues the step of that ticket. The first problem of the line is the first problem that is not before a `retry` of its ticket.
 
 To see the events of a run that ended, give its run id or `--from`. `watch` then replays the journal, as it does for a run that goes on. When the repository has no run, `watch` exits 2.
 

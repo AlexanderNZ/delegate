@@ -148,11 +148,11 @@ def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_
 
 def test_watch_of_a_run_that_ended_resumed_crashed_and_resumed_again_exits_3_at_the_problem_after_the_first_resume(tmp_path, capsys):
     # The history ends at the first `resume` after the last `run-end`. A problem after it is no history, also when a later
-    # `resume` follows a crash with no `run-end`.
+    # `resume` follows a crash with no `run-end`. (A later `retry` of the same ticket supersedes the problem, #99.)
     repo = bare_repo(tmp_path)
     write_journal(
         repo, "r1", run_start("r1", "a", "b"), step_start("a"), step_end("a", "failed", "boom1"), run_end("failed", [], ["a"]),
-        resume("a"), retry("a"), step_start("a"), step_end("a", "failed", "boom2"), resume("a"), retry("a"), step_start("b"),
+        resume("a"), retry("a"), step_start("a"), step_end("a", "failed", "boom2"), resume("a"), step_start("b"),
     )
 
     code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")

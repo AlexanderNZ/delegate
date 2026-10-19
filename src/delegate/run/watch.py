@@ -117,20 +117,44 @@ class EndedRun:
 
 
 def ended_run(journal: Path) -> EndedRun | None:
-    """The run of `journal` when its journal holds `run-end`, or None when the run goes on.
+    """The run of `journal` when the newest event of its journal is `run-end`, or None when the run goes on.
 
-    The run id is the name of the directory of the journal. Raise JournalError when the journal is not valid.
+    A retry continues a run that ended: it appends `retry`, then a new `step-end` and a new `run-end`. So a run whose
+    journal holds an event after its newest `run-end` goes on, and the result and the time come from the newest
+    `run-end`. The first problem is the first problem that a later event does not supersede (see `_superseded`). The run
+    id is the name of the directory of the journal. Raise JournalError when the journal is not valid.
     """
     events, _ = read_new_events(journal, 0, 1)
+    if not events or events[-1]["event"] != "run-end":
+        return None
+    superseded = _superseded(events)
     tracker = _Tracker()
     problem: str | None = None
     for event in events:
-        reason = tracker.problem(event)
-        if problem is None and reason is not None:
+        reason = tracker.problem(event)  # the tracker reads every event, because a gate result counts for a later step end
+        if problem is None and reason is not None and event["seq"] not in superseded:
             problem = f"ticket {event.get('ticket')}: {reason}"
-        if event["event"] == "run-end":
-            return EndedRun(journal.parent.name, str(event["result"]), datetime.fromisoformat(str(event["time"])), problem)
-    return None
+    end = events[-1]
+    return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem)
+
+
+def _superseded(events: list[dict[str, object]]) -> set[object]:
+    """The `seq` of each event of `events` that a later event of `events` makes history.
+
+    A `run-end` that another event follows is history: a retry continues the run. An event of a ticket that a later
+    `retry` of the same ticket follows is history: the retry continues the step of that ticket, so a problem of that
+    ticket before the retry is not a problem of the run. A history event is reported, but it does not end a watch.
+    """
+    superseded: set[object] = set()
+    retried: set[str] = set()
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        kind, ticket = event["event"], event.get("ticket")
+        if (kind == "run-end" and index < len(events) - 1) or (ticket is not None and str(ticket) in retried):
+            superseded.add(event["seq"])
+        if kind == "retry":
+            retried.add(str(ticket))
+    return superseded
 
 
 def _result_code(result: object) -> int:
@@ -323,20 +347,23 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
         if first_read:
             resumed_at = _resumed_at(events)
         first_read = False
+        # An event that a later event of the same read supersedes (a retry continues the run) does not end the watch.
+        superseded = _superseded(events)
         for event in events:
             last_event = event
             seq = int(event["seq"])  # type: ignore[call-overload]
             files.update(Path(str(event[field])) for field in ACTIVITY_FIELDS if field in event)
             problem = tracker.problem(event)  # an event before the position still counts for the events after it
             # A run that ended and was resumed works again. Its events before the first `resume` after its newest
-            # `run-end` that a `resume` follows are its history: a problem, a verdict or a `run-end` there does not
-            # end the watch.
-            history = seq < resumed_at
+            # `run-end` that a `resume` follows are its history, and so is an event that a later event of the same
+            # read supersedes: a problem, a verdict or a `run-end` there does not end the watch.
+            history = seq < resumed_at or seq in superseded
             if history:
                 problem = None
+            ends = event["event"] == "run-end" and not history
             if seq <= options.from_position:
                 sink.event(event, False, None)
-                if event["event"] == "run-end" and not history:
+                if ends:
                     return WatchResult(_result_code(event["result"]), position)
                 continue
             position = seq
@@ -346,7 +373,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
             if options.until == UNTIL_VERDICT and event["event"] == "verdict" and not history:
                 sink.verdict(event)
                 return WatchResult(EXIT_VERDICT, position)
-            if event["event"] == "run-end" and not history:
+            if ends:
                 return WatchResult(_result_code(event["result"]), position)
         if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
             sink.stall(options.stall_minutes, last_event)
