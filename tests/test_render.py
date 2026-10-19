@@ -931,7 +931,7 @@ def test_a_descriptor_as_the_last_word_inside_quotes_is_denied_with_the_form_tha
     assert "put a space before the closing quote" in r.stderr, (shell, command, r.stderr)
 
 
-@pytest.mark.parametrize("shell", GUARD_SHELLS)
+@pytest.mark.parametrize("shell", ALL_GUARD_SHELLS)
 @pytest.mark.parametrize("command", AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE)
 def test_a_descriptor_after_a_space_stays_permitted(command, shell):
     r = _run_guard(command, shell=shell)

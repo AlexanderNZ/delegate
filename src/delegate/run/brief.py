@@ -707,6 +707,16 @@ def report_correction_brief(
     )
 
 
+def red_proof_copy(copy: str | Path) -> Path:
+    """The path of the second copy that the verifier brief gives for a red proof: beside `copy`, in the scratch directory.
+
+    The engine removes this path with `copy` when the verifier ends, and it
+    does not move it into the evidence directory with the other files of the
+    scratch directory.
+    """
+    return Path(copy).parent / "proof"
+
+
 def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, engine_gates: bool = False) -> str:
     """The sections the engine adds to a verifier brief: the working copy, the report rule, the foreground rule, and the report path.
 
@@ -715,8 +725,8 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
     brief gives the output of the gates that the engine ran green, and the
     verifier does not run them.
     """
-    # The second copy goes beside the copy, in the temp directory that the engine removes when the verifier ends.
-    proof = Path(copy).parent / "proof"
+    # The second copy goes beside the copy. The engine removes both when the verifier ends, and keeps neither as evidence.
+    proof = red_proof_copy(copy)
     working_copy = (
         f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
         "The verifier guards deny a write in the git toplevel of your working directory, and that toplevel is this copy. "

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,10 +32,12 @@ from pathlib import Path
 
 import pytest
 
+from delegate import adapters
+from delegate.cli import delegate
 from delegate.definitions.validate import split_frontmatter
 from delegate.run.brief import verifier_run_sections
 
-from .support import git
+from .support import ScriptedAdapter, git, make_repo, read_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 ENFORCEMENT_PAGE = ROOT / "docs" / "explanation" / "the-enforcement-model-and-its-limits.md"
@@ -190,6 +193,38 @@ def test_each_step_of_the_recipe_of_the_verifier_brief_passes_the_guard(rendered
     _in_order(brief, steps)
 
     _follow(_bash_hook(rendered), shell, base, copy, proof, steps)
+
+
+def test_the_engine_removes_the_second_copy_of_a_red_proof_and_keeps_the_other_files_of_the_verifier(tmp_path, capsys):
+    # The verifier follows the recipe of its brief: it makes the second copy, breaks it, and writes a note beside its
+    # report. The engine moves the files beside the report into the evidence directory, but not a copy of the tree.
+    seen: dict[str, Path] = {}
+
+    def red_proof(request):
+        (command,) = re.findall(r"`(cp -R [^`]*)`", request.prompt)
+        subprocess.run(["bash", "-c", command], cwd=request.cwd, check=True, capture_output=True)
+        proof = Path(command.split(" && ", 1)[0].split()[-1])
+        (proof / "feature.txt").write_text("broken by the verifier\n")
+        (request.report_path.parent / "notes.txt").write_text("the red proof\n")
+        seen["proof"] = proof
+
+    scripted = ScriptedAdapter(during_verifier=red_proof)
+    adapters.register("scripted", scripted)
+    try:
+        repo = make_repo(tmp_path)
+        code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+        out, err = capsys.readouterr()
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    journal = [line.removeprefix("journal ") for line in out.splitlines() if line.startswith("journal ")]
+    evidence = Path(journal[0]).parent / "verifier" / "a"
+    assert (evidence / "notes.txt").read_text() == "the red proof\n"
+    kept = sorted(p.relative_to(evidence).as_posix() for p in evidence.rglob("*"))
+    assert not [name for name in kept if name.endswith("feature.txt") or name.endswith("workflow.toml")], kept
+    assert not seen["proof"].exists()
+    assert read_journal(out)[-1]["event"] == "run-end"
 
 
 @pytest.mark.parametrize("shell", SHELLS)

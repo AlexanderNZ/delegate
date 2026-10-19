@@ -127,7 +127,8 @@ from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
-    plan_change_section, plan_change_text, report_correction_brief, specialist_brief, verifier_run_brief, verifier_run_sections,
+    plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief, verifier_run_brief,
+    verifier_run_sections,
 )
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
@@ -1664,10 +1665,11 @@ def _verify_round(
             check_worktree_unchanged(step.vcs, before)
         except InvariantViolation as found:
             violation = found
-        # The copy goes; the verdict report and the event stream stay as evidence of the run.
+        # The copy and the second copy of a red proof go; the verdict report, the event stream and the other files
+        # of the verifier stay as evidence of the run.
         evidence.mkdir(parents=True, exist_ok=True)
         for entry in scratch.iterdir():
-            if entry != copy:
+            if entry not in (copy, red_proof_copy(copy)):
                 shutil.move(str(entry), evidence / entry.name)
     finally:
         step.vcs.stop_file_watcher(scratch / "copy")
