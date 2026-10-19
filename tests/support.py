@@ -108,7 +108,9 @@ def copy_of(dest: Path, key: tuple[object, ...], build: Callable[[Path], None]) 
         template.mkdir()
         build(template)
         _templates[key] = template
-    shutil.copytree(template, dest, symlinks=True)
+    # A lock file belongs to a git process that ran in the template, for example `git maintenance run --auto`, which
+    # can remove it while the copy runs. The copy is a new repository with no process, so it takes no lock file.
+    shutil.copytree(template, dest, symlinks=True, ignore=shutil.ignore_patterns("*.lock"))
     return dest
 
 
