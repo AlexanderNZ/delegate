@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-19
+
 ### Fixed
 
 - The verifier guard permits `cd <dir>` when `<dir>` is in the git toplevel of the working directory, the toplevel of #106, or is a temp path (#121). Before, it permitted a `cd` only to a temp path, so it refused each gate in the form `cd <dir> && <gate>`, for example `cd api && ./gradlew test`. A `cd` takes one path argument. The guard denies a `..` component, a path that starts with `~` or `=`, and a path with `*`, `?`, `[`, `{` or `$`, so `cd ../outside`, `cd /etc` and `cd api/../..` stay denied. Each later segment is tested on its own, so `cd api && echo x > f` stays denied. The verdicts are the same in bash, `/bin/sh` and zsh.
