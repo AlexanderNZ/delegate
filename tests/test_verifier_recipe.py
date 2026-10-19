@@ -53,8 +53,11 @@ SHELLS = (
 #: The fixed temp prefixes of the guards, without a /private prefix.
 TEMP_TEXT = ("/tmp/", "/var/folders/")
 
-#: The toplevel rule of #106, as the rendered verifier states it.
+#: The toplevel rule of #106, as the rendered OpenCode verifier states it.
 TOPLEVEL_RULE = "outside the git toplevel of your working directory"
+
+#: The full rule of the Claude Code guards since #125, as the rendered verifier states it.
+FULL_RULE = "in a temp directory, not inside a git tree, and not holding one"
 
 #: The recipe of the rendered Claude Code verifier, in the order of the text. `<tree>` is the tree to copy, and
 #: `/tmp/x` is a new temp path.
@@ -152,11 +155,13 @@ def _in_order(text: str, steps: list[str]) -> None:
 # --- The toplevel rule --------------------------------------------------------
 
 
-def test_the_claude_code_verifier_states_the_toplevel_rule_for_the_shell_and_for_the_write_tool(rendered):
+def test_the_claude_code_verifier_states_the_full_rule_for_the_shell_and_for_the_write_tool(rendered):
     body = _body(rendered, "claude-code")
 
-    assert TOPLEVEL_RULE in _section(body, "Your shell")
-    assert TOPLEVEL_RULE in _section(body, "Your Write tool")
+    for title in ("Your shell", "Your Write tool"):
+        assert FULL_RULE in _section(body, title)
+        # The guards look for the .git entry from each target, not only from the working directory (#125).
+        assert "from each write target" in _section(body, title)
     # The old text gave the temp rule alone, which is wider than the guard.
     assert "a write whose every path argument is in a temp directory." not in body
 

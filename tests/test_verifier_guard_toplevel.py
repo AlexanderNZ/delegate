@@ -275,10 +275,11 @@ def test_the_bash_guard_permits_a_copy_of_the_worktree_and_a_cd_to_it(tree, shel
 
 
 @pytest.mark.parametrize("shell", GUARD_SHELLS)
-def test_the_bash_guard_permits_a_temp_write_when_the_working_directory_is_in_no_repository(tree, shell):
+def test_the_bash_guard_permits_a_temp_write_outside_each_git_tree_when_the_working_directory_is_in_no_repository(tree, shell):
+    # A write into the worktree from here is a deny since #125: see tests/test_verifier_guard_target_tree.py.
     outside = tree.base / "plain"
     outside.mkdir()
-    for command in _bash_writes(_without_private(str(tree.worktree / "src" / "app.py"))):
+    for command in _bash_writes(_without_private(str(outside / "src" / "app.py"))):
         result = _bash(tree, command, shell, cwd=str(outside))
 
         assert result.returncode == 0, (command, result.stderr)

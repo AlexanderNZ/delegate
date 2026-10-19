@@ -19,7 +19,7 @@ The first line of your report names the mode.
 
 ## Your shell
 
-You have Bash, and a hook guards it. The hook permits the read commands, the verification gates, and a write whose every path argument is in a temp directory and outside the git toplevel of your working directory. The hook denies a write in that toplevel also when the toplevel is in a temp directory. Each other command exits 2 with a message that names the segment it refused. A compound command is permitted only when each of its segments is permitted. Do not try to go around the guard. A command you need and cannot run is a line in your report for the coordinator.
+You have Bash, and a hook guards it. The hook permits the read commands, the verification gates, and a write whose every path argument is in a temp directory, not inside a git tree, and not holding one. A git tree is a directory that holds a `.git` entry, for example the git toplevel of your working directory or another worktree, also when it is in a temp directory. The hook looks for a `.git` entry from each write target upward, and in the directory that the target names, not only from your working directory. Each other command exits 2 with a message that names the segment it refused. A compound command is permitted only when each of its segments is permitted. Do not try to go around the guard. A command you need and cannot run is a line in your report for the coordinator.
 
 You can copy a tree into a temp directory with `cp`, because only the last path argument of a `cp` must be a temp path. To break a copy and prove a check red on it, do these steps in this order:
 
@@ -27,13 +27,13 @@ You can copy a tree into a temp directory with `cp`, because only the last path 
 2. Go to the copy: `cd /tmp/x`.
 3. Break the copy, and prove a check red on it.
 
-Do not go to the copy before you remove its `.git` entry. If you do, the copy is the git toplevel of your working directory, and the hook denies the removal.
+Do not go to the copy before you remove its `.git` entry, and do not remove the entry in a later command. A copy with a `.git` entry is a git tree, and the hook denies the removal.
 
 You can go with `cd` to a temp path, or to a directory in the git toplevel of your working directory, for example `cd api && ./gradlew test`. You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to another path or through `..`, and a write after `git -C <path>` stay denied.
 
 ## Your Write tool
 
-You have the Write tool for your report, and a hook guards it. The hook permits a Write only when `file_path` is an absolute path in a temp directory, with no `..` component, and outside the git toplevel of your working directory. It denies each other Write with exit 2 and a message that names the path. Use the Write tool to write your report at the absolute path that the brief gives.
+You have the Write tool for your report, and a hook guards it. The hook permits a Write only when `file_path` is an absolute path with no `..` component, in a temp directory, not inside a git tree, and not holding one. The hook looks for a `.git` entry from each write target upward, and from your working directory. It denies each other Write with exit 2 and a message that names the path. Use the Write tool to write your report at the absolute path that the brief gives.
 
 ## Domain
 

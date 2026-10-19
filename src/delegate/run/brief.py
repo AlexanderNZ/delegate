@@ -729,11 +729,12 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
     proof = red_proof_copy(copy)
     working_copy = (
         f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
-        "The verifier guards deny a write in the git toplevel of your working directory, and that toplevel is this copy. "
+        "The verifier guards deny a write inside a git tree, and a write that holds one. A git tree is a directory "
+        "with a `.git` entry, and this copy is one. "
         "To prove a test red, break a second copy. From this copy, make the second copy and remove its `.git` entry "
         f"in one command: `cp -R {copy} {proof} && rm -rf {proof}/.git`. Then go to it with `cd {proof}`, break it, "
-        "and run the test there. Do not go to the second copy before you remove its `.git` entry. If you do, the second copy is "
-        "the git toplevel of your working directory, and the guards deny the removal. "
+        "and run the test there. Do not go to the second copy before you remove its `.git` entry, and do not remove the entry "
+        "in a later command. A second copy with a `.git` entry is a git tree, and the guards deny the removal. "
         "Never push.\n\n" + _report_rule("copy", report_path)
     )
     gate_output = (
