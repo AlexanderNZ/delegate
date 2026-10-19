@@ -1,6 +1,6 @@
 {
   "name": "delegate",
-  "owner": { "name": "Alex J Corkin" },
+  "owner": { "name": "The delegate maintainers" },
   "description": "The plugins of the delegate kit.",
   "plugins": [
     {

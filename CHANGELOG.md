@@ -17,6 +17,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Fixed
 
+- The plugin files name no person: the owner of `.claude-plugin/marketplace.json` and the author of the Claude Code plugin are "The delegate maintainers", and the plugin README adds the marketplace from the root of a clone. The neutrality check, which now scans the plugins (#102), found the names.
 - In an `economy` chain with more than one stack, the verifier of a later stack sees each fix-up of an earlier stack that changes a file of its tickets: the chain brief holds the delta of those fix-ups and names the files (#93).
 - `delegate status` and `delegate watch` follow a run that ended and was resumed. Before, `status` gave the old result and `100%`, and the retried ticket as `failed`, and `watch` exited at once at the old `run-end`. Now a `run-end` that a `resume` follows does not end the run, a ticket with a `retry` event is `running`, and `watch` treats the events before the first `resume` after the newest `run-end` that a `resume` follows as history (#103).
 - When the verifier guard denies a file descriptor as the last word inside quotes, such as `bash -c "ls 2>&1"`, its message now tells the agent to put a space before the closing quote: under bash and `/bin/sh`, `bash -c "ls 2>&1 "` is permitted. The guard still denies the first form, because a quote after the descriptor can make the target a file name: `ls >&1")"` writes the file `1)` (#104).

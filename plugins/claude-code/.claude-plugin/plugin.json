@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Shows the progress of a delegate run of the repository: a status line entry, toasts, and a /delegate pane, from `delegate status --json`.",
   "author": {
-    "name": "Alex J Corkin"
+    "name": "The delegate maintainers"
   },
   "types": "./types/index.d.ts",
   "userConfig": {
