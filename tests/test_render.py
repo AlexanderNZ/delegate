@@ -996,7 +996,44 @@ def test_opencode_verifier_bash_map_comes_from_the_same_table(rendered, java_spr
     (agent,) = java_spring
     assert perm["bash"] == verifier_bash_permission(tuple(agent.gate_commands))
     for c in VERIFIER_READ_COMMANDS:
-        assert opencode_bash_action(perm, c) == "allow", c
+        # echo and printf are only in the Claude Code list (#123).
+        expected = "deny" if c in ("echo", "printf") else "allow"
+        assert opencode_bash_action(perm, c) == expected, c
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x > /abs/x",
+        "cat a >> /abs/b",
+        "ls > f",
+        "ls &> /abs/f",
+        "grep x f | tee /abs/y",
+        "grep x f |tee /abs/y",
+        "printf x > /abs/z",
+        "git diff > /abs/d",
+    ],
+)
+def test_the_opencode_verifier_map_denies_a_redirection_and_a_pipe_to_tee(rendered, command):
+    # Before #123, "echo *" and the other read patterns also matched a
+    # redirection to any path, so the OpenCode verifier could write anywhere.
+    perm = _fm(rendered / "opencode" / "java-spring-verifier.md")[0]["permission"]
+    assert opencode_bash_action(perm, command) == "deny", command
+
+
+def test_the_opencode_verifier_map_keeps_the_reads_and_drops_echo_and_printf(rendered):
+    # OpenCode gives the glob no ">" of a redirection after a group, a subshell,
+    # a loop or the last command of a pipeline (#123). A verifier needs echo and
+    # printf only to write, so the OpenCode map has no rule for them.
+    perm = _fm(rendered / "opencode" / "java-spring-verifier.md")[0]["permission"]
+    for command in ("cat f", "grep -n x f", "ls -la", "git diff main...HEAD", "grep -n x f < f"):
+        assert opencode_bash_action(perm, command) == "allow", command
+    for command in ("echo x", "printf x"):
+        assert opencode_bash_action(perm, command) == "deny", command
+    # The rendered verifier states the limit, so the agent does not use it.
+    body = _fm(rendered / "opencode" / "java-spring-verifier.md")[1]
+    assert "The map cannot deny each redirection." in body
+    assert "{ cat f; } > x" in body
 
 
 def test_opencode_does_not_split_a_compound_command(rendered):

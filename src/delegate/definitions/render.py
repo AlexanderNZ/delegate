@@ -679,24 +679,48 @@ def verifier_external_directory_permission() -> dict[str, str]:
     return perm
 
 
+#: Read commands that the OpenCode verifier map leaves out (#123). A verifier
+#: needs them only to write, and the OpenCode map cannot deny each redirection:
+#: see VERIFIER_OPENCODE_WRITE_DENIES.
+VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("echo", "printf")
+
+#: The deny rules that close the OpenCode verifier map (#123). They come after
+#: the read allows, because OpenCode keeps the last matching rule
+#: (`evaluate` in packages/core/src/permission.ts @ tag v1.15.10, a `findLast`,
+#: read 2026-10-20). OpenCode checks each simple command of the line on its
+#: own, with the text of a redirection that follows that command
+#: (`source` in packages/opencode/src/tool/shell.ts @ tag v1.15.10). So "*>*"
+#: denies "echo x > /abs/x", "cat a >> /abs/b", "ls &> f", and also
+#: "2>/dev/null" and "2>&1": a glob cannot tell a redirection to a file from
+#: one to a file descriptor. The two "tee" rules stop a pipe to tee where the
+#: whole line is one pattern. OpenCode gives the glob no ">" of a redirection
+#: after a group, a subshell, a loop or the last command of a pipeline, so no
+#: rule of the map can deny those forms.
+VERIFIER_OPENCODE_WRITE_DENIES: tuple[str, ...] = ("*>*", "*| tee *", "*|tee *")
+
+
 def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     """The OpenCode permission.bash map for a verifier.
 
     The catch-all deny is the first key, because OpenCode keeps the last
     matching rule. Each read command becomes "<command> *": OpenCode treats a
     trailing " *" as optional, so one pattern covers the bare command and the
-    command with arguments, and it does not match a longer command name.
+    command with arguments, and it does not match a longer command name. The
+    write denies come last, so they win over the read allows.
 
     This map is smaller than the Claude Code allow list on purpose. An OpenCode
     pattern cannot examine a path argument, so the temp-write commands and the
-    GET-only commands stay out.
+    GET-only commands stay out, and so do echo and printf.
     """
     perm: dict[str, str] = {"*": "deny"}
     # An exact gate stays out: the map is a glob, and a glob cannot hold a
     # quote or a substitution as text that only matches itself.
     plain_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
-    for command in VERIFIER_READ_COMMANDS + plain_gates:
+    reads = tuple(c for c in VERIFIER_READ_COMMANDS if c not in VERIFIER_OPENCODE_LEFT_OUT)
+    for command in reads + plain_gates:
         perm[f"{command} *"] = "allow"
+    for pattern in VERIFIER_OPENCODE_WRITE_DENIES:
+        perm[pattern] = "deny"
     return perm
 
 # A PreToolUse hook on Bash. Exit 2 blocks the call and returns stderr to the

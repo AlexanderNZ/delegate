@@ -30,6 +30,12 @@ The adapter passes no permission option. The permission rules of the repository 
 
 When the stack names MCP servers, the environment of the command is the environment of the [**engine**](../glossary.md#engine) with the servers added to `OPENCODE_CONFIG_CONTENT`. See [what the agent gets](#what-the-agent-gets). Otherwise the environment is the environment of the engine.
 
+## The permission rules
+
+OpenCode flattens the `permission` map of an agent into rules in key order, and it keeps the last rule that matches the permission and the pattern. A rule before the catch-all `"*"` of the same map is therefore shadowed. The source is `evaluate` in `packages/core/src/permission.ts` of OpenCode at tag v1.15.10, a `findLast` over the rules, read on 2026-10-20. A pattern is an anchored glob: `*` is zero or more characters, and a trailing ` *` also matches the bare command (`packages/core/src/util/wildcard.ts` at the same tag).
+
+For the bash tool, OpenCode parses the line and checks each simple command on its own. The text that it matches is the command with the redirection that follows it (`source` in `packages/opencode/src/tool/shell.ts` at the same tag). One deny for one command denies the line. A redirection after a group, a subshell, a loop, or the last command of a pipeline is not in the text of a command, so no pattern can deny it. Measured on OpenCode 1.15.10 on 2026-10-20 with `opencode debug agent <verifier> --tool bash` on a rendered verifier, which runs the tool with no model: `echo x > <file>` and `grep x f | tee <file>` were a deny, and `{ cat f; } > <file>` and `cat f | grep h > <file>` wrote the file. The rendered verifier map and its limits are in [the enforcement model and its limits](../explanation/the-enforcement-model-and-its-limits.md#the-limits-of-the-guards) (#123).
+
 ## What the agent gets
 
 The agent gets:
