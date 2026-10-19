@@ -30,7 +30,7 @@ import pytest
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import TITLE, Terminal, bare_repo, frames, journal_path, without_titles
+from .support import CONTROL, TITLE, Terminal, bare_repo, frames, journal_path, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 PYTEST = "nix develop -c python3 -m pytest -q"
@@ -514,7 +514,8 @@ def test_watch_with_no_run_id_of_a_newest_run_that_ended_draws_no_frame_on_a_ter
 
     assert code == 0
     assert frames(out.getvalue()) == []
-    assert without_titles(out.getvalue()) == "no run is active; the newest run r1 ended built at 2026-10-16 17:06\n"
+    # On a terminal the line has the paint of tokens.md (#119, tests/test_ended_run_line.py); the words do not change.
+    assert CONTROL.sub("", without_titles(out.getvalue())) == "no run is active; the newest run r1 ended built at 2026-10-16 17:06\n"
 
 
 def test_watch_of_an_unknown_run_on_a_terminal_exits_2_as_before(tmp_path, monkeypatch, capsys):
