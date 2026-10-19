@@ -7,7 +7,9 @@ know, or that has no stream reader, gives no reader: the output then has the pro
 
 With no run id, the active runs decide (`delegate.run.runs.runs_of`), as for `delegate watch`: the one active run, or
 the newest run when no run is active. With more than one active run, the lines list each active run
-(`delegate.run.status.active_line`), and `--json` is an error, because one snapshot cannot hold two runs.
+(`delegate.run.status.active_line`), and `--json` is an error, because one snapshot cannot hold two runs. A newest
+run that failed at start (`delegate.run.runs.FailedStart`) has no journal: the output is one line with the last line of
+its log, and `--json` is an error, because the run has no snapshot.
 """
 
 from __future__ import annotations
@@ -25,10 +27,10 @@ from ..adapters.git import GitVersionControl
 from ..ports.harness import Activity
 from ..run import status
 from ..run.journal import JournalError
-from ..run.runs import RunsError, runs_of
+from ..run.runs import FailedStart, RunsError, runs_of
 
 # The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid. With
-# `--json` and no run id, it is also the exit status when more than one run is active.
+# `--json` and no run id, it is also the exit status when more than one run is active, or when the newest run failed at start.
 # An event stream that cannot be read is not an error: the output shows no tokens and no activity for its agent.
 EXIT_ERROR: int = 2
 
@@ -77,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
                 now = utc_now()
                 listed = [status.active_line(active, now) for active in runs.active]  # an error prints no part of the list
                 print("\n".join([f"{len(runs.active)} runs are active; give a run id to show one of them:", *listed]))
+                return 0
+            if isinstance(runs.chosen, FailedStart):
+                # The newest run failed at start: it has no journal, so no report and no snapshot.
+                if args.json:
+                    raise RunsError(runs.chosen.line())
+                print(runs.chosen.line())
                 return 0
             run_id = runs.chosen.parent.name
         if args.json:

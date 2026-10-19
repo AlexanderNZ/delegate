@@ -289,11 +289,17 @@ def _holds(vcs: VersionControl, repo: Path, ancestor: str, descendant: str) -> b
 
 
 def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
-    """Refuse a run whose base branch is missing or whose ticket branch is taken. Create nothing."""
+    """Refuse a new run whose base branch is missing, or whose run branch or ticket branch is taken. Create nothing."""
     with _vcs_errors():
         base_exists = vcs.branch_exists(repo, workflow.base_branch)
+        run_branch_taken = vcs.branch_exists(repo, workflow.run_branch)
     if not base_exists:
         raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
+    if run_branch_taken:
+        raise EngineError(
+            f"run-branch {workflow.run_branch!r} exists already in the repository {repo}; an earlier run can leave it. "
+            "Delete it or choose another run-branch"
+        )
     for ticket in workflow.tickets:
         branch = _ticket_branch(workflow, ticket)
         with _vcs_errors():
@@ -737,6 +743,28 @@ def _check_chain_start(
         )
 
 
+def check_start(
+    workflow: Workflow, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *, resume: bool = False,
+    break_lock: bool = False,
+) -> None:
+    """The checks of a run that need no agent: the tier of each role, the lock, and for a new run the branches. Create nothing.
+
+    Raise EngineError, which names the input at fault, when a check fails. A run branch in use is reported first: the
+    run branch of a run that works exists. A new run needs its base branch, and a run branch and ticket branches that
+    do not exist. `run_workflow` does these checks before it takes the lock. `delegate run --detach` does them before it
+    starts the run process, so a run that cannot start gives its error on stderr and exits non-zero, as in the foreground.
+    """
+    repo, state_dir = state_directory(repo, vcs)
+    for role in ("specialist", "verifier"):
+        _role_model(workflow, tiers, adapter.tier_column, role)
+    try:
+        check_free(state_dir, workflow.run_branch, run_id, break_stale=break_lock)
+    except LockError as error:
+        raise EngineError(str(error)) from None
+    if not resume:
+        _check_branches(workflow, repo, vcs)
+
+
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False, on_start: Callable[[str], None] | None = None,
@@ -755,6 +783,7 @@ def run_workflow(
     `_retry_plan`). Raise EngineError, which names the ticket, when the step
     cannot be retried.
 
+    The run first makes the checks of `check_start`. A refused run creates nothing, so the lock is taken last.
     The run holds the lock of its run branch until it ends. Raise EngineError,
     which names the holder, when another run holds the lock. A resume takes over
     a lock of its own run whose process no longer exists, and the result names
@@ -776,14 +805,11 @@ def run_workflow(
     `all`. Raise EngineError, which names each ticket and field at fault, when
     the rules refuse the change. A plan change also goes on with a run that ended.
     """
+    run_id = resume if resume is not None else (run_id or new_run_id())
+    check_start(workflow, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock)
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
-    run_id = resume if resume is not None else (run_id or new_run_id())
     try:
-        # A run branch in use is reported first. A refused run creates nothing, so the lock is taken last.
-        check_free(state_dir, workflow.run_branch, run_id, break_stale=break_lock)
-        if resume is None:
-            _check_branches(workflow, repo, vcs)
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
             if on_start is not None:
                 on_start(run_id)

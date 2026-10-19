@@ -19,7 +19,11 @@ journal. The command prints `run <id>` and `journal <path>`, one line on stderr 
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
-limit, then does not stop the run.
+limit, then does not stop the run. Before it starts the process, it makes the
+checks of the run that need no agent (`engine.check_start`): the workflow, the
+tiers, the lock, and for a new run the base branch and a free run branch. A
+check that fails prints its error on stderr, exits 1, and starts no process, as
+a run in the foreground does.
 """
 
 from __future__ import annotations
@@ -37,17 +41,15 @@ from ..adapters.shell import ShellGateRunner
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
-    EngineError, PlanReview, RunInterrupted, new_run_id, review_plan_change, run_workflow, state_directory, workflow_of_run,
+    EngineError, PlanReview, RunInterrupted, check_start, new_run_id, review_plan_change, run_workflow, state_directory,
+    workflow_of_run,
 )
-from ..run.runs import RunsError, journal_of
+from ..run.runs import LOG_NAME, RunsError, journal_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .title import SEPARATOR, Title, short_run_id
-
-# The name of the log file of a detached run, in the directory of the run.
-LOG_NAME: str = "run.log"
 
 # The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
 EXIT_PAUSED: int = 3
@@ -94,8 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--detach", action="store_true",
-        help="start the run in a new process with setsid, outside the process group of the shell; write its output to the file "
-        "run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run",
+        help="make the checks of the run that need no agent, and exit 1 with the error when one fails; then start the run in a "
+        "new process with setsid, outside the process group of the shell; write its output to the file run.log in the directory "
+        "of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run",
     )
     # The run id that a detached start gives to the run process. The run process then runs in the foreground.
     parser.add_argument("--detached-run-id", help=argparse.SUPPRESS)
@@ -243,6 +246,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.detach and args.detached_run_id is None:
             run_id = args.resume if args.resume is not None else new_run_id()
+            try:
+                # The checks that need no agent come before the run process, so their error goes to the caller.
+                check_start(workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None, break_lock=args.break_lock)
+            except EngineError as error:
+                print(f"delegate run: {error}", file=sys.stderr)
+                return 1
             return _detach(argv, run_id, args.repo, args.resume is not None, vcs)
         title = Title(sys.stdout)
         try:

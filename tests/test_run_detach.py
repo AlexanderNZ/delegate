@@ -10,6 +10,7 @@ that starts it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import time
@@ -18,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from . import claude_fake
-from .support import WORKFLOW, event_names, journal_path, make_repo, read_journal_file, run_main
+from .support import WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -102,6 +103,48 @@ def test_detach_with_a_workflow_problem_exits_1_at_once_and_starts_nothing(tmp_p
     assert (code, out) == (1, "")
     assert "no-such-harness" in err
     assert not (repo / ".git" / "delegate" / "runs").exists()
+
+
+def _take_the_run_branch(repo: Path) -> contextlib.AbstractContextManager[None]:
+    git(repo, "branch", "run/demo")  # a branch that an earlier run left
+    return contextlib.nullcontext()
+
+
+def _remove_the_base_branch(repo: Path) -> contextlib.AbstractContextManager[None]:
+    (repo / "workflow.toml").write_text((repo / "workflow.toml").read_text().replace('base-branch = "main"', 'base-branch = "nope"'))
+    return contextlib.nullcontext()
+
+
+def _lock_the_run_branch(repo: Path) -> contextlib.AbstractContextManager[None]:
+    # The process of the test holds the lock for another run, so the lock names a process that exists.
+    return live_lock(journal_path(repo, "20261018T000000Z-0000"), "run/demo")
+
+
+@pytest.mark.parametrize(
+    ("make_the_fault", "error"),
+    [
+        (_take_the_run_branch, "run-branch 'run/demo' exists already"),
+        (_remove_the_base_branch, "base-branch 'nope' is not a branch of the repository"),
+        (_lock_the_run_branch, "run branch run/demo is in use by run 20261018T000000Z-0000"),
+    ],
+    ids=["run branch exists", "no base branch", "run branch locked"],
+)
+def test_detach_with_a_check_that_fails_exits_1_with_the_error_of_a_run_in_the_foreground_and_starts_no_process(
+    tmp_path, monkeypatch, capsys, make_the_fault, error,
+):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    repo = make_repo(tmp_path, CLAUDE_CODE)
+
+    with make_the_fault(repo):
+        code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
+        foreground = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert (code, out) == (1, "")
+    assert error in err and err.startswith("delegate run: ")
+    assert (foreground[0], foreground[2]) == (1, err), "the detached start and the run in the foreground give different errors"
+    # No run process started: the run has no directory, so it has no log and no journal, and no agent was called.
+    assert not (repo / ".git" / "delegate" / "runs").exists()
+    assert fake.calls() == []
 
 
 def test_detach_and_dry_run_cannot_go_together(tmp_path, capsys):

@@ -31,7 +31,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |
-| `--detach` | Start the run in a new process with setsid, outside the process group of the shell; write its output to the file run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run. |
+| `--detach` | Make the checks of the run that need no agent, and exit 1 with the error when one fails; then start the run in a new process with setsid, outside the process group of the shell; write its output to the file run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run. |
 | `--repo <repo>` | The git repository to build in; default is the current directory. |
 | `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |
 | `--opencode-model <tier=model>` | Use MODEL for TIER in the OpenCode column; repeat it. |
@@ -43,7 +43,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 
 1. The engine validates the workflow. A problem exits 1 and creates nothing.
 2. The engine checks that no other run holds the lock of the run branch. See [the run lock](#the-run-lock). A held lock exits 1 and creates nothing.
-3. The engine checks that `base-branch` is a branch of the repository and that no ticket branch exists. A problem exits 1 and creates nothing.
+3. The engine checks that `base-branch` is a branch of the repository, and that the run branch and the ticket branches do not exist. An earlier run can leave its run branch. A problem exits 1 and creates nothing.
 4. The engine takes the lock.
 5. The engine creates the run branch at the commit of `base-branch`, and writes `run-start` to a new journal. That commit is the base of the run. See [the base of the run](#the-base-of-the-run).
 6. For each ticket in dependency order, the engine does the [**step**](../glossary.md#step) below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
@@ -448,14 +448,14 @@ The run id is the UTC time and four hexadecimal characters, for example `2026100
 
 ## The detached run
 
-With `--detach`, the command checks the options and the workflow first. A problem exits 1 or 2, as without `--detach`, and starts no run. Then the command starts the run in a new process with the `setsid` system call, and exits 0. The new process has no terminal, and it is outside the process group of the shell that started the command. A harness that stops its tool shell, or a background task at a time limit, does not stop the run.
+With `--detach`, the command first makes the checks of the run that need no agent: the options, the workflow and its tiers, the lock of the run branch, and, for a new run, `base-branch` and a run branch and ticket branches that do not exist. These are steps 1 to 3 of [what a run does](#what-a-run-does). A check that fails prints its error on stderr and exits 1 or 2, as without `--detach`. The command then starts no process, and makes no directory of the run and no log. Then the command starts the run in a new process with the `setsid` system call, and exits 0. The new process has no terminal, and it is outside the process group of the shell that started the command. A harness that stops its tool shell, or a background task at a time limit, does not stop the run.
 
 The command prints two lines:
 
 - `run <run id>`: the id of the run. Give it to `delegate status`, `delegate watch` and `--resume`.
 - `log <path>`: the file `runs/<run id>/run.log` in the state directory. The run process writes its standard output and its standard error to this file, so the log holds the lines of [the output](#output-and-exit-codes) of a run in the foreground.
 
-The command makes the directory of the run and the log before the run starts. A problem after the start, for example a lock that another run holds, goes to the log, and the run has no journal.
+The command makes the directory of the run and the log before the run starts. A problem after the start goes to the log. For example, another run can take the lock between the checks and the start. When the run process ends before it writes its journal, the run failed at start: its directory holds the log and no journal. A run failed at start when no lock names its run id and a process that exists, and its log holds text: the run process takes its lock before it writes its journal, and it writes nothing to the log before a problem. `delegate watch` and `delegate status` with no run id report a newest run that failed at start in one line, with the last line of its log. See [the newest run that failed at start](status-and-watch.md#the-newest-run-that-failed-at-start).
 
 `--detach` also works with `--resume <run-id>` and with `--retry <ticket>`. The run id is the id of the resumed run, and the run process appends to the same log. An unknown run id exits 1 and starts nothing. `--detach` cannot go with `--dry-run`.
 
@@ -463,7 +463,7 @@ The command makes the directory of the run and the log before the run starts. A 
 
 On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout.
 
-With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. See [the detached run](#the-detached-run).
+With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. A check that fails before the start prints its error on stderr, exits 1, and starts no run process. See [the detached run](#the-detached-run).
 
 When stdout is a terminal, the command also sets the title of the terminal. The title is `delegate run` when the command starts, and `delegate run · <short run id>` when the run holds its lock. The short run id is the four hexadecimal characters at the end of the run id, for example `e9dc`. With `--dry-run`, the title stays `delegate run`. When stdout is not a terminal, or when the environment variable `DELEGATE_NO_TITLE` is `1`, the command writes no title. See [the terminal title](status-and-watch.md#the-terminal-title).
 

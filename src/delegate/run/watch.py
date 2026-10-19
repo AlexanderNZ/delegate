@@ -40,7 +40,10 @@ EXIT_INTERRUPTED: int = 130
 # table and from `EXIT_CODES`. The links point into that page.
 EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_SUCCEEDED: "The journal holds `run-end` with the result `built`.",
-    EXIT_FAILED: "The journal holds `run-end` with the result `failed`.",
+    EXIT_FAILED: (
+        "The journal holds `run-end` with the result `failed`, or, with no run id, "
+        "[the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active."
+    ),
     EXIT_ERROR: (
         "A usage error, a repository with no run, an unknown run id, a journal that is not valid, "
         "a `--from` position beyond the end of the journal, or, with no run id, "

@@ -4,6 +4,8 @@ A run is active when its journal has no `run-end` after its newest `resume`, and
 run and a process that exists. A case writes each journal with the journal class of the engine, and each lock with the
 lock class of the engine: a live lock is held by the process of the test, and a stale lock by a child process that
 ended. A case calls `delegate.main([...])` against a real temporary git repository.
+
+A run that failed at start has a directory with a `run.log` and no journal. A case writes that log as a file.
 """
 
 import json
@@ -15,7 +17,7 @@ from datetime import datetime, timedelta
 from delegate.cli import delegate
 
 from .support import (
-    append_events, bare_repo, live_lock, run_end, run_start, stale_lock, step_end, step_start, write_journal,
+    append_events, bare_repo, journal_path, live_lock, run_end, run_start, stale_lock, step_end, step_start, write_journal,
 )
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
 
@@ -197,3 +199,88 @@ def test_status_json_without_a_run_id_and_two_active_runs_exits_2_and_names_each
 
     assert (code, out) == (2, "")
     assert err == "delegate status: 2 runs are active: r-assure, r-economy; give a run id to show one of them\n"
+
+
+# The last line that a detached run process wrote to its log when a check failed before the run wrote its journal.
+GIT_ERROR = (
+    "delegate run: git branch run/watch-chain e0dbee4 failed: fatal: a branch named 'run/watch-chain' already exists"
+)
+
+
+def failed_start(repo, run_id: str) -> str:
+    """Write the directory of a run that failed at start: a `run.log` that ends with an error, and no journal.
+
+    Return the path of the log. Its time of change is 60 seconds after now, so it is newer than each journal of the case.
+    """
+    log = journal_path(repo, run_id).parent / "run.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(f"an earlier line of the log\n{GIT_ERROR}\n\n")
+    later = time.time() + 60
+    os.utime(log, (later, later))
+    return str(log)
+
+
+def test_watch_and_status_without_a_run_id_report_a_newest_run_with_only_a_log_as_failed_at_start(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), run_end("built", ["a"]))
+    log = failed_start(repo, "newer")
+    line = f"no run is active; the newest run newer failed at start: {GIT_ERROR}; log {log}\n"
+
+    watch_code, watched, watch_err = watch(repo, capsys)
+    status_code, shown, status_err = status(repo, capsys)
+    json_code, snapshot, json_err = status(repo, capsys, "--json")
+
+    assert (watch_code, watched, watch_err) == (1, line, "")
+    assert (status_code, shown, status_err) == (0, line, "")
+    assert (json_code, snapshot) == (2, "")
+    assert json_err == f"delegate status: {line}"
+
+
+def test_watch_without_a_run_id_reports_a_failed_start_also_when_no_run_has_a_journal(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    log = failed_start(repo, "only")
+
+    code, out, err = watch(repo, capsys)
+
+    assert (code, out, err) == (1, f"no run is active; the newest run only failed at start: {GIT_ERROR}; log {log}\n", "")
+
+
+def test_a_run_with_only_a_log_whose_lock_names_a_live_process_has_not_failed_at_start(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), run_end("built", ["a"]))
+    failed_start(repo, "starting")
+
+    # The run process holds its lock and has not written its journal yet: it is active by the rule of the lock.
+    with live_lock(journal_path(repo, "starting"), "run/starting"):
+        watch_code, watched, _ = watch(repo, capsys)
+        status_code, shown, _ = status(repo, capsys)
+
+    assert "failed at start" not in watched + shown
+    assert watch_code == 0 and watched.startswith("no run is active; the newest run older ended built at ")
+    assert status_code == 0 and shown.splitlines()[0].startswith("run older: ")
+
+
+def test_a_run_with_an_empty_log_and_no_journal_has_not_failed_at_start(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), run_end("built", ["a"]))
+    # `run --detach` makes the log before the run process starts. The process writes nothing to it before it takes its lock.
+    log = journal_path(repo, "starting").parent / "run.log"
+    log.parent.mkdir(parents=True)
+    log.touch()
+
+    code, out, _ = watch(repo, capsys)
+
+    assert code == 0 and out.startswith("no run is active; the newest run older ended built at ")
+
+
+def test_watch_without_a_run_id_follows_the_one_active_run_when_a_newer_run_failed_at_start(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    active = write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), step_start("a"))
+    failed_start(repo, "newer")
+    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+
+    with live_lock(active, "run/older"):
+        code, out, err = watch(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert "run_id=older" in out and "failed at start" not in out

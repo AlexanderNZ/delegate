@@ -86,6 +86,25 @@ def live_holder(state_dir: Path, run_branch: str) -> LockHolder | None:
     return holder if _alive(holder.pid) else None
 
 
+def live_holder_of_run(state_dir: Path, run_id: str) -> LockHolder | None:
+    """The holder of a lock of any run branch that names `run_id` and a process that is alive, or None when there is none.
+
+    A run takes its lock before it writes its journal, so a run with no journal yet has no run branch to look up.
+    Raise LockError when a lock file cannot be read.
+    """
+    locks = state_dir / "locks"
+    for path in sorted(locks.glob("*.lock")) if locks.is_dir() else []:
+        try:
+            holder = _read_holder(path)
+        except LockError:
+            if not path.exists():
+                continue  # the run released it while this function read it
+            raise
+        if holder.run_id == run_id and _alive(holder.pid):
+            return holder
+    return None
+
+
 def check_free(state_dir: Path, run_branch: str, run_id: str, *, break_stale: bool = False) -> None:
     """Raise LockError, as `run_lock` does, when the lock of the run branch is held. Create nothing.
 

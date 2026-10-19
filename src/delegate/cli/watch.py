@@ -13,7 +13,9 @@ With no run id and no `--from`, the active runs decide (`delegate.run.runs.runs_
 also when a newer run ended. With more than one, this module prints the line of each (`delegate.run.status.active_line`),
 follows none, and exits with `watch.EXIT_CHOOSE`. With none, the newest run gets one line and no replay of its journal:
 a run that ended (`delegate.run.watch.EndedRun`) exits with the code of its result, and a run that stopped
-(`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr.
+(`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr. A newest run that failed
+at start (`delegate.run.runs.FailedStart`) has no journal: its line gives the last line of its log, and the exit code
+is `watch.EXIT_FAILED`.
 
 Ctrl-C ends the watch with `watch.EXIT_INTERRUPTED` (130), and the run goes on. The live view draws its last frame, and
 this module shows the cursor and sets the title to the reason `interrupted`. It then prints one line on stderr with the
@@ -31,7 +33,7 @@ from typing import TextIO
 from ..adapters.git import GitVersionControl
 from ..run import live, status, watch
 from ..run.journal import JournalError
-from ..run.runs import RunsError, journal_of, runs_of
+from ..run.runs import FailedStart, RunsError, journal_of, runs_of
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title, short_run_id
 
@@ -211,8 +213,13 @@ def main(argv: list[str] | None = None) -> int:
                 return watch.EXIT_CHOOSE
             if not runs.active:
                 # No run is active: the newest run gets one line, not a replay of its journal.
+                if isinstance(runs.newest, FailedStart):
+                    # The run failed at start: it has no journal.
+                    Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(runs.newest.run_id)}{SEPARATOR}failed")
+                    print(runs.newest.line())
+                    return watch.EXIT_FAILED
                 return _newest_run(watch.newest_run(runs.newest))
-            journal = runs.chosen
+            journal = runs.active[0]
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)

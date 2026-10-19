@@ -68,7 +68,7 @@ A ticket that failed or was skipped has the line `  reason: <reason>`, after its
 
 On a terminal, `status` sets the title of the terminal to `delegate status`. See [the terminal title](#the-terminal-title).
 
-`status` exits 0 when it printed the run, or the lines of the active runs. It exits 2 when the repository has no run, when the run id is unknown, when the journal is not valid, or with `--json` and no run id when more than one run is active. The message on stderr names the repository, the run id, the journal, or each active run. Ctrl-C ends `status` with the code 130 and the line `delegate: interrupted` on stderr, and with no traceback. An event stream that cannot be read is not an error: see [a stream that cannot be read](#a-stream-that-cannot-be-read).
+`status` exits 0 when it printed the run, the lines of the active runs, or the line of [a newest run that failed at start](#the-newest-run-that-failed-at-start). It exits 2 when the repository has no run, when the run id is unknown, when the journal is not valid, or with `--json` and no run id when more than one run is active or the newest run failed at start. The message on stderr names the repository, the run id, the journal, each active run, or the run that failed at start. Ctrl-C ends `status` with the code 130 and the line `delegate: interrupted` on stderr, and with no traceback. An event stream that cannot be read is not an error: see [a stream that cannot be read](#a-stream-that-cannot-be-read).
 
 ### The snapshot
 
@@ -241,10 +241,12 @@ A run is active when these two conditions are true:
 
 A run with no `run-end` and no live process is not active: its process stopped. A crash, a kill, Ctrl-C and a pause stop the process of a run.
 
+A run directory with a `run.log` and no journal is the directory of a [detached run](run.md#the-detached-run) whose journal does not exist. When a lock names its run id and a process that exists, the run process works, and it has not written its journal yet. When its log is empty, the run process has not written to it yet. Otherwise the run failed at start. A run that failed at start has no `run-start` event, so the time of the last change of its log is its start time when the commands find the newest run.
+
 | Active runs | `status` | `watch` |
 |---|---|---|
 | One | Shows the active run, also when a newer run ended. | Follows the active run, also when a newer run ended. |
-| None | Shows the newest run. | Prints one line for the newest run, and exits. See [the newest run that ended](#the-newest-run-that-ended) and [the newest run that stopped](#the-newest-run-that-stopped). |
+| None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
 | More than one | Prints the list of the active runs, and exits 0. With `--json`, it exits 2, and the message names each active run. | Prints the list of the active runs, follows none, and exits 8. It replays no event, and prints no line `position <seq>`. |
 
 The list has one line with the number of the active runs, and then one line for each active run, the oldest run first:
@@ -295,6 +297,16 @@ delegate watch: no run is active; the newest run 20261016T030000Z-abcd stopped a
 ```
 
 The line gives the run id, the local date and time of the newest event of the journal, and the command that resumes the run. See [the resume](run.md#the-resume).
+
+### The newest run that failed at start
+
+When `status` or `watch` gets no run id, no run is active, and the newest run [failed at start](#the-run-with-no-run-id), the run has no journal. The command prints one line on stdout, and no line `position <seq>`:
+
+```
+no run is active; the newest run 20261019T070133Z-b937 failed at start: delegate run: git branch run/watch-chain e0dbee4 failed: fatal: a branch named 'run/watch-chain' already exists; log /path/to/.git/delegate/runs/20261019T070133Z-b937/run.log
+```
+
+The line gives the run id, the last line of the log that holds text, and the path of the log. `watch` exits 1: the run failed. `status` exits 0. With `--json`, `status` exits 2, and the message on stderr is the line: the run has no snapshot. Since `delegate run --detach` makes [the checks that need no agent](run.md#the-detached-run) before it starts the run process, a run fails at start only after those checks.
 
 ### The live view
 
@@ -349,7 +361,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 | Code | Reason | When |
 |---|---|---|
 | 0 | run succeeded | The journal holds `run-end` with the result `built`. |
-| 1 | run failed | The journal holds `run-end` with the result `failed`. |
+| 1 | run failed | The journal holds `run-end` with the result `failed`, or, with no run id, [the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active. |
 | 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active. |
 | 3 | problem | An event is a problem. See [the problem events](#the-problem-events). |
 | 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
@@ -363,7 +375,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 
 Code 2 is also the code that `argparse` gives for a usage error.
 
-`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result, and [the newest run that stopped](#the-newest-run-that-stopped) exits 7 or 2.
+`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at its first problem, and not 1. The code 1 follows when `watch` goes on from the position of that problem. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result, [the newest run that stopped](#the-newest-run-that-stopped) exits 7 or 2, and [the newest run that failed at start](#the-newest-run-that-failed-at-start) exits 1.
 
 A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the first `resume` after its newest `run-end` that a `resume` follows are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still ends the watch. `watch` then follows the resumed run to its new `run-end`.
 
