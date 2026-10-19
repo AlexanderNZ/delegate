@@ -603,35 +603,78 @@ the commands of the kit. These rules apply from the start of the run to its
 end.
 
 1. **Start the run detached.** Start the run with `delegate run --detach`.
-   It starts the run process with the `setsid` system call, so that the
+   First the command makes the checks that need no agent: the workflow, the
+   tiers, the lock, and the branches of a new run. For a resume, it also
+   applies the rules of a plan change, with `--reviewed`. A check that fails
+   prints its error on stderr, exits 1, and starts no process. Then the
+   command starts the run process with the `setsid` system call, so that the
    harness cannot stop it with your shell. It prints `run <run id>` and
-   `log <path>`, and exits at once.
+   `log <path>`, and exits 0.
    A harness can stop a background task at a time limit. A run that only has
    `nohup` and `&` can stay in the process group of your shell.
-2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
+2. **Name the run by its id.** The run id is on the line `run <run id>`. The
+   short run id is the part of the run id after the last `-`, for example
+   `e9dc`. `delegate status`, `delegate watch`, `delegate pause` and
+   `--resume` take the run id or the short run id. A short id that more than
+   one run has is an error: the command names each match and changes nothing.
+3. **Follow the run with `delegate watch`.** Start `delegate watch` as a
    background task, with `--stall-minutes` and `--max-minutes`. The harness
    then tells you when it exits. A background task has no terminal, so
    `watch` prints one raw line for each event, as with `--raw`. On a terminal,
    `watch` shows a live view for a person. When it exits at a limit, start it
    again with `--from <position>`, the position that its last line gives.
-3. **Show `delegate status` as it is.** At each report to the person, show the
+   With no run id, `watch` follows the one active run, also with `--from`. An
+   active run has no `run-end` after its newest `resume`, and a live process
+   holds the lock of its run branch. With more than one active run and no
+   terminal, `watch` names each active run on stderr, follows none, and exits
+   with the code 2. Then give the run id.
+4. **Show `delegate status` as it is.** At each report to the person, show the
    output of `delegate status`, as it is. The coordinator does not write its
    own script to read the journal or an event stream. If the output does not
-   show a fact that the person needs, tell the person.
-4. **Report a stall at once.** A stalled agent is an agent with no activity
+   show a fact that the person needs, tell the person. With no run id,
+   `status` shows the one active run, or the newest run when no run is
+   active. With more than one active run, it prints a table of the active
+   runs: give the run id.
+5. **Report a stall at once.** A stalled agent is an agent with no activity
    for the stall limit, the time that `--stall-minutes` sets. `delegate watch`
    then exits 5, with the reason `stall`. Tell the person at once, and give
    the output of `delegate status`.
-5. **Resume a stopped run.** When the run process stops before the run ends,
-   go on with `delegate run --detach --resume <run-id>`. The resume takes over the
-   lock of the same run when its process no longer exists. If the lock belongs
-   to another run and to a process that no longer exists, add `--break-lock`.
-   First make sure that no other run uses the run branch.
+6. **Pause a run at a step boundary.** Run `delegate pause <run-id>`. The
+   pause cuts off no agent and no gate. The run stops at its next step
+   boundary. `delegate status` shows `pausing` while the run is active, and
+   `paused` after the stop. `delegate watch` exits 7. The run
+   process prints `paused <where>; go on with delegate run --resume <run-id>`,
+   and exits 3. A run with no live process cannot be paused:
+   `delegate pause` exits 1. Ctrl-C stops a run in the foreground with no wait.
+   The run then writes `interrupted` in its journal, prints one line that
+   tells how to resume, and exits 130.
+7. **Resume a stopped run.** When the run process stops or pauses before the
+   run ends, go on with `delegate run --detach --resume <run-id>`. The resume
+   takes over the lock of the same run when its process no longer exists. If
+   the lock belongs to another run and to a process that no longer exists,
+   add `--break-lock`. First make sure that no other run uses the run branch.
+8. **Retry a failed step.** A failed step goes on with
+   `delegate run --detach --resume <run-id> --retry <ticket>`, also in a run
+   that ended. When the retry builds the step, the engine also builds each
+   ticket that the step made it skip, in plan order, when its blockers are
+   built. A run that ends with a failed step or a skipped ticket exits 1.
+   An invariant violation halts a run for good: a resume, a plan change and a
+   retry of that run are refused. Start a new run.
 
 ### Change the plan of a run
-A run can take a new ticket without a new run. Stop the run, or let it end.
-Edit the workflow file, then resume the run. The engine compares the workflow
-with the newest plan of the run, and applies these rules:
+A run can take a new ticket without a new run. Do these steps in this order:
+
+1. Pause the run with `delegate pause <run-id>`. You can also change a run
+   that stopped or ended.
+2. Edit the workflow file that the run started from. Add a ticket at the end,
+   or insert it before a ticket that has not started.
+3. Run `delegate run --resume <run-id> --dry-run`. It changes nothing.
+4. Review each later ticket that the dry run names (rule 6 below).
+5. Resume with `delegate run --detach --resume <run-id> --reviewed <ids>`,
+   or with `--reviewed all`.
+
+The engine compares the workflow with the newest plan of the run, and applies
+these rules:
 
 1. **The built part is fixed.** Each ticket up to the last ticket that started
    keeps its id, its text, its stack, its `blocked-by` and its place. The
@@ -660,7 +703,10 @@ with the newest plan of the run, and applies these rules:
    and builds nothing. Read that reason, and change the plan again.
 
 The journal records each change as `plan-change`. `delegate status` counts the
-new tickets.
+new tickets. A refused resume writes no journal line, starts no agent, and
+exits 1 with the ticket and the field at fault. With `--detach`, the command
+applies these rules before it starts the run process. A plan change is refused
+for a run that an invariant violation halted: start a new run.
 
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a

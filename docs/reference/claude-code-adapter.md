@@ -112,7 +112,7 @@ An API error (for example, a model that does not exist) gives `is_error` true wi
 
 ## The activity
 
-Each form of `delegate status` reads each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far, as two counts, and the time of the newest event:
+Each form of `delegate status`, and the [live view](status-and-watch.md#the-live-view) of `delegate watch`, read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far, as two counts, and the time of the newest event:
 
 - The time is the `timestamp` field of the newest event that has one (ISO 8601, UTC). The `assistant` and `user` events have it. The `system`, `rate_limit_event`, `tool_progress` and `result` events do not.
 - Some events with no `timestamp` show that the agent works now. While a tool runs, the harness writes a `tool_progress` event with `"heartbeat": true` every 30 seconds. While the model thinks, it writes `system` events with the subtype `thinking_tokens`. When the newest event of the stream is one of these, the time is the modification time of the stream file: the time that the harness last wrote to it. Measured on Claude Code 2.1.287 on 2026-10-16.
