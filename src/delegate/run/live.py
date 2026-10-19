@@ -21,12 +21,19 @@ group, and its lines name the stack. While an agent runs, the last line of a fra
 has the paint of its role (`output.paint`), which is plain text when `NO_COLOR` is set or standard output is not a
 terminal.
 
+The time since the last activity of an agent is in the live tail of its row and at the end of its line (#147,
+`status.liveness`). When the frame has paint, an agent that is active shows a spinner, and the view draws the frame
+again from the snapshot that it has after each `SPIN_SECONDS` of the wait between two reads of the journal: the spinner
+steps one frame at each draw. The wait between two reads stays the same. A frame with no spinner is drawn once for each
+read. With no paint, there is no spinner: the line gives `active <time> ago`, as a snapshot.
+
 The view reads the event streams only through the reader that the command gives (the `activity` method of the adapter
 of the run), so this module never imports an adapter.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -59,6 +66,9 @@ FEED_LINES: int = 4
 # The minutes with no activity after which the live tail of a running ticket warns, when `watch` has no `--stall-minutes`.
 # The pane of the Claude Code plugin uses the same default.
 IDLE_WARNING_MINUTES: float = 5
+
+# The seconds between two draws of a frame with a spinner, while the view waits for the next read of the journal (#147).
+SPIN_SECONDS: float = 0.125
 
 # A part of a line of the feed: the roles of its paint (see `output.styled`), and its text.
 Span = tuple[str, str]
@@ -125,7 +135,8 @@ class _Waiting:
 
 
 class LiveView:
-    """The sink of `follow` for a terminal. `frame` gives the lines to draw; `draw` gets them at each poll and at the end.
+    """The sink of `follow` for a terminal. `frame` gives the lines to draw; `draw` gets them at each poll and at the end,
+    and also after each `SPIN_SECONDS` of the wait between two polls while the frame has a spinner (`wait`).
 
     `reader_of` gives the reader of the event streams for the adapter of the run, as for `delegate status`. `now` is the
     clock, in UTC. `size` gives the columns and the lines of the terminal, with 0 lines when the terminal does not give
@@ -150,6 +161,13 @@ class LiveView:
         self._gates: dict[tuple[str, str], datetime] = {}  # the start of the gate that runs, by ticket and command
         self._chain: dict[str, str] = {}  # the stack of the chain verification, by the ticket that its events name
         self._reader: status.StreamReader | None = None
+        # The facts of the newest frame, which a draw between two reads of the journal uses again (#147): the snapshot,
+        # the tokens of each agent that runs, and the time of the clock.
+        self._snap: status.Snapshot | None = None
+        self._agent_counts: dict[tuple[str, str], str | None] = {}
+        self._at: datetime | None = None
+        self._spin = 0  # the frame of the spinner of the next draw
+        self._spinning = False  # the newest frame has a spinner
 
     # The sink of `follow`.
 
@@ -177,6 +195,20 @@ class LiveView:
     def poll(self) -> None:
         columns, rows = self._size()
         self._draw(self.frame(columns, rows, final=False))
+        self._spin += 1
+
+    def wait(self, seconds: float) -> None:
+        """Wait for the next read of the journal. While the frame has a spinner, draw it again after each `SPIN_SECONDS`
+        of the wait, from the snapshot of the newest frame, so the spinner steps. The last part of the wait has no draw:
+        the next poll draws."""
+        left = seconds
+        while self._spinning and left > SPIN_SECONDS:
+            time.sleep(SPIN_SECONDS)
+            left -= SPIN_SECONDS
+            columns, rows = self._size()
+            self._draw(self._compose(columns, rows, final=False))
+            self._spin += 1
+        time.sleep(left)
 
     def interrupted(self) -> None:
         return None  # `end` draws the last frame; the command restores the terminal and prints the line
@@ -197,17 +229,25 @@ class LiveView:
         scrolls it. With 0 `rows`, the size of the terminal is not known: no row folds, and the frame keeps each line. A
         frame of a watch that goes on also tells each agent that runs now; the last frame does not.
         """
+        self._at = self._now()
+        self._snap = self._snapshot(self._at)
+        self._agent_counts = {key: self._agent_tokens(stream) for key, (_, stream) in self._agents.items()}
+        return self._compose(columns, rows, final)
+
+    def _compose(self, columns: int, rows: int, final: bool) -> list[str]:
+        """The lines of `frame`, from the facts of the newest frame, with the spinner at its next frame."""
         width = max(columns, 1)
         known = rows > 0
         room = max(0, rows - 1)
-        snap = self._snapshot()
+        snap = self._snap
+        spin = self._spin if output.colour_on() else None
         feed = [*self._feed, *(_Line(w.time, w.subject, w.spans) for w in self._waiting.values())]
         if not final and snap is not None:
-            feed += self._running(snap)
+            feed += self._running(snap, spin)
         block: list[str] = []
         if snap is not None:
             height = room - 1 - FEED_LINES if known else None
-            block = status.view_lines(snap, status.plan_links(self._events), width, height, self._idle_limit)
+            block = status.view_lines(snap, status.plan_links(self._events), width, height, self._idle_limit, spin)
         id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
         lines = [line.painted(id_cells) for line in feed]
         if not final and known:
@@ -215,26 +255,30 @@ class LiveView:
             space = max(0, room - len(block) - 1)
             lines = lines[-space:] if space else []
         divider = [output.styled("dim", output.glyphs().rule * width)] if lines else []
+        # The spinner shows for an agent that is active: in the live tail of its row, and at the end of its line.
+        idle = [t.idle_seconds for t in snap.tickets if t.idle_seconds is not None] if snap is not None and not final else []
+        self._spinning = spin is not None and any(status.liveness(seconds, self._idle_limit, spin)[0] == "now" for seconds in idle)
         return [output.cut(line, width) for line in [*block, *divider, *lines]]
 
-    def _running(self, snap: status.Snapshot) -> list[_Line]:
+    def _running(self, snap: status.Snapshot, spin: int | None) -> list[_Line]:
         """A line for each agent that runs now: its role, the time since it started, its tokens in `dim` when the run has a
-        reader of the event streams, and the time since its last activity."""
-        now = self._now()
+        reader of the event streams, and the time since its last activity (`status.liveness`). `spin` is the frame of the
+        spinner, or None when the frame has no paint."""
+        now = self._at or self._now()
         idle = {t.id: t.idle_seconds for t in snap.tickets}
         lines = []
-        for (ticket, role), (started, stream) in self._agents.items():
+        for (ticket, role), (started, _) in self._agents.items():
             spans: list[Span] = [("", f"{role} running{SEPARATOR}{duration((now - started).total_seconds())}")]
-            tokens = self._agent_tokens(stream)
+            tokens = self._agent_counts.get((ticket, role))
             if tokens is not None:
                 spans += [JOIN, ("dim", tokens)]
             paint = "now"
             seconds = idle.get(ticket)
-            if seconds is not None and seconds >= self._idle_limit:
-                spans += [JOIN, ("", f"{output.glyphs().idle} idle {status.format_duration(seconds)}")]
-                paint = "warn"
-            elif seconds is not None:
-                spans += [JOIN, ("", f"active {status.format_duration(seconds)}")]
+            if seconds is not None:
+                tail_role, text = status.liveness(seconds, self._idle_limit, spin)
+                if tail_role == "warn":
+                    paint = "warn"  # the whole line warns
+                spans += [JOIN, ("dim" if tail_role == "dim" else "", text)]
             lines.append(_Line(now, self._chain_subject(ticket, f"#{ticket}"), spans, role=paint))
         return lines
 
@@ -248,10 +292,11 @@ class LiveView:
             return None
         return f"{status.format_tokens(found.tokens_new)} new{SEPARATOR}{status.format_tokens(found.tokens_cache)} cache"
 
-    def _snapshot(self) -> status.Snapshot | None:
-        """The snapshot of the events so far, or None when the journal does not start with `run-start`."""
+    def _snapshot(self, now: datetime | None = None) -> status.Snapshot | None:
+        """The snapshot of the events so far at `now` (default: the clock), or None when the journal does not start with
+        `run-start`."""
         try:
-            return status.snapshot_of(self._events, self._journal, self._reader_of, self._now())
+            return status.snapshot_of(self._events, self._journal, self._reader_of, self._now() if now is None else now)
         except JournalError:
             return None
 

@@ -97,7 +97,7 @@ def test_frame_3a_at_120_columns_puts_the_header_the_running_row_and_its_phase_s
     assert at_cell(running, START_CELL["phase"], "specialist ●"), running
     assert running[START_CELL["after"]:START_CELL["used"]].strip() == "", running
     assert [right_in_track(running, name, text) for name, text in (("used", "4m00s"), ("new", "0"), ("cache", "0"))] == [True] * 3
-    assert at_cell(running, START_CELL["tail"], "active 4m00s"), running
+    assert at_cell(running, START_CELL["tail"], "quiet 4m00s"), running
     # Each further phase is a sub-row with the rail (the next row, 131, is after 128) and the phase only.
     assert gates == line_of(rail="│", phase="gates ○")
     assert verifier == line_of(rail="│", phase="verifier ○")
@@ -262,7 +262,7 @@ def test_with_a_c_locale_the_table_has_the_ascii_rail_and_the_same_column_positi
         line_of(**{"#": "1", "plan": "* 127", "state": "+ built", "used": "10m00s", "new": "39k", "cache": "0"}),
         line_of(**{"#": "2", "rail": "|", "plan": "* 130", "state": "+ built", "used": "10m00s", "new": "39k", "cache": "0"}),
         line_of(**{"#": "3", "rail": "|", "plan": "> 128", "state": "running", "phase": "specialist *", "used": "4m00s", "new": "0",
-                   "cache": "0", "tail": "active 4m00s"}),
+                   "cache": "0", "tail": "quiet 4m00s"}),
         line_of(rail="|", phase="gates o"),
         line_of(rail="|", phase="verifier o"),
         line_of(rail="|", phase="fix-up o"),

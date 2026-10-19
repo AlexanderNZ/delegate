@@ -7,11 +7,11 @@ This plugin shows the progress of a `delegate` run of the repository in Claude C
 - **The status line entry.** While the run of the snapshot is in the state `running`, the entry shows the short run id, the percentage, the ETA, the running ticket and its phase, the time since the last activity, and the two token counts:
 
   ```text
-  delegate 1638 · 84% · ETA 13:12 · ▶ 60 specialist · active 18s · 1.9M new · 53.0M cache
+  delegate 1638 · 84% · ETA 13:12 · ▶ 60 specialist · active 18s ago · 1.9M new · 53.0M cache
   ```
 
   In the `gates` phase, the time since the last activity is the time since the last output of the gate.
-- **The warning.** When no agent activity occurs for `stall_minutes` minutes, the entry shows `⚠ idle 6m40s` in place of `active 18s`. A band above the prompt then shows the warning in the warning colour of the theme. The status line of Claude Code shows text only, so the colour is on the band.
+- **The warning.** When no agent activity occurs for `stall_minutes` minutes, the entry shows `⚠ idle 6m40s` in place of `active 18s ago`. A band above the prompt then shows the warning in the warning colour of the theme. The status line of Claude Code shows text only, so the colour is on the band.
 - **The toasts.** A toast shows when a ticket ends (`delegate 1638: ticket 60 built`), and when the state of the run changes from `running` to another state (`delegate 1638: the run ended, built`). A pause request also gives this toast, with the state `pausing`. The tickets that ended before the first poll of the session give no toast.
 - **The pane.** The `/delegate` command opens a pane. Its first line gives the run id, the state, the percentage, the ETA and the tokens of the run. Under it, the pane has one row for each ticket, in plan order: the plan index, the ticket id, the state, the phase, the time used, the tokens, and `after <id>`. The rows have no tree prefix. The `after` cell comes from the `plan` field of the snapshot. When the one blocker of a ticket is the ticket of the row above, the cell is empty. Otherwise, it names each blocker, as `after 90` or `after 82 89`. A blocker that is not in the plan does not count. With no plan (a run of an earlier version), no row has an `after` cell. The rows of the tickets that ended are dim. The pane changes at each poll.
 

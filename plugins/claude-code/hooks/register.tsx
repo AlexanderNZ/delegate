@@ -105,7 +105,7 @@ function statusText(snap: DelegateSnapshot, limitSeconds: number): string {
     const more = running.length > 1 ? ` +${running.length - 1}` : ''
     parts.push(`▶ ${ticket.id}${ticket.phase ? ` ${ticket.phase}` : ''}${more}`)
     const idle = idleSeconds(ticket)
-    if (idle !== null) parts.push(idle >= limitSeconds ? `⚠ idle ${duration(idle)}` : `active ${duration(idle)}`)
+    if (idle !== null) parts.push(idle >= limitSeconds ? `⚠ idle ${duration(idle)}` : `active ${duration(idle)} ago`)
   } else if (snap.phase) {
     parts.push(`▶ ${snap.phase}`)
   }

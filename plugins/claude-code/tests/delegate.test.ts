@@ -34,7 +34,7 @@ function clockTime(iso: string): string {
 
 const RUNNING = JSON.stringify(RECORDED_RUNNING, null, 2)
 const EXPECTED_ENTRY =
-  `delegate 1638 · 84% · ETA ${clockTime(RECORDED_RUNNING.eta)} · ▶ 60 specialist · active 18s · 1.9M new · 53.0M cache`
+  `delegate 1638 · 84% · ETA ${clockTime(RECORDED_RUNNING.eta)} · ▶ 60 specialist · active 18s ago · 1.9M new · 53.0M cache`
 
 // The host beneath the plugin. `answer` is what the next `process.run` gives; change it to change the next poll.
 function host(on: On, first: Answer, clock?: MockClock, delayMs = 0) {
@@ -108,12 +108,12 @@ describe('the status line', () => {
     seen.answer = { exitCode: 0, stdout: changed(snap => {
       snap.percent = 91
       ticket(snap, '60').phase = 'verifier'
-      ticket(snap, '60').idle_seconds = 3
+      ticket(snap, '60').idle_seconds = 2
     }) }
     await clock.advance(POLL_MS)
 
     expect(seen.statuses.at(-1)).toContain('91%')
-    expect(seen.statuses.at(-1)).toContain('▶ 60 verifier · active 3s')
+    expect(seen.statuses.at(-1)).toContain('▶ 60 verifier · active 2s ago')
   })
 
   test('shows the idle time of the gate while the ticket is in its gates phase', async ($, on) => {
@@ -124,7 +124,7 @@ describe('the status line', () => {
 
     await start($, clock)
 
-    expect(seen.statuses.at(-1)).toContain('▶ 60 gates · active 7s')
+    expect(seen.statuses.at(-1)).toContain('▶ 60 gates · active 7s ago')
   })
 
   test('shows no token counts when the JSON has the one `tokens` field of a version before #86', async ($, on) => {
@@ -234,7 +234,7 @@ describe('the warning', () => {
 
     const band = await $.ui.mount({ plugin: 'delegate', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS })
 
-    expect(seen.statuses.at(-1)).toContain('active 6m40s')
+    expect(seen.statuses.at(-1)).toContain('active 6m40s ago')
     expect(seen.statuses.at(-1)).not.toContain('⚠')
     expect(await band.find({ key: 'stall' })).toBeUndefined()
   })

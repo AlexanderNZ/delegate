@@ -33,6 +33,11 @@ When more than one run is active (see `delegate.run.runs`), `delegate status`
 and `delegate watch` with no run id show the run picker of frame 2b (#118):
 `active_runs` reads each active run, newest first, `picker_lines` draws the
 table, and `choices_line` gives the one line that names each run.
+
+`liveness` gives the time since the last activity of an agent (#147). A snapshot,
+as the run picker, gives `active <time> ago`. The live view on a terminal gives
+a spinner while the agent is active, and `quiet <time>` after `QUIET_SECONDS`.
+Past the stall time, both give `⚠ idle <time>`.
 """
 
 from __future__ import annotations
@@ -68,6 +73,9 @@ PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes 
 
 # What a line shows for a value that it does not have: the ETA before the first ticket ends.
 NONE: str = "-"
+
+# The seconds with no activity of an agent after which the live view shows `quiet <time>` and no spinner (#147).
+QUIET_SECONDS: int = 30
 
 
 def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
@@ -623,7 +631,8 @@ class _Row:
 
 
 def view_lines(
-    snap: Snapshot, links: Sequence[PlanLink], width: int, height: int | None = None, idle_limit: int | None = None
+    snap: Snapshot, links: Sequence[PlanLink], width: int, height: int | None = None, idle_limit: int | None = None,
+    spin: int | None = None,
 ) -> list[str]:
     """The lines of the live view of a snapshot: the run line, a blank line, and the ticket table, each cut to `width`.
 
@@ -632,11 +641,12 @@ def view_lines(
     sub-row for each phase after its first. When the lines would be more than `height`, the rows fold (`_fit`): first
     the tail, then the rows in the middle. With no `height`, no row folds. When a line of the table is wider than
     `width`, the columns drop in the order of `FIT_STEPS`. An agent or a gate log that has not changed for
-    `idle_limit` seconds or more shows a warning in the live tail. The view names only the run id, the ticket ids, the
+    `idle_limit` seconds or more shows a warning in the live tail. `spin` is the frame of the spinner of a live view
+    that animates, or None for the text of a snapshot (`liveness`). The view names only the run id, the ticket ids, the
     states, the phases, the reasons with no path, and the numbers. It shows no tool call.
     """
     glyph = output.glyphs()
-    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True), None if height is None else height - 3)
+    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True, spin=spin), None if height is None else height - 3)
     for dropped in FIT_STEPS:
         table, measured = _table(snap, rows, TABLE_COLUMNS, TRACKS, dropped, glyph)
         if measured <= width:
@@ -816,7 +826,7 @@ def _fold_line(snap: Snapshot, fold: _Fold, names: list[str], widths: list[int],
 
 def _rows(
     snap: Snapshot, links: Sequence[PlanLink], idle_limit: int | None, glyph: output.Glyphs, live: bool,
-    facts: dict[str, dict[str, str]] | None = None,
+    facts: dict[str, dict[str, str]] | None = None, spin: int | None = None,
 ) -> list[_Row]:
     """The rows of the ticket table in plan order: one row for each ticket, and under the row of a running ticket a
     sub-row for each phase after its first.
@@ -826,7 +836,7 @@ def _rows(
     running ticket on its row, and the gate that runs on the sub-row of its phase. Without it, as in `delegate status`,
     the tail has only the reason of a row. While the run is pausing, the live tail of the next row gives
     `PAUSING_CELL` (`_pausing_before`). `facts` gives, for each ticket id, the cells of the columns that the live
-    view does not have: `verdict`, `branch` and `last event` of `delegate status`.
+    view does not have: `verdict`, `branch` and `last event` of `delegate status`. `spin` is as for `view_lines`.
     """
     by_id = {link.id: link for link in links}
     pausing = _pausing_before(snap) if live else None
@@ -837,7 +847,7 @@ def _rows(
         phases, active = _phases(snap, ticket, glyph)
         details = [""] * max(1, len(phases))
         if live and ticket.state == RUNNING:
-            details[0] = _activity_tail(ticket, idle_limit, glyph)
+            details[0] = _activity_tail(ticket, idle_limit, glyph, spin)
             if ticket.gate is not None:
                 at = active if 0 < active < len(details) else 0
                 details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(ticket, idle_limit, glyph)) if part)
@@ -927,13 +937,30 @@ def _idle(seconds: int, quiet: str, idle_limit: int | None, glyph: output.Glyphs
     return quiet
 
 
-def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Glyphs) -> str:
-    """The live tail of the row of a running ticket: its continuations, and the activity of its agent."""
+def liveness(seconds: int, idle_limit: int | None, spin: int | None) -> tuple[str, str]:
+    """The paint role and the text of the time since the last activity of an agent (#147).
+
+    At `idle_limit` seconds or more, it is the warning `⚠ idle <time>` in `warn`. Else, with no `spin`, it is the text
+    of a snapshot: `active <time> ago` in `now`. A live view that animates gives the frame of its spinner in `spin`:
+    under `QUIET_SECONDS`, the text is that frame of the spinner, in `now`, and after it `quiet <time>` in `dim`.
+    """
+    if idle_limit is not None and seconds >= idle_limit:
+        return "warn", f"{output.glyphs().idle} idle {format_duration(seconds)}"
+    if spin is None:
+        return "now", f"active {format_duration(seconds)} ago"
+    if seconds < QUIET_SECONDS:
+        frames = output.spinner()
+        return "now", frames[spin % len(frames)]
+    return "dim", f"quiet {format_duration(seconds)}"
+
+
+def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Glyphs, spin: int | None) -> str:
+    """The live tail of the row of a running ticket: its continuations, and the activity of its agent (`liveness`)."""
     parts = []
     if ticket.continuation is not None:
         parts.append(output.styled("warn", f"cont {ticket.continuation[0]}/{ticket.continuation[1]}"))
     if ticket.idle_seconds is not None:
-        parts.append(_idle(ticket.idle_seconds, output.styled("now", f"active {format_duration(ticket.idle_seconds)}"), idle_limit, glyph))
+        parts.append(output.styled(*liveness(ticket.idle_seconds, idle_limit, spin)))
     return f" {glyph.pending} ".join(parts)
 
 
@@ -1043,7 +1070,7 @@ def picker_lines(runs: Sequence[ActiveRun], now: datetime) -> list[str]:
     The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Run picker). The rows keep the
     order of `runs`. A row gives the number to choose, the full run id with its short id bold, the run branch, the mode,
     the local start time (with the day of the week when the run did not start today), the progress, and what runs now
-    with the time since the last activity. `now` is the time of the clock, in UTC.
+    with the time since the last activity, as `active 2s ago` (`liveness`). `now` is the time of the clock, in UTC.
     """
     glyph = output.glyphs()
     dot = f" {glyph.pending} "
@@ -1066,7 +1093,7 @@ def picker_lines(runs: Sequence[ActiveRun], now: datetime) -> list[str]:
             snap.mode,
             output.styled("dim", started.strftime("%H:%M" if started.date() == today else "%a %H:%M")),
             f"{snap.tickets_ended}/{snap.tickets_total} ended{dot}{snap.percent}%",
-            doing + dot + output.styled("now", f"active {format_duration(run.idle_seconds)}"),
+            doing + dot + output.styled(*liveness(run.idle_seconds, None, None)),
         ])
     table = [line.rstrip(" ") for line in output.columns(rows, right=PICKER_NUMBERS)]
     return [f"{len(runs)} runs are active in this repository", *table]

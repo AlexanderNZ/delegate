@@ -372,6 +372,9 @@ class Sink(Protocol):
     def poll(self) -> None:
         """The events of one read of the journal are told, and the watch goes on."""
 
+    def wait(self, seconds: float) -> None:
+        """Wait `seconds` before the next read of the journal. A sink can draw again while it waits (#147)."""
+
     def interrupted(self) -> None:
         """Ctrl-C ends the watch. The run goes on."""
 
@@ -413,6 +416,9 @@ class RawSink:
 
     def poll(self) -> None:
         return None
+
+    def wait(self, seconds: float) -> None:
+        time.sleep(seconds)
 
     def interrupted(self) -> None:
         return None  # the command prints the line of an interrupted watch on stderr
@@ -510,7 +516,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 sink.time_limit(options.max_minutes)
                 return WatchResult(EXIT_TIME_LIMIT, position)
             sink.poll()
-            time.sleep(options.poll_seconds)
+            sink.wait(options.poll_seconds)
     except KeyboardInterrupt:
         # Ctrl-C: the watch ends, and the run goes on. `position` is the last event that the sink reported.
         sink.interrupted()

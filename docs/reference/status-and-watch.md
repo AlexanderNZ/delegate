@@ -288,8 +288,8 @@ When `watch` gets no run id, more than one run is active, and standard input and
 ```
 2 runs are active in this repository
 #  run                    run branch    mode     since  progress          now
-1  20261019T051148Z-ff1a  run/fix-auth  economy  18:11  0/1 ended . 30%   > 12 gates . active 12s
-2  20261019T040911Z-d636  run/plan      assure   17:09  6/13 ended . 46%  > 7 specialist . active 1m05s
+1  20261019T051148Z-ff1a  run/fix-auth  economy  18:11  0/1 ended . 30%   > 12 gates . active 12s ago
+2  20261019T040911Z-d636  run/plan      assure   17:09  6/13 ended . 46%  > 7 specialist . active 1m05s ago
 watch which? [1]
 ```
 
@@ -301,9 +301,9 @@ On a terminal with a UTF-8 locale, the picker has the glyphs and the colours of 
 ```text
 3 runs are active in this repository
 #  run                    run branch     mode     since  progress         now
-1  20260302T090500Z-c3e8  run/cli-flags  assure   09:05  0/3 ended · 0%   ▶ 401 specialist · active 1m00s
-2  20260302T084000Z-9a0b  run/docs-pass  economy  08:40  2/5 ended · 33%  paused · no ticket running · active 12m00s
-3  20260302T081500Z-2d4f  run/parser     assure   08:15  4/9 ended · 53%  ▶ 205 verifier · active 3m10s
+1  20260302T090500Z-c3e8  run/cli-flags  assure   09:05  0/3 ended · 0%   ▶ 401 specialist · active 1m00s ago
+2  20260302T084000Z-9a0b  run/docs-pass  economy  08:40  2/5 ended · 33%  paused · no ticket running · active 12m00s ago
+3  20260302T081500Z-2d4f  run/parser     assure   08:15  4/9 ended · 53%  ▶ 205 verifier · active 3m10s ago
 watch which? [1]
 ```
 
@@ -319,7 +319,7 @@ Type the number of a run, and push Enter. Enter alone takes 1, the newest run. `
 | `mode` | The [**mode**](../glossary.md#mode) of the run. |
 | `since` | The local time of the `run-start` event. A run that did not start today also has the day of the week, as `Mon 17:09`. |
 | `progress` | The tickets that ended, of all the tickets, and the percentage of [the snapshot](#the-snapshot). |
-| `now` | Each running ticket and its phase, separated by `, `. While the verification of an `economy` chain runs, `chain <phase>`. When no ticket runs, `no ticket running`. Before them, the state of a run that is not `running`, as `pausing`. Then `active <time>`: the time since the newest change of the journal, of the event streams and of the gate logs that the journal names. The [stall](#the-stall) check of `watch` uses the same files. |
+| `now` | Each running ticket and its phase, separated by `, `. While the verification of an `economy` chain runs, `chain <phase>`. When no ticket runs, `no ticket running`. Before them, the state of a run that is not `running`, as `pausing`. Then `active <time> ago`: the time since the newest change of the journal, of the event streams and of the gate logs that the journal names. The [stall](#the-stall) check of `watch` uses the same files. |
 
 When standard input or standard output is not a terminal, nobody can answer the prompt, for example a coordinator that runs `watch` as a background task. `watch` then follows no run. It prints one line on stderr that gives each active run, the newest run first, with its run branch and its state, and it exits 2:
 
@@ -380,7 +380,7 @@ run abcd  running  #############... 82%  5/7 ended  58m20s used  ETA 11m40s  213
   3  |   * 67    + built                               10m00s    39k       0
   4      * 68    + built                               10m00s    39k       0
   5      * 69    + built                               10m00s    39k       0
-  6  |   > 70    running     specialist +               8m20s    19k       0  active 2m20s
+  6  |   > 70    running     specialist +               8m20s    19k       0  quiet 2m20s
      |                       gates +
      |                       verifier *
      |                       fix-up o
@@ -390,7 +390,7 @@ run abcd  running  #############... 82%  5/7 ended  58m20s used  ETA 11m40s  213
 16:55  #70  specialist finished · 5m · tokens 19k new, 0 cache · report ok
 16:56  #70  gates green (pytest 1m)
 16:56  #70  verifier started
-16:58  #70  verifier running · 2m · 0 new · 0 cache · active 2m20s
+16:58  #70  verifier running · 2m · 0 new · 0 cache · quiet 2m20s
 ```
 
 The figure below is a frame on a terminal with a UTF-8 locale, at 120 columns. The text under the figure is the same frame with no colour.
@@ -404,7 +404,7 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
   #      plan    state       phase          after        used    new   cache
   1      ● 101   ✓ built                                9m20s    38k    401k
   2  │   ● 102   ✓ built                               11m00s    53k    666k
-  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s ago
      │                       gates ○
      │                       verifier ○
      │                       fix-up ○
@@ -418,7 +418,7 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
  11  │   · 111   pending
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 09:20  #103  started · python-specialist
-09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s ago
 ```
 
 The run line and the table come from the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
@@ -427,7 +427,7 @@ The run line and the table come from the snapshot of `status` (see [the snapshot
 - The table has one row for each ticket, flat and in plan order. The columns are `#` (the position in the plan), the rail (no header), `plan`, `state`, `phase`, `after`, `used`, `new`, `cache`, and a live tail with no header. The node glyph in `plan` gives the state: `●` built, `▶` running, `·` pending, `✗` failed, and `–` skipped.
 - The rail and `after` show the [**blockers**](../glossary.md#blocker) of the plan, from `blocked_by` in the plan of `run-start` or of the newest `plan-change`. When the one blocker of a ticket is the row directly above it, the rail `│` joins the two rows, and `after` is empty. Otherwise `after` gives the id of each blocker: a ticket after a row that is not the row above has no rail, and `after` names that row, as `66`. A join names each blocker, as `126 132`. The depth of the plan never makes the table wider: a chain of 40 tickets has the columns of a chain of 3. A journal of an earlier version of the engine records no plan, and then no row has a rail or an `after` cell.
 - The row of a running ticket gives its first phase, and each further phase is a sub-row under it, with only the rail, the phase and a detail in the live tail. The rail runs through the sub-rows when the next row has it. A phase shows `✓` when it is done, `●` when it runs, and `○` when it is to come. While a gate runs, the phase gives its count, as `gates ● 2/3`: the gate that runs, and the gates of the stack. The count shows when the journal holds an earlier run of the gates of the same stack that ended. A fix-up round shows its round and the limit, as `fix-up ● 1/2`. In `economy` mode a ticket has the phases `specialist` and `gates` only. Only phases go in the `phase` column.
-- The live tail of the row of a running ticket gives `active <time>` since the last activity of its agent. While a gate runs, the sub-row of its phase gives `gate <name> · log <time> ago` in its live tail. After an agent or a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
+- The live tail of the row of a running ticket gives the [liveness](#the-liveness-of-an-agent) of its agent. While a gate runs, the sub-row of its phase gives `gate <name> · log <time> ago` in its live tail. After a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
 - The live tail of a ticket that failed or was skipped gives the reason, with no path. While the run is `pausing`, the live tail of the next row gives `pauses before this step`: the first pending ticket after the running ticket, or the first pending ticket when no ticket runs. In a paused run, the live tail of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no columns `new` and `cache`, and the live tail gives no activity.
 
@@ -444,7 +444,7 @@ The feed holds only the lines of the ticket that runs now. The `step-start` of a
 | `run built · 1h06m · tokens 50k new, 1.3M cache` | The `run-end`: the result, the time of the run, and its two token counts. |
 | `paused · before ticket d · go on with delegate run --resume ab12` | The `paused` event: where the run stopped, and the command that goes on with it, with the short run id. |
 
-The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it, as `16:58  #70  verifier running · 2m · 43k new · 1.1M cache · active 2m20s`. The line gives the role, the time from its `agent-start`, the two token counts of its stream in faint text, and the time since its last activity. A stream that the harness has not opened yet has 0 tokens. For [a run with no stream reader](#a-run-with-no-stream-reader), and for a stream that cannot be read, the line has no token counts. The last frame has no such line.
+The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it, as `16:58  #70  verifier running · 2m · 43k new · 1.1M cache · quiet 2m20s`. The line gives the role, the time from its `agent-start`, the two token counts of its stream in faint text, and the [liveness](#the-liveness-of-an-agent) of the agent. A stream that the harness has not opened yet has 0 tokens. For [a run with no stream reader](#a-run-with-no-stream-reader), and for a stream that cannot be read, the line has no token counts. The last frame has no such line.
 
 A [problem](#the-problem-events) and a [stall](#the-stall) are lines that start with `✗`. For example, `16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json`, or `17:40  ✗ stall · no change for 30m`. The line of the time limit is `<time>  time limit · <N>m used · the run goes on`.
 
@@ -459,7 +459,7 @@ run 4b9d  running  ███████░░░░░░░░░ 46%  2/6 end
   #      plan    state       phase          after        used    new   cache
   1      ● 101   ✓ built                               10m00s    38k    401k
   2  │   ● 102   ✓ built                                9m40s    53k    666k
-  3  │   ▶ 103   running     specialist ✓              12m05s    65k    792k  active 25s
+  3  │   ▶ 103   running     specialist ✓              12m05s    65k    792k  active 25s ago
      │                       gates ✓
      │                       verifier ✓
      │                       fix-up ● 1/2
@@ -474,7 +474,7 @@ run 4b9d  running  ███████░░░░░░░░░ 46%  2/6 end
 09:28  #103  verifier finished · 3m · tokens 15k new, 104k cache · report ok
 09:28  #103  REJECT · 2 findings
 09:28  #103  fix-up round 1 started
-09:31  #103  fix-up running · 3m · 12k new · 126k cache · active 25s
+09:31  #103  fix-up running · 3m · 12k new · 126k cache · active 25s ago
 ```
 
 The figure below is the frame of a paused run. The pause stopped the run before the step of ticket 104. Its row gives `paused before this step`, and the last line of the feed gives the command that goes on with the run. The text under the figure is the same frame with no colour.
@@ -567,6 +567,20 @@ run 6e2b  running  █████████░░░░░░░ 59%  23/40 e
 ```
 
 Then the feed gets the rows that the table does not use, and keeps its newest lines. When the terminal does not give its size, no row folds, and the frame keeps each line of the feed. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.
+
+#### The liveness of an agent
+
+The live tail of the row of a running ticket, and the end of the line of its agent in the feed, show the liveness of the agent: the time since its last activity. On a terminal with colour, the liveness has three states:
+
+| Time since the last activity | The liveness |
+|---|---|
+| Less than 30 seconds | A spinner in cyan. Its frames are `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`, one step in approximately 125 ms. |
+| From 30 seconds to the stall time | `quiet <time>` in faint text, with no animation. An agent can be quiet during a long test run. |
+| The stall time or more | `⚠ idle <time>` in the warning colour. |
+
+The stall time is `--stall-minutes`, or 5 minutes. With a locale that is not UTF-8, the frames of the spinner are the ASCII characters `|`, `/`, `-` and `\`. The spinner turns only while the agent is active, so a spinner that stops does not hide an agent that hangs. Between two reads of the journal, `watch` draws the frame again from the snapshot that it has, so the spinner turns. The time between two reads of the journal does not change.
+
+With `NO_COLOR` set, there is no animation. Before the stall time, the liveness is `active <time> ago`, as in a snapshot: for example, `active 38s ago` is 38 seconds after the last activity, not 38 seconds of activity. The text under each figure of the live view on this page has this form. The run picker and the status line entry of the Claude Code plugin (`plugins/claude-code/`) are snapshots, so they also show `active <time> ago`.
 
 ### The raw lines
 

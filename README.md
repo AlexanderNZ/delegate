@@ -18,7 +18,7 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
   #      plan    state       phase          after        used    new   cache
   1      ● 101   ✓ built                                9m20s    38k    401k
   2  │   ● 102   ✓ built                               11m00s    53k    666k
-  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s ago
      │                       gates ○
      │                       verifier ○
      │                       fix-up ○
@@ -32,7 +32,7 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
  11  │   · 111   pending
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 09:20  #103  started · python-specialist
-09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s ago
 ```
 
 ## Docs

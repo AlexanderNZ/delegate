@@ -10,7 +10,7 @@ New or changed strings
 | ticket row | `12m38s used, tokens 149k new, 1.4M cache` | `12m38s  149k · 1.4M` under column headers `used` / `new · cache` | columns replace the labels |
 | ticket row | — | `after 69` / `→ 71` | shows what blocks what |
 | ticket row | — | plan index `12` | shows plan order |
-| running row | `last activity 2s ago` | `active 2s` | plugin wording; shorter |
+| running row | `last activity 2s ago`, then `active 2s` | live view on a terminal: a spinner `⠋` under 30 s since the last activity, `quiet 45s` from 30 s to the stall limit, `⚠ idle 6m40s` past it; a snapshot (`status`, the run picker, the plugin, the live view with `NO_COLOR`): `active 2s ago` | #147: `active 2s` read as a duration ("active for 2 seconds") next to `19m` used; the row and the waiting line already show the duration, so the live view shows a sign of life, and a snapshot says `ago` |
 | running row, gate | `gate python3 -m pytest -q, gate log changed 30s ago` | `gate pytest · log 30s ago` | uses `gate_name()` already in live.py |
 | folded pending tail (last row above the divider) | — | `· 11 pending` · `134–150` · `rows 30–40 folded` | the remaining work, always visible |
 | folded built rows (middle) | — | `✓ 17 built` · `104–120` · totals · `rows 4–20 folded` | only when the tail fold is not enough |

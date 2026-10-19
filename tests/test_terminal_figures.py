@@ -7,8 +7,10 @@ theme, as the other figures of the docs (`tests/svg.py`). `delegate docs --check
 from the code.
 
 The cases call `delegate.main(["docs", ...])` on a copy of the docs, or on the repository for the drift test. The case
-of the text compares each figure with the frame that the code renders with `NO_COLOR` set
-(`delegate.docs.figures.frame_lines`), so a figure holds no cell that the code does not print.
+of the text compares each figure with the frame that the code renders (`delegate.docs.figures.frame_lines`), so a figure
+holds no cell that the code does not print. The frame with `NO_COLOR` set is the text under the figure on a page. It has
+the same cells, except the liveness of an agent (#147): with colour, the live view shows a frame of the spinner or
+`quiet <time>`, and with no colour the text of a snapshot, `active <time> ago`.
 """
 
 from __future__ import annotations
@@ -58,6 +60,26 @@ def docs(capsys, *argv: str) -> tuple[int, str, str]:
 
 def contents(directory: Path) -> dict[str, bytes]:
     return {path.name: path.read_bytes() for path in sorted(directory.iterdir())}
+
+
+# The liveness cell at the end of a line of a frame (#147): with colour, a frame of the spinner or `quiet <time>`, and
+# with no colour, `active <time> ago`.
+LIVE = re.compile(r"(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]|quiet (?P<time>\S+))$")
+SNAPSHOT = re.compile(r"active (?P<time>\S+) ago$")
+
+
+def same_story(painted: list[str], plain: list[str]) -> None:
+    """Assert that the lines of a frame with colour, with no SGR code, are the lines with no colour, except that a
+    liveness cell of the live view is `active <time> ago` with no colour. A `quiet <time>` keeps its time."""
+    shown = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in painted]
+    assert len(shown) == len(plain)
+    for live, text in zip(shown, plain):
+        if live == text:
+            continue
+        cell, snapshot = LIVE.search(live), SNAPSHOT.search(text)
+        assert cell is not None and snapshot is not None, (live, text)
+        assert live[:cell.start()] == text[:snapshot.start()], (live, text)
+        assert cell["time"] in (None, snapshot["time"]), (live, text)
 
 
 def rows_of(path: Path) -> list[str]:
@@ -129,15 +151,15 @@ def test_each_pair_of_figure_files_is_accessible_and_differs_only_in_its_colours
 
 @outside_the_package
 @pytest.mark.parametrize("name", NAMES)
-def test_the_rows_of_each_figure_are_the_lines_of_the_frame_that_the_code_prints_with_no_colour(name):
+def test_the_rows_of_each_figure_are_the_lines_of_the_frame_that_the_code_prints(name):
     figure = next(f for f in figures.FIGURES if f.name == name)
 
-    plain = figures.frame_lines(figure, colour=False)
+    shown = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in figures.frame_lines(figure, colour=True)]
 
-    assert not any("\x1b" in line for line in plain)
-    assert len(plain) > 3
+    assert not any("\x1b" in line for line in shown)
+    assert len(shown) > 3
     for scheme in ("light", "dark"):
-        assert rows_of(ROOT / ASSETS / f"{name}-{scheme}.svg") == plain
+        assert rows_of(ROOT / ASSETS / f"{name}-{scheme}.svg") == shown
 
 
 def test_the_frame_with_colour_is_the_frame_with_no_colour_and_the_sgr_codes_of_the_roles():
@@ -145,7 +167,17 @@ def test_the_frame_with_colour_is_the_frame_with_no_colour_and_the_sgr_codes_of_
         painted = figures.frame_lines(figure, colour=True)
 
         assert any("\x1b[" in line for line in painted), figure.name
-        assert [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in painted] == figures.frame_lines(figure, colour=False)
+        same_story(painted, figures.frame_lines(figure, colour=False))
+
+
+def test_the_live_view_figures_show_the_spinner_and_quiet_and_their_text_reads_active_ago():
+    # #147: frame 3a has an agent quiet for 38s, and frame 1d an agent active 25s ago.
+    by_name = {figure.name: figure for figure in figures.FIGURES}
+    for name, live, text in (("watch-live", "  quiet 38s", "  active 38s ago"), ("watch-fixup", "  ⠋", "  active 25s ago")):
+        painted = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in figures.frame_lines(by_name[name], colour=True)]
+        plain = figures.frame_lines(by_name[name], colour=False)
+        assert sum(line.endswith(live) for line in painted) == 1, painted
+        assert sum(line.endswith(text) for line in plain) == 1, plain
 
 
 def test_a_frame_does_not_depend_on_the_locale_the_time_zone_or_the_colour_settings_of_the_process(monkeypatch):

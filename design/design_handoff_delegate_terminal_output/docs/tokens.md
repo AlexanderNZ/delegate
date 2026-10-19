@@ -5,10 +5,10 @@ Colour is semantic and named by ANSI role, so it follows any terminal theme. The
 | Token | ANSI | Mock colour | Used for |
 |---|---|---|---|
 | `fg` | default foreground | `#dde5ee` | event text, run-branch names, numbers on the running row |
-| `dim` | faint (SGR 2) or bright black (90) | `#7f8fa0` | time, tokens, `used`, every cell of an ended or pending row, column headers, the divider, parentheticals |
+| `dim` | faint (SGR 2) or bright black (90) | `#7f8fa0` | time, tokens, `used`, every cell of an ended or pending row, column headers, the divider, parentheticals, `quiet 45s` |
 | `bold` | SGR 1 | — | short run id, the running ticket id and its `running`, the run result word, `ACCEPT`/`REJECT`, `#id` on a `started` line |
 | `ok` | green (32) | `#8fd19e` | `✓`, `●` built node, `gates green`, done phases, bar fill, `run built` |
-| `now` | cyan (36) | `#7dcfff` | `▶`, the running ticket id, `running`, the active phase `●`, `active 2s`, the waiting line |
+| `now` | cyan (36) | `#7dcfff` | `▶`, the running ticket id, `running`, the active phase `●`, the spinner, `active 2s ago`, the waiting line |
 | `warn` | yellow (33) | `#e8c56a` | `REJECT`, `fix-up`, `continuation`, `cont 2/2`, `paused`/`pausing`, `⚠ idle`, `paused before this step` |
 | `bad` | red (31) | `#f07a7a` | `✗`, `failed`, `gates red` and the red gate's name, problem lines, `stall`, `run failed`, error lines on stderr |
 | `plan` | blue (34) | `#8ab4f8` | the rail `│` and the ids in the `after` column |
@@ -21,8 +21,8 @@ Rules
 - `NO_COLOR` set, or stdout not a terminal: no SGR codes at all.
 
 Glyphs
-`✓` built/accept · `✗` failed/problem · `▶` running · `·` pending, and the separator · `●` built node and active phase · `○` pending phase · `–` skipped · `█ ░` bar · `│` rail (blocker is the row above) · `─` divider · `⚠` idle past threshold.
-ASCII fallback (no UTF-8 locale): `+ x > . * o - # . \-- - !`.
+`✓` built/accept · `✗` failed/problem · `▶` running · `·` pending, and the separator · `●` built node and active phase · `○` pending phase · `–` skipped · `█ ░` bar · `│` rail (blocker is the row above) · `─` divider · `⚠` idle past threshold · `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏` the spinner of an active agent, one frame about each 125 ms (#147).
+ASCII fallback (no UTF-8 locale): `+ x > . * o - # . \-- - !`; the spinner `| / - \`.
 
 Spacing
 - Columns are padded with spaces to the widest value in the column; 2 cells between columns; numbers right-align.

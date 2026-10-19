@@ -181,6 +181,9 @@ class _Titled:
         self._title.set(self._progress())
         self._sink.poll()
 
+    def wait(self, seconds: float) -> None:
+        self._sink.wait(seconds)
+
     def end(self) -> None:
         self._title.set(self._progress() if self._result is None else f"{self._name}{SEPARATOR}{self._result}")
         self._sink.end()

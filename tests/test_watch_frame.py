@@ -152,7 +152,7 @@ FEED_OF_70 = [
     "16:55  #70  specialist finished · 5m · tokens 19k new, 0 cache · report ok",
     "16:56  #70  gates green (pytest 1m)",
     "16:56  #70  verifier started",
-    "16:58  #70  verifier running · 2m · 0 new · 0 cache · active 2m20s",
+    "16:58  #70  verifier running · 2m · 0 new · 0 cache · quiet 2m20s",
 ]
 
 
@@ -174,7 +174,7 @@ def test_at_120_columns_the_frame_has_the_run_line_the_flat_table_in_plan_order_
         "  3  │   ● 67    ✓ built                               10m00s    39k       0",
         "  4      ● 68    ✓ built                               10m00s    39k       0",
         "  5      ● 69    ✓ built                               10m00s    39k       0",
-        "  6  │   ▶ 70    running     specialist ✓               8m20s    19k       0  active 2m20s",
+        "  6  │   ▶ 70    running     specialist ✓               8m20s    19k       0  quiet 2m20s",
         "     │                       gates ✓",
         "     │                       verifier ●",
         "     │                       fix-up ○",
@@ -202,7 +202,7 @@ def test_at_80_columns_the_frame_drops_the_bar_then_new_and_cache_and_keeps_the_
         "  3  │   ● 67    ✓ built                               10m00s",
         "  4      ● 68    ✓ built                               10m00s",
         "  5      ● 69    ✓ built                               10m00s",
-        "  6  │   ▶ 70    running     specialist ✓               8m20s  active 2m20s",
+        "  6  │   ▶ 70    running     specialist ✓               8m20s  quiet 2m20s",
         "     │                       gates ✓",
         "     │                       verifier ●",
         "     │                       fix-up ○",
@@ -220,7 +220,7 @@ FEED_OF_A_FIXUP = [
     "17:58  #70  verifier finished · 2m · tokens 19k new, 0 cache · report ok",
     "17:58  #70  REJECT · 1 finding",
     "17:58  #70  fix-up round 1 started",
-    "17:59  #70  fix-up running · 1m · 0 new · 0 cache · active 1m20s",
+    "17:59  #70  fix-up running · 1m · 0 new · 0 cache · quiet 1m20s",
 ]
 
 
@@ -248,7 +248,7 @@ def test_frame_1h_at_80_columns_and_24_rows_folds_the_built_rows_in_the_middle_a
         "  9  │   ● 67    ✓ built                               10m00s",
         " 10      ● 68    ✓ built                               10m00s",
         " 11      ● 69    ✓ built                               10m00s",
-        " 12  │   ▶ 70    running     specialist ✓               9m20s  active 1m20s",
+        " 12  │   ▶ 70    running     specialist ✓               9m20s  quiet 1m20s",
         "     │                       gates ✓",
         "     │                       verifier ✓",
         "     │                       fix-up ● 1/2",
@@ -278,7 +278,7 @@ def test_at_120_columns_and_24_rows_the_built_rows_fold_and_every_column_stays(t
         " 10      ● 68    ✓ built                               10m00s    39k       0",
         " 11      ● 69    ✓ built                               10m00s    39k       0",
     ]
-    assert frame[10] == " 12  │   ▶ 70    running     specialist ✓               9m20s    39k       0  active 1m20s"
+    assert frame[10] == " 12  │   ▶ 70    running     specialist ✓               9m20s    39k       0  quiet 1m20s"
     assert frame[14:16] == [" 13  │   · 71    pending", "─" * 120]
     assert frame[16:] == FEED_OF_A_FIXUP[1:]
 
@@ -299,7 +299,7 @@ def test_a_frame_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
     ("extra", "tail", "waiting"),
     [
         pytest.param((), "⚠ idle 6m40s", "17:02  #70  verifier running · 6m · 0 new · 0 cache · ⚠ idle 6m40s", id="past-the-default-of-5-minutes"),
-        pytest.param(("--stall-minutes", "10"), "active 6m40s", "17:02  #70  verifier running · 6m · 0 new · 0 cache · active 6m40s", id="within-the-stall-minutes"),
+        pytest.param(("--stall-minutes", "10"), "quiet 6m40s", "17:02  #70  verifier running · 6m · 0 new · 0 cache · quiet 6m40s", id="within-the-stall-minutes"),
     ],
 )
 def test_an_agent_idle_past_the_stall_time_shows_a_warning_in_the_live_tail_and_in_the_waiting_line(tmp_path, monkeypatch, extra, tail, waiting):
@@ -361,7 +361,7 @@ def test_in_economy_mode_the_feed_of_the_chain_verification_is_one_group_named_b
         "  2      ● b     ✓ built                                6m00s    19k       0",
         "─" * 120,
         "16:16  stack python  verifier started (#a, #b)",
-        "16:18  stack python  verifier running · 1m · 0 new · 0 cache · active 1m40s",
+        "16:18  stack python  verifier running · 1m · 0 new · 0 cache · quiet 1m40s",
     ]
 
 
@@ -425,18 +425,20 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     clock = Clock(monkeypatch, 500)
 
     def next_events(seconds: float) -> None:
-        fixup_accepted_and_b_continues_twice(run)
-        clock.seconds = 1270
+        if clock.seconds != 1270:  # the fix-up is active, so the wait has steps that draw its spinner (#147)
+            fixup_accepted_and_b_continues_twice(run)
+            clock.seconds = 1270
 
     # 1d: the REJECT and the fix-up. Then 1e: the second continuation is a problem, and the watch exits.
     code, out = watch(repo, monkeypatch, "r1", sleep=next_events)
     assert code == 3
-    fixup, problem = frames(out)
+    drawn = frames(out)
+    fixup, problem = drawn[0], drawn[-1]
     assert fixup == [
         "run r1  running  ███░░░░░░░░░░░░░ 20%  0/4 ended  8m20s used  ETA -  39k new · 0 cache",
         "",
         "  #      plan    state       phase          after        used    new   cache",
-        "  1      ▶ a     running     specialist ✓               8m20s    39k       0  active 20s",
+        "  1      ▶ a     running     specialist ✓               8m20s    39k       0  ⠋",
         "     │                       gates ✓",
         "     │                       verifier ✓",
         "     │                       fix-up ● 1/2",
@@ -451,7 +453,7 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
         "16:08  #a   verifier finished · 2m · tokens 19k new, 0 cache · report ok",
         "16:08  #a   REJECT · 1 finding",
         "16:08  #a   fix-up round 1 started",
-        "16:08  #a   fix-up running · 20s · 0 new · 0 cache · active 20s",
+        "16:08  #a   fix-up running · 20s · 0 new · 0 cache · ⠋",
     ]
     assert problem == [
         "run r1  running  ████░░░░░░░░░░░░ 25%  1/4 ended  21m10s used  ETA 25m30s  97k new · 0 cache",
@@ -562,7 +564,7 @@ def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch)
     running, fixup = frame[index], frame[index + 3]
     assert "\x1b[36m▶\x1b[0m" in running and "\x1b[36m\x1b[1m70\x1b[0m\x1b[0m" in running
     assert "\x1b[36m\x1b[1mrunning\x1b[0m\x1b[0m" in running and "\x1b[2mspecialist \x1b[0m\x1b[32m✓\x1b[0m" in running
-    assert "\x1b[36mactive 1m20s\x1b[0m" in running
+    assert "\x1b[2mquiet 1m20s\x1b[0m" in running  # quiet for 1m20s: `dim`, with no spinner (#147)
     assert fixup == "     \x1b[34m│\x1b[0m" + " " * 23 + "\x1b[33mfix-up ● 1/2\x1b[0m"  # the sub-row of the fix-up is `warn`
     feed = frame[frame.index(divider) + 1:]
     assert feed[0] == "\x1b[2m17:50\x1b[0m  \x1b[36m\x1b[1m#70\x1b[0m\x1b[0m  started · python-specialist"
@@ -571,7 +573,7 @@ def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch)
     assert "\x1b[33m\x1b[1mREJECT · 1 finding\x1b[0m\x1b[0m" in feed[5]
     assert "\x1b[33mfix-up round 1 started\x1b[0m" in feed[6]
     # The waiting line is `now`, and its tokens are `dim`.
-    assert feed[7] == "\x1b[36m17:59  #70  fix-up running · 1m · \x1b[0m\x1b[2m0 new · 0 cache\x1b[0m\x1b[36m · active 1m20s\x1b[0m"
+    assert feed[7] == "\x1b[36m17:59  #70  fix-up running · 1m · \x1b[0m\x1b[2m0 new · 0 cache\x1b[0m\x1b[36m · \x1b[0m\x1b[2mquiet 1m20s\x1b[0m"
 
 
 def test_a_problem_line_is_bad_and_an_accept_has_a_check_in_ok_and_a_bold_word(tmp_path, monkeypatch):
@@ -629,7 +631,7 @@ def test_with_a_locale_that_is_not_utf8_the_frame_has_the_ascii_glyphs_in_the_sa
         "  9  |   * 67    + built                               10m00s    39k       0",
         " 10      * 68    + built                               10m00s    39k       0",
         " 11      * 69    + built                               10m00s    39k       0",
-        " 12  |   > 70    running     specialist +               9m20s    39k       0  active 1m20s",
+        " 12  |   > 70    running     specialist +               9m20s    39k       0  quiet 1m20s",
         "     |                       gates +",
         "     |                       verifier +",
         "     |                       fix-up * 1/2",
@@ -659,7 +661,7 @@ def test_the_feed_puts_the_id_on_its_own_track_and_the_waiting_line_gives_the_to
     feed = frames(out)[0][-2:]
     # The cut stream of the specialist has 12k new tokens and 14k cache reads (as in `test_watch_live`).
     assert feed[0] == "07:22  #127  started · python-specialist"
-    assert re.fullmatch(r"07:24  #127  specialist running · 2m · 12k new · 14k cache · active \S+", feed[1]), feed[1]
+    assert re.fullmatch(r"07:24  #127  specialist running · 2m · 12k new · 14k cache · (?:quiet \S+|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])", feed[1]), feed[1]
     assert "\x1b[2m12k new · 14k cache\x1b[0m" in out  # the token part is `dim`
 
 
@@ -673,4 +675,4 @@ def test_the_id_track_of_the_feed_is_at_least_3_cells_wide(tmp_path, monkeypatch
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
     # The harness has not opened the stream of the specialist yet, so it has 0 tokens.
-    assert frame[-2:] == ["16:00  #a   started · python-specialist", "16:00  #a   specialist running · 20s · 0 new · 0 cache · active 20s"]
+    assert frame[-2:] == ["16:00  #a   started · python-specialist", "16:00  #a   specialist running · 20s · 0 new · 0 cache · ⠋"]

@@ -100,8 +100,8 @@ def test_on_a_terminal_watch_prints_the_active_runs_newest_first_and_the_prompt_
     assert picker.splitlines() == [
         "2 runs are active in this repository",
         "#  run        run branch  mode     since  progress         now",
-        f"1  r-economy  run/two     economy  {since(second, twelve_hours_east)}  0/1 ended · 0%   ▶ x specialist · active 2h00m",
-        f"2  r-assure   run/one     assure   {since(first, twelve_hours_east)}  1/2 ended · 50%  ▶ b specialist · active 2h00m",
+        f"1  r-economy  run/two     economy  {since(second, twelve_hours_east)}  0/1 ended · 0%   ▶ x specialist · active 2h00m ago",
+        f"2  r-assure   run/one     assure   {since(first, twelve_hours_east)}  1/2 ended · 50%  ▶ b specialist · active 2h00m ago",
     ]
     # Enter takes 1: the newest run. `watch` follows it to its end.
     assert (code, err) == (0, "")
@@ -274,5 +274,5 @@ def test_a_run_with_a_pause_request_shows_pausing_in_the_line_and_in_the_table(t
 
     assert code == 0
     older = shown.splitlines()[3]
-    assert older.split()[1] == "r-assure" and older.endswith("pausing · ▶ b specialist · active 2h00m")
+    assert older.split()[1] == "r-assure" and older.endswith("pausing · ▶ b specialist · active 2h00m ago")
     assert err.endswith("give a run id: r-economy (run/two, running), r-assure (run/one, pausing)\n")

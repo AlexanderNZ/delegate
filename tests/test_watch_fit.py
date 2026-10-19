@@ -76,7 +76,7 @@ def frame_3b(repo) -> Run:
 
 def in_a_continuation(repo) -> Run:
     """The plan of frame 3b, with ticket 124 in its specialist after its first continuation: its live tail is
-    `cont 1/2 · active 40s`, 21 cells. A continuation at its limit is a problem, which ends the watch."""
+    `cont 1/2 · quiet 40s`, 20 cells (#147). A continuation at its limit is a problem, which ends the watch."""
     run = Run(repo, *PLAN_3B, run_id="20261019T030000Z-a41f", blocked_by=BLOCKED_BY_3B)
     for index, ticket in enumerate(PLAN_3B[:23]):
         built_with_three_gates(run, ticket, index * 600)
@@ -232,7 +232,7 @@ def test_at_80_by_24_the_bar_drops_first_then_new_and_cache_then_used_and_the_ph
     running = next(line for line in frame if "▶ 124" in line)
     assert re.split(r"\s{2,}", running.strip()) == [
         "24", "│", "▶ 124", "running", "specialist ●", *([] if "used" in dropped else ["6m00s"]),
-        *([] if "new" in dropped else ["19k", "0"]), "cont 1/2 · active 40s",
+        *([] if "new" in dropped else ["19k", "0"]), "cont 1/2 · quiet 40s",
     ], running
     assert [line.strip() for line in frame if line.strip().split(" ")[-1] in ("○", "●") and "▶" not in line] == [
         "│                       gates ○", "│                       verifier ○", "│                       fix-up ○",

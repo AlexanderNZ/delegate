@@ -9,6 +9,8 @@ The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and 
   standard error, as an error line, names that stream: it has no SGR code when standard error is not a terminal.
 * `glyphs()` gives the one glyph set. When the locale is not UTF-8, it gives the ASCII set of tokens.md. Each ASCII
   glyph has the width of its Unicode glyph, so the columns stay in the same positions.
+* `spinner()` gives the frames of the spinner of the live view (#147): the Unicode frames, or the ASCII frames when
+  the locale is not UTF-8. Each frame is 1 cell.
 * `columns(rows, right, tracks)` pads each value to the widest value of its column, or to the track of its column
   when the track is wider, with 2 cells between columns. The columns of numbers align right. A painted value is
   measured by the cells that it shows.
@@ -123,6 +125,16 @@ def utf8_locale() -> bool:
 def glyphs() -> Glyphs:
     """The glyph set of the locale: the Unicode set, or the ASCII set when the locale is not UTF-8."""
     return UNICODE if utf8_locale() else ASCII
+
+
+# The frames of the spinner of the live view (tokens.md, #147), in order, and the ASCII frames. Each frame is 1 cell.
+SPINNER_UNICODE: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+SPINNER_ASCII: tuple[str, ...] = ("|", "/", "-", "\\")
+
+
+def spinner() -> tuple[str, ...]:
+    """The frames of the spinner of the locale: the Unicode frames, or the ASCII frames when the locale is not UTF-8."""
+    return SPINNER_UNICODE if utf8_locale() else SPINNER_ASCII
 
 
 def width(text: str) -> int:
