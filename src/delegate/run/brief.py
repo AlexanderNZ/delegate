@@ -662,9 +662,10 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
     verifier does not run them.
     """
     working_copy = (
-        f"Work only in the temporary copy `{copy}`. It is a copy of the branch under verification. "
+        f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
         "The verifier guards deny a write in the git toplevel of your working directory, and that toplevel is this copy. "
-        "To prove a test red, copy this copy to another temp directory, and break the second copy. Never push.\n\n" + _report_rule("copy", report_path)
+        "To prove a test red, copy this copy to another temp directory, and break the second copy. "
+        "Never push.\n\n" + _report_rule("copy", report_path)
     )
     gate_output = (
         "`gate_output` holds the gate output that the brief gives, and the output of each test that you ran, as one string. "

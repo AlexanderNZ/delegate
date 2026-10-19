@@ -102,7 +102,7 @@ So the inputs of a run are files: the ticket, the workflow, the delegation docum
 
 Bassim Eledath is blunt about review: "if the same model instance implements and evaluates its own work, it's biased." His rule for it is "Don't let the same model grade its own exam — separate the implementer from the reviewer".
 
-The verifier answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh session, no report, the gates run again in a [**temporary copy**](../glossary.md#temporary-copy) that it may break, and a [**red proof**](../glossary.md#red-proof) that each new test can fail. Shared knowledge. Separate work.
+The verifier answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh session, no report, the gates run again in a [**temporary copy**](../glossary.md#temporary-copy) of the branch, and a [**red proof**](../glossary.md#red-proof) on a second copy that it may break, to show that each new test can fail. Shared knowledge. Separate work.
 
 ### The coordinator is the part not yet fixed
 

@@ -24,7 +24,7 @@ If the engine runs the gates, why does the verifier run them?
 
 The reason is the [**red proof**](../glossary.md#red-proof). A verifier that only reads a test cannot tell whether the test can fail. A test that passes before and after a change protects nothing. To know that a test is not decoration, the verifier breaks the code the test covers and watches the test go red. That means the verifier must run the test.
 
-The verifier must not break the real worktree. So the engine prepares a [**temporary copy**](../glossary.md#temporary-copy) of the branch and passes its path in the [**brief**](../glossary.md#brief). The verifier may edit the copy, run the gates in it, and throw it away. After the verifier ends, the engine checks that the real worktree has the same HEAD and the same status as before. A difference is an invariant violation, and the [**run**](../glossary.md#run) stops. I do not rely on the verifier's promise to stay read-only. I rely on the check.
+The verifier must not break the real worktree. So the engine prepares a [**temporary copy**](../glossary.md#temporary-copy) of the branch and passes its path in the [**brief**](../glossary.md#brief). The verifier runs the gates in the copy. The [**verifier guard**](../glossary.md#verifier-guard) keeps the copy read-only, so for a red proof the verifier copies it again to another temp directory, breaks the second copy, and throws it away. After the verifier ends, the engine checks that the real worktree has the same HEAD and the same status as before. A difference is an invariant violation, and the [**run**](../glossary.md#run) stops. I do not rely on the verifier's promise to stay read-only. I rely on the check.
 
 ## What this does not give
 

@@ -36,7 +36,7 @@ REASONS: dict[str, list[tuple[str, str]]] = {
         ("the verifier gets the task and the diff, never the report", r"never (gets? )?the (specialist's )?report"),
         ("the claim that the tests pass is not evidence", r"claim"),
         ("the engine runs the gates outside the specialist", r"engine runs (the|your) gates"),
-        ("the verifier runs the gates in a copy it may break", r"temporary copy"),
+        ("the verifier runs the gates in a temporary copy, and breaks only a second copy", r"temporary copy"),
     ],
     "why-each-specialist-has-its-own-verifier.md": [
         ("the verifier holds the same skills as the specialist", r"same skills"),
