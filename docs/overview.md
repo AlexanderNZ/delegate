@@ -166,7 +166,7 @@ Neither dial changes an [**invariant**](glossary.md#invariant), one of the seven
 
 The engine records the run in the journal: one line for each event, appended and never rewritten. Gate results, verdicts, fix-ups and each move of the run branch are all in it.
 
-I made it this way for three reasons. A run that stops, after Ctrl-C, a kill or a pause overnight, can [**resume**](glossary.md#resume) from the journal at the first ticket that is not complete, and it never builds a finished ticket again. `delegate status` and `delegate watch` read the journal, so I can see where a run is, and `watch` exits when the run needs me. And the journal is the record of the evidence: what ran, in which order, with which result. It's also the first place to look when a model falls short, because every REJECT and every fix-up round is in it.
+I made it this way for three reasons. A run that stops, after Ctrl-C or a kill, can [**resume**](glossary.md#resume) from the journal at the first ticket that is not complete, and it never builds a finished ticket again. So can a run that I stop overnight with a [**pause**](glossary.md#pause): it waits for the next step boundary, so it cuts off no agent. The resume can also carry a [**plan change**](glossary.md#plan-change): a new ticket, or a change to a ticket that has not started. The built part of the run stays as it is. `delegate status` and `delegate watch` read the journal, so I can see where a run is, and `watch` exits when the run needs me. And the journal is the record of the evidence: what ran, in which order, with which result. It's also the first place to look when a model falls short, because every REJECT and every fix-up round is in it.
 
 ## What delegate is not
 

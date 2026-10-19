@@ -2,6 +2,10 @@
 
 *[ACCEPT]: ACCEPT is the verdict that a verifier gives when the work does what the ticket asks.
 *[ACCEPTs]: ACCEPT is the verdict that a verifier gives when the work does what the ticket asks.
+*[Active run]: An active run is a run that a live process works on now.
+*[Active runs]: An active run is a run that a live process works on now.
+*[active run]: An active run is a run that a live process works on now.
+*[active runs]: An active run is a run that a live process works on now.
 *[Adapter]: An adapter is a Python object that drives one harness through the headless command line of that harness.
 *[Adapters]: An adapter is a Python object that drives one harness through the headless command line of that harness.
 *[adapter]: An adapter is a Python object that drives one harness through the headless command line of that harness.
@@ -180,6 +184,14 @@
 *[neutrality check]: The neutrality check is a test that fails when a term of the denylist appears in the kit.
 *[neutrality checks]: The neutrality check is a test that fails when a term of the denylist appears in the kit.
 *[Pair]: See Agent pair.
+*[Pause]: A pause (delegate pause) asks an active run to stop at its next step boundary.
+*[Pauses]: A pause (delegate pause) asks an active run to stop at its next step boundary.
+*[pause]: A pause (delegate pause) asks an active run to stop at its next step boundary.
+*[pauses]: A pause (delegate pause) asks an active run to stop at its next step boundary.
+*[Plan change]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
+*[Plan changes]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
+*[plan change]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
+*[plan changes]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
 *[Port]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
 *[Ports]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
 *[port]: A port is an interface that the run context drives: the harness port, the version-control port or the gate port.
@@ -205,7 +217,7 @@
 *[renderer]: The renderer (delegate render) writes the agent files of each harness from a declaration.
 *[renderers]: The renderer (delegate render) writes the agent files of each harness from a declaration.
 *[Report]: The report is the JSON file that the specialist writes at the end of its run: its status, its commits, and its claim about the gates.
-*[Resume]: A resume (delegate run --resume) goes on with a stopped run from its journal, and it never builds a finished step again.
+*[Resume]: A resume (delegate run --resume) goes on with a run that stopped or paused, from its journal.
 *[Reviewer]: See Verifier.
 *[Run]: A run is one execution of delegate run over a workflow, with its own run id and its own journal.
 *[Run branch]: The run branch is the branch that the engine owns, and only accepted work lands on it.
@@ -220,6 +232,10 @@
 *[Sessions]: A session is one conversation of a harness with an agent, with a session id.
 *[session]: A session is one conversation of a harness with an agent, with a session id.
 *[sessions]: A session is one conversation of a harness with an agent, with a session id.
+*[Short run id]: The short run id is the part of a run id after its last -: e9dc of 20261016T030000Z-e9dc.
+*[Short run ids]: The short run id is the part of a run id after its last -: e9dc of 20261016T030000Z-e9dc.
+*[short run id]: The short run id is the part of a run id after its last -: e9dc of 20261016T030000Z-e9dc.
+*[short run ids]: The short run id is the part of a run id after its last -: e9dc of 20261016T030000Z-e9dc.
 *[Skill]: A skill is a directory with a SKILL.md file of instructions that an agent loads.
 *[Skip]: A skip is the state of a ticket whose blocker is not built.
 *[Spec]: A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come.

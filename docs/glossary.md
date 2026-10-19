@@ -6,6 +6,10 @@ This page explains the terms that the docs use. The entries are in alphabetical 
 
 ACCEPT is the verdict that a verifier gives when the work does what the ticket asks. Only an ACCEPT moves the run branch, so work that nobody checked cannot reach it. See [the verifier step](reference/run.md#the-verifier-step).
 
+## Active run
+
+An active run is a run that a live process works on now. Its journal has no `run-end` after its newest `resume`, and the lock of its run branch names a process that exists. `delegate status` and `delegate watch` with no run id choose the run from the active runs. A run that stopped, paused or ended is not active. See [the run with no run id](reference/status-and-watch.md#the-run-with-no-run-id).
+
 ## Adapter
 
 An adapter is a Python object that drives one harness through the headless command line of that harness. The engine is the same for each harness, so a new harness needs only a new adapter. See [the adapter interface](reference/run.md#the-adapter-interface).
@@ -290,6 +294,14 @@ The neutrality check is a test that fails when a term of the denylist appears in
 
 See [Agent pair](#agent-pair).
 
+## Pause
+
+A pause (`delegate pause`) asks an active run to stop at its next step boundary. The engine cuts off no agent and no gate, so no work is lost. The journal gets `paused` and no `run-end`, and a resume goes on with the run. Ctrl-C stops a run at once, also inside a step. See [the pause](reference/run.md#the-pause).
+
+## Plan change
+
+A plan change is a resume with a workflow whose tickets differ from the newest plan of the run. It can add tickets, and change or remove tickets that have not started. The built part of the run is fixed. The journal records the change in the event `plan-change`. A later ticket of the change needs `--reviewed`, and its brief gets the section "Plan change". See [the plan change](reference/run.md#the-plan-change).
+
 ## Port
 
 A port is an interface that the run context drives: the harness port, the version-control port or the gate port. A port names no outside tool, so a test can pass a scripted object in its place.
@@ -340,7 +352,7 @@ See [the specialist report](reference/run.md#the-specialist-report).
 
 ## Resume
 
-A resume (`delegate run --resume`) goes on with a stopped run from its journal, and it never builds a finished step again. An adapter can also resume a harness session for a continuation, which is a different use of the word. See [the resume](reference/run.md#the-resume).
+A resume (`delegate run --resume`) goes on with a run that stopped or paused, from its journal. It never builds a step that ended again, unless `--retry` names it. A resume with a changed workflow is a [plan change](#plan-change). An adapter can also resume a harness session for a continuation, which is a different use of the word. See [the resume](reference/run.md#the-resume).
 
 ## Reviewer
 
@@ -348,7 +360,7 @@ See [Verifier](#verifier).
 
 ## Run
 
-A run is one execution of `delegate run` over a workflow, with its own run id and its own journal. A run that stops goes on with a resume. See [what a run does](reference/run.md#what-a-run-does).
+A run is one execution of `delegate run` over a workflow, with its own run id and its own journal. A run that stops or pauses goes on with a resume. See [what a run does](reference/run.md#what-a-run-does).
 
 ## Run branch
 
@@ -361,6 +373,10 @@ The run lock is a file that stops a second run on one run branch. Two runs canno
 ## Session
 
 A session is one conversation of a harness with an agent, with a session id. The adapter resumes the session for a continuation when the harness supports it, so the agent keeps its context. See [what a session is](explanation/the-concepts-behind-the-words.md#session) and [the continuation](reference/run.md#the-continuation).
+
+## Short run id
+
+The short run id is the part of a run id after its last `-`: `e9dc` of `20261016T030000Z-e9dc`. `delegate status`, `delegate watch`, `delegate pause` and `--resume` take it in place of the full id. A short id that more than one run has is an error, and the message names each run. See [the reference of status and watch](reference/status-and-watch.md) and [the resume](reference/run.md#the-resume).
 
 ## Skill
 
@@ -500,7 +516,7 @@ See [Temporary copy](#temporary-copy).
 
 ## Verifier guard
 
-The verifier guard is the hook in each rendered verifier that permits a fixed list of commands. The list holds read commands, temp writes, and the gates of the repository. It is a contract for the verifier, not a sandbox, so the engine also checks the worktree.
+The verifier guard is the hook in each rendered verifier that permits a fixed list of commands. The list holds read commands, the gates of the repository, and temp writes. A write must not be inside a git tree, or hold one. The verifier reports each refused command in the `unverified` list of its verdict. It does not run that command in another form, such as `bash -c`. It is a contract for the verifier, not a sandbox, so the engine also checks the worktree.
 
 Not: command guard.
 

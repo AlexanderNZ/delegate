@@ -47,7 +47,7 @@ pip install . pytest
 python -m pytest -rs
 ```
 
-These are the commands that CI runs. The suite also tests the docs: a dead link, a stale generated section, or a glossary term that is not linked at its first use fails it. After a change to a flag, an exit code, a guard command, a finding code or the glossary, run [`delegate docs`](docs/reference/docs.md) and commit what it writes.
+CI runs the same suite with `pip install '.[test]'` and `python -m pytest -rs -n auto`: the `test` extra adds `pytest-xdist`, which runs the tests in parallel. The suite also tests the docs: a dead link, a stale generated section, or a glossary term that is not linked at its first use fails it. After a change to a flag, an exit code, a guard command, a finding code or the glossary, run [`delegate docs`](docs/reference/docs.md) and commit what it writes.
 
 To build the docs site, run `uvx "zensical==$(cat .zensical-version)" build --strict`. To preview it, run the same command with `serve` in place of `build`.
 

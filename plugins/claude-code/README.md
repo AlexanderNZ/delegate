@@ -4,7 +4,7 @@ This plugin shows the progress of a `delegate` run of the repository in Claude C
 
 ## What it shows
 
-- **The status line entry.** While a run is active, the entry shows the short run id, the percentage, the ETA, the running ticket and its phase, the time since the last activity, and the two token counts:
+- **The status line entry.** While the run of the snapshot is in the state `running`, the entry shows the short run id, the percentage, the ETA, the running ticket and its phase, the time since the last activity, and the two token counts:
 
   ```text
   delegate 1638 · 84% · ETA 13:12 · ▶ 60 specialist · active 18s · 1.9M new · 53.0M cache
@@ -12,16 +12,17 @@ This plugin shows the progress of a `delegate` run of the repository in Claude C
 
   In the `gates` phase, the time since the last activity is the time since the last output of the gate.
 - **The warning.** When no agent activity occurs for `stall_minutes` minutes, the entry shows `⚠ idle 6m40s` in place of `active 18s`. A band above the prompt then shows the warning in the warning colour of the theme. The status line of Claude Code shows text only, so the colour is on the band.
-- **The toasts.** A toast shows when a ticket ends (`delegate 1638: ticket 60 built`), and when the run ends (`delegate 1638: the run ended, built`). The tickets that ended before the first poll of the session give no toast.
-- **The pane.** The `/delegate` command opens a pane with one row for each ticket, in plan order: the position in the plan, the tree of the blockers, the state, the phase, the time used, and the tokens. The tree comes from the `plan` field of the snapshot: a ticket with a blocker sits under its deepest blocker with `└─`, two cells deeper for each level. With no plan (a run of an earlier version), the tree is flat. The rows of the tickets that ended are dim. The pane changes at each poll.
+- **The toasts.** A toast shows when a ticket ends (`delegate 1638: ticket 60 built`), and when the state of the run changes from `running` to another state (`delegate 1638: the run ended, built`). A pause request also gives this toast, with the state `pausing`. The tickets that ended before the first poll of the session give no toast.
+- **The pane.** The `/delegate` command opens a pane. Its first line gives the run id, the state, the percentage, the ETA and the tokens of the run. Under it, the pane has one row for each ticket, in plan order: the position in the plan, the tree of the blockers, the state, the phase, the time used, and the tokens. The tree comes from the `plan` field of the snapshot: a ticket with a blocker sits under its deepest blocker with `└─`, two cells deeper for each level. With no plan (a run of an earlier version), the tree is flat. The rows of the tickets that ended are dim. The pane changes at each poll.
 
   ```text
+  run 20261017T185517Z-1638 · running · 84% · ETA 13:12 · 1.9M new · 53.0M cache
   1 ticket 90      built    -          57m22s  259k new · 10.9M cache
   2 └─ ticket 92   built    -          9m42s   112k new · 1.9M cache
   3   └─ ticket 60 running  specialist 3m29s   76k new · 1.0M cache
   ```
 
-With no active run, the plugin shows nothing. When the command fails, or its output is not JSON with a `percent` field (an old version of `delegate`), the plugin shows nothing and gives no error.
+When the snapshot has no run in the state `running`, the plugin shows no status line entry, and `/delegate` opens no pane. This is so for a run that ended, and also for a run that is `pausing` or `paused`. When more than one run is active, `delegate status --json` exits 2, and the plugin shows nothing. When the command fails, or its output is not JSON with a `percent` field (an old version of `delegate`), the plugin shows nothing and gives no error.
 
 ## Options
 

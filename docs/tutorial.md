@@ -33,7 +33,7 @@ Check that the install worked:
 delegate --help
 ```
 
-The output lists the subcommands `render`, `validate`, `bootstrap`, `brief`, `run`, `status`, `watch` and `docs`.
+The output lists the subcommands `render`, `validate`, `bootstrap`, `brief`, `run`, [**`pause`**](glossary.md#pause), `status`, `watch` and `docs`.
 
 ## 2. Get the sample files
 
@@ -124,7 +124,20 @@ The engine now works on its own. It does these things in order:
 4. It starts the verifier agent in a [**temporary copy**](glossary.md#temporary-copy) of the branch. The verifier gets the ticket text and the diff. It runs the gate again and writes its verdict.
 5. If the verdict is [**ACCEPT**](glossary.md#accept), it moves the run branch to the commit that the verifier saw.
 
-The command prints a line `run <run id>` and a line `journal <path>`. It exits 0 when the ticket is accepted.
+When the run starts, the command prints three lines. When the run ends, it prints a summary line. The output looks like this, without its colours. Your run id, path, times and token counts are different.
+
+```text
+run 20261009T031500Z-a1b2
+journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
+follow it with delegate watch · pause it with delegate pause a1b2
+run built · 4m03s · 1 built · 0 failed · 0 skipped · 39k new · 0 cache
+```
+
+`a1b2` is the [**short run id**](glossary.md#short-run-id), the part of the run id after the last `-`. `delegate status`, `delegate watch`, `delegate pause` and `delegate run --resume` take it in place of the full run id. The command exits 0 when the ticket is accepted.
+
+While the run goes on, you can follow it from a second terminal with `delegate watch`. With no run id, it follows the [**active run**](glossary.md#active-run). On a terminal, it shows a live view of the tickets and of the events of the ticket that runs.
+
+To stop the run at its next step boundary, use `delegate pause a1b2`. The run then stops, and `delegate run` exits 3. Ctrl-C stops the run at once, and the command exits 130. After either one, `delegate run --resume a1b2` goes on with the run.
 
 If the verdict is [**REJECT**](glossary.md#reject), the engine starts a [**fix-up**](glossary.md#fix-up) round. The specialist adds a new commit, and a new verifier checks it. The limit is two rounds. The reference page for `delegate run` has the details.
 
@@ -136,15 +149,15 @@ Show the state of the run:
 delegate status
 ```
 
-The output looks like this. Your run id and your times are different.
+The output looks like this, without its colours. Your run id, path, times and token counts are different.
 
 ```text
 run 20261009T031500Z-a1b2: built (mode assure, adapter claude-code)
-progress: 100%, 1 of 1 ended, 4m03s used, tokens 41k new, 655k cache
+progress: 100%, 1 of 1 ended, 4m03s used, tokens 39k new, 0 cache
 journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
 
   #  plan          state       phase                                           verdict  branch              used    new   cache  last event
-  1  ● 1           ✓ built                                                     ACCEPT   run/sample-1       4m01s    41k    655k  2026-10-09T03:19:02.512384+00:00
+  1  ● 1           ✓ built                                                     ACCEPT   run/sample-1       4m01s    39k       0  2026-10-09T03:19:02.512384+00:00
 ```
 
 The state `built` and the verdict `ACCEPT` mean that the ticket is done and checked.
@@ -168,10 +181,12 @@ The file holds these things:
 The journal records each event of the run, in order. Print it:
 
 ```bash
-delegate watch
+delegate watch --from 0 --raw
 ```
 
-The command prints one line for each event. The line names the event, for example `step-start`, `gate-result`, `verdict`, `run-branch-advance` and `run-end`. The command ends when it reaches the end of the run. It exits 0 because the run succeeded.
+The run ended, so no run is active. `--from 0` replays the journal of the newest run from its first event. `--raw` prints one line for each event, in place of the live view. The line names the event, for example `step-start`, `gate-result`, `verdict`, `run-branch-advance` and `run-end`. After `run-end`, the command prints the line `position <seq>` and ends. It exits 0 because the run succeeded.
+
+With no option, `delegate watch` prints only one line here: the result of the newest run.
 
 ## 10. Take the work
 
@@ -196,5 +211,5 @@ You ran the whole loop once:
 ## Next steps
 
 - [The workflow file](reference/workflow.md) shows how to write a workflow with many tickets.
-- [The `delegate run` reference](reference/run.md) explains the fix-up round, the [**resume**](glossary.md#resume) of a stopped run, and the guards.
+- [The `delegate run` reference](reference/run.md) explains the fix-up round, the pause, the [**resume**](glossary.md#resume) of a stopped run, and the guards. It also explains the [**plan change**](glossary.md#plan-change), which adds a ticket to a run.
 - [The reference for `delegate status` and `delegate watch`](reference/status-and-watch.md) lists the exit codes that a [**coordinator**](glossary.md#coordinator) can act on.
