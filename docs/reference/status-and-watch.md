@@ -52,6 +52,30 @@ journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
   4      . d     pending
 ```
 
+On a terminal with a UTF-8 locale, the table has the glyphs and the colours of the live view, as in the figure below. The text under the figure is the same output with no colour.
+
+![The output of delegate status: the header lines of a run of 8 tickets and its ticket table, with the verdict, the branch and the last event of each ticket. Ticket 103 failed, 104 was skipped, and 106 is in its verifier. The text below gives the same frame.](../assets/terminal/status-table-light.svg#gh-light-mode-only)
+![The output of delegate status: the header lines of a run of 8 tickets and its ticket table, with the verdict, the branch and the last event of each ticket. Ticket 103 failed, 104 was skipped, and 106 is in its verifier. The text below gives the same frame.](../assets/terminal/status-table-dark.svg#gh-dark-mode-only)
+
+```text
+run 20260302T090000Z-58c2: running (mode assure, adapter claude-code)
+progress: 72%, 5 of 8 ended, 52m50s used, ETA 22m42s, tokens 241k new, 3.0M cache
+journal ~/project/.git/delegate/runs/20260302T090000Z-58c2/journal.jsonl
+
+  #      plan    state     phase          after     verdict  branch              used    new   cache  last event
+  1      ● 101   ✓ built                            ACCEPT   run/demo-101      10m00s    38k    401k  2026-03-02T09:10:00+00:00
+  2  │   ● 102   ✓ built                            ACCEPT   run/demo-102       9m00s    53k    666k  2026-03-02T09:19:00+00:00
+  3  │   ✗ 103   failed                                      run/demo-103      14m00s    54k    715k  2026-03-02T09:33:00+00:00  gates red: pytest -q; the continuation limit of 1 is reached
+  4  │   – 104   skipped                                                                              2026-03-02T09:33:00+00:00  blocked by 103, which failed
+  5      ● 105   ✓ built                  102       ACCEPT   run/demo-105      10m10s    46k    522k  2026-03-02T09:43:10+00:00
+  6  │   ▶ 106   running   specialist ✓                      run/demo-106       9m40s    50k    688k  2026-03-02T09:49:40+00:00
+     │                     gates ✓
+     │                     verifier ●
+     │                     fix-up ○
+  7  │   · 107   pending
+  8      · 108   pending                  104 107
+```
+
 The progress line comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta). It gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
 
 The columns of the table:
@@ -269,6 +293,20 @@ When `watch` gets no run id, more than one run is active, and standard input and
 watch which? [1]
 ```
 
+On a terminal with a UTF-8 locale, the picker has the glyphs and the colours of the figure below, here with three active runs. The text under the figure is the same output with no colour.
+
+![The run picker of delegate watch: three active runs, the newest first, each with its run branch, its mode, its start time, its progress and what runs now, and the prompt. The text below gives the same frame.](../assets/terminal/watch-picker-light.svg#gh-light-mode-only)
+![The run picker of delegate watch: three active runs, the newest first, each with its run branch, its mode, its start time, its progress and what runs now, and the prompt. The text below gives the same frame.](../assets/terminal/watch-picker-dark.svg#gh-dark-mode-only)
+
+```text
+3 runs are active in this repository
+#  run                    run branch     mode     since  progress         now
+1  20260302T090500Z-c3e8  run/cli-flags  assure   09:05  0/3 ended · 0%   ▶ 401 specialist · active 1m00s
+2  20260302T084000Z-9a0b  run/docs-pass  economy  08:40  2/5 ended · 33%  paused · no ticket running · active 12m00s
+3  20260302T081500Z-2d4f  run/parser     assure   08:15  4/9 ended · 53%  ▶ 205 verifier · active 3m10s
+watch which? [1]
+```
+
 Type the number of a run, and push Enter. Enter alone takes 1, the newest run. `watch` then follows that run, as it follows a run that you name. An answer that is not the number of a row gets one line on stderr, and the prompt again. At the end of the input (Ctrl-D), `watch` follows no run, and exits 2. Ctrl-C at the prompt prints `delegate: interrupted` on stderr, and `watch` exits 130. See [Ctrl-C](#ctrl-c).
 
 `status` with no run id prints the same lines, with no prompt, and exits 0. It does not ask, so a script can read it. The columns of the table:
@@ -355,6 +393,34 @@ run abcd  running  #############... 82%  5/7 ended  58m20s used  ETA 11m40s  213
 16:58  #70  verifier running · 2m · 0 new · 0 cache · active 2m20s
 ```
 
+The figure below is a frame on a terminal with a UTF-8 locale, at 120 columns. The text under the figure is the same frame with no colour.
+
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](../assets/terminal/watch-live-light.svg#gh-light-mode-only)
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](../assets/terminal/watch-live-dark.svg#gh-dark-mode-only)
+
+```text
+run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 ended  24m30s used  ETA 1h27m  111k new · 1.4M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+     │                       gates ○
+     │                       verifier ○
+     │                       fix-up ○
+  4  │   · 104   pending
+  5  │   · 105   pending
+  6      · 106   pending                    104
+  7      · 107   pending                    105 106
+  8  │   · 108   pending
+  9  │   · 109   pending
+ 10  │   · 110   pending
+ 11  │   · 111   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:20  #103  started · python-specialist
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+```
+
 The run line and the table come from the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
 
 - The run line gives the [**short run id**](../glossary.md#short-run-id), the state, a bar of 16 cells, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `running · verifier`.
@@ -381,6 +447,60 @@ The feed holds only the lines of the ticket that runs now. The `step-start` of a
 The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it, as `16:58  #70  verifier running · 2m · 43k new · 1.1M cache · active 2m20s`. The line gives the role, the time from its `agent-start`, the two token counts of its stream in faint text, and the time since its last activity. A stream that the harness has not opened yet has 0 tokens. For [a run with no stream reader](#a-run-with-no-stream-reader), and for a stream that cannot be read, the line has no token counts. The last frame has no such line.
 
 A [problem](#the-problem-events) and a [stall](#the-stall) are lines that start with `✗`. For example, `16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json`, or `17:40  ✗ stall · no change for 30m`. The line of the time limit is `<time>  time limit · <N>m used · the run goes on`.
+
+The figure below is a frame after a REJECT. The verifier of ticket 103 gave 2 findings, and the fix-up round 1 of 2 runs. The phase column gives `fix-up ● 1/2`, and the feed gives the verdict and the start of the round. The text under the figure is the same frame with no colour.
+
+![A frame of delegate watch after a REJECT: ticket 103 shows the fix-up round 1 of 2 in its phases, and the feed gives the verdict with 2 findings and the start of the fix-up. The text below gives the same frame.](../assets/terminal/watch-fixup-light.svg#gh-light-mode-only)
+![A frame of delegate watch after a REJECT: ticket 103 shows the fix-up round 1 of 2 in its phases, and the feed gives the verdict with 2 findings and the start of the fix-up. The text below gives the same frame.](../assets/terminal/watch-fixup-dark.svg#gh-dark-mode-only)
+
+```text
+run 4b9d  running  ███████░░░░░░░░░ 46%  2/6 ended  31m45s used  ETA 27m15s  156k new · 1.9M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                               10m00s    38k    401k
+  2  │   ● 102   ✓ built                                9m40s    53k    666k
+  3  │   ▶ 103   running     specialist ✓              12m05s    65k    792k  active 25s
+     │                       gates ✓
+     │                       verifier ✓
+     │                       fix-up ● 1/2
+  4  │   · 104   pending
+  5  │   · 105   pending
+  6  │   · 106   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:19  #103  started · python-specialist
+09:24  #103  specialist finished · 5m · tokens 38k new, 562k cache · report ok
+09:25  #103  gates green (pytest 30s, ruff 15s)
+09:25  #103  verifier started
+09:28  #103  verifier finished · 3m · tokens 15k new, 104k cache · report ok
+09:28  #103  REJECT · 2 findings
+09:28  #103  fix-up round 1 started
+09:31  #103  fix-up running · 3m · 12k new · 126k cache · active 25s
+```
+
+The figure below is the frame of a paused run. The pause stopped the run before the step of ticket 104. Its row gives `paused before this step`, and the last line of the feed gives the command that goes on with the run. The text under the figure is the same frame with no colour.
+
+![A frame of delegate watch for a paused run of 6 tickets: tickets 101 to 103 are built, the row of 104 says that the run paused before this step, and the feed gives the command that goes on with the run. The text below gives the same frame.](../assets/terminal/watch-paused-light.svg#gh-light-mode-only)
+![A frame of delegate watch for a paused run of 6 tickets: tickets 101 to 103 are built, the row of 104 says that the run paused before this step, and the feed gives the command that goes on with the run. The text below gives the same frame.](../assets/terminal/watch-paused-dark.svg#gh-dark-mode-only)
+
+```text
+run e05a  paused  ████████░░░░░░░░ 50%  3/6 ended  30m30s used  136k new · 1.6M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ● 103   ✓ built                               10m10s    46k    522k
+  4  │   · 104   pending                                                      paused before this step
+  5  │   · 105   pending
+  6  │   · 106   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:20  #103  started · python-specialist
+09:26  #103  specialist finished · 6m · tokens 31k new, 418k cache · report ok
+09:27  #103  gates green (pytest 20s, ruff 20s)
+09:28  #103  verifier started
+09:30  #103  verifier finished · 2m · tokens 15k new, 104k cache · report ok
+09:30  #103  ✓ ACCEPT · built
+09:30  paused · before ticket 104 · go on with delegate run --resume e05a
+```
 
 Each part of the frame has the colour of its role, from the 16 ANSI colours of the theme of the terminal: green for a result that is good (`✓`, `●` built, `gates green`, the done phases, the bar), cyan for the ticket that runs now, yellow for `REJECT`, a fix-up, a continuation, a pause and `⚠ idle`, red for a failure, a problem and `gates red`, and blue for the rail and the ids in `after`. Faint text (SGR 2) is for the facts to read second: the times, the tokens, the header, the divider, and the rows that ended or are pending. Bold marks the short run id, the ticket that runs now, the verdict word, and the result of the run. The view sets no background colour. Each state also has a glyph or a word, so the view reads the same with no colour. When `NO_COLOR` is set and not empty, the frame has no SGR code. When the locale is not UTF-8 (`LC_ALL`, `LC_CTYPE`, `LANG`), the run line, the table, the divider and the glyph of a problem line use the ASCII glyphs `+ x > . * o - # . | - !`, in the same columns. The ids in `after` stay as they are. The lines of the feed and the title keep the separator `·`.
 
@@ -414,6 +534,36 @@ run a41f  running  #########....... 59%  23/40 ended  3h56m used  ETA 2h44m  908
 19:50  #124  started · python-specialist
 19:55  #124  specialist finished · 5m · tokens 19k new, 0 cache · report ok
 19:55  #124  gates green (lint 20s)
+```
+
+The figure below is a plan of 40 tickets with two branches, on a terminal of 120 columns and 24 rows with a UTF-8 locale. The text under the figure is the same frame with no colour.
+
+![A frame of delegate watch for a plan of 40 tickets at 120 columns and 24 rows: the built rows 4 to 20 fold into one row with their totals, ticket 124 runs its second gate of 3, the pending rows nearest to it stay, and rows 28 to 40 fold into one row. The text below gives the same frame.](../assets/terminal/watch-fit-light.svg#gh-light-mode-only)
+![A frame of delegate watch for a plan of 40 tickets at 120 columns and 24 rows: the built rows 4 to 20 fold into one row with their totals, ticket 124 runs its second gate of 3, the pending rows nearest to it stay, and rows 28 to 40 fold into one row. The text below gives the same frame.](../assets/terminal/watch-fit-dark.svg#gh-dark-mode-only)
+
+```text
+run 6e2b  running  █████████░░░░░░░ 59%  23/40 ended  4h06m used  ETA 2h52m  1.1M new · 12.5M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ● 103   ✓ built                               10m10s    46k    522k
+     │   ✓ 17 built                         104–120     2h59m   772k    9.0M  rows 4–20 folded
+ 21  │   ● 121   ✓ built                                9m20s    46k    522k
+ 22  │   ● 122   ✓ built                               11m00s    38k    401k
+ 23  │   ● 123   ✓ built                               10m10s    53k    666k
+ 24  │   ▶ 124   running     specialist ✓               5m56s    23k    297k
+     │                       gates ● 2/3                                      gate mypy · log 36s ago
+     │                       verifier ○
+     │                       fix-up ○
+ 25  │   · 125   pending
+ 26      · 131   pending                    124
+ 27  │   · 132   pending
+         · 13 pending                       126–144   rows 28–40 folded
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+13:00  #124  started · python-specialist
+13:05  #124  specialist finished · 5m · tokens 23k new, 297k cache · report ok
+13:06  #124  gates green (ruff 20s)
 ```
 
 Then the feed gets the rows that the table does not use, and keeps its newest lines. When the terminal does not give its size, no row folds, and the frame keeps each line of the feed. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.

@@ -4,6 +4,34 @@ Models are different. That sounds like a silly thing to say. It stops being sill
 
 `delegate` is the machine I built so that the model I pick changes one thing only: how good the code is. This page is the kit at a glance: the problem, the idea, where the kit sits on the [**ladder**](glossary.md#ladder) that it climbs, the team, and how one [**ticket**](glossary.md#ticket) moves from the [**brief**](glossary.md#brief) to the merge. It is not a tutorial and it is not a reference. It links both at the end. Each term is in bold where it first appears, and it links its entry in the [glossary](glossary.md). After that, a dotted underline marks the term: hover for its definition, or follow it to its entry.
 
+This is `delegate watch` while it follows the work on 11 tickets. The text under the figure is the same frame with no colour.
+
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](assets/terminal/watch-live-light.svg#gh-light-mode-only)
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](assets/terminal/watch-live-dark.svg#gh-dark-mode-only)
+
+```text
+run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 ended  24m30s used  ETA 1h27m  111k new · 1.4M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+     │                       gates ○
+     │                       verifier ○
+     │                       fix-up ○
+  4  │   · 104   pending
+  5  │   · 105   pending
+  6      · 106   pending                    104
+  7      · 107   pending                    105 106
+  8  │   · 108   pending
+  9  │   · 109   pending
+ 10  │   · 110   pending
+ 11  │   · 111   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:20  #103  started · python-specialist
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+```
+
 ## The problem
 
 I've worked with Haiku, Sonnet, Opus, Fable, Qwen and OpenAI's models, and each one frustrated me in its own way. I prefer Claude models, because they think and work most like I do. OpenAI's models approached problems differently from how I wanted them to, and they valued different things from what I value. So did the open-weight models.

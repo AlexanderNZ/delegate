@@ -258,20 +258,27 @@ def test_the_site_directory_is_ignored_by_git():
 # Box-drawing characters and drawn arrows. A code block that holds them is a diagram drawn as text.
 DRAWING = re.compile(r"[─-╿←-⇿▲-◄⟵-⟿]")
 
+# The image of a terminal figure that `delegate docs` writes (#138).
+TERMINAL_FIGURE = re.compile(r"!\[[^\]]*\]\([^)\s]*assets/terminal/[^)\s]+\)")
+
 
 def drawn_diagrams(page: Path, root: Path = ROOT) -> list[str]:
     """The code blocks of a page that hold a drawing, as `file:line`.
 
     A diagram in the docs is a Mermaid diagram or an SVG with a text alternative. A drawing in a code block renders
     as code on the site: it scrolls sideways, and the theme cannot style it.
+
+    The block directly under a terminal figure is not a drawing: it is the text alternative of the figure, the plain
+    text of a frame of `delegate watch` or `delegate status`. `tests/test_terminal_figures_on_pages.py` checks that it
+    is the text that the code prints, so no hand-drawn diagram can stand there.
     """
     found: list[str] = []
-    closing, start, drawn = "", 0, False
+    closing, start, drawn, alternative, before = "", 0, False, False, ""
     for number, line in enumerate(page.read_text().splitlines(), start=1):
         if closing:
             text = line.strip()
             if text and set(text) == {closing[0]} and len(text) >= len(closing):
-                if drawn:
+                if drawn and not alternative:
                     found.append(f"{page.relative_to(root)}:{start}")
                 closing, drawn = "", False
             elif DRAWING.search(line):
@@ -279,7 +286,9 @@ def drawn_diagrams(page: Path, root: Path = ROOT) -> list[str]:
             continue
         opened = OPENING_FENCE.match(line)
         if opened:
-            closing, start = opened.group(1), number
+            closing, start, alternative = opened.group(1), number, bool(TERMINAL_FIGURE.fullmatch(before.strip()))
+        if line.strip():
+            before = line
     return found
 
 
@@ -298,6 +307,22 @@ def test_the_drawing_check_flags_box_drawing_and_arrows_in_a_block_and_accepts_m
     )
 
     assert drawn_diagrams(page, root=tmp_path) == ["page.md:3"]
+
+
+def test_the_drawing_check_accepts_the_text_alternative_directly_under_a_terminal_figure_and_nothing_else(tmp_path):
+    page = tmp_path / "page.md"
+    page.write_text(
+        "![A frame.](../assets/terminal/watch-live-light.svg#gh-light-mode-only)\n"
+        "![A frame.](../assets/terminal/watch-live-dark.svg#gh-dark-mode-only)\n\n"
+        "```text\n  2  │   ● 102\n────\n```\n\n"
+        "![A frame.](../assets/terminal/watch-live-dark.svg#gh-dark-mode-only)\n\n"
+        "A sentence stands between.\n\n"
+        "```text\nyou ──▶ engine\n```\n\n"
+        "![A ladder.](../assets/ladder-light.svg)\n\n"
+        "```text\nyou ──▶ engine\n```\n"
+    )
+
+    assert drawn_diagrams(page, root=tmp_path) == ["page.md:13", "page.md:19"]
 
 
 @outside_the_package

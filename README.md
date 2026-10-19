@@ -7,6 +7,34 @@
 
 It builds on [the levels of agentic engineering](https://www.bassimeledath.com/blog/levels-of-agentic-engineering) by Bassim Eledath and on the planning skills of [mattpocock/skills](https://github.com/mattpocock/skills) by Matt Pocock: `grilling`, `wayfinder`, `to-spec` and `to-tickets`. It would not exist without them. [Prior art](docs/explanation/prior-art.md) says what each one gave.
 
+This is `delegate watch` while it follows a run of 11 tickets. The text under the figure is the same frame with no colour.
+
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](docs/assets/terminal/watch-live-light.svg#gh-light-mode-only)
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](docs/assets/terminal/watch-live-dark.svg#gh-dark-mode-only)
+
+```text
+run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 ended  24m30s used  ETA 1h27m  111k new · 1.4M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+     │                       gates ○
+     │                       verifier ○
+     │                       fix-up ○
+  4  │   · 104   pending
+  5  │   · 105   pending
+  6      · 106   pending                    104
+  7      · 107   pending                    105 106
+  8  │   · 108   pending
+  9  │   · 109   pending
+ 10  │   · 110   pending
+ 11  │   · 111   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:20  #103  started · python-specialist
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+```
+
 ## Docs
 
 The docs are at **[alexandernz.github.io/delegate](https://alexandernz.github.io/delegate/)**, built from [`docs/`](docs/overview.md). Start with [the overview](docs/overview.md): the problem, the idea, the team and the loop from a ticket to a merge. Then follow [the tutorial](docs/tutorial.md) from install to one verified ticket. Each term is in [the glossary](docs/glossary.md).

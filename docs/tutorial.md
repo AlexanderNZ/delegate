@@ -137,6 +137,34 @@ run built · 4m03s · 1 built · 0 failed · 0 skipped · 39k new · 0 cache
 
 While the run goes on, you can follow it from a second terminal with `delegate watch`. With no run id, it follows the [**active run**](glossary.md#active-run). On a terminal, it shows a live view of the tickets and of the events of the ticket that runs.
 
+The figure shows the live view of a larger run, with 11 tickets. The text under it is the same view with no colour.
+
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](assets/terminal/watch-live-light.svg#gh-light-mode-only)
+![The live view of delegate watch at 120 columns. It shows the run line, a table of 11 tickets and the feed. Ticket 103 is in its specialist, with its other phases under it. The text below gives the same frame.](assets/terminal/watch-live-dark.svg#gh-dark-mode-only)
+
+```text
+run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 ended  24m30s used  ETA 1h27m  111k new · 1.4M cache
+
+  #      plan    state       phase          after        used    new   cache
+  1      ● 101   ✓ built                                9m20s    38k    401k
+  2  │   ● 102   ✓ built                               11m00s    53k    666k
+  3  │   ▶ 103   running     specialist ●               4m10s    20k    315k  active 38s
+     │                       gates ○
+     │                       verifier ○
+     │                       fix-up ○
+  4  │   · 104   pending
+  5  │   · 105   pending
+  6      · 106   pending                    104
+  7      · 107   pending                    105 106
+  8  │   · 108   pending
+  9  │   · 109   pending
+ 10  │   · 110   pending
+ 11  │   · 111   pending
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+09:20  #103  started · python-specialist
+09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s
+```
+
 To stop the run at its next step boundary, use `delegate pause a1b2`. The run then stops, and `delegate run` exits 3. Ctrl-C stops the run at once, and the command exits 130. After either one, `delegate run --resume a1b2` goes on with the run.
 
 If the verdict is [**REJECT**](glossary.md#reject), the engine starts a [**fix-up**](glossary.md#fix-up) round. The specialist adds a new commit, and a new verifier checks it. The limit is two rounds. The reference page for `delegate run` has the details.
