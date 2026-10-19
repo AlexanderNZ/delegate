@@ -32,6 +32,10 @@ DELEGATION_DOC = ROOT / "docs" / "agents" / "delegation.md"
 CLAUDE_VERIFIER = ROOT / ".claude" / "agents" / "delegate-verifier.md"
 OPENCODE_VERIFIER = ROOT / ".opencode" / "agents" / "delegate-verifier.md"
 
+# The docs and the committed agent files are outside the package source, as in a Nix build.
+if not DELEGATION_DOC.is_file():
+    pytest.skip("the docs are outside the package source, as in a Nix build", allow_module_level=True)
+
 SHELLS = (
     "bash",
     "/bin/sh",
