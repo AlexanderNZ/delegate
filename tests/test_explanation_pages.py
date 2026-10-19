@@ -303,6 +303,7 @@ LIMIT_PHRASES = [
     "`..`",
     "does not examine it",
     "write guard reads",
+    "tree under review",
     "no `$tmpdir` prefix",
     "no `cp` rule",
     "`getonlycommands`",
