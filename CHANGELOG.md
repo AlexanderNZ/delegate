@@ -23,7 +23,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 - When the verifier guard denies a file descriptor as the last word inside quotes, such as `bash -c "ls 2>&1"`, its message now tells the agent to put a space before the closing quote: under bash and `/bin/sh`, `bash -c "ls 2>&1 "` is permitted. The guard still denies the first form, because a quote after the descriptor can make the target a file name: `ls >&1")"` writes the file `1)` (#104).
 - The verifier guard permits a redirection to `/dev/null`, such as `ls src 2>/dev/null`, and under bash and `/bin/sh` also `> /dev/null` with a space. Before, it denied the target as a write outside a temp directory. Only the exact path counts: `/dev/nullx`, a path under `/dev/null` and another device stay denied, and a write command such as `cp` or `tee` keeps the temp rule (#105).
 - The verifier guard checks each redirection target of a word, not only the last one, also in the word after a sign that stands alone. Before, `ls >x>/tmp/y` passed in bash, `/bin/sh` and zsh, `ls > /tmp/y>x` passed in bash and `/bin/sh`, and `ls >x 2>/tmp/y` passed in zsh. Each one wrote the file `x` outside a temp directory (#105).
-- While `delegate watch` follows or replays a journal, an event of a ticket that a later `retry` of that ticket follows is no problem, and a `run-end` that another event follows does not end the watch (#99).
+- While `delegate watch` follows or replays a journal, an event of a ticket that a later `retry` of that ticket follows is no problem, a `run-end` that another event follows does not end the watch, and `--until verdict` does not exit at a verdict of such a ticket (#99).
 
 ## [1.4.0] - 2026-10-18
 

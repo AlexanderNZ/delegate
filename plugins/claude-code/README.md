@@ -31,7 +31,7 @@ Set the options in `/config`, or in `pluginConfigs.delegate.options` of the sett
 The root of this repository is a plugin marketplace: `.claude-plugin/marketplace.json` lists this plugin as `delegate`. In the root of a clone, run:
 
 ```bash
-claude plugin marketplace add .
+claude plugin marketplace add ./
 claude plugin install delegate@delegate
 ```
 

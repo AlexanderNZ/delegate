@@ -329,7 +329,7 @@ An agent that ends `finished` with an exit status other than 0 is not a problem 
 
 ### The verdict
 
-With `--until verdict`, `watch` exits at the first `verdict` event. The raw line is `watch: verdict: ticket <id> round <n>: <verdict>: <findings>`. For the verdict of a chain in `economy` mode, the raw line is `watch: verdict: stack <name> (tickets <ids>) round <n>: <verdict>: <findings>`. The [**findings**](../glossary.md#finding) are separated by `; `. Without the option, `watch` goes past each verdict.
+With `--until verdict`, `watch` exits at the first `verdict` event that is not history: a verdict before the resume of a run that ended, or a verdict of a ticket that a later `retry` of that ticket follows, does not end the watch. The raw line is `watch: verdict: ticket <id> round <n>: <verdict>: <findings>`. For the verdict of a chain in `economy` mode, the raw line is `watch: verdict: stack <name> (tickets <ids>) round <n>: <verdict>: <findings>`. The [**findings**](../glossary.md#finding) are separated by `; `. Without the option, `watch` goes past each verdict.
 
 ### The stall
 

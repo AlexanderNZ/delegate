@@ -169,3 +169,25 @@ def test_watch_of_a_resumed_run_that_ended_again_exits_with_the_result_of_its_la
 
     assert code == 0
     assert "result=built" in [line for line in out.splitlines() if line.split()[2:3] == ["run-end"]][-1]
+
+
+def test_watch_of_a_resumed_run_does_not_exit_at_the_old_problem_of_a_ticket_that_the_resume_does_not_retry(tmp_path, capsys):
+    # The history before the first `resume` after the `run-end` holds the problems of each ticket, also of a ticket that
+    # no `retry` follows: ticket b failed before the run ended, and the resumed run retries only a.
+    repo = bare_repo(tmp_path)
+    path = write_journal(
+        repo, "r1", run_start("r1", "a", "b"), step_start("a"), step_end("a", "failed", "boomA"), step_start("b"),
+        step_end("b", "failed", "boomB"), run_end("failed", [], ["a", "b"]), resume("a", "b"), retry("a"), agent_start("a"),
+    )
+
+    def append_later():
+        time.sleep(0.2)
+        append_events(path, step_end("a"), run_end("failed", ["a"], ["b"]))
+
+    writer = threading.Thread(target=append_later)
+    writer.start()
+    code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
+    writer.join()
+
+    assert code == 1
+    assert "watch: problem" not in out
