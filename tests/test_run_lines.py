@@ -16,16 +16,20 @@ system boundaries are faked: the terminal (a standard output whose `isatty` is t
 
 from __future__ import annotations
 
+import io
 import re
 import sys
+from collections.abc import Callable
+from contextlib import redirect_stdout
 
 import pytest
 
 from delegate import adapters
+from delegate.cli import delegate
 
 from .support import ScriptedAdapter, Terminal, make_repo, read_journal, resume_main, run_main, ticket_of
 from .test_run_multi import HEAD, ticket
-from .test_run_pause import RUN_PAUSED, pause_during_the_specialist_of
+from .test_run_pause import RUN_PAUSED
 
 # An SGR sequence: the paint of a role.
 SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -60,6 +64,36 @@ def run_id_of(out: str) -> str:
 
 def short(run_id: str) -> str:
     return run_id.rsplit("-", 1)[-1]
+
+
+def pause_during_the_specialist_of(repo, scripted, ticket_id: str, read_out: Callable[[], str]) -> list[str]:
+    """Ask for a pause from a second command while the specialist of `ticket_id` works, as from a second shell.
+
+    The list that this returns gets the stdout of the run before the pause: `read_out` reads it. The output of the
+    second command goes to a buffer of its own, so it is not in the stdout of the run.
+    """
+    before: list[str] = []
+
+    def request(request) -> None:
+        if ticket_of(request) != ticket_id:
+            return
+        before.append(read_out())
+        (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+        with redirect_stdout(io.StringIO()) as second:
+            assert delegate.main(["pause", run_dir.name, "--repo", str(repo)]) == 0
+        assert "pause" in second.getvalue()
+
+    scripted.on_specialist = request
+    return before
+
+
+def start_lines(out: str, repo, run_id: str) -> None:
+    """Assert the three start lines of frame 1k: the run id, the journal, and the hint to follow and to pause."""
+    assert out.splitlines() == [
+        f"run {run_id}",
+        f"journal {repo / '.git' / 'delegate' / 'runs' / run_id / 'journal.jsonl'}",
+        f"follow it with delegate watch · pause it with delegate pause {short(run_id)}",
+    ]
 
 
 def words(out: str) -> list[str]:
@@ -103,20 +137,22 @@ def test_a_failed_run_prints_the_summary_and_a_retry_line_and_keeps_the_per_tick
     assert "\x1b" not in out + err
 
 
-def test_a_paused_run_prints_the_summary_before_the_line_that_tells_how_to_go_on(tmp_path, capsys, scripted):
+def test_a_paused_run_prints_the_start_lines_and_the_summary_before_the_line_that_tells_how_to_go_on(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
-    pause_during_the_specialist_of(repo, capsys, scripted, "a")
+    before = pause_during_the_specialist_of(repo, scripted, "a", lambda: capsys.readouterr().out)
 
     code, out, err = start(repo, capsys)
 
     assert (code, err) == (RUN_PAUSED, "")
     (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
     run_id = run_dir.name
+    (started,) = before
+    start_lines(started, repo, run_id)
     lines = out.splitlines()
-    # The pause came from a second command while the specialist of a worked, so the start lines went to that read.
     assert len(lines) == 2, out
     assert re.fullmatch(rf"run paused · {USED} · 0 built · 0 failed · 0 skipped · 0 new · 0 cache", lines[0]), lines[0]
     assert lines[1].startswith("paused before the gate ") and lines[1].endswith(f" of ticket a; go on with delegate run --resume {run_id}")
+    assert "\x1b" not in started + out
 
 
 def test_the_start_lines_are_on_stdout_before_the_first_agent_starts(tmp_path, capsys, scripted):
@@ -163,6 +199,45 @@ def test_on_a_terminal_the_result_has_the_colour_of_its_role_and_the_words_are_t
     assert summary.startswith("\x1b[31m\x1b[1mrun failed\x1b[0m\x1b[0m · ")  # the result is in `bad`, bold
     assert "\x1b[2m0 new · 0 cache\x1b[0m" in summary  # the token counts are faint
     assert [SGR.search(line) for line in painted[:3]] == [None] * 3  # the start lines are plain
+
+
+def test_on_a_terminal_the_result_of_a_built_run_is_ok_and_bold_and_the_start_lines_are_plain(tmp_path, capsys, monkeypatch, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+    terminal = Terminal()
+    monkeypatch.setattr(sys, "stdout", terminal)
+
+    code = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))[0]
+
+    assert code == 0
+    painted = terminal.getvalue().splitlines()
+    assert len(painted) == 4, painted
+    run_id = painted[0].removeprefix("run ")
+    start_lines("\n".join(painted[:3]), repo, run_id)  # the start lines are plain
+    summary = painted[3]
+    assert summary.startswith("\x1b[32m\x1b[1mrun built\x1b[0m\x1b[0m · ")  # the result is in `ok`, bold
+    assert summary.endswith(" · 2 built · 0 failed · 0 skipped · \x1b[2m0 new · 0 cache\x1b[0m")
+    assert re.fullmatch(rf"run built · {USED} · 2 built · 0 failed · 0 skipped · 0 new · 0 cache", SGR.sub("", summary))
+
+
+def test_on_a_terminal_the_result_of_a_paused_run_is_warn_and_bold_and_the_other_lines_are_plain(tmp_path, capsys, monkeypatch, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    terminal = Terminal()
+    monkeypatch.setattr(sys, "stdout", terminal)
+    before = pause_during_the_specialist_of(repo, scripted, "a", terminal.getvalue)
+
+    code = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))[0]
+
+    assert code == RUN_PAUSED
+    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    run_id = run_dir.name
+    (started,) = before
+    start_lines(started, repo, run_id)  # the start lines are plain
+    painted = terminal.getvalue().removeprefix(started).splitlines()
+    assert len(painted) == 2, painted
+    assert painted[0].startswith("\x1b[33m\x1b[1mrun paused\x1b[0m\x1b[0m · ")  # the result is in `warn`, bold
+    assert re.fullmatch(rf"run paused · {USED} · 0 built · 0 failed · 0 skipped · 0 new · 0 cache", SGR.sub("", painted[0]))
+    assert painted[1].endswith(f" of ticket a; go on with delegate run --resume {run_id}")
+    assert SGR.search(painted[1]) is None
 
 
 def test_with_no_color_set_the_lines_on_a_terminal_have_no_sgr_code(tmp_path, capsys, monkeypatch, scripted):

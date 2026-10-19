@@ -3,6 +3,7 @@
 The words do not change. On a terminal, the result of the run has the colour of its role: `built` in `ok`, `failed`
 in `bad`, `paused` in `warn`, and the result word is bold. The time is faint, and the first problem is in `bad`. An
 error line on stderr is in `bad` when stderr is a terminal. With `NO_COLOR`, or with no terminal, no line has an SGR code.
+With `--raw`, no line has an SGR code also on a terminal: the output of `watch --raw` is the output before #114.
 
 A case writes the journal of a run in the state directory of a real temporary git repository and calls
 `delegate.main(["watch", ...])`. The system boundaries are faked: the terminal (a standard output or a standard error
@@ -32,18 +33,18 @@ def no_no_color(monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
 
 
-def watch(repo, capsys) -> tuple[int, str, str]:
-    code = delegate.main(["watch", "--repo", str(repo), "--poll-seconds", "0.02", "--max-minutes", "0.1"])
+def watch(repo, capsys, *flags: str) -> tuple[int, str, str]:
+    code = delegate.main(["watch", "--repo", str(repo), "--poll-seconds", "0.02", "--max-minutes", "0.1", *flags])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
 
 
-def on_terminals(repo, capsys, monkeypatch) -> tuple[int, str, str]:
+def on_terminals(repo, capsys, monkeypatch, *flags: str) -> tuple[int, str, str]:
     """The exit code, the stdout and the stderr of `watch` when stdout and stderr are terminals, with no title sequence."""
     out, err = Terminal(), Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err)
-    code, _, _ = watch(repo, capsys)
+    code, _, _ = watch(repo, capsys, *flags)
     return code, without_titles(out.getvalue()), err.getvalue()
 
 
@@ -143,3 +144,59 @@ def test_with_no_color_set_the_lines_on_terminals_have_no_sgr_code(tmp_path, cap
     assert (code, err) == (1, "")
     assert out.startswith("no run is active; the newest run r1 ended failed at ")
     assert "\x1b" not in out
+
+
+@pytest.mark.parametrize(
+    ("journal", "expected_code"),
+    [
+        pytest.param((run_start("r1", "a"), step_start("a"), step_end("a"), run_end("built", ["a"])), 0, id="built"),
+        pytest.param(
+            (run_start("r1", "a"), step_start("a"), step_end("a", "failed", "no commit"), run_end("failed", failed=["a"])),
+            1, id="failed",
+        ),
+        pytest.param(
+            (
+                run_start("r1", "a", "b"), step_start("a"), step_end("a"),
+                ("pause-requested", {"ticket": "b", "requested_at": None}), ("paused", {"ticket": "b", "before": "step"}),
+            ),
+            7, id="paused",
+        ),
+    ],
+)
+def test_with_raw_on_terminals_the_line_of_the_newest_run_has_no_sgr_code(
+    tmp_path, capsys, monkeypatch, journal, expected_code
+):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", *journal)
+    _, plain, _ = watch(repo, capsys, "--raw")
+
+    code, out, err = on_terminals(repo, capsys, monkeypatch, "--raw")
+
+    assert (code, err) == (expected_code, "")
+    assert out.startswith("no run is active; the newest run r1 ")
+    assert out == plain
+    assert "\x1b[" not in out
+
+
+def test_with_raw_an_error_line_on_a_terminal_has_no_sgr_code(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    stopped = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"))
+    stale_lock(stopped)
+    _, _, plain = watch(repo, capsys, "--raw")
+
+    code, out, err = on_terminals(repo, capsys, monkeypatch, "--raw")
+
+    assert (code, out) == (2, "")
+    assert plain.startswith("delegate watch: no run is active; the newest run r1 stopped at ")
+    assert err == plain
+
+
+def test_with_raw_an_error_line_for_an_unknown_run_on_a_terminal_has_no_sgr_code(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    failed_run(repo)
+    monkeypatch.setattr(sys, "stderr", err := Terminal())
+
+    code = delegate.main(["watch", "nosuchrun", "--raw", "--repo", str(repo)])
+
+    assert code == 2
+    assert re.fullmatch(r"delegate watch: .*nosuchrun.*\n", err.getvalue())

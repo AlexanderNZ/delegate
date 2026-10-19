@@ -193,26 +193,31 @@ class _Titled:
         return f"{self._name}{SEPARATOR}{snap.percent}%{SEPARATOR}ETA {eta}"
 
 
-def _error(text: str) -> None:
-    """Print an error line of `watch` on stderr, in `bad` when stderr is a terminal (tokens.md)."""
-    print(styled("bad", f"delegate watch: {text}", sys.stderr), file=sys.stderr)
+def _error(text: str, raw: bool) -> None:
+    """Print an error line of `watch` on stderr, in `bad` when stderr is a terminal (tokens.md).
+
+    With `--raw` (`raw`), the line is plain also on a terminal, as before #114.
+    """
+    line = f"delegate watch: {text}"
+    print(line if raw else styled("bad", line, sys.stderr), file=sys.stderr)
 
 
-def _newest_run(newest: watch.EndedRun | watch.StoppedRun) -> int:
+def _newest_run(newest: watch.EndedRun | watch.StoppedRun, raw: bool) -> int:
     """Print the one line of the newest run when no run is active, and return its exit code.
 
-    The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set.
+    The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set. With
+    `--raw` (`raw`), the line is plain also on a terminal, as before #114.
     """
     if isinstance(newest, watch.StoppedRun) and not newest.paused:
-        _error(newest.line())
+        _error(newest.line(), raw)
         return newest.code
     result = newest.result if isinstance(newest, watch.EndedRun) else "paused"
     Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(newest.run_id)}{SEPARATOR}{result}")
-    print(newest.painted())
+    print(newest.line() if raw else newest.painted())
     return newest.code
 
 
-def _pick(runs: list[status.ActiveRun]) -> status.ActiveRun | None:
+def _pick(runs: list[status.ActiveRun], raw: bool) -> status.ActiveRun | None:
     """Show the run picker on the terminal, read the answer, and return the run that the reader chose.
 
     Enter takes 1. An answer that is not the number of a row gets one line on stderr, and the prompt again. Return None
@@ -230,12 +235,12 @@ def _pick(runs: list[status.ActiveRun]) -> status.ActiveRun | None:
             raise
         if not answer:
             print(flush=True)
-            _error("no run chosen")
+            _error("no run chosen", raw)
             return None
         text = answer.strip() or "1"
         if text.isdecimal() and 1 <= int(text) <= len(runs):
             return runs[int(text) - 1]
-        _error(f"{text} is not a number from 1 to {len(runs)}")
+        _error(f"{text} is not a number from 1 to {len(runs)}", raw)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,9 +254,9 @@ def main(argv: list[str] | None = None) -> int:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
                 active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list
                 if not (sys.stdin.isatty() and sys.stdout.isatty()):
-                    _error(status.choices_line(active))
+                    _error(status.choices_line(active), args.raw)
                     return watch.EXIT_ERROR
-                picked = _pick(active)
+                picked = _pick(active, args.raw)
                 if picked is None:
                     return watch.EXIT_ERROR
                 journal = picked.journal
@@ -262,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                     Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(runs.newest.run_id)}{SEPARATOR}failed")
                     print(runs.newest.line())
                     return watch.EXIT_FAILED
-                return _newest_run(watch.newest_run(runs.newest))
+                return _newest_run(watch.newest_run(runs.newest), args.raw)
             else:
                 journal = runs.active[0]
         else:
@@ -277,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             sink = _Titled(sink, journal, title)
         result = watch.follow(journal, options, sink)
     except (RunsError, JournalError) as error:
-        _error(str(error))
+        _error(str(error), args.raw)
         return watch.EXIT_ERROR
     if result.code == watch.EXIT_INTERRUPTED:
         if live_view:
