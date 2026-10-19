@@ -34,6 +34,7 @@ import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
+from delegate.definitions.render import TREE_SEARCH_LIMIT
 from delegate.definitions.validate import split_frontmatter
 from delegate.run.brief import verifier_run_sections
 
@@ -42,6 +43,7 @@ from .support import ScriptedAdapter, git, make_repo, read_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 ENFORCEMENT_PAGE = ROOT / "docs" / "explanation" / "the-enforcement-model-and-its-limits.md"
+SKILL = ROOT / "skills" / "agent-definitions" / "SKILL.md"
 
 #: Each shell that runs the Bash guard of the harness.
 SHELLS = (
@@ -273,3 +275,34 @@ def test_the_enforcement_page_states_the_opencode_limit_with_its_evidence():
     assert "OpenCode 1.15.10" in item
     assert "2026-10-19" in item
     assert "/var/folders" in item
+
+
+# --- The limit of the walk (#132) ----------------------------------------------
+
+
+def _states_the_walk_limit(text: str, removes: bool = True) -> None:
+    """`text` states the limit of the walk in one sentence, and what to do about a large temp copy.
+
+    With `removes`, the verifier can remove a temp path, so the sentence also tells it to remove a large copy in parts.
+    """
+    (sentence,) = [s for s in re.split(r"(?<=\.) ", text) if f"at most {TREE_SEARCH_LIMIT} directories" in s]
+    assert "temp copy in place" in sentence, sentence
+    assert "the system removes temp directories" in sentence, sentence
+    if removes:
+        assert f"one directory at a time, each with fewer than {TREE_SEARCH_LIMIT} directories" in sentence, sentence
+
+
+def test_the_rendered_verifiers_and_the_brief_state_the_limit_of_the_walk(rendered, tmp_path):
+    # The report of #132: no rendered verifier stated that the walk reads at most 2000 directories, so a verifier did
+    # not know why the guard denied the removal of its own large temp copy.
+    _states_the_walk_limit(_section(_body(rendered, "claude-code"), "Your shell"))
+    # The OpenCode map has no rm and no mv rule, so that verifier only leaves its copy in place.
+    _states_the_walk_limit(_section(_body(rendered, "opencode"), "Your shell"), removes=False)
+    _states_the_walk_limit(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "full"))
+
+
+# The docs and the skill are outside the package source, as in a Nix build.
+@outside_the_package
+def test_the_enforcement_page_and_the_skill_state_the_limit_of_the_walk():
+    _states_the_walk_limit(ENFORCEMENT_PAGE.read_text())
+    _states_the_walk_limit(SKILL.read_text())

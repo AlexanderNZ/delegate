@@ -408,9 +408,13 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "copy the tree to another temp directory and remove the .git entry of the copy in the same command, "
         "then change the copy."
     )
+    # The message names the limit of the walk and what to do (#132). A copy of a repository with node_modules holds
+    # more directories than the walk reads, so a verifier meets this deny when it removes its own temp copy.
     in_unsearched = (
-        f"A write target holds the directory [$wr], which has more than {TREE_SEARCH_LIMIT} directories, "
-        "so the guard cannot find each .git entry in it. Name a directory deeper in it."
+        f"The walk in the directory [$wr] read {TREE_SEARCH_LIMIT} directories and did not reach the end, "
+        "so the guard cannot tell that the write target holds no git tree. The limit keeps each guard call short. "
+        "Leave a large temp copy in place, because the system removes temp directories, or first remove the parts "
+        f"that hold no git tree, one directory at a time, each with fewer than {TREE_SEARCH_LIMIT} directories."
     )
     # The shell removes a redirection before it runs the command, so a path
     # that comes after one is still a path argument. A scan that stopped at the
@@ -661,9 +665,9 @@ def _verifier_write_hook() -> str:
         'd=dn(n+"/",n) if ok and not r else ""; '
         '(r or d[:1]=="/") and (m:="the file path ["+p+"] is in the git toplevel ["+(r or d)+"], or holds it. '
         'A verifier is read-only on each git tree: write to another temp directory."); '
-        'd[:1]=="+" and (m:="the file path ["+p+"] holds the directory ["+d[1:]+"], which has more than '
-        f'{TREE_SEARCH_LIMIT} directories, so the guard cannot find each .git entry in it. '
-        'Write to another temp directory."); '
+        'd[:1]=="+" and (m:="the file path ["+p+"] is not permitted. The walk in ["+d[1:]+"] read '
+        f'{TREE_SEARCH_LIMIT} directories and did not reach the end, so the guard cannot tell that the file path '
+        'holds no git tree. The limit keeps each guard call short. Write to another temp directory."); '
         "sys.stdout.write(m); "
         "sys.exit(3 if m else 0)"
     )

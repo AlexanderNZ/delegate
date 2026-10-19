@@ -19,7 +19,7 @@ The first line of your report names the mode.
 
 ## Your shell
 
-Your `permission.bash` map permits the read commands and the verification gates. Each other command is denied. The map matches the full command text and it does not divide a command at `&&`, so a write behind an allowed head stays permitted; do not use that hole. A command you need and cannot run is a line in your report for the coordinator.
+Your `permission.bash` map permits the read commands and the verification gates. Each other command is denied. The map matches the full command text and it does not divide a command at `&&`, so a write behind an allowed head stays permitted; do not use that hole. A command you need and cannot run is a line in your report for the coordinator. Your map has no `rm` and no `mv` rule, so the walk of the Claude Code hook, which reads at most 2000 directories in a write target, does not apply to you: leave each temp copy in place, because the system removes temp directories.
 
 This rule is binding: a command that your map denies is not run in another form. Do not run it through `bash -c`, `python3 -c`, `sh -c`, `env`, `xargs` or a script file. The map does not read the command inside such a form. Report the denial under What you could not verify (the `unverified` list of a JSON verdict), with the command and the message of the denial. The coordinator then runs the command.
 

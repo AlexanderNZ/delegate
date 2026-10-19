@@ -283,6 +283,41 @@ def test_a_run_verifier_writes_its_verdict_from_its_copy_and_from_its_second_cop
 
 # --- A directory that is too large to search ---------------------------------
 
+#: The reason of a deny when the walk in a write target stops at its limit (#132). The deny message names the limit.
+WALK_LIMIT_REASON = (
+    f"read {TREE_SEARCH_LIMIT} directories and did not reach the end, so the guard cannot tell that the"
+)
+
+
+def _big_copy(trees: Trees) -> Path:
+    """A temp copy with no git tree that holds more directories than the walk reads, as a copy with node_modules does."""
+    big = trees.base / "copy-with-node-modules"
+    for index in range(TREE_SEARCH_LIMIT + 1):
+        (big / "node_modules" / f"package{index}").mkdir(parents=True)
+    return big
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_deny_of_a_target_that_the_walk_could_not_search_names_the_limit_and_what_to_do(trees, shell):
+    # The report of #132: a verifier could not rm -rf or mv its own temp copy, and the message did not tell it that
+    # the walk stopped at its limit, or what to do.
+    plain = _without_private(_big_copy(trees))
+    for command in (f"rm -rf {plain}", f"mv {plain} {plain}-old"):
+        result = _bash(trees, command, shell, trees.copy)
+
+        assert result.returncode == 2, (command, result.stderr)
+        assert Path(plain).is_dir()
+        if shell in GUARD_SHELLS:
+            assert f"The walk in the directory [{plain}] {WALK_LIMIT_REASON} write target holds no git tree." in (
+                result.stderr
+            ), result.stderr
+            assert "Leave a large temp copy in place" in result.stderr, result.stderr
+            assert "one directory at a time" in result.stderr, result.stderr
+    write = _write(trees, plain, shell, trees.copy)
+
+    assert write.returncode == 2, write.stderr
+    assert f"The walk in [{plain}] {WALK_LIMIT_REASON} file path holds no git tree." in write.stderr, write.stderr
+
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_the_guards_deny_a_target_that_holds_more_directories_than_the_search_reads(trees, shell):
@@ -297,10 +332,10 @@ def test_the_guards_deny_a_target_that_holds_more_directories_than_the_search_re
 
         assert result.returncode == 2, (command, result.stderr)
         if shell in GUARD_SHELLS:
-            assert f"more than {TREE_SEARCH_LIMIT} directories" in result.stderr, result.stderr
+            assert WALK_LIMIT_REASON in result.stderr, result.stderr
     write = _write(trees, plain, shell, trees.copy)
     assert write.returncode == 2, write.stderr
-    assert f"more than {TREE_SEARCH_LIMIT} directories" in write.stderr
+    assert WALK_LIMIT_REASON in write.stderr
     # A pattern limits the walk to the directories that it can match: d1, d1<n>, d1<n><n> and d1<n><n><n>.
     for command in (f"touch {plain}/d1/app.py", f"ls {plain} && rm -rf {plain}/d1", f"rm -rf {plain}/d1*"):
         assert _bash(trees, command, shell, trees.copy).returncode == 0, command

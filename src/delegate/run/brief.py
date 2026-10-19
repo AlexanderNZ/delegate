@@ -731,6 +731,12 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
         "The verifier guards deny a write inside a git tree, and a write that holds one. A git tree is a directory "
         "with a `.git` entry, and this copy is one. "
+        # The limit of the walk in a write target is TREE_SEARCH_LIMIT of the definitions context (#132). The run
+        # context does not import that context, so the number is text here, and a test compares the two.
+        "In a directory that a write target names, the guards read at most 2000 directories, and they deny a target "
+        "that they could not search to the end: leave a large temp copy in place, because the engine removes both "
+        "copies when you end and the system removes temp directories, or first remove the parts that hold no git tree, one directory at a time, each with "
+        "fewer than 2000 directories. "
         "To prove a test red, break a second copy. From this copy, make the second copy and remove its `.git` entry "
         f"in one command: `cp -R {copy} {proof} && rm -rf {proof}/.git`. Then go to it with `cd {proof}`, break it, "
         "and run the test there. Do not go to the second copy before you remove its `.git` entry, and do not remove the entry "
