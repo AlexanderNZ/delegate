@@ -52,13 +52,14 @@ def test_status_of_a_finished_run_prints_every_ticket_with_its_final_state_verdi
 
     assert (code, err) == (0, "")
     assert out.splitlines()[0] == f"run {run_id}: failed (mode assure, adapter scripted)"
-    # The cells of a row: the position, the plan, the state, the phase or the reason, the verdict, the branch, the time
-    # used, and the last event. The scripted adapter has no stream reader, so the table has no tokens.
+    # The cells of a row: the position, the plan, the state, the phase, the blockers that are not the row above, the
+    # verdict, the branch, the time used, the last event, and the reason (#143). The scripted adapter has no stream
+    # reader, so the table has no tokens.
     a, b, c = (status_row(out, t) for t in "abc")
-    assert a[:3] == ["1", "✗ a", "failed"] and a[4] == "run/demo-a"
-    assert re.fullmatch(r"\d+s", a[5]) and re.fullmatch(TIME, a[6]) and len(a) == 7  # a has no verdict
-    assert b[:4] == ["2", "└─– b", "skipped", "blocked by a, which failed"]  # b has no step: no branch, no time used
-    assert re.fullmatch(TIME, b[4]) and len(b) == 5
+    assert a[:4] == ["1", "✗ a", "failed", "run/demo-a"]  # a has no verdict
+    assert re.fullmatch(r"\d+s", a[4]) and re.fullmatch(TIME, a[5]) and a[6].startswith("the specialist ended failed") and len(a) == 7
+    assert b[:3] == ["2", "– b", "skipped"]  # b has no step: no branch, no time used
+    assert re.fullmatch(TIME, b[3]) and b[4] == "blocked by a, which failed" and len(b) == 5
     assert c[:3] == ["3", "● c", "✓ built"] and c[3:5] == ["ACCEPT", "run/demo-c"] and c[6] == last_c and len(c) == 7
 
 
@@ -107,10 +108,11 @@ def test_status_shows_the_verdict_of_a_chain_for_every_ticket_that_the_verdict_c
     code, out, err = status(repo, capsys, "r1")
 
     assert (code, err) == (0, "")
-    # b failed with the reason `no header`, in its phase cell. d has no verdict.
+    # b failed with the reason `no header`, at the end of its row. d has no verdict.
     assert [status_row(out, t)[2:5] for t in "abcd"] == [
-        ["✓ built", "REJECT", "run/demo-a"], ["failed", "no header", "REJECT"], ["✓ built", "REJECT", "run/demo-c"], ["pending"],
+        ["✓ built", "REJECT", "run/demo-a"], ["failed", "REJECT", "run/demo-b"], ["✓ built", "REJECT", "run/demo-c"], ["pending"],
     ]
+    assert status_row(out, "b")[-1] == "no header"
 
 
 def test_status_of_an_unknown_run_exits_2_and_names_the_run_id(tmp_path, capsys):

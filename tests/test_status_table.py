@@ -1,9 +1,10 @@
-"""The text of `delegate status` is the ticket table of frame 1i of the design (#117).
+"""The text of `delegate status` is the ticket table of frame 1i of the design (#117, #143).
 
 The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Ticket table (status)) and
 `docs/copy-deck.md`. Under the header lines (run, progress, journal), `status` prints the ticket table of the live view
-of `watch`, with three more columns: `verdict`, `branch` and `last event`. The progress line of each ticket folds into
-its row. `status --json` does not change.
+of `watch` on the same tracks, with `state` 8 cells wide and three more columns: `verdict` and `branch` after `after`,
+and `last event` last. The progress line of each ticket folds into its row. Status is a snapshot, so it has no live
+tail: after `last event`, a row has only its reason. `status --json` does not change.
 
 A case writes the journal of a run in the state directory of a real temporary git repository and calls
 `delegate.main(["status", ...])`. The system boundaries are faked: the clock (`time.time`), the locale (`LC_ALL`), the
@@ -101,22 +102,25 @@ def test_the_status_of_a_running_run_is_the_header_lines_and_the_ticket_table_wi
 
     # a used 600 seconds and has the tokens of its specialist and its verifier (finished.jsonl twice). b is in its
     # verifier since 960 seconds: the harness has not opened the stream yet, so its last activity is the agent-start.
-    # The progress sub-line of each ticket folds into its row, and a pending ticket has empty cells.
+    # The progress sub-line of each ticket folds into its row, and a pending ticket has empty cells. The phases of b
+    # stack in sub-rows, and the row of b has no live tail.
     assert lines == [
         "run r1: running (mode assure, adapter claude-code)",
         "progress: 45%, 1 of 4 ended, 18m20s used, ETA 21m40s, tokens 58k new, 0 cache",
         f"journal {run.path}",
         "",
-        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
-        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
-        "  2  └─▶ b         running     specialist ✓  gates ✓  verifier ●  fix-up ○              run/demo-b         8m20s    19k       0  "
-        + at(960) + "  active 2m20s",
-        "  3    └─· c       pending",
-        "  4  · d           pending",
+        "  #      plan    state     phase          after     verdict  branch              used    new   cache  last event",
+        "  1      ● a     ✓ built                            ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        "  2  │   ▶ b     running   specialist ✓                      run/demo-b         8m20s    19k       0  " + at(960),
+        "     │                     gates ✓",
+        "     │                     verifier ●",
+        "     │                     fix-up ○",
+        "  3  │   · c     pending",
+        "  4      · d     pending",
     ]
 
 
-def test_the_status_of_a_run_that_ended_gives_the_reason_of_a_failed_and_of_a_skipped_ticket_in_the_phase_cell(
+def test_the_status_of_a_run_that_ended_gives_the_reason_of_a_failed_and_of_a_skipped_ticket_after_its_last_event(
     tmp_path, capsys, monkeypatch
 ):
     repo = bare_repo(tmp_path)
@@ -125,23 +129,22 @@ def test_the_status_of_a_run_that_ended_gives_the_reason_of_a_failed_and_of_a_sk
 
     lines = lines_of(repo, capsys)
 
-    # The skipped ticket c has no step: no branch, no time used, and no tokens. Its last event is its `skip`.
+    # The skipped ticket c has no step: no branch, no time used, and no tokens. Its last event is its `skip`. The reason
+    # of b and of c is after the last event, not in the phase cell.
     assert lines == [
         "run r1: failed (mode assure, adapter claude-code)",
         "progress: 100%, 4 of 4 ended, 26m00s used, tokens 97k new, 0 cache",
         f"journal {run.path}",
         "",
-        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
-        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
-        f"  2  └─✗ b         failed      gates red: {PYTEST}           run/demo-b         6m00s    19k       0  {at(960)}",
-        "  3    └─– c       skipped     blocked by b, which failed" + " " * 20 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7
-        + "  " + " " * 5 + "  " + " " * 6 + f"  {at(960)}",
-        "  4  ● d           ✓ built                                                     ACCEPT   run/demo-d        10m00s    39k       0  "
-        + at(1560),
+        "  #      plan    state     phase          after     verdict  branch              used    new   cache  last event",
+        "  1      ● a     ✓ built                            ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        f"  2  │   ✗ b     failed                                      run/demo-b         6m00s    19k       0  {at(960)}  gates red: {PYTEST}",
+        "  3  │   – c     skipped".ljust(STATUS_TRACK_START["last event"]) + f"{at(960)}  blocked by b, which failed",
+        "  4      ● d     ✓ built                            ACCEPT   run/demo-d        10m00s    39k       0  " + at(1560),
     ]
 
 
-def test_the_status_of_a_paused_run_gives_paused_before_this_step_in_the_row_of_the_next_ticket(tmp_path, capsys, monkeypatch):
+def test_the_status_of_a_paused_run_gives_paused_before_this_step_at_the_end_of_the_row_of_the_next_ticket(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     run = a_paused_run(repo)
     frozen(monkeypatch, 9000)
@@ -154,12 +157,11 @@ def test_the_status_of_a_paused_run_gives_paused_before_this_step_in_the_row_of_
         "progress: 25%, 1 of 4 ended, 10m00s used, tokens 39k new, 0 cache",
         f"journal {run.path}",
         "",
-        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
-        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
-        "  2  └─· b         pending     paused before this step" + " " * 23 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7
-        + "  " + " " * 5 + "  " + " " * 6 + f"  {at(600)}",
-        "  3    └─· c       pending",
-        "  4  · d           pending",
+        "  #      plan    state     phase          after     verdict  branch              used    new   cache  last event",
+        "  1      ● a     ✓ built                            ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        "  2  │   · b     pending".ljust(STATUS_TRACK_START["last event"]) + f"{at(600)}  paused before this step",
+        "  3  │   · c     pending",
+        "  4      · d     pending",
     ]
 
 
@@ -250,15 +252,15 @@ def test_on_a_terminal_each_cell_of_the_table_has_the_colour_of_its_role_and_the
 
     assert [SGR.sub("", line) for line in painted] == plain
     assert [SGR.search(line) for line in painted[:4]] == [None] * 4
-    header, a, b, c, _ = painted[4:]
-    assert header.startswith("  \x1b[2m#\x1b[0m  \x1b[2mplan\x1b[0m")  # the header is faint
+    header, a, b, _, _, _, c, _ = painted[4:]
+    assert header.startswith("  \x1b[2m#\x1b[0m" + " " * 6 + "\x1b[2mplan\x1b[0m")  # the header is faint
     assert "\x1b[1mACCEPT\x1b[0m" in a  # the verdict word is bold
     assert f"\x1b[2m{at(600)}\x1b[0m" in a  # the time of the last event is faint
     assert "\x1b[2mrun/demo-a\x1b[0m" in a  # each cell of a row that ended is faint
     assert "\x1b[36m\x1b[1mrunning\x1b[0m\x1b[0m" in b  # the ticket that runs now is in `now`, bold
     assert "  run/demo-b  " in b  # and its branch has the colour of the theme
-    assert "\x1b[36mactive 2m20s\x1b[0m" in b
-    assert "\x1b[34m  └─\x1b[0m" in c  # the tree is in `plan`
+    assert "active" not in b  # status is a snapshot: no live tail
+    assert c.startswith("  \x1b[2m3\x1b[0m  \x1b[34m│\x1b[0m")  # the rail is in `plan`
 
 
 def test_with_no_color_set_the_status_on_a_terminal_writes_no_sgr_code(tmp_path, capsys, monkeypatch):
@@ -284,13 +286,14 @@ def test_with_a_locale_that_is_not_utf8_the_table_has_the_ascii_glyphs_in_the_sa
     ascii_lines = lines_of(repo, capsys)
 
     assert [len(line) for line in ascii_lines] == [len(line) for line in unicode]
-    assert ascii_lines[5:9] == [
-        "  1  * a           + built                                                     ACCEPT   run/demo-a        10m00s    39k       0  "
-        + at(600),
-        "  2  \\-> b         running     specialist +  gates +  verifier *  fix-up o              run/demo-b         8m20s    19k       0  "
-        + at(960) + "  active 2m20s",
-        "  3    \\-. c       pending",
-        "  4  . d           pending",
+    assert ascii_lines[5:12] == [
+        "  1      * a     + built                            ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        "  2  |   > b     running   specialist +                      run/demo-b         8m20s    19k       0  " + at(960),
+        "     |                     gates +",
+        "     |                     verifier *",
+        "     |                     fix-up o",
+        "  3  |   . c     pending",
+        "  4      . d     pending",
     ]
 
 
@@ -312,25 +315,33 @@ def test_the_example_of_the_reference_page_is_the_output_of_status_for_the_run_t
 
 
 # The cell where each track of the ticket table of `delegate status` starts (components.md § Ticket table (status)):
-# the tracks of `watch`, with `verdict` 7 and `branch` 15 after `phase`, and `last event` before the live tail.
+# the tracks of `watch` with `state` 8, `verdict` 7 and `branch` 15 after `after`, and `last event` last.
 STATUS_TRACK_START: dict[str, int] = {
-    "#": 0, "plan": 5, "state": 19, "phase": 31, "verdict": 79, "branch": 88, "used": 105, "new": 114, "cache": 121, "last event": 129,
+    "#": 0, "rail": 5, "plan": 9, "state": 17, "phase": 27, "after": 42, "verdict": 52, "branch": 61, "used": 78, "new": 87,
+    "cache": 94, "last event": 102,
 }
 
 
-def test_the_status_table_puts_each_column_on_the_design_track_of_watch_with_three_more_columns(tmp_path, capsys, monkeypatch):
+def test_the_status_table_puts_each_column_on_the_design_track_of_watch_with_three_more_columns_and_no_live_tail(
+    tmp_path, capsys, monkeypatch
+):
     repo = bare_repo(tmp_path)
     a_running_run(repo)
     frozen(monkeypatch, 1100)
 
-    header, a, b = lines_of(repo, capsys)[4:7]
+    header, a, b, gates = lines_of(repo, capsys)[4:8]
 
     def starts(line: str, cell: int, text: str) -> bool:
         return line[cell:cell + len(text)] == text and line[cell - 1] == " "
 
-    assert [starts(header, STATUS_TRACK_START[name], name) for name in ("plan", "state", "phase", "verdict", "branch", "last event")] == [True] * 6
-    assert header.startswith("  #  plan")  # the numbers and their header align right in their track
+    names = ("plan", "state", "phase", "after", "verdict", "branch", "last event")
+    assert [starts(header, STATUS_TRACK_START[name], name) for name in names] == [True] * len(names), header
+    assert header.startswith("  #      plan")  # the numbers and their header align right in their track; the rail has no header
     assert [starts(header, STATUS_TRACK_START[n] + w - len(n), n) for n, w in (("used", 7), ("new", 5), ("cache", 6))] == [True] * 3
-    assert a.startswith("  1  ● a") and starts(a, STATUS_TRACK_START["verdict"], "ACCEPT")
+    assert a.startswith("  1      ● a") and starts(a, STATUS_TRACK_START["verdict"], "ACCEPT")
+    assert starts(b, STATUS_TRACK_START["rail"], "│") and starts(b, STATUS_TRACK_START["plan"], "▶ b")
+    assert starts(b, STATUS_TRACK_START["state"], "running") and starts(b, STATUS_TRACK_START["phase"], "specialist ✓")
     assert starts(b, STATUS_TRACK_START["branch"], "run/demo-b") and starts(b, STATUS_TRACK_START["used"] + 2, "8m20s")
-    assert starts(b, STATUS_TRACK_START["last event"], at(960)) and starts(b, STATUS_TRACK_START["last event"] + len(at(960)) + 2, "active 2m20s")
+    assert b.endswith(f"  {at(960)}") and starts(b, STATUS_TRACK_START["last event"], at(960))  # no live tail after it
+    assert gates == " " * STATUS_TRACK_START["rail"] + "│" + " " * 21 + "gates ✓"
+    assert starts(gates, STATUS_TRACK_START["phase"], "gates ✓")

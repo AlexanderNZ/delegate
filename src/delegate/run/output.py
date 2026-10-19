@@ -1,4 +1,4 @@
-"""The parts of the terminal output: the paint roles, the glyph set, and the column measurer (#115).
+"""The parts of the terminal output: the paint roles, the glyph set, and the column measurer (#115, #143).
 
 The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and `docs/accessibility.md`.
 
@@ -92,7 +92,7 @@ def styled(roles: str, text: str, stream: TextIO | None = None) -> str:
 
 @dataclass(frozen=True)
 class Glyphs:
-    """The glyph set of tokens.md. The tree glyph takes two cells for each depth."""
+    """The glyph set of tokens.md. The rail joins a row of the ticket table to the row above it (#143)."""
 
     built: str      # built, ACCEPT
     failed: str     # failed, a problem
@@ -103,13 +103,13 @@ class Glyphs:
     skipped: str
     fill: str       # the filled part of the bar
     empty: str      # the rest of the bar
-    tree: str
+    rail: str       # the blocker of the row is the row directly above
     rule: str       # the divider
     idle: str       # idle past the threshold
 
 
-UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "└─", "─", "⚠")
-ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "\\-", "-", "!")
+UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠")
+ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!")
 
 
 def utf8_locale() -> bool:

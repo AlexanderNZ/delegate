@@ -443,7 +443,7 @@ def plain_status(repo: Path, capsys) -> list[str]:
     return captured.out.splitlines()
 
 
-def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activity_of_each_running_agent(tmp_path, capsys, monkeypatch):
+def test_plain_status_shows_the_percentage_the_eta_and_the_tokens_and_its_table_has_no_live_tail(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     run = a_run_of_two_tickets(repo)
     frozen(monkeypatch, 650)
@@ -452,17 +452,19 @@ def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activ
 
     # The mean of the ended tickets is 600, and b used 50 seconds: the ETA is 550 seconds from now.
     # The tokens: new 19326 and cache 0 for a, and new 11824 and cache 13970 for the one turn of b so far. The run:
-    # new 31150 and cache 13970. b had its last activity on 2026-10-08. The ticket table of #117 has the progress of
-    # each ticket in its row. No ticket has a verdict yet.
+    # new 31150 and cache 13970. The ticket table of #117 has the progress of each ticket in its row. No ticket has a
+    # verdict yet. Status is a snapshot (#143): the table has no live tail, so the last activity of b is only in --json.
     assert lines == [
         "run r1: running (mode assure, adapter claude-code)",
         "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
         f"journal {run.path}",
         "",
-        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
-        "  1  ● a           ✓ built" + " " * 62 + f"run/demo-a        10m00s    19k       0  {at(600)}",
-        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○" + " " * 14
-        + f"run/demo-b           50s    12k     14k  {at(600)}  active 7d07h",
+        "  #      plan    state     phase          after     verdict  branch              used    new   cache  last event",
+        "  1      ● a     ✓ built" + " " * 37 + f"run/demo-a        10m00s    19k       0  {at(600)}",
+        "  2      ▶ b     running   specialist ●" + " " * 22 + f"run/demo-b           50s    12k     14k  {at(600)}",
+        " " * 27 + "gates ○",
+        " " * 27 + "verifier ○",
+        " " * 27 + "fix-up ○",
     ]
 
 
@@ -482,12 +484,15 @@ def test_each_form_of_status_shows_the_new_tokens_and_the_cache_tokens_of_the_ru
     assert lines[1].endswith(", tokens 31k new, 14k cache")
     # The cells `new` and `cache` of each row in the table of status.
     assert status_row("\n".join(lines), "a")[5:7] == ["19k", "0"]
-    assert status_row("\n".join(lines), "b")[9:11] == ["12k", "14k"]
+    assert status_row("\n".join(lines), "b")[6:8] == ["12k", "14k"]
     assert block == [
         "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s  31k new · 14k cache",
-        "  #  plan          state       phase                                              used    new   cache",
-        "  1  ● a           ✓ built                                                      10m00s    19k       0",
-        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d07h",
+        "  #      plan    state       phase          after        used    new   cache",
+        "  1      ● a     ✓ built                               10m00s    19k       0",
+        "  2      ▶ b     running     specialist ●                 50s    12k     14k  ⚠ idle 7d07h",
+        " " * 29 + "gates ○",
+        " " * 29 + "verifier ○",
+        " " * 29 + "fix-up ○",
     ]
 
 
@@ -502,13 +507,12 @@ def test_plain_status_of_a_run_that_ended_shows_its_progress_with_no_eta(tmp_pat
     lines = plain_status(repo, capsys)
 
     assert lines[:2] == ["run r1: built (mode assure, adapter claude-code)", "progress: 100%, 2 of 2 ended, 10m10s used, tokens 19k new, 0 cache"]
-    # The skipped ticket has its reason in the phase cell, and no branch, no time used and no tokens.
+    # The skipped ticket has its reason after its last event, and no branch, no time used and no tokens.
     assert lines[3:] == [
         "",
-        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
-        "  1  ● a           ✓ built" + " " * 62 + f"run/demo-a        10m00s    19k       0  {at(600)}",
-        "  2  – b           skipped     blocked by x" + " " * 34 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7 + "  " + " " * 5
-        + "  " + " " * 6 + f"  {at(601)}",
+        "  #      plan    state     phase          after     verdict  branch              used    new   cache  last event",
+        "  1      ● a     ✓ built" + " " * 37 + f"run/demo-a        10m00s    19k       0  {at(600)}",
+        "  2      – b     skipped" + " " * 78 + f"{at(601)}  blocked by x",
     ]
 
 
@@ -566,11 +570,9 @@ def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_an
 
     assert lines[1] == "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s"
     # The table has no columns `new` and `cache`, and the live tail of b gives no activity.
-    assert lines[4] == "  #  plan          state       phase" + " " * 41 + "  verdict  branch              used  last event"
+    assert lines[4] == "  #      plan    state     phase          after     verdict  branch              used  last event"
     assert status_row("\n".join(lines), "a") == ["1", "● a", "✓ built", "run/demo-a", "10m00s", at(600)]
-    assert status_row("\n".join(lines), "b") == [
-        "2", "▶ b", "running", "specialist ●", "gates ○", "verifier ○", "fix-up ○", "run/demo-b", "50s", at(600),
-    ]
+    assert status_row("\n".join(lines), "b") == ["2", "▶ b", "running", "specialist ●", "run/demo-b", "50s", at(600)]
 
 
 def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_and_the_eta_and_no_tokens_and_no_activity(
@@ -585,9 +587,12 @@ def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_
     # The table has no columns `new` and `cache`, and the running row has no live tail.
     assert block_of(drawn[0]) == [
         "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s",
-        "  #  plan          state       phase                                              used",
-        "  1  ● a           ✓ built                                                      10m00s",
-        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s",
+        "  #      plan    state       phase          after        used",
+        "  1      ● a     ✓ built                               10m00s",
+        "  2      ▶ b     running     specialist ●                 50s",
+        " " * 29 + "gates ○",
+        " " * 29 + "verifier ○",
+        " " * 29 + "fix-up ○",
     ]
     # The waiting line of the specialist of b has no tokens and no activity (#130).
     assert re.fullmatch(r"\d\d:\d\d  #b   specialist running · 50s", drawn[0][-1]), drawn[0][-1]
@@ -635,10 +640,12 @@ def test_the_live_block_has_a_line_for_the_run_and_one_for_each_ticket_and_watch
 
     assert (code, waits) == (0, [3.0])
     first, second = (block_of(frame) for frame in drawn)
-    assert len(first) == len(second) == 4  # the run line, the header, and a row for each ticket
+    # The run line, the header, a row for each ticket, and while b runs a sub-row for each phase after its first.
+    assert (len(first), len(second)) == (7, 4)
     assert first[0].startswith("run abcd  running  50%")
     assert second[0].startswith("run abcd  built  100%")
-    assert second[3].startswith("2  ● b                            ✓ built")
+    # The long id makes the `plan` column wider than its track, so `state` starts after it.
+    assert second[3] == "  2      ● b".ljust(9 + len("● first-ticket-with-a-long-id") + 2) + "✓ built"
 
 
 @pytest.mark.parametrize("columns", [30, 60, 200])
@@ -809,7 +816,7 @@ def test_plain_status_on_a_run_with_a_stream_that_cannot_be_read_shows_no_tokens
     expected = {
         "ended": (f"progress: 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", ["2", "● b", "✓ built", "run/demo-b", "30s", at(630)]),
         "live": (f"progress: 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", [
-            "2", "▶ b", "running", "specialist ●", "gates ○", "verifier ○", "fix-up ○", "run/demo-b", "50s", at(600),
+            "2", "▶ b", "running", "specialist ●", "run/demo-b", "50s", at(600),
         ]),
     }[where]
     out = "\n".join(lines)
@@ -832,19 +839,22 @@ def test_the_live_block_on_a_run_with_a_stream_that_cannot_be_read_shows_no_toke
     expected = {
         "ended": [
             f"run r1  running  ██████████░░░░░░ 66%  2/3 ended  10m50s used  ETA 5m15s  {new} new · 0 cache",
-            "  #  plan          state       phase                                              used    new   cache",
-            f"  1  ● a           ✓ built                                                      10m00s    {new}       0",
-            "  2  ● b           ✓ built                                                         30s",
+            "  #      plan    state       phase          after        used    new   cache",
+            f"  1      ● a     ✓ built                               10m00s    {new}       0",
+            "  2      ● b     ✓ built".ljust(58) + "30s",
         ],
         "live": [
             f"run r1  running  █████░░░░░░░░░░░ 33%  1/3 ended  10m50s used  ETA 19m10s  {new} new · 0 cache",
-            "  #  plan          state       phase                                              used    new   cache",
-            f"  1  ● a           ✓ built                                                      10m00s    {new}       0",
-            "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s",
+            "  #      plan    state       phase          after        used    new   cache",
+            f"  1      ● a     ✓ built                               10m00s    {new}       0",
+            "  2      ▶ b     running     specialist ●                 50s",
+            " " * 29 + "gates ○",
+            " " * 29 + "verifier ○",
+            " " * 29 + "fix-up ○",
         ],
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
-    assert block_of(drawn[0])[:4] == expected
+    assert block_of(drawn[0])[:len(expected)] == expected
 
 
 # The running gate. The engine writes `gate-start` with the log of the gate, and the gate runner appends to the log.
@@ -933,18 +943,17 @@ def test_a_run_that_ended_has_no_running_gate(tmp_path, capsys, monkeypatch):
     assert (a["gate"], a["gate_idle_seconds"]) == (None, None)
 
 
-def test_plain_status_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, capsys, monkeypatch):
+def test_plain_status_shows_the_phase_of_the_running_gate_in_a_sub_row_and_no_live_tail(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     a_run_with_a_running_gate(repo)
     frozen(monkeypatch, 230)
 
     lines = plain_status(repo, capsys)
 
-    # The live tail gives the short name of the gate and the time since its log changed.
-    assert status_row("\n".join(lines), "a") == [
-        "1", "▶ a", "running", "specialist ✓", "gates ●", "verifier ○", "fix-up ○", "run/demo-a", "3m50s", "19k", "0", at(110),
-        "gate pytest · log 30s ago",
-    ]
+    # Status is a snapshot (#143): it has no live tail, so the gate and the age of its log are only in --json.
+    assert status_row("\n".join(lines), "a") == ["1", "▶ a", "running", "specialist ✓", "run/demo-a", "3m50s", "19k", "0", at(110)]
+    assert " " * 27 + "gates ●" in lines
+    assert not any("pytest" in line or "log" in line for line in lines[4:])  # the table, under the header lines
 
 
 def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_changed(tmp_path, monkeypatch):
@@ -956,7 +965,11 @@ def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_change
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert block_of(drawn[0])[2] == "  1  ▶ a           running     specialist ✓  gates ●  verifier ○  fix-up ○      10m50s    19k       0  gate pytest · log 1m00s ago"
+    # The live tail of the sub-row of the phase `gates` gives the short name of the gate and the time since its log changed.
+    assert block_of(drawn[0])[2:4] == [
+        "  1      ▶ a     running     specialist ✓              10m50s    19k       0",
+        " " * 29 + "gates ●".ljust(49) + "gate pytest · log 1m00s ago",
+    ]
 
 
 def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):

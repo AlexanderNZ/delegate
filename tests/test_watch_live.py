@@ -177,14 +177,19 @@ def watch(
     return code, out.getvalue()
 
 
+# The row of ticket b while its specialist runs, and the sub-rows of its other phases (#143).
+RUNNING_B = "  2      ▶ b     running     specialist ●                 50s    12k     14k  ⚠ idle 7d08h"
+SUB_ROWS_OF_B = [" " * 29 + phase for phase in ("gates ○", "verifier ○", "fix-up ○")]
+
 # The table of the run of `a_live_run`, at the first poll and at the end. The stream of the specialist of b is a
 # recorded one, so its last activity is days before the clock of the case.
 TABLE_AT_THE_FIRST_POLL = [
     "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  1h00m used  ETA 59m10s  50k new · 14k cache",
     "",
-    "  #  plan          state       phase                                              used    new   cache",
-    "  1  ● a           ✓ built                                                       1h00m    39k       0",
-    "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d08h",
+    "  #      plan    state       phase          after        used    new   cache",
+    "  1      ● a     ✓ built".ljust(56) + "1h00m    39k       0",
+    RUNNING_B,
+    *SUB_ROWS_OF_B,
     "─" * 200,
 ]
 
@@ -213,9 +218,9 @@ def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_runn
     assert last == [
         "run r1  built  ████████████████ 100%  2/2 ended  1h06m used  50k new · 14k cache",
         "",
-        "  #  plan          state       phase                                              used    new   cache",
-        "  1  ● a           ✓ built                                                       1h00m    39k       0",
-        "  2  ● b           ✓ built                                                       6m40s    12k     14k",
+        "  #      plan    state       phase          after        used    new   cache",
+        "  1      ● a     ✓ built".ljust(56) + "1h00m    39k       0",
+        "  2      ● b     ✓ built".ljust(56) + "6m40s    12k     14k",
         "─" * 200,
         *FEED,
     ]
@@ -271,16 +276,17 @@ def test_a_frame_of_a_run_that_goes_on_fits_the_height_of_the_terminal_and_keeps
     run = a_live_run(repo)
     monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
 
-    _, out = watch(repo, monkeypatch, rows=8, then=lambda: ticket_b_ends(run))
+    _, out = watch(repo, monkeypatch, rows=11, then=lambda: ticket_b_ends(run))
 
     first, last = frames(out)
     # The built row folds, and the feed keeps its newest line. The last line of the terminal stays free for the cursor.
     assert first == [
         TABLE_AT_THE_FIRST_POLL[0],
         "",
-        "  #  plan          state       phase                                              used    new   cache",
-        "     ✓ built 1  a",
-        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d08h",
+        "  #      plan    state       phase          after        used    new   cache",
+        "         ✓ 1 built".ljust(78) + "a",
+        RUNNING_B,
+        *SUB_ROWS_OF_B,
         "─" * 200,
         "17:00  #b   specialist running · 50s · 12k new · 14k cache · ⚠ idle 7d08h",
     ]

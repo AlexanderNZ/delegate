@@ -26,8 +26,8 @@ CODES = {"dim": "2", "bold": "1", "ok": "32", "now": "36", "warn": "33", "bad": 
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")
 
-UNICODE = ("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "└─", "─", "⚠")
-ASCII = ("+", "x", ">", ".", "*", "o", "-", "#", ".", "\\-", "-", "!")
+UNICODE = ("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠")
+ASCII = ("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!")
 
 
 def on_a_terminal(monkeypatch) -> None:
@@ -138,7 +138,7 @@ def test_each_ascii_glyph_has_the_width_of_its_unicode_glyph_so_the_columns_keep
     unicode_set = astuple(glyphs())
 
     assert [len(g) for g in ascii_set] == [len(g) for g in unicode_set]
-    assert glyphs().tree == "└─"
+    assert glyphs().rail == "│"
 
 
 def test_columns_pad_each_value_to_the_widest_value_of_its_column_with_two_cells_between_columns():

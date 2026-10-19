@@ -98,7 +98,7 @@ def test_ctrl_c_in_the_live_view_restores_the_cursor_the_end_of_the_frame_and_th
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
     # The output ends with the end of a whole frame and the sequence that shows the cursor.
     assert out.endswith(FRAME_END + "\n" + SHOW_CURSOR)
-    assert any("#a started" in line for line in frames(out)[-1])
+    assert any("#a   started" in line for line in frames(out)[-1])
     # The title no longer gives the progress: it gives the reason that the watch ended.
     assert TITLE.findall(out)[-1] == "delegate watch · r1 · interrupted"
 
@@ -128,7 +128,7 @@ def test_ctrl_c_while_a_frame_is_written_draws_a_whole_frame_before_the_line(tmp
     assert code == INTERRUPTED
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
     assert out.endswith(FRAME_END + "\n" + SHOW_CURSOR)
-    assert any("#a started" in line for line in frames(out)[-1])
+    assert any("#a   started" in line for line in frames(out)[-1])
 
 
 @pytest.mark.parametrize("command", [["status", "r1"], ["pause", "r1"], ["status", "--json"]])

@@ -584,12 +584,12 @@ TITLE = re.compile("\x1b\\]2;([^\x07]*)\x07")
 def status_row(out: str, ticket: str) -> list[str]:
     """The cells of the row of a ticket in the ticket table of `delegate status` (#117), with no empty cell.
 
-    Two columns are 2 spaces apart or more, so the cells split at each run of 2 spaces or more. A phase track has 2
-    spaces between its phases, so each phase of it is a cell of its own. The first cell is the position in the plan,
-    and the second cell ends with the ticket id.
+    Two columns are 2 spaces apart or more, so the cells split at each run of 2 spaces or more. The rail (`│`, or `|`
+    in the ASCII set) is not a cell (#143). The first cell is the position in the plan, and the second cell ends with
+    the ticket id. The phases after the first phase of a running ticket are on sub-rows, which are not in the cells.
     """
     for line in out.splitlines():
-        cells = re.split(r" {2,}", line.strip())
+        cells = [cell for cell in re.split(r" {2,}", line.strip()) if cell not in ("│", "|")]
         if len(cells) > 1 and cells[0].isdigit() and cells[1].split()[-1] == ticket:
             return cells
     raise AssertionError(f"the table of status has no row of ticket {ticket}:\n{out}")

@@ -2,8 +2,8 @@
 the feed of the ticket that runs now (#116).
 
 `LiveView` is a sink of `delegate.run.watch.follow`. At each poll it makes a frame: the run line and the ticket table
-(`status.view_lines`, of the same snapshot as `delegate status`, with the tree of `status.plan_tree`), a divider, and
-the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in place on the terminal. The spec is
+(`status.view_lines`, of the same snapshot as `delegate status`, with the rail and the `after` cells of
+`status.plan_links`), a divider, and the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in place on the terminal. The spec is
 `design/design_handoff_delegate_terminal_output/docs/components.md`.
 
 A line of the feed is short: the local time (`HH:MM`), the ticket, and what happened. It shows no path and no `None`.
@@ -198,7 +198,7 @@ class LiveView:
         block: list[str] = []
         if snap is not None:
             height = room - 1 - len(feed) if feed else room
-            block = status.view_lines(snap, status.plan_tree(self._events), width, height, self._idle_limit)
+            block = status.view_lines(snap, status.plan_links(self._events), width, height, self._idle_limit)
         id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
         lines = [line.painted(id_cells) for line in feed]
         if not final:
