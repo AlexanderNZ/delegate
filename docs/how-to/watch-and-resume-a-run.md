@@ -90,6 +90,8 @@ A `watch` that follows a journal prints a line `position <seq>` before it exits.
 delegate watch --from <position> --stall-minutes 30
 ```
 
+With no run id, `watch --from` chooses the run as `watch` with no run id does: the one active run, also when a newer run ended, or the run that you choose when more than one run is active. When no run is active, it goes on in the newest run. To go on in a specific run, give its run id before `--from`, as the line of Ctrl-C does. See [the run with no run id](../reference/status-and-watch.md#the-run-with-no-run-id).
+
 ## Pause a run
 
 A pause stops a run at its next [**step**](../glossary.md#step) boundary. It cuts off no agent, so no work in progress is lost.

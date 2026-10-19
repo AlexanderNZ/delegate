@@ -9,18 +9,19 @@ the sink prints the raw line of each event.
 When standard output is a terminal, this module also sets the title of the terminal (`delegate.cli.title`): the short
 run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
 
-With no run id and no `--from`, the active runs decide (`delegate.run.runs.runs_of`). The one active run is followed,
-also when a newer run ended. With more than one, standard input and standard output on a terminal get the run picker of
-frame 2b (#118): the table of the active runs, newest first (`delegate.run.status.picker_lines`), and the prompt
+With no run id, the active runs decide (`delegate.run.runs.runs_of`), also with `--from` (#137). The one active run is
+followed, also when a newer run ended. With more than one, standard input and standard output on a terminal get the run
+picker of frame 2b (#118): the table of the active runs, newest first (`delegate.run.status.picker_lines`), and the prompt
 `watch which? [1]`. The reader types the number of a run, and Enter takes 1. Then this module follows that run. When
 standard input or standard output is not a terminal, nobody can answer the prompt: this module prints one line on stderr
 that names each active run (`delegate.run.status.choices_line`), follows none, and exits with `watch.EXIT_ERROR`. Ctrl-C
-at the prompt ends the command as before it finds a run: `delegate: interrupted` and 130. With no active run, the
-newest run gets one line and no replay of its journal:
+at the prompt ends the command as before it finds a run: `delegate: interrupted` and 130. With no active run and with
+`--from`, this module goes on in the journal of the newest run from the position. With no active run and no `--from`,
+the newest run gets one line and no replay of its journal:
 a run that ended (`delegate.run.watch.EndedRun`) exits with the code of its result, and a run that stopped
 (`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr. A newest run that failed
-at start (`delegate.run.runs.FailedStart`) has no journal: its line gives the last line of its log, and the exit code
-is `watch.EXIT_FAILED`.
+at start (`delegate.run.runs.FailedStart`) has no journal, also with `--from`: its line gives the last line of its log,
+and the exit code is `watch.EXIT_FAILED`.
 
 Ctrl-C ends the watch with `watch.EXIT_INTERRUPTED` (130), and the run goes on. The live view draws its last frame, and
 this module shows the cursor and sets the title to the reason `interrupted`. It then prints one line on stderr with the
@@ -248,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     from_position = 0 if args.from_position is None else args.from_position
     options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, from_position, args.poll_seconds)
     try:
-        if args.run_id is None and args.from_position is None:
+        if args.run_id is None:
             runs = runs_of(args.repo, GitVersionControl())
             if runs.chosen is None:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
@@ -260,16 +261,17 @@ def main(argv: list[str] | None = None) -> int:
                 if picked is None:
                     return watch.EXIT_ERROR
                 journal = picked.journal
-            elif not runs.active:
+            elif isinstance(runs.chosen, FailedStart):
+                # No run is active, and the newest run failed at start: it has no journal, also to go on from a position.
+                Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(runs.chosen.run_id)}{SEPARATOR}failed")
+                print(runs.chosen.line())
+                return watch.EXIT_FAILED
+            elif not runs.active and args.from_position is None:
                 # No run is active: the newest run gets one line, not a replay of its journal.
-                if isinstance(runs.newest, FailedStart):
-                    # The run failed at start: it has no journal.
-                    Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(runs.newest.run_id)}{SEPARATOR}failed")
-                    print(runs.newest.line())
-                    return watch.EXIT_FAILED
-                return _newest_run(watch.newest_run(runs.newest), args.raw)
+                return _newest_run(watch.newest_run(runs.chosen), args.raw)
             else:
-                journal = runs.active[0]
+                # The one active run, or, with `--from` and no active run, the newest run from the position.
+                journal = runs.chosen
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)

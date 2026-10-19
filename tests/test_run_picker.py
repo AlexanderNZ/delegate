@@ -126,6 +126,27 @@ def test_on_a_terminal_the_answer_2_follows_the_second_run_in_the_live_view(
     assert out.splitlines()[-1] == "position 6"
 
 
+def test_on_a_terminal_watch_from_a_position_shows_the_picker_and_goes_on_from_the_position_in_the_chosen_run(
+    tmp_path, monkeypatch, twelve_hours_east,  # noqa: F811 - the fixture
+):
+    # #137: with `--from` and no run id, `watch` chooses the run as with no `--from`.
+    repo = bare_repo(tmp_path)
+    first, second = two_active_runs(repo)
+    ends_at_the_first_wait(monkeypatch, (first, "b"), (second, "x"))
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    with live_lock(first, "run/one"), live_lock(second, "run/two"):
+        code, out, err = on_a_terminal(repo, monkeypatch, Keyboard("2\n"), "--raw", "--from", "3")
+
+    picker, followed = out.split(PROMPT)
+    assert picker.splitlines()[0] == "2 runs are active in this repository"
+    # The events of r-assure after position 3: ticket b starts and ends, and the run is built.
+    assert (code, err) == (0, "")
+    assert [line.split()[2] for line in followed.splitlines()[:3]] == ["step-start", "step-end", "run-end"]
+    assert "ticket=b" in followed.splitlines()[0] and "ticket=x" not in followed
+    assert followed.splitlines()[3:] == ["position 6"]
+
+
 def test_on_a_terminal_the_short_id_is_bold_and_the_header_is_faint(tmp_path, monkeypatch, twelve_hours_east):  # noqa: F811
     repo = bare_repo(tmp_path)
     first, second = two_active_runs(repo)

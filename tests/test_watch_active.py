@@ -275,3 +275,47 @@ def test_watch_without_a_run_id_follows_the_one_active_run_when_a_newer_run_fail
 
     assert (code, err) == (0, "")
     assert "run_id=older" in out and "failed at start" not in out
+
+
+def test_watch_from_a_position_without_a_run_id_follows_the_one_active_run_when_a_newer_run_ended(tmp_path, capsys, monkeypatch):
+    # #137: with `--from` and no run id, `watch` followed the newest run, and not the active run.
+    repo = bare_repo(tmp_path)
+    active = write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), step_start("a"))
+    write_journal(repo, "newer", run_start("newer", "b", run_branch="run/newer"), run_end("failed", [], ["b"]))
+    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+
+    with live_lock(active, "run/older"):
+        code, out, err = watch(repo, capsys, "--from", "1")
+
+    # The events after position 1 of the active run: its ticket a starts and ends, and the run is built.
+    assert (code, err) == (0, "")
+    assert [line.split()[2] for line in out.splitlines()[:3]] == ["step-start", "step-end", "run-end"]
+    assert "ticket=a" in out.splitlines()[0] and "ticket=b" not in out
+    assert out.splitlines()[3:] == ["position 4"]
+
+
+def test_watch_from_a_position_without_a_run_id_and_two_active_runs_not_on_a_terminal_follows_none_and_exits_2(
+    tmp_path, capsys,
+):
+    repo = bare_repo(tmp_path)
+    first, second = two_active_runs(repo)
+
+    with live_lock(first, "run/one"), live_lock(second, "run/two"):
+        code, out, err = watch(repo, capsys, "--from", "1")
+
+    assert (code, out) == (2, "")
+    assert err == (
+        "delegate watch: 2 runs are active in this repository; give a run id: "
+        "r-economy (run/two, running), r-assure (run/one, running)\n"
+    )
+
+
+def test_watch_from_a_position_without_a_run_id_reports_a_newest_run_that_failed_at_start_in_one_line(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), run_end("built", ["a"]))
+    log = failed_start(repo, "newer")
+
+    code, out, err = watch(repo, capsys, "--from", "1")
+
+    # The newest run has no journal to go on in, so `watch` gives its line, as with no `--from`.
+    assert (code, out, err) == (1, f"no run is active; the newest run newer failed at start: {GIT_ERROR}; log {log}\n", "")

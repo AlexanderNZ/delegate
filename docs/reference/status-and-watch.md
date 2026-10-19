@@ -213,7 +213,7 @@ delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--
 
 The exit codes, the options, and the last line `position <seq>` are the same in the two forms. The position is the `seq` of the last event that `watch` reported.
 
-With no run id and no `--from`, `watch` follows the one active run of the repository. When no run is active, it prints one line for the newest run, and no event. When more than one run is active, it shows [the run picker](#the-run-picker) on a terminal. Otherwise it prints one line on stderr that names each active run, follows none, and exits 2. See [the run with no run id](#the-run-with-no-run-id).
+With no run id, `watch` follows the one active run of the repository, also with `--from`. When no run is active, it prints one line for the newest run, and no event. With `--from`, it replays the journal of the newest run from the position. When more than one run is active, it shows [the run picker](#the-run-picker) on a terminal. Otherwise it prints one line on stderr that names each active run, follows none, and exits 2. See [the run with no run id](#the-run-with-no-run-id).
 
 On a terminal, `watch` also shows the progress of the run in the title of the terminal, in the two forms. See [the terminal title](#the-terminal-title).
 
@@ -235,7 +235,7 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 
 ### The run with no run id
 
-`status` and `watch` with no run id choose the run from the active runs of the repository. `watch` uses this rule only when it also gets no `--from`. With `--from` and no run id, `watch` goes on in the newest run.
+`status` and `watch` with no run id choose the run from the active runs of the repository. `watch` uses this rule also when it gets `--from`, so `watch --from <position>` with no run id follows the same run as `watch` with no run id. When no run is active, `watch` with `--from` replays the journal of the newest run from the position, and does not print the one line of the newest run.
 
 A run is active when these two conditions are true:
 
@@ -249,12 +249,12 @@ A run directory with a `run.log` and no journal is the directory of a [detached 
 | Active runs | `status` | `watch` |
 |---|---|---|
 | One | Shows the active run, also when a newer run ended. | Follows the active run, also when a newer run ended. |
-| None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
+| None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. With `--from`, replays the journal of the newest run from the position, when that run has a journal. See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
 | More than one | Prints the table of the active runs, with no prompt, and exits 0. With `--json`, it exits 2, and the message names each active run. | On a terminal, shows [the run picker](#the-run-picker), and follows the run that you choose. Otherwise, prints one line on stderr that names each active run, follows none, and exits 2. |
 
 ### The run picker
 
-When `watch` gets no run id and no `--from`, more than one run is active, and standard input and standard output are terminals, `watch` shows the run picker. It prints the number of the active runs, a table with one row for each active run, the newest run first, and the prompt `watch which? [1]`. The example below is for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold `·` (the separator) and `▶` (a running ticket):
+When `watch` gets no run id, more than one run is active, and standard input and standard output are terminals, `watch` shows the run picker. It shows the run picker also with `--from`, and goes on from the position in the run that you choose. It prints the number of the active runs, a table with one row for each active run, the newest run first, and the prompt `watch which? [1]`. The example below is for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold `·` (the separator) and `▶` (a running ticket):
 
 ```
 2 runs are active in this repository
