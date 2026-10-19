@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-19
+
 ### Added
 
 - `delegate watch`, `delegate status`, `delegate pause` and `delegate run --resume` take the short form of a run id: the part after the last `-`, as `ab12` of `20261016T030000Z-ab12` (#115). A full run id keeps its meaning. A short id that more than one run has is an error that names each match, and the command does nothing. `delegate pause` names the full run id in its output. The run context also gets the parts of the new terminal output of #114: `paint(role, text)` with the ANSI roles `fg dim bold ok now warn bad plan`, `dim` as faint (SGR 2), no background colour, and no SGR code when `NO_COLOR` is set or standard output is not a terminal; one glyph set with the ASCII fallback of the design when the locale is not UTF-8 (`LC_ALL`, `LC_CTYPE`, `LANG`); a column measurer; and `plan_tree(events)`, the depth of each ticket from `blocked_by` in the newest plan of the journal. A journal with no plan gives a flat tree.
