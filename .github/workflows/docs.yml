@@ -23,6 +23,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v10.3.0
 
+      # The generated sections and figures must be the output of the code, so a stale page is never published.
+      - name: Check the generated docs
+        run: uvx --from . delegate docs --check
+
       # The Zensical version lives only in .zensical-version.
       - name: Build the site
         run: uvx "zensical==$(cat .zensical-version)" build --strict
