@@ -109,3 +109,7 @@ git merge --ff-only run/plan
 ```
 
 The engine never merges to your base branch, never pushes, and never closes a ticket. Close the tickets in your tracker yourself.
+
+## When the plan changes during the run
+
+`to-tickets` can give a new ticket while the run works. Save it to a file, add it to the workflow, and resume the run. Do not change the file of a ticket that has started: the [**resume**](../glossary.md#resume) refuses it. See [change the plan of a run](watch-and-resume-a-run.md#change-the-plan-of-a-run).

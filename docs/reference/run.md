@@ -43,7 +43,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 
 1. The engine validates the workflow. A problem exits 1 and creates nothing.
 2. The engine checks that no other run holds the lock of the run branch. See [the run lock](#the-run-lock). A held lock exits 1 and creates nothing.
-3. The engine checks that `base-branch` is a branch of the repository, and that the run branch and the ticket branches do not exist. An earlier run can leave its run branch. A problem exits 1 and creates nothing.
+3. The engine checks that `base-branch` is a branch of the repository, and that the run branch and the ticket branches do not exist. An earlier run can leave its run branch. A problem exits 1 and creates nothing. A ticket branch that exists gives `branch '<branch>' for ticket '<id>' exists already; delete it or choose another run-branch`. A run branch that exists gives `run-branch '<name>' exists already in the repository <repo>; an earlier run can leave it. Delete it or choose another run-branch`.
 4. The engine takes the lock.
 5. The engine creates the run branch at the commit of `base-branch`, and writes `run-start` to a new journal. That commit is the base of the run. See [the base of the run](#the-base-of-the-run).
 6. For each ticket in dependency order, the engine does the [**step**](../glossary.md#step) below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
@@ -111,7 +111,7 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
+`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the short run id: the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
 
 The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a plan change, and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
@@ -153,7 +153,7 @@ delegate pause <run-id> [--repo <repo>]
 
 <!-- generated:end pause-options -->
 
-The command writes the request file `pause-request` in the directory of the run, beside its journal. It sends no signal, so it works from any shell on the same host. It prints `run <run id>: pause requested; the run stops at its next step boundary` and the path of the request, and exits 0. A second request before the engine reads the first one writes the file again.
+The command writes the request file `pause-request` in the directory of the run, beside its journal. It sends no signal, so it works from any shell on the same host. It prints two lines, `run <run id>: pause requested; the run stops at its next step boundary` and `request <path>`, and exits 0. The first line gives the full run id, also when you give the short id. A second request before the engine reads the first one writes the file again.
 
 The engine reads the request at each step boundary:
 
@@ -161,9 +161,9 @@ The engine reads the request at each step boundary:
 - Before a gate runs. In `assure` mode, the gates come after the specialist, so a pause during a specialist stops after its valid report, before its gates. A gate that does not run again (`gate-skip`) is not a boundary.
 - Before a verifier starts. In the verification of an `economy` chain, a pause during the gates of the chain stops after the gates, before the verifier.
 
-At the boundary, the engine writes `pause-requested` with the time of the request, then `paused` with the ticket and the work that did not start. It removes the request file. The run writes no `run-end`. It releases the [**run lock**](../glossary.md#run-lock), and the command prints `paused <where>; go on with delegate run --resume <run-id>` and exits 3. A run with no step boundary left ends as usual, and the engine removes the request file.
+At the boundary, the engine writes `pause-requested` with the time of the request, then `paused` with the ticket and the work that did not start. It removes the request file. The run writes no `run-end`. It releases the [**run lock**](../glossary.md#run-lock), and the command prints `paused <where>; go on with delegate run --resume <run-id>` and exits 3. `<where>` is `before the step of ticket <id>`, ``before the gate `<command>` of ticket <id>``, `before the verifier of ticket <id>`, or `before the verifier of stack <name>`. The line gives the full run id. A run with no step boundary left ends as usual, and the engine removes the request file.
 
-`delegate status` shows the run as `pausing` while the request waits, and as `paused` after `paused`. See [the reference of status and watch](status-and-watch.md#delegate-status). `delegate watch` exits with the code 7 at `paused`.
+`delegate status` shows the run as `pausing` while the request waits and the run is active, and as `paused` after `paused`. A run that stopped before the engine read the request shows the state of its journal and the note `a pause request waits; delegate run --resume removes it`. See [the reference of status and watch](status-and-watch.md#delegate-status). `delegate watch` exits with the code 7 at `paused`.
 
 To go on, use `delegate run --resume <run-id>`. The resume goes on from the boundary as from a stop: an open step continues in its worktree, a specialist with a valid report is not spawned again, and a gate that the journal holds green on the same commit does not run again. See [the resume](#the-resume). The resume accepts a plan change under its rules. So you can pause a run, add or change a ticket that has not started, and go on. See [the plan change](#the-plan-change). The resume removes a request that a process before it did not read.
 
@@ -173,6 +173,7 @@ The command refuses these runs, and writes no file. It exits 1, and the message 
 - A run that is paused already.
 - A run whose process stopped: no live process holds the lock of its run branch. Such a run needs no pause. Go on with `delegate run --resume <run-id>`.
 - An unknown run id, or a journal that is not valid.
+- A short run id that more than one run has. The message names each match.
 
 ## The plan change
 
@@ -190,20 +191,21 @@ The plan of a run is the tickets in plan order, with the id, the stack, the `blo
 8. **The coordinator reviews the later tickets.** A later ticket is a ticket that has not started and comes after an added or changed ticket, in the new order. A new ticket is not a later ticket. A resume with later tickets needs `--reviewed <ids>`, the ids separated by commas, or `--reviewed all`, that covers each of them. Without it, the resume is refused, and the message names the tickets to review. `plan-change` records the later tickets in `reviewed`. Read each later ticket against the added and changed tickets before the resume, and change its text or its `blocked-by` where a precondition changed.
 9. **Each later ticket gets the section "Plan change".** The specialist [**brief**](../glossary.md#brief) and the full verifier brief of each later ticket get the section `## Plan change`. It names each added or changed ticket that comes before the ticket, with its text, and says where the work of those tickets is. It tells the specialist to check the assumptions of its ticket against that work, and to report `blocked`, with the reason in `blocked_reason`, and build nothing, when the ticket no longer fits. It tells the verifier to check the diff against the changed plan too. A ticket before the first added or changed ticket gets no such section.
 
-A refused resume changes nothing: no journal line, no branch and no agent. The command exits 1 and names each ticket and field at fault.
+A refused resume writes no journal line, makes no branch and starts no agent. It removes a pause request that no process read. The command exits 1 and names each ticket and field at fault.
 
-A plan change also goes on with a run that ended: a `run-end` before the newest `plan-change` does not end the run. A plan change does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted. A journal of an earlier version of `delegate` has no `plan` in `run-start`. A resume of such a run with the same ticket ids goes on as before. A plan change on such a run is refused: the engine cannot check the built part, so start a new run.
+A plan change also goes on with a run that ended: a `run-end` before the newest `plan-change` does not end the run. A plan change does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted. See [the worktree invariant](#the-worktree-invariant). A journal of an earlier version of `delegate` has no `plan` in `run-start`. A resume of such a run with the same ticket ids goes on as before. A plan change on such a run is refused: the engine cannot check the built part, so start a new run.
 
 ### The dry run of a resume
 
 `delegate run [<workflow>] --resume <run-id> --dry-run` applies the rules, and changes nothing. It takes no lock. With no plan change, it prints `run <run id>: no plan change` and the order. With a plan change, it prints:
 
+- `run <run id>: plan change`.
 - `old order:` and `new order:`, the ticket ids of each plan.
 - One line for each rule: `rule <n>: ok: <rule>: <detail>`, or `rule <n>: refused: <rule>: <reason>`.
 - `later tickets to review, in plan order:` and the later tickets, when there are any.
 - `ticket <id> (added):` or `ticket <id> (changed):` and the text of each added or changed ticket, in plan order, each line indented by two spaces.
 
-The dry run takes `--reviewed` too. It exits 1 when a rule of the plan change refuses the resume, and 0 when the rules accept it. Each refusal also goes to stderr. The dry run checks only the plan. It does not check the other conditions of a resume, for example the [**run lock**](../glossary.md#run-lock), or a run that ended with no plan change.
+The dry run takes `--reviewed` too. It exits 1 when a rule of the plan change refuses the resume, or when another check of the plan refuses it: an id in `--reviewed` that is not a ticket of the workflow, a branch of a new ticket that exists, or a run that an invariant violation halted. It exits 0 when nothing refuses it. Each refusal also goes to stderr. The dry run checks only the plan. It does not check the other conditions of a resume, for example the [**run lock**](../glossary.md#run-lock), or a run that ended with no plan change.
 
 ## The retry
 
@@ -250,11 +252,11 @@ The command exits 1, names the ticket, and changes nothing, when the step cannot
 - In `economy` mode: a ticket after it in the chain is built. The branch of that ticket does not hold the commits of the step.
 - In `economy` mode: the step started from another commit than the chain gives it now. The verification of the chain added a fix-up commit to the ticket before it, or failed the tickets before it.
 
-`--retry` without `--resume` is a usage error, and the command exits 2.
+`--retry` or `--reviewed` without `--resume` is a usage error, and the command exits 2.
 
 ## The run lock
 
-A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
+A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, when a pause request stops the run, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
 
 - If another run holds the lock, and its process exists, the command exits 1. The message names the run branch, the run id, and the process id of the holder: `run branch <name> is in use by run <run id> (process <pid>)`. The run in progress is not changed. `--break-lock` does not remove the lock of a process that exists.
 - A process that is killed cannot release its lock. The next run finds a lock whose process no longer exists.
@@ -272,7 +274,7 @@ An exception that the engine did not plan for is a crash. Examples are an except
 1. It writes `step-end` with the state `failed`. The `reason` is `crashed: <exception type>: <message>`.
 2. It writes `skip` for each ticket that it did not reach. The `blockers` list is empty, and the reason is `the run ended after ticket <id> crashed`.
 3. It writes `run-end` with the result `failed`.
-4. The command prints one line `delegate run: ticket <id>: crashed: ...` on stderr, and exits 1.
+4. The command prints `delegate run: ticket <id>: crashed: ...` on stderr, and `delegate run: ticket <id>: skipped: the run ended after ticket <id> crashed` for each ticket that it did not reach. Then it prints [the summary and the retry line](#output-and-exit-codes) on stdout, and exits 1.
 
 The branch and the worktree of the ticket stay as the crash left them.
 
@@ -291,7 +293,7 @@ The engine installs the push guard in each worktree that it makes, also in a wor
 - The engine sets `core.hooksPath` for that one worktree only. It writes the setting, with `core.fsmonitor=false`, to the file `delegate.config` in the git directory of the worktree (`.git/worktrees/<name>/`). The configuration of the repository includes that file with an `includeIf "gitdir:<git directory of the worktree>"` section, so git reads the file in that worktree and in no other checkout. The main checkout and the other worktrees keep their own hooks, and a `pre-push` hook of the repository still runs for a push from the main checkout.
 - The engine does not set `extensions.worktreeConfig`, because tools that use go-git, such as `tea`, refuse a repository with that extension. Git ignores an include whose file is missing, so the settings of a worktree go with its git directory. The engine removes the `includeIf` section of a worktree that it removes, and of each worktree whose `delegate.config` file is gone, when it makes the next worktree.
 - An earlier version of the engine set `extensions.worktreeConfig`, and kept the settings in the `config.worktree` file of each worktree. When the engine makes a worktree, it moves those settings of each of its earlier worktrees to the include file, so the push guard of an earlier worktree still holds. Then it removes the extension when no `config.worktree` file holds another setting, and the repository holds `hooks/` in the [**state directory**](../glossary.md#state-directory) from an earlier run. An extension that a setting of a person needs stays, and so does an extension in a repository with no earlier run.
-- The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the [**state directory**](../glossary.md#state-directory). It holds a `pre-push` hook that prints `delegate: push refused` on stderr and exits 1, so every push from the worktree fails.
+- The directory that `core.hooksPath` names is `hooks/<run id>/<ticket id>/` in the [**state directory**](../glossary.md#state-directory). It holds a `pre-push` hook that prints `delegate: push refused: an engine worktree never pushes; the coordinator pushes` on stderr and exits 1, so every push from the worktree fails.
 - The directory also holds a wrapper for each other hook of the repository (or of the host, when the host sets `core.hooksPath`). The wrapper runs the original hook with the same arguments and the same input, so those hooks still run for the commits of the specialist.
 - The guard does not stop a push with the `--no-verify` option, because git skips every `pre-push` hook then. It also does not stop a push from a clone or from another directory. It holds against the plain push command of a specialist in the worktree.
 
@@ -311,8 +313,8 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 
 - Before each verifier run, the engine takes a snapshot of the worktree of the ticket: the HEAD commit, and for each path that `git status` reports, the status code and a hash of the content of the file. A file that git ignores is not in the snapshot. The engine takes the snapshot again when the verifier ends.
 - A difference is an [**invariant**](../glossary.md#invariant) violation. A verifier that commits, that adds or deletes a file, that edits a tracked file, or that rewrites a file which was already changed or untracked, makes the snapshots differ. The engine does this check for the first verifier of a ticket and for the verifier of each fix-up round.
-- A violation halts the run. The engine writes `verify-result`, then `invariant-violation` with the worktree, the HEAD commit before and after, and one entry in `changes` for each path that differs. The engine writes `step-end` with the state `failed` and the reason `invariant violation: ...`. It writes `skip` for each ticket that it did not reach, with the reason `the run ended after ticket <id> halted the run`. It writes `run-end` with the result `failed`. The command prints one line `delegate run: ticket <id>: invariant violation: ...` on stderr, and exits 1.
-- The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A run that a violation halted cannot be resumed.
+- A violation halts the run. The engine writes `verify-result`, then `invariant-violation` with the worktree, the HEAD commit before and after, and one entry in `changes` for each path that differs. The engine writes `step-end` with the state `failed` and the reason `invariant violation: ...`. It writes `skip` for each ticket that it did not reach, with the reason `the run ended after ticket <id> halted the run`. It writes `run-end` with the result `failed`. The command prints `delegate run: ticket <id>: invariant violation: ...` on stderr, and one skip line for each ticket that it did not reach. Then it prints the summary and the retry line on stdout, and exits 1.
+- The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A plain resume and a plan change of a run that a violation halted are refused. `--retry <ticket>` goes on with the halted step: it starts the verifier again. The tickets that the halt skipped stay skipped.
 - A verifier that writes only in its temporary copy does not halt the run. The engine removes the copy after each verifier run, also when the run halts.
 - The check covers the worktree of the ticket. It does not cover the main checkout of the repository, which the coordinator can change at any time, and it does not cover a path outside the repository.
 
@@ -393,8 +395,8 @@ A resume that stops before the end of the chain verifies the stacks again. A sta
 
 In `assure` mode, the engine verifies each ticket branch that has green gates. In `economy` mode, the engine verifies the chain at the end instead. See [the chain verification](#the-chain-verification). The steps below describe one ticket branch; the chain verification uses the same temporary copy, the same invariant check, and the same verdict report.
 
-1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. A change in the copy cannot reach the real repository. The copy is the working directory of the verifier, so the [**verifier guard**](../glossary.md#verifier-guard) keeps the copy read-only too: to break a test for a [**red proof**](../glossary.md#red-proof), the verifier copies the copy again to another temp directory. The brief gives the command, which makes the second copy and removes its `.git` entry from the working directory, before the `cd` to the second copy. The engine makes the copy also when the HEAD of the repository is on the run branch. The engine removes the copy and the second copy when the verifier ends. It does not keep the second copy in the evidence directory of the verifier.
-2. The engine makes the verifier brief with the brief generator (`full_brief`). The brief holds the task (the ticket text), the diff `git diff <run-branch>...<ticket branch>`, the gates of the stack, the path of the copy, the report rule with the absolute report path, and the foreground rule of the specialist brief (`## Commands`). The brief never holds a line of the specialist report. The report section names two ways to write the verdict, in this order. The first way is the Write tool, with the absolute report path as `file_path`. The rendered verifier has the Write tool, and its guard permits a Write only to an absolute path in a temp directory, with no `..` component; the report path is in a temp directory that the engine makes with `mkdtemp`. See [the verifier guard](commands.md#the-verifier-guard). The second way, for a verifier with no Write tool or a harness that refuses the Write, is the one command form that writes the verdict through the [**verifier guard**](../glossary.md#verifier-guard): `printf '%s\n' '<the JSON object>' > <report path>`, with the JSON on one line, and with each `$`, backtick, apostrophe, `<`, `>` and `&` written as a JSON escape (`\u0024`, `\u0060`, `\u0027`, `\u003c`, `\u003e`, `\u0026`). The guard refuses a heredoc and a here-string, and it refuses some of these characters in a command also inside quotes. The JSON parser of the engine reads each escape back as the same character. The fix-up brief and the chain brief carry the same section.
+1. The engine makes a temporary copy of the branch. The copy is a clone with its own git directory and no remote. It holds the run branch and the ticket branch, and the ticket branch is checked out. A change in the copy cannot reach the real repository. The copy is the working directory of the verifier. It has a `.git` entry, so it is a git tree. The [**verifier guard**](../glossary.md#verifier-guard) denies a write inside a git tree, and a write that holds one, so it keeps the copy read-only too: to break a test for a [**red proof**](../glossary.md#red-proof), the verifier copies the copy again to another temp directory. The brief gives the command, which makes the second copy and removes its `.git` entry from the working directory, before the `cd` to the second copy. The engine makes the copy also when the HEAD of the repository is on the run branch. The engine removes the copy and the second copy when the verifier ends. It does not keep the second copy in the evidence directory of the verifier.
+2. The engine makes the verifier brief with the brief generator (`full_brief`). The brief holds the task (the ticket text), the diff `git diff <run-branch>...<ticket branch>`, the gates of the stack, the path of the copy, the report rule with the absolute report path, and the foreground rule of the specialist brief (`## Commands`). The brief never holds a line of the specialist report. The report section names two ways to write the verdict, in this order. The first way is the Write tool, with the absolute report path as `file_path`. The rendered verifier has the Write tool, and its guard permits a Write only to an absolute path in a temp directory, with no `..` component, not inside a git tree, and not holding one; the report path is in a temp directory that the engine makes with `mkdtemp`. See [the verifier guard](commands.md#the-verifier-guard). The second way, for a verifier with no Write tool or a harness that refuses the Write, is the one command form that writes the verdict through the [**verifier guard**](../glossary.md#verifier-guard): `printf '%s\n' '<the JSON object>' > <report path>`, with the JSON on one line, and with each `$`, backtick, apostrophe, `<`, `>` and `&` written as a JSON escape (`\u0024`, `\u0060`, `\u0027`, `\u003c`, `\u003e`, `\u0026`). The guard refuses a heredoc and a here-string, and it refuses some of these characters in a command also inside quotes. The JSON parser of the engine reads each escape back as the same character. The report section also holds a binding rule: the verifier does not run a refused command in another form, through `bash -c`, `python3 -c`, `sh -c`, `env`, `xargs` or a script file. It puts the refusal in `unverified`, with the command and the message of the guard. The fix-up brief and the chain brief carry the same section.
 3. The engine spawns the verifier of the stack through the adapter. The working directory is the copy. The tier is `verifier`, whatever the tier of the specialist is. The `verifier` entry of `tier-overrides` replaces it. The model comes from the tier column of the adapter.
 4. The engine checks that the verifier left the real worktree as it was. See [the worktree invariant](#the-worktree-invariant). A difference halts the run before the engine reads the verdict.
 5. The engine reads the verdict report and checks it against the schema. When the verifier ended and wrote no report file, the engine takes the last JSON object with a `verdict` field from the final text of the verifier, writes it to the report path, and checks it in the same way. The journal records `source` `final-text` in `verify-report`. A permission mode that refuses a shell redirect to a file (for example Claude Code in `dontAsk` mode) refuses the printf form. On such a host the Write tool works only with a Write allow rule for the temp directory in the settings of the host. Without that rule the final text is the only way to give the verdict, and the brief tells the verifier to end its final message with the verdict object in each case.
@@ -443,6 +445,7 @@ The paths below are relative to the state directory.
 | `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. |
 | `hooks/<run id>/<ticket id>/` | The hooks directory of the worktree. See [the push guard](#the-push-guard). |
 | `locks/<run branch>.lock` | The lock of a run branch while a run holds it. The branch name is percent-encoded. |
+| `runs/<run id>/pause-request` | The request of `delegate pause`. The engine removes it at the next step boundary, at the end of the run, or at the start of a resume. See [the pause](#the-pause). |
 
 The run id is the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`.
 
@@ -457,7 +460,7 @@ The command prints two lines:
 
 The command makes the directory of the run and the log before the run starts. A problem after the start goes to the log. For example, another run can take the lock between the checks and the start. When the run process ends before it writes its journal, the run failed at start: its directory holds the log and no journal. A run failed at start when no lock names its run id and a process that exists, and its log holds text: the run process takes its lock before it writes its journal, and it writes nothing to the log before a problem. `delegate watch` and `delegate status` with no run id report a newest run that failed at start in one line, with the last line of its log. See [the newest run that failed at start](status-and-watch.md#the-newest-run-that-failed-at-start).
 
-`--detach` also works with `--resume <run-id>` and with `--retry <ticket>`. The run id is the id of the resumed run, and the run process appends to the same log. An unknown run id exits 1 and starts nothing. `--detach` cannot go with `--dry-run`.
+`--detach` also works with `--resume <run-id>` and with `--retry <ticket>`. The run id is the id of the resumed run, and the run process appends to the same log. An unknown run id exits 1 and starts nothing. For a resume, the checks before the start are the workflow, its tiers and the lock. The rules of a plan change, the check of a run that ended, and the checks of `--retry` are not among them. When one of these refuses the resume, the error goes to the log, and the command still exits 0. Run [the dry run of the resume](#the-dry-run-of-a-resume) first. `--detach` cannot go with `--dry-run`.
 
 ## Output and exit codes
 
@@ -469,14 +472,16 @@ journal /repo/.git/delegate/runs/20261016T030000Z-e9dc/journal.jsonl
 follow it with delegate watch · pause it with delegate pause e9dc
 ```
 
-When the run ends or pauses, the command prints one line `delegate run: ticket <id>: <reason>` on stderr for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. Then it prints the summary line on stdout, and one retry line for each failed step, in plan order:
+`delegate watch` with no run id follows the one active run. See [the run with no run id](status-and-watch.md#the-run-with-no-run-id).
+
+When the run ends or pauses, the command prints one line `delegate run: ticket <id>: <reason>` on stderr for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. Then it prints the summary line on stdout, and one retry line for each failed step, in plan order. A retry line comes also for a step that `--retry` cannot go on with. See [when a step cannot be retried](#when-a-step-cannot-be-retried).
 
 ```
 run failed · 1h06m · 1 built · 1 failed · 1 skipped · 50k new · 1.3M cache
 retry with delegate run --resume e9dc --retry a
 ```
 
-The summary gives the result of the run (`built`, `failed` or `paused`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The lines give the short run id, the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it.
+The summary gives the result of the run (`built`, `failed` or `paused`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The follow line and the retry lines give the short run id: the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it. The `paused` line gives the full run id.
 
 On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
 
@@ -486,8 +491,8 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 
 | Code | Meaning |
 |---|---|
-| 0 | Every ticket is built. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
-| 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a ticket was skipped, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
+| 0 | No step failed. After a retry, a ticket that the failed step made the engine skip can stay skipped. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
+| 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 | 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
 | 130 | Ctrl-C stopped the run in the foreground. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c). |
@@ -496,16 +501,16 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 
 Ctrl-C stops a run in the foreground at once. It does not wait for a step boundary, so it can cut off an agent or a gate. To stop a run at its next step boundary, use `delegate pause`. See [the pause](#the-pause). After Ctrl-C, the command does these steps:
 
-1. It releases the [**run lock**](../glossary.md#run-lock) of the run branch.
-2. It writes `interrupted` in the journal. The run writes no `run-end`.
-3. It prints one line on stderr. See the line below. The lines `run <run id>` and `journal <path>` are on stdout from the start of the run.
+1. It writes `interrupted` in the journal. The run writes no `run-end`.
+2. It releases the [**run lock**](../glossary.md#run-lock) of the run branch.
+3. It prints one line on stderr. See the line below. The start lines are on stdout from the start of the run. When Ctrl-C stops a resume before its start lines, the command prints `run <run id>` and `journal <path>` first.
 4. It exits with the code 130, as a shell gives for SIGINT. It shows no traceback.
 
 ```
 delegate run: interrupted; the run <run id> stopped. Go on with delegate run --resume <run id>
 ```
 
-`delegate run --resume <run-id>` then goes on as after a crash. An open step continues in its worktree. See [the resume](#the-resume). When Ctrl-C comes before the run writes its journal, there is nothing to resume: the command prints `delegate: interrupted` on stderr and exits 130. A detached run has no terminal, so Ctrl-C in the shell does not stop it.
+`delegate run --resume <run-id>` then goes on as after a kill. An open step continues in its worktree. See [the resume](#the-resume). When Ctrl-C comes before the run writes its journal, there is nothing to resume: the command prints `delegate: interrupted` on stderr and exits 130. A detached run has no terminal, so Ctrl-C in the shell does not stop it.
 
 ## Why a step fails
 
@@ -568,6 +573,8 @@ The adapter has the method `run(request)`.
 | `session_id` | The session id, or `None` when the harness gives none. |
 | `event_stream` | The path of the captured event stream: the `event_stream` of the request. |
 | `ended_idle` | True when the adapter ended the session at the idle timeout. Then `report_valid` gave true, and the harness wrote no event for `idle_timeout` seconds. Otherwise false. An adapter that cannot end a session ignores `idle_timeout` and `report_valid`, and gives false. |
+| `refused` | A (tool, mode) pair for each tool call that a permission mode of the harness refused, in stream order. Empty by default. |
+| `final_text` | The last text of the agent in the stream, or `None`. The engine reads a missing verdict from it. |
 
 The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with three fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
 
@@ -581,7 +588,7 @@ Half a line at the end of a stream is not an error, because a live harness write
 
 ## The specialist brief
 
-The brief has five sections. `## Task` holds the ticket id and the ticket text. `## File boundary` holds the worktree path, the report rule, the hotspot patterns of the stack, and the no-push rule. The report rule tells the agent to write the report only at the absolute report path. Except for its worktree and the report, the agent creates, changes, or removes nothing inside the git directory. The engine keeps the worktree and the report inside the git directory, so a relative path from the worktree is not safe. `## Commands` tells the agent to run every command in the foreground, with no background task and no monitor tool. In a headless session the notifications of these tools do not come to the agent, and a monitor that stays open keeps the session alive after the report. `## Gates` holds each gate command of the stack and the gate rule. The engine runs these gates after the report, and their result decides the step. The specialist does not run a gate command itself: it runs only the tests of the code that it changes. Without this rule, each ticket runs the gates two times. In `economy` mode, the section says that the engine runs the gates once, on the tip of the chain, and not after this ticket. The fix-up brief and the continuation brief hold the same `## Gates` section. `## Report` holds the report path, the JSON type of each report field, and one example object. It says that `gates_green` states whether the tests that the specialist ran pass, and that the result of the gates of the engine decides. The engine makes this text from the field tables of the report module, so the brief and the report check always agree. The example passes the report check.
+The brief has five sections. `## Task` holds the ticket id and the ticket text. A later ticket of a plan change also gets the section `## Plan change`. See [the plan change](#the-plan-change). `## File boundary` holds the worktree path, the report rule, the hotspot patterns of the stack, and the no-push rule. The report rule tells the agent to write the report only at the absolute report path. Except for its worktree and the report, the agent creates, changes, or removes nothing inside the git directory. The engine keeps the worktree and the report inside the git directory, so a relative path from the worktree is not safe. `## Commands` tells the agent to run every command in the foreground, with no background task and no monitor tool. In a headless session the notifications of these tools do not come to the agent, and a monitor that stays open keeps the session alive after the report. `## Gates` holds each gate command of the stack and the gate rule. The engine runs these gates after the report, and their result decides the step. The specialist does not run a gate command itself: it runs only the tests of the code that it changes. Without this rule, each ticket runs the gates two times. In `economy` mode, the section says that the engine runs the gates once, on the tip of the chain, and not after this ticket. The fix-up brief and the continuation brief hold the same `## Gates` section. `## Report` holds the report path, the JSON type of each report field, and one example object. It says that `gates_green` states whether the tests that the specialist ran pass, and that the result of the gates of the engine decides. The engine makes this text from the field tables of the report module, so the brief and the report check always agree. The example passes the report check.
 
 ## The specialist report
 
@@ -611,7 +618,7 @@ The `## Report` section of the verifier brief holds the report path, the JSON ty
 | `criteria` | list of objects | One object for each acceptance criterion, with the strings `criterion` and `evidence`. An ACCEPT needs at least one. |
 | `gate_output` | string | The output of the gates that the verifier ran. |
 | `findings` | list of strings | The defects. A REJECT needs at least one. |
-| `unverified` | list of strings | What the verifier could not verify. |
+| `unverified` | list of strings | What the verifier could not verify. This includes each command that a verifier guard refused, with the command and the message of the guard. |
 
 ## The journal
 
@@ -637,7 +644,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `pause-requested` | `ticket` (the ticket of the step boundary), `requested_at` (the time that `delegate pause` wrote in the request, or `null` when the request file cannot be read). The engine writes it at the step boundary where it reads the request. See [the pause](#the-pause). |
 | `paused` | `ticket`, `before` (the work that did not start: `step`, `gate`, or `verifier`). Before a gate also `command` and `phase`, as in `gate-start`. Before a verifier also `round`, and in a chain verification `stack` and `tickets`. The run process then ends with no `run-end`. |
-| `interrupted` | `run_id`. Ctrl-C stopped the run in the foreground. The run process then ends with no `run-end`, and a resume goes on as after a crash. See [Ctrl-C](#ctrl-c). |
+| `interrupted` | `run_id`. Ctrl-C stopped the run in the foreground. The run process then ends with no `run-end`, and a resume goes on as after a kill. See [Ctrl-C](#ctrl-c). |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |
@@ -657,7 +664,6 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 
 - In `assure` mode with `ticket-start = "base-branch"`, a ticket with no `blocked-by` starts from the base of the run, not from the accepted work of the tickets before it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see that work.
 - The engine can resume a run only while the journal has no `run-end`, or with a plan change. A run that a crash ended cannot be resumed without a plan change: start a new run. `--retry` goes on with one failed step also after `run-end`. In `assure` mode, the tickets that the engine skipped for that step stay skipped.
-- During a retry of a run that ended, `delegate status` and `delegate watch` read the old `run-end` until the retry writes a new one.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
 - In `economy` mode, a defect shows only at the end of the chain. That is also true for a defect that the gates find. The stack of a rejected chain fails as a whole when no finding names a ticket.
 - In `economy` mode, a fix-up commit goes on the chain tip. A stack that the engine verified before it does not see that commit, also when the commit changes a file of that stack. The verifier of the fix-up sees only the delta. A stack that the engine verifies after it sees the commit only when the commit changes a file of the stack. See [the fix-ups and the other stacks](#the-fix-ups-and-the-other-stacks).

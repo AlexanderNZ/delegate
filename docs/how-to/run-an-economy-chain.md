@@ -72,7 +72,7 @@ The engine does these things:
 5. It starts one [**blind**](../glossary.md#blind) verifier for the stack. The verifier gets the text of the three tickets, the diff of each ticket, and the output of the green gates.
 6. On [**ACCEPT**](../glossary.md#accept), it moves the run branch to the end of the chain.
 
-The command prints `run <run id>` and `journal <path>`. It exits 0 when every ticket is built and accepted.
+When the [**run**](../glossary.md#run) starts, the command prints `run <run id>`, `journal <path>`, and a line that tells how to follow and pause the run. When the run ends, it prints a summary line, for example `run built · 2s · 3 built · 0 failed · 0 skipped · 0 new · 0 cache`. It exits 0 when every ticket is built and accepted.
 
 ### 4. Read the result
 
@@ -100,4 +100,4 @@ Red gates and a REJECT share two fix-up rounds for each stack. A third problem f
 
 The verifier starts each finding with the id of its ticket in square brackets. For example, the finding `[2] The header row is missing.` is about ticket `2`. The engine uses the label to name the ticket. See [the chain verification](../reference/run.md#the-chain-verification) for the rules of the finding map.
 
-To follow a [**run**](../glossary.md#run), or to go on after an interruption, see [how to watch and resume a run](watch-and-resume-a-run.md).
+To follow a run, to pause it, or to add a ticket to the chain, see [how to watch and resume a run](watch-and-resume-a-run.md). That page also tells how to go on after an interruption. A ticket that a [**resume**](../glossary.md#resume) adds after the chain verification gets its own gates and verifier.

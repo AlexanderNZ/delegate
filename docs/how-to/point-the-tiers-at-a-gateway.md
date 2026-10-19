@@ -86,6 +86,6 @@ In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode) the [**
 
 ## Other commands
 
-`--tiers` also changes the other commands that read the tier table. For `render`, `validate` and [**`bootstrap`**](../glossary.md#bootstrap), put it before the subcommand, as in `delegate --tiers my-tiers.toml validate`. The commands `brief`, `status`, `watch` and `docs` refuse it. See [the options before the subcommand](../reference/commands.md#options-before-the-subcommand).
+`--tiers` also changes the other commands that read the tier table. For `render`, `validate` and [**`bootstrap`**](../glossary.md#bootstrap), put it before the subcommand, as in `delegate --tiers my-tiers.toml validate`. The commands `brief`, `pause`, `status`, `watch` and `docs` refuse it. See [the options before the subcommand](../reference/commands.md#options-before-the-subcommand).
 
 To change only the OpenCode column, use `--opencode-model` and `--opencode-allow` and no file. See [the model of the OpenCode adapter](../reference/opencode-adapter.md#the-model).

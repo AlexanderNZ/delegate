@@ -89,7 +89,7 @@ delegate bootstrap --repo . --name web \
   --gate-command "npm test"
 ```
 
-Each verifier may run the gate command that you gave to its own run, and no other build command. The backend verifier cannot run `npm test`. See [the bootstrap reference](../reference/commands.md#delegate-bootstrap) for every option.
+Each verifier may run the gate command that you gave to its own run, and no other build command. The backend verifier cannot run `npm test`. A verifier can also go to a directory of the repository first, so `cd backend && python3 -m pytest` is permitted. See [the bootstrap reference](../reference/commands.md#delegate-bootstrap) for every option.
 
 The runs write these agents: `backend-specialist`, `backend-verifier`, `web-specialist`, and `web-verifier`.
 

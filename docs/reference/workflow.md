@@ -13,7 +13,7 @@ Check a workflow file before a [**run**](../glossary.md#run):
 delegate run <workflow> --dry-run
 ```
 
-The command validates the file and prints the plan in dependency order. The command creates no branch, no [**worktree**](../glossary.md#worktree), and no [**journal**](../glossary.md#journal). It changes nothing.
+The command validates the file and prints the plan in dependency order. With `--resume <run-id>`, the dry run compares the file with the newest plan of the run instead. See [change the workflow between resumes](#change-the-workflow-between-resumes). The command creates no branch, no [**worktree**](../glossary.md#worktree), and no [**journal**](../glossary.md#journal). It changes nothing.
 
 The options of `delegate run` are in [the options of the run reference](run.md#options). Without `--dry-run`, the command builds the [**tickets**](../glossary.md#ticket). A [**tier file**](../glossary.md#tier-file) from `--tiers` sets the valid [**tier**](../glossary.md#tier) names. The options `--opencode-model` and `--opencode-allow` change the `opencode` column of the [**tier table**](../glossary.md#tier-table). See [the adapter reference](opencode-adapter.md#the-model).
 
@@ -22,10 +22,10 @@ The options of `delegate run` are in [the options of the run reference](run.md#o
 | Code | Meaning |
 |---|---|
 | 0 | The workflow is valid. The plan is on stdout. |
-| 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). |
+| 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the plan change refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
 | 2 | A usage error. |
 
-The command reports all problems of a file in one run, not only the first.
+The command reports the problems of a file in one run, not only the first. A ticket or a stack with a problem is left out of the later checks, so correct the problems and check the file again.
 
 ## Example
 
@@ -66,7 +66,7 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 | `base-branch` | string | The branch that the run starts from. The run takes the commit of this branch at its start, and records it as the base of the run. A commit that lands on `base-branch` later is not part of the run. See [the base of the run](run.md#the-base-of-the-run). |
 | `run-branch` | string | The branch that the engine owns and accepted work lands on. It must differ from `base-branch`. |
 | [**`mode`**](../glossary.md#mode) | string | [**`assure`**](../glossary.md#assure) or [**`economy`**](../glossary.md#economy). |
-| [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. See [the run reference](run.md#the-adapter-interface). |
+| [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. A run with `cursor` exits 1 until an implementation registers under that name. See [the run reference](run.md#the-adapter-interface). |
 | `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode with no `blocked-by` starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
 | `stacks` | table | One sub-table for each stack. See [Stacks](#stacks). |
@@ -110,7 +110,7 @@ In `economy` mode, each ticket branch starts from the previous ticket. `ticket-s
 |---|---|
 | `claude-code` | Claude Code. See [the adapter reference](claude-code-adapter.md). |
 | `opencode` | OpenCode. See [the adapter reference](opencode-adapter.md). |
-| `cursor` | Cursor `agent` CLI |
+| `cursor` | Cursor `agent` CLI. The name is valid, and `--dry-run` accepts it, but no adapter implements it yet: a run with `cursor` exits 1. |
 
 ## Tier overrides
 
@@ -173,6 +173,16 @@ Each `[[tickets]]` table describes one ticket. The tickets can be in any order i
 The engine never contacts an issue tracker. The agent that invokes the engine writes any tracker content to disk first.
 
 Ticket text is about behaviour and holds no file paths. The engine adds the [**file boundary**](../glossary.md#file-boundary) to the [**brief**](../glossary.md#brief) when it starts a step.
+
+## Change the workflow between resumes
+
+A resume reads the workflow file again. With no workflow argument, `delegate run --resume <run-id>` reads the file that the run started from.
+
+- `mode`, `adapter`, `base-branch` and `run-branch` must not change. If one of them changes, the resume exits 1, and the message names the field.
+- The tickets can change. This is a plan change. The built part of the run is fixed. A new ticket goes at the end, or before a ticket that has not started. A ticket that has not started can change, move or go. A new ticket before built work, and a change to a built ticket, are refused, and the message names the ticket and the field.
+- A later ticket has not started, and comes after an added or changed ticket. Read each later ticket against the new work, then give `--reviewed <ids>` or `--reviewed all`. Without it, the resume is refused.
+
+`delegate run --resume <run-id> --dry-run` prints the old order, the new order, the [**verdict**](../glossary.md#verdict) of each rule and the tickets to review, and changes nothing. See [the plan change](run.md#the-plan-change).
 
 ## Problems that the check reports
 

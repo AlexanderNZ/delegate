@@ -28,9 +28,10 @@ On a terminal, `delegate docs` sets the title of the terminal to `delegate docs`
 
 ## What the command does
 
-- With no option, the command rewrites each generated section and prints `updated <page>` for each page that changed. It leaves the prose outside the sections as it is.
+- With no option, the command rewrites each generated section and prints `updated <file>` for each page or file that changed, also for the abbreviations file and the glossary map. It leaves the prose outside the sections as it is.
 - With `--check`, the command writes nothing. For each section that differs from the code, it prints a line on stderr that names the page and the section, and it exits 1. It exits 0 when each section is current.
-- A page that is missing, or a page with no pair of markers for one of its sections, is an error: the command names the page and the section on stderr and exits 2. The command never adds a section to a page.
+- A page that is missing, or a page that does not have exactly one pair of markers for one of its sections, is an error: the command names the page and the section on stderr and exits 2. An option with no help text is also an error. The command never adds a section to a page.
+- After Ctrl-C, the command prints `delegate: interrupted` on stderr and exits 130.
 
 A generated section sits between two markers in the page:
 
