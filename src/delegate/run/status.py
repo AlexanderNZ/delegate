@@ -14,8 +14,11 @@ for its agent, and is not an error. It needs no workflow file, and no tool
 beyond git, which finds the state directory. The tickets are the tickets of the
 newest plan of the run (see `journal.plan_ids`), so the progress and the ETA
 count a ticket that a plan change added. The state of the run is `running`,
-`pausing` while a pause request waits in the directory of the run, `paused`
-from its `paused` event until a resume, or the result of its `run-end`.
+`pausing` while a pause request waits in the directory of the run and the run
+is active (see `delegate.run.runs`), `paused` from its `paused` event until a
+resume, or the result of its `run-end`. A pause request of a run that is not
+active stays until the next resume: the run then keeps the state of its
+journal, and the snapshot has the note `PAUSE_REQUEST_NOTE`.
 
 The report (`report`) gives the lines of `delegate status`: the state, the
 verdict and the branch of each ticket from the journal, with the progress of
@@ -39,7 +42,7 @@ from ..ports.vcs import VersionControl
 from . import domain
 from .journal import JournalError, activity_files, is_paused, last_change, newest_run_end, plan_ids, read_new_events
 from .pause import pause_requested
-from .runs import journal_of
+from .runs import RunsError, is_active, journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
 # with `step-start` and no `step-end` is running, and the rest follow `step-end`
@@ -55,6 +58,9 @@ SKIPPED: str = "skipped"
 PAUSING: str = "pausing"
 PAUSED: str = "paused"
 
+# The note of a run with a pause request and no live process: the run stopped before the engine read the request.
+PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
+
 # What the line of a ticket shows for a value that the journal does not hold.
 NONE: str = "-"
 
@@ -66,6 +72,7 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
     lines = [
         f"run {start['run_id']}: {snap.state} (mode {start['mode']}, adapter {start['adapter']})",
+        *([f"note: {snap.note}"] if snap.note else []),
         f"progress: {_run_progress(snap)}", f"journal {journal}",
     ]
     progress = {t.id: t for t in snap.tickets}
@@ -172,6 +179,8 @@ class Snapshot:
 
     `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
 
+    `note` is `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
+
     `tokens_new` and `tokens_cache` are None when the snapshot has no reader of the streams. Otherwise each is the sum of
     the tickets that have tokens: a ticket with a stream that cannot be read adds nothing.
     """
@@ -188,6 +197,7 @@ class Snapshot:
     tokens_cache: int | None
     tickets: tuple[TicketSnapshot, ...]
     phase: str | None = None
+    note: str | None = None
 
     def to_json(self) -> dict[str, object]:
         """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it."""
@@ -195,7 +205,7 @@ class Snapshot:
             "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
             "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
             "eta": self.eta.isoformat() if self.eta else None, "tokens_new": self.tokens_new, "tokens_cache": self.tokens_cache,
-            "phase": self.phase,
+            "phase": self.phase, "note": self.note,
             "tickets": [
                 {
                     "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens_new": t.tokens_new,
@@ -362,24 +372,37 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     chain_phase, chain_seconds = _chain(events, now) if chain and not stopped else (None, 0)
     units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
+    state, note = _state(end, paused, journal)
     return Snapshot(
-        run_id=str(start["run_id"]), state=_state(end, paused, journal), time=now,
+        run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
         eta=None if to_end is None or paused else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
-        phase=chain_phase,
+        phase=chain_phase, note=note,
     )
 
 
-def _state(end: dict[str, object] | None, paused: bool, journal: Path) -> str:
-    """The state of a run: the result of its `run-end`, `paused`, `pausing` while a pause request waits, or `running`."""
+def _state(end: dict[str, object] | None, paused: bool, journal: Path) -> tuple[str, str | None]:
+    """The state of a run and its note.
+
+    The state is the result of its `run-end`, `paused`, `pausing` while a pause request waits and the run is active, or
+    `running`. The note is `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
+    A lock file that cannot be read does not show that the process stopped, so the run is then `pausing`.
+    """
+    requested = pause_requested(journal)
+    if end is None and not paused and requested:
+        try:
+            active = is_active(journal)
+        except RunsError:
+            active = True
+        if active:
+            return PAUSING, None
+    note = PAUSE_REQUEST_NOTE if requested else None
     if end is not None:
-        return str(end["result"])
-    if paused:
-        return PAUSED
-    return PAUSING if pause_requested(journal) else RUNNING
+        return str(end["result"]), note
+    return (PAUSED if paused else RUNNING), note
 
 
 def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> Snapshot:

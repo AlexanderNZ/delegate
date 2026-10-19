@@ -95,8 +95,13 @@ class Runs:
         return self.active[0] if self.active else self.newest
 
 
-def _active(state: Path, journal: Path) -> bool:
-    """True when the run of `journal` is active. Raise RunsError when its lock file cannot be read."""
+def is_active(journal: Path) -> bool:
+    """True when the run of `journal` is active. Raise RunsError when its lock file cannot be read.
+
+    The journal is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory that holds the lock.
+    `delegate status` uses the rule also for the state of a run with a pause request.
+    """
+    state = journal.parents[2]
     with journal.open() as handle:
         line = handle.readline()
     # `_start_time` checked that a complete first line is an event. A journal with no `run-start` names no run branch.
@@ -122,5 +127,5 @@ def runs_of(repo: Path, vcs: VersionControl) -> Runs:
     """
     state = _state(repo, vcs)
     journals = _journals(repo, state)
-    active = tuple(journal for journal in sorted(journals, key=_start_time) if _active(state, journal))
+    active = tuple(journal for journal in sorted(journals, key=_start_time) if is_active(journal))
     return Runs(max(journals, key=_start_time), active)

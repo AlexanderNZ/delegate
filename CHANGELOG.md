@@ -16,6 +16,7 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ### Fixed
 
+- `delegate status` shows `pausing` only while the run is active: the lock of its run branch names the run and a process that exists, the rule of #110 (#111). A run that stopped before the engine read its pause request (Ctrl-C, a kill or a crash) shows the state of its journal, and the note `a pause request waits; delegate run --resume removes it`. `status --json` gives the note in the new field `note`, which is `null` for each other run. Before, such a run showed `pausing` until the next resume.
 - A verifier stays read-only on the tree under review also when that tree is in a temp directory. On macOS, a worktree from `mktemp -d` is under `/var/folders`, and the Bash guard and the Write guard permitted a write to it. Each guard now finds the git toplevel of its working directory (the `cwd` of the hook input, or else the working directory of the process) in the `python3` process that it starts anyway, and denies a temp path in that toplevel, or a path that holds it, as a write target. It compares the paths without a `/private` prefix. A `cd` to the tree and a write to another temp path stay permitted. The working directory of a `delegate run` verifier is its temporary copy, so that verifier copies the copy again for a red proof, and the brief says so. The reference page records that the OpenCode maps have no `$TMPDIR` prefix (#106).
 
 ## [1.5.0] - 2026-10-19

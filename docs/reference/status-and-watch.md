@@ -33,7 +33,7 @@ With no run id, `status` shows the one active run, or the newest run when no run
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run, and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). The second line gives the progress of the run. The third line gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A run can stop before the [**engine**](../glossary.md#engine) reads the request: for example, after Ctrl-C, a kill or a crash. The request then stays until the next resume, and the run has no live process. Such a run is not `pausing`: the result is the state of its journal, for example `running`. A second line then gives the note `note: a pause request waits; delegate run --resume removes it`. The next line gives the progress of the run, and the line after it gives the path of the journal. Then each [**ticket**](../glossary.md#ticket) of the run has one line, in plan order:
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
@@ -77,7 +77,7 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | Field | Type | Meaning |
 |---|---|---|
 | `run_id` | string | The id of the run. |
-| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. `pausing` while a pause request waits, and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). |
+| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. `pausing` while a pause request waits and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A pause request of a run with no live process does not make the run `pausing`: see `note`. |
 | `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. For a paused run, it is the time of `paused`. |
 | `elapsed_seconds` | integer | The time that the run used: from `run-start` to `time`. |
 | `tickets_total` | integer | The number of [**tickets**](../glossary.md#ticket) of the run. |
@@ -87,6 +87,7 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | `tokens_new` | integer or `null` | The new tokens of the run: the sum of `tokens_new` of all tickets. A ticket whose `tokens_new` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). See [the token counts](#the-token-counts). |
 | `tokens_cache` | integer or `null` | The cache tokens of the run: the sum of `tokens_cache` of all tickets. A ticket whose `tokens_cache` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, while the run is paused, and in [**`assure`**](../glossary.md#assure) mode. |
+| `note` | string or `null` | `a pause request waits; delegate run --resume removes it` when a pause request waits in the directory of the run and the run is not [active](#the-run-with-no-run-id): its process stopped before the engine read the request. `null` otherwise. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 
 | Ticket field | Type | Meaning |
