@@ -37,6 +37,7 @@ from delegate.cli import delegate
 from delegate.definitions.validate import split_frontmatter
 from delegate.run.brief import verifier_run_sections
 
+from .pages import outside_the_package
 from .support import ScriptedAdapter, git, make_repo, read_journal
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -258,6 +259,8 @@ def test_the_opencode_verifier_states_that_its_maps_cannot_deny_the_tree_through
     assert "2026-10-19" in section
 
 
+# The docs are outside the package source, as in a Nix build.
+@outside_the_package
 def test_the_enforcement_page_states_the_opencode_limit_with_its_evidence():
     section = ENFORCEMENT_PAGE.read_text().split("## The limits of the guards", 1)[1]
     (item,) = [line for line in section.splitlines() if "the real path of the project" in line]
