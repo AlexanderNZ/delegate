@@ -118,6 +118,38 @@ def test_a_verifier_that_changes_the_real_worktree_halts_the_run_and_the_journal
     assert git(repo, "rev-parse", "run/demo").strip() == base_tip  # an ACCEPT on disk does not advance the run branch
 
 
+@pytest.mark.parametrize(
+    "change, entry",
+    [
+        pytest.param("new-file", "oops.txt: status clean -> ??", id="new-file"),
+        pytest.param("tracked-edit", "feature.txt: status clean -> M", id="edit-of-a-tracked-file"),
+        pytest.param("untracked-delete", "leftover.txt: status ?? -> clean", id="delete-of-an-untracked-file"),
+    ],
+)
+def test_the_changes_of_a_violation_name_a_path_with_no_status_as_clean(tmp_path, capsys, registered, change, entry):
+    # A gate leaves the untracked file leftover.txt in the worktree before the verifier runs.
+    workflow = WORKFLOW.replace('gates = ["test -f feature.txt"]', 'gates = ["test -f feature.txt && echo gate > leftover.txt"]')
+    repo = make_repo(tmp_path, workflow)
+    adapter = registered(ScriptedAdapter())
+
+    def change_it(request):
+        worktree = real_worktree(repo)
+        if change == "new-file":
+            (worktree / "oops.txt").write_text("written by the verifier\n")
+        elif change == "tracked-edit":
+            (worktree / "feature.txt").write_text("changed by the verifier\n")
+        else:
+            (worktree / "leftover.txt").unlink()
+
+    adapter.during_verifier = change_it
+
+    code, out, err = run(repo, capsys)
+
+    (violation,) = [e for e in read_journal(out) if e["event"] == "invariant-violation"]
+    assert code == 1
+    assert violation["changes"] == [entry]
+
+
 def test_a_violation_halts_the_whole_run_so_a_ticket_that_waits_is_skipped_and_never_built(tmp_path, capsys, registered):
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b") + ticket("c", ("a",)))
     adapter = registered(ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"}))

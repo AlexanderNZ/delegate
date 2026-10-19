@@ -155,7 +155,7 @@ def snapshot_worktree(vcs: VersionControl, worktree: Path) -> WorktreeSnapshot:
 
 def _change(name: str, before: str | None, after: str | None) -> str:
     """One line for a path whose state differs: its status code before and after, or that its content changed."""
-    code_before, code_after = (before or "clean")[:2].strip() or "clean", (after or "clean")[:2].strip() or "clean"
+    code_before, code_after = ((state or "")[:2].strip() or "clean" for state in (before, after))
     if before is not None and after is not None and code_before == code_after:
         return f"{name}: content changed (status {code_after})"
     return f"{name}: status {code_before} -> {code_after}"
