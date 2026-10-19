@@ -33,9 +33,10 @@ from typing import TextIO
 from ..adapters.git import GitVersionControl
 from ..run import live, status, watch
 from ..run.journal import JournalError
+from ..run.output import short_run_id
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
 from .status import stream_reader_of, utc_now
-from .title import SEPARATOR, Title, short_run_id
+from .title import SEPARATOR, Title
 
 # The terminal control sequences of the live view: clear the screen, move the cursor to the top left, clear to the end
 # of the line, and clear the screen below the cursor.
@@ -226,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         live_view = not args.raw and sys.stdout.isatty()
         if live_view:
             screen = _Screen(sys.stdout)
-            sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw)
+            sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw, args.stall_minutes)
         title = Title(sys.stdout)
         if title.enabled:
             sink = _Titled(sink, journal, title)

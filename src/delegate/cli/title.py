@@ -23,14 +23,6 @@ SEPARATOR: str = " · "
 CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 
 
-def short_run_id(run_id: str) -> str:
-    """The short form of a run id: the random part after the last `-`, as `ab12` of `20261016T030000Z-ab12`.
-
-    A run id with no `-` is its own short form.
-    """
-    return run_id.rsplit("-", 1)[-1] or run_id
-
-
 class Title:
     """The title of the terminal that is standard output. `set` writes a title only when it differs from the last one."""
 

@@ -1,11 +1,13 @@
-"""`delegate watch` on a terminal: the live progress block of the snapshot at the top, and a readable feed of the events below.
+"""`delegate watch` on a terminal: the run line and the ticket table at the top, and below a divider a readable feed of
+the events of the ticket that runs now (#116). `test_watch_frame` holds the cases of the cells of the frame.
 
 A case writes the journal of a run, with the time of each event, in the state
 directory of a real temporary git repository, and calls
 `delegate.main(["watch", ...])`. The system boundaries are faked: the terminal
 (a standard output whose `isatty` is true, and `COLUMNS` and `LINES`), the clock
-(`time.time`), the time zone (`TZ`), and the wait between two polls
-(`time.sleep`), which appends the next events of a live run.
+(`time.time`), the time zone (`TZ`), the locale (`LC_ALL`, which decides the glyph
+set), and the wait between two polls (`time.sleep`), which appends the next events
+of a live run.
 
 Standard output that is not a terminal, and `--raw`, give the raw lines of the
 earlier `watch`. The golden lines below are the output of `watch` before the
@@ -42,13 +44,19 @@ def at(seconds: float) -> str:
 class Run:
     """The journal of one run, written line by line with the time of each event, and the event streams of its agents."""
 
-    def __init__(self, repo: Path, *tickets: str, mode: str = "assure") -> None:
-        self.path = journal_path(repo, "r1")
+    def __init__(
+        self, repo: Path, *tickets: str, mode: str = "assure", run_id: str = "r1", blocked_by: dict[str, tuple[str, ...]] | None = None
+    ) -> None:
+        """`blocked_by` gives the blockers of each ticket. With it, `run-start` records the plan, as the engine does (#107)."""
+        self.path = journal_path(repo, run_id)
         self.path.parent.mkdir(parents=True)
         self.dir = self.path.parent
         self.seq = 0
-        self.add(0, "run-start", run_id="r1", workflow="/w/workflow.toml", mode=mode, adapter="claude-code",
-                 base_branch="main", run_branch="run/demo", tickets=list(tickets))
+        plan = {} if blocked_by is None else {"plan": [
+            {"id": t, "stack": "python", "blocked_by": list(blocked_by.get(t, ())), "text_sha256": "0" * 64} for t in tickets
+        ]}
+        self.add(0, "run-start", run_id=run_id, workflow="/w/workflow.toml", mode=mode, adapter="claude-code",
+                 base_branch="main", run_branch="run/demo", tickets=list(tickets), **plan)
 
     def add(self, seconds: float, event: str, **fields: object) -> None:
         self.seq += 1
@@ -134,9 +142,10 @@ def ticket_b_ends(run: Run) -> None:
 
 @pytest.fixture
 def local_zone(monkeypatch):
-    """Set the local time zone of the process to a POSIX zone, and set it back after the case."""
+    """Set the local time zone of the process to a POSIX zone, and set it back after the case. The locale is UTF-8."""
 
     def set_zone(zone: str) -> None:
+        monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
         monkeypatch.setenv("TZ", zone)
         time.tzset()
 
@@ -168,25 +177,26 @@ def watch(
     return code, out.getvalue()
 
 
-FEED = [
-    "16:00  run r1 started · assure · 2 tickets",
-    "16:00  #a started · python-specialist",
-    "16:36  #a specialist finished · 36m · tokens 19k new, 0 cache · report ok",
-    "16:52  #a gates green (pytest 16m, zensical 1s)",
-    "16:52  #a verifier started",
-    "17:00  #a verifier finished · 7m · tokens 19k new, 0 cache · report ok",
-    "17:00  #a ✓ ACCEPT · built",
-    "17:00  #b started · python-specialist",
+# The table of the run of `a_live_run`, at the first poll and at the end. The stream of the specialist of b is a
+# recorded one, so its last activity is days before the clock of the case.
+TABLE_AT_THE_FIRST_POLL = [
+    "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  1h00m used  ETA 59m10s  50k new · 14k cache",
+    "",
+    "#  plan  state    phase                                         used  new  cache",
+    "1  ● a   ✓ built                                               1h00m  39k      0",
+    "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○    50s  12k    14k  ⚠ idle 7d08h",
+    "─" * 200,
 ]
 
-FEED_AFTER_THE_END = [
+FEED = [
+    "17:00  #b started · python-specialist",
     "17:06  #b specialist finished · 6m · tokens 12k new, 14k cache · report ok",
     "17:06  #b built",
     "17:06  run built · 1h06m · tokens 50k new, 14k cache",
 ]
 
 
-def test_watch_on_a_terminal_draws_the_live_block_at_the_top_and_the_feed_below_and_draws_them_again_at_each_poll(
+def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_running_ticket_below_and_draws_them_again_at_each_poll(
     tmp_path, monkeypatch, local_zone
 ):
     local_zone("NZT-13")  # 13 hours east of UTC: the run starts at 03:00 UTC, 16:00 local time
@@ -198,22 +208,30 @@ def test_watch_on_a_terminal_draws_the_live_block_at_the_top_and_the_feed_below_
 
     assert code == 0
     first, last = frames(out)
-    assert first == [
-        "run r1 running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, tokens 50k new, 14k cache",
-        "  a built, 1h00m used, tokens 39k new, 0 cache",
-        "  b running specialist, 50s used, tokens 12k new, 14k cache, last activity 7d08h ago",
-        "",
-        *FEED,
-    ]
+    # The lines of ticket a went at the start of b. The last line of a frame that goes on tells the agent that runs.
+    assert first == [*TABLE_AT_THE_FIRST_POLL, FEED[0], "17:00  #b specialist running · 50s · ⚠ idle 7d08h"]
     assert last == [
-        "run r1 built 100%, 2 of 2 ended, 1h06m used, tokens 50k new, 14k cache",
-        "  a built, 1h00m used, tokens 39k new, 0 cache",
-        "  b built, 6m40s used, tokens 12k new, 14k cache",
+        "run r1  built  ████████████████ 100%  2/2 ended  1h06m used  50k new · 14k cache",
         "",
+        "#  plan  state    phase   used  new  cache",
+        "1  ● a   ✓ built         1h00m  39k      0",
+        "2  ● b   ✓ built         6m40s  12k    14k",
+        "─" * 200,
         *FEED,
-        *FEED_AFTER_THE_END,
     ]
     assert out.splitlines()[-1] == f"position {run.seq}"
+
+
+def test_before_the_first_step_the_feed_holds_the_line_of_the_start_of_the_run(tmp_path, monkeypatch, local_zone):
+    local_zone("NZT-13")
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a")
+    run.add(1, "run-end", result="failed", built=[], failed=[], skipped=[])
+
+    _, out = watch(repo, monkeypatch)
+
+    (last,) = frames(out)
+    assert last[-2:] == ["16:00  run r1 started · assure · 1 ticket", "16:00  run failed · 1s · tokens 0 new, 0 cache"]
 
 
 def test_the_feed_gives_the_local_time_of_each_event(tmp_path, monkeypatch, local_zone):
@@ -225,9 +243,7 @@ def test_the_feed_gives_the_local_time_of_each_event(tmp_path, monkeypatch, loca
     _, out = watch(repo, monkeypatch)
 
     (last,) = frames(out)
-    assert [line[:5] for line in last if re.match(r"\d\d:\d\d  ", line)] == (
-        ["22:00", "22:00", "22:36", "22:52", "22:52", "23:00", "23:00", "23:00", "23:06", "23:06", "23:06"]
-    )
+    assert [line[:5] for line in last if re.match(r"\d\d:\d\d  ", line)] == ["23:00", "23:06", "23:06", "23:06"]
 
 
 @pytest.mark.parametrize("columns", [30, 60, 200])
@@ -241,7 +257,7 @@ def test_the_live_view_has_no_line_wider_than_the_terminal_no_absolute_path_and_
 
     assert code == 0
     drawn = [line for frame in frames(out) for line in frame]
-    assert len(drawn) > 20
+    assert len(drawn) > 15
     for line in drawn:
         assert len(line) <= columns, line
         assert not re.search(r"(^|\s)/", line), line
@@ -258,9 +274,17 @@ def test_a_frame_of_a_run_that_goes_on_fits_the_height_of_the_terminal_and_keeps
     _, out = watch(repo, monkeypatch, rows=8, then=lambda: ticket_b_ends(run))
 
     first, last = frames(out)
-    # The block has 3 lines and a blank line under it; the last line of the terminal stays free for the cursor.
-    assert first == first[:4] + FEED[-3:]
-    assert last[4:] == FEED + FEED_AFTER_THE_END  # the last frame keeps the whole feed, so the terminal scrolls it
+    # The built row folds, and the feed keeps its newest line. The last line of the terminal stays free for the cursor.
+    assert first == [
+        TABLE_AT_THE_FIRST_POLL[0],
+        "",
+        "#  plan  state    phase                                        used  new  cache",
+        "   ✓ built 1  a",
+        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○   50s  12k    14k  ⚠ idle 7d08h",
+        "─" * 200,
+        "17:00  #b specialist running · 50s · ⚠ idle 7d08h",
+    ]
+    assert last[last.index("─" * 200) + 1:] == FEED  # the last frame keeps the whole feed, so the terminal scrolls it
 
 
 def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_path(tmp_path, monkeypatch, local_zone):
@@ -282,7 +306,9 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
     assert out.splitlines()[-1] == "position 5"
 
 
-def test_the_verdict_of_an_economy_chain_names_its_stack_and_joins_the_end_of_the_run(tmp_path, monkeypatch, local_zone):
+def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its_stack_and_joins_the_end_of_the_run(
+    tmp_path, monkeypatch, local_zone
+):
     local_zone("NZT-13")
     repo = bare_repo(tmp_path)
     run = Run(repo, "a", mode="economy")
@@ -299,11 +325,7 @@ def test_the_verdict_of_an_economy_chain_names_its_stack_and_joins_the_end_of_th
 
     assert code == 0
     (last,) = frames(out)
-    assert last[last.index("") + 1:] == [
-        "16:00  run r1 started · economy · 1 ticket",
-        "16:00  #a started · python-specialist",
-        "16:10  #a specialist finished · 10m · tokens 19k new, 0 cache · report ok",
-        "16:11  #a gates green (pytest 1m) · built",
+    assert last[last.index("─" * 200) + 1:] == [
         "16:11  stack python verifier started (#a)",
         "16:16  stack python verifier finished · 5m · tokens 19k new, 0 cache · report ok",
         "16:16  stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 0 cache",
@@ -329,8 +351,7 @@ def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_t
 
     assert code == 3
     (last,) = frames(out)
-    assert last[last.index("") + 1:] == [
-        "16:00  run r1 started · assure · 1 ticket",
+    assert last[last.index("─" * 200) + 1:] == [
         "16:00  #a started · python-specialist",
         "16:36  #a specialist capped · 36m · tokens 19k new, 0 cache",
         "16:36  #a continuation 1 of 2 · capped",

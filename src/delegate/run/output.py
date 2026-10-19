@@ -10,15 +10,20 @@ The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and 
   glyph has the width of its Unicode glyph, so the columns stay in the same positions.
 * `columns(rows, right)` pads each value to the widest value of its column, with 2 cells between columns. The
   columns of numbers align right. A painted value is measured by the cells that it shows.
+* `styled(roles, text)` paints a text in more than one role, as `now bold`, and `cut(text, cells)` cuts a painted
+  line to the width of the terminal.
+* The short forms of the words of a frame: `short_run_id`, `gate_name`, and `without_paths`.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 # The SGR code of each role of tokens.md. `fg` is the default foreground, so it has no code.
 ROLES: dict[str, str | None] = {
@@ -37,6 +42,16 @@ GAP: str = "  "
 # The locale variables, in the order that decides the character set: the first one that is set and not empty wins.
 LOCALE_VARIABLES: tuple[str, ...] = ("LC_ALL", "LC_CTYPE", "LANG")
 
+# An absolute path in a line of a frame. A frame shows only its last part, the name of the file.
+ABSOLUTE_PATH = re.compile(r"(?<![\w.~-])/(?:[^\s/'\"]+/)*([^\s/'\"]*)")
+
+# The words at the start of a gate command that only start the tool that does the work. A frame names the gate by the
+# first word after them that is not an option and not a variable, so `nix develop -c python3 -m pytest -q` is `pytest`.
+LAUNCHERS: frozenset[str] = frozenset({"nix", "develop", "uvx", "uv", "run", "npx", "env", "exec", "python", "python3"})
+
+# A word that sets a variable of the environment of a command, as `NAME=value`. A version pin, as `tool==1.0`, is not one.
+VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?!=)")
+
 
 def colour_on() -> bool:
     """True when the output can have SGR codes: `NO_COLOR` is not set or is empty, and standard output is a terminal."""
@@ -54,6 +69,18 @@ def paint(role: str, text: str) -> str:
     if code is None or not colour_on():
         return text
     return f"\x1b[{code}m{text}{RESET}"
+
+
+def styled(roles: str, text: str) -> str:
+    """The text in each role of `roles`, a list of roles with a space between them, as `now bold`. `paint` gives the codes.
+
+    An empty text and an empty list of roles give the text with no code.
+    """
+    if not text:
+        return text
+    for role in reversed(roles.split()):
+        text = paint(role, text)
+    return text
 
 
 @dataclass(frozen=True)
@@ -112,3 +139,53 @@ def columns(rows: Sequence[Sequence[str]], right: Collection[int] = ()) -> list[
             cells.append(pad + value if index in right else value if index == last else value + pad)
         lines.append(GAP.join(cells))
     return lines
+
+
+def cut(text: str, cells: int) -> str:
+    """The first `cells` cells of a painted text. A cut text ends with the code that turns each attribute off."""
+    if width(text) <= cells:
+        return text
+    kept, shown, painted = [], 0, False
+    position = 0
+    for match in SGR.finditer(text):
+        plain = text[position:match.start()]
+        take = plain[: max(0, cells - shown)]
+        kept.append(take)
+        shown += len(take)
+        if shown >= cells:
+            break
+        kept.append(match.group())
+        painted = True
+        position = match.end()
+    else:
+        kept.append(text[position:][: max(0, cells - shown)])
+    return "".join(kept) + (RESET if painted else "")
+
+
+def short_run_id(run_id: str) -> str:
+    """The short form of a run id: the random part after the last `-`, as `ab12` of `20261016T030000Z-ab12`.
+
+    A run id with no `-` is its own short form.
+    """
+    return run_id.rsplit("-", 1)[-1] or run_id
+
+
+def gate_name(command: str) -> str:
+    """The short name of a gate command: the name of the first word that is not a launcher, with no version.
+
+    For example `nix develop -c python3 -m pytest -q` is `pytest`, and `uvx "zensical==0.0.2" build` is `zensical`.
+    """
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    for word in words:
+        if word in LAUNCHERS or word.startswith("-") or VARIABLE.match(word):
+            continue
+        return re.split(r"[=<>@]", Path(word).name)[0] or word
+    return command
+
+
+def without_paths(text: str) -> str:
+    """The text with each absolute path cut to its last part."""
+    return ABSOLUTE_PATH.sub(lambda match: match.group(1), text)

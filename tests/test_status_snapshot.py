@@ -70,6 +70,12 @@ class Run:
         self.add(end, "step-end", ticket=ticket, state="built", reason=None)
 
 
+@pytest.fixture(autouse=True)
+def utf8_locale(monkeypatch):
+    """A UTF-8 locale, so the frames of `watch` have the Unicode glyph set (`delegate.run.output.glyphs`)."""
+    monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
+
+
 def frozen(monkeypatch, seconds: float) -> None:
     monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=seconds)).timestamp())
 
@@ -322,8 +328,9 @@ def chain_gates_start(run: Run, seconds: float, round_number: int) -> None:
 
 
 def block_of(frame: list[str]) -> list[str]:
-    """The live block of a frame of `watch`: the lines above the first blank line."""
-    return frame[: frame.index("")] if "" in frame else frame
+    """The run line and the ticket table of a frame of `watch`: the lines above the divider, with no blank line."""
+    above = next((frame[:index] for index, line in enumerate(frame) if line and set(line) == {"─"}), frame)
+    return [line for line in above if line]
 
 
 def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
@@ -376,7 +383,8 @@ def test_the_verification_of_an_economy_chain_is_a_phase_of_the_run_and_keeps_th
     shown = f"{phase}, " if phase else ""
     eta_text = "5m51s" if eta == 450 - 99 else "7m30s"
     assert lines[1] == f"progress: {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
-    assert view[0] == f"run r1 running {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
+    state = f"running · {phase}" if phase else "running"
+    assert view[0] == f"run r1  {state}  ██████████░░░░░░ 66%  2/2 ended  16m40s used  ETA {eta_text}  39k new · 0 cache"
 
 
 def test_in_economy_mode_the_chain_counts_as_one_more_unit_while_a_ticket_runs(tmp_path, capsys, monkeypatch):
@@ -475,9 +483,10 @@ def test_each_form_of_status_shows_the_new_tokens_and_the_cache_tokens_of_the_ru
         "  progress: specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
     ]
     assert block == [
-        "run r1 running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
-        "  a built, 10m00s used, tokens 19k new, 0 cache",
-        "  b running specialist, 50s used, tokens 12k new, 14k cache, last activity 7d07h ago",
+        "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s  31k new · 14k cache",
+        "#  plan  state    phase                                          used  new  cache",
+        "1  ● a   ✓ built                                               10m00s  19k      0",
+        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s  12k    14k  ⚠ idle 7d07h",
     ]
 
 
@@ -565,10 +574,12 @@ def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
+    # The table has no columns `new` and `cache`, and the running row has no live tail.
     assert block_of(drawn[0]) == [
-        "run r1 running 50%, 1 of 2 ended, 10m50s used, ETA 9m10s",
-        "  a built, 10m00s used",
-        "  b running specialist, 50s used",
+        "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s",
+        "#  plan  state    phase                                          used",
+        "1  ● a   ✓ built                                               10m00s",
+        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s",
     ]
 
 
@@ -614,10 +625,10 @@ def test_the_live_block_has_a_line_for_the_run_and_one_for_each_ticket_and_watch
 
     assert (code, waits) == (0, [3.0])
     first, second = (block_of(frame) for frame in drawn)
-    assert len(first) == len(second) == 3
-    assert first[0].startswith("run 20261016T030000Z-abcd running 50%")
-    assert second[0].startswith("run 20261016T030000Z-abcd built 100%")
-    assert "b" in second[2] and "built" in second[2]
+    assert len(first) == len(second) == 4  # the run line, the header, and a row for each ticket
+    assert first[0].startswith("run abcd  running  50%")
+    assert second[0].startswith("run abcd  built  100%")
+    assert second[3].startswith("2  ● b                            ✓ built")
 
 
 @pytest.mark.parametrize("columns", [30, 60, 200])
@@ -645,7 +656,7 @@ def test_watch_of_a_run_that_ended_draws_it_once_and_exits_with_no_wait(tmp_path
     code, drawn, waits = follow(repo, monkeypatch, run)
 
     assert (code, waits, len(drawn)) == (0, [], 1)
-    assert drawn[0][0].startswith("run 20261016T030000Z-abcd built 100%")
+    assert drawn[0][0].startswith("run abcd  built  100%")
 
 
 @pytest.mark.parametrize(
@@ -801,12 +812,24 @@ def test_the_live_block_on_a_run_with_a_stream_that_cannot_be_read_shows_no_toke
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     good = GOOD_TOKENS[adapter][1]
+    new = good.split()[1]  # `tokens 19k new, 0 cache`: the new tokens of a
+    # The row of b has no tokens, and while its agent runs, no live tail.
     expected = {
-        "ended": (f"run r1 running 66%, 2 of 3 ended, 10m50s used, ETA 5m15s, {good}", "  b built, 30s used"),
-        "live": (f"run r1 running 33%, 1 of 3 ended, 10m50s used, ETA 19m10s, {good}", "  b running specialist, 50s used"),
+        "ended": [
+            f"run r1  running  ██████████░░░░░░ 66%  2/3 ended  10m50s used  ETA 5m15s  {new} new · 0 cache",
+            "#  plan  state    phase    used  new  cache",
+            f"1  ● a   ✓ built         10m00s  {new}      0",
+            "2  ● b   ✓ built            30s",
+        ],
+        "live": [
+            f"run r1  running  █████░░░░░░░░░░░ 33%  1/3 ended  10m50s used  ETA 19m10s  {new} new · 0 cache",
+            "#  plan  state    phase                                          used  new  cache",
+            f"1  ● a   ✓ built                                               10m00s  {new}      0",
+            "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s",
+        ],
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
-    assert block_of(drawn[0])[:3] == [expected[0], f"  a built, 10m00s used, {good}", expected[1]]
+    assert block_of(drawn[0])[:4] == expected
 
 
 # The running gate. The engine writes `gate-start` with the log of the gate, and the gate runner appends to the log.
@@ -916,7 +939,7 @@ def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_change
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert block_of(drawn[0])[1] == f"  a running gates, 10m50s used, tokens 19k new, 0 cache, gate {GATE}, gate log changed 1m00s ago"
+    assert block_of(drawn[0])[2] == "1  ▶ a   running  specialist ✓  gates ●  verifier ○  fix-up ○  10m50s  19k      0  gate pytest · log 1m00s ago"
 
 
 def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):

@@ -115,7 +115,7 @@ The two token counts and the time of the newest event come from the method `acti
 
 #### The token counts
 
-`status` shows two token counts, for the run and for each ticket, in each form: the lines of `status`, the JSON, and the live block and the feed of `watch`. It shows no cost.
+`status` shows two token counts, for the run and for each ticket, in each form: the lines of `status`, the JSON, and the run line, the ticket table and the feed of the [live view](#the-live-view) of `watch`. It shows no cost.
 
 - **New** (`tokens_new`): the input tokens, the cache writes, and the output tokens, with the thinking tokens. These are the tokens that the model reads or writes for the first time.
 - **Cache** (`tokens_cache`): the cache reads. Each turn of an agent reads its whole context again from the cache, so this count grows with the number of turns times the size of the context. A long [**session**](../glossary.md#session) has many cache reads, and they do not mean that the run is expensive.
@@ -147,7 +147,7 @@ The `status` process can have no reader of the streams of a run:
 - The adapter of the run is not known to the process. For example, a script registered the adapter in its own process.
 - The adapter has no method `activity`. For example, an adapter of an earlier version.
 
-Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens_new`, `tokens_cache` and `idle_seconds` are `null`, and the lines of `status` and of the [live block](#the-live-view) of `watch` have no tokens and no last activity. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
+Each form of `status` then works, and exits 0. It shows the progress and the ETA. It shows no tokens and no activity: in the JSON, `tokens_new`, `tokens_cache` and `idle_seconds` are `null`, the lines of `status` have no tokens and no last activity, and the [live view](#the-live-view) of `watch` has no columns `new` and `cache` and no activity in the live tail. `status` does not read the streams of such a run. The running gate and the time since its log changed do not need the reader, so they show.
 
 ### A stream that cannot be read
 
@@ -166,7 +166,7 @@ Each form of `status` then works, and exits 0. It shows the progress and the ETA
 - In the JSON, the `tokens_new` and the `tokens_cache` of its ticket are `null`. The counts of the other agents of the ticket would not be the counts of the ticket.
 - When the agent runs now, the `idle_seconds` of its ticket is `null`.
 - The `tokens_new` and the `tokens_cache` of the run are the sums of the other tickets.
-- The lines of `status` and of the live block of `watch` show no tokens for the ticket. While the agent runs, they show no last activity for it.
+- The lines of `status` and the row of the ticket in the live view of `watch` show no tokens for the ticket. While the agent runs, they show no last activity for it.
 
 Only `status` treats such a stream as no data. `delegate run` reads the stream of an agent for its [**end state**](../glossary.md#end-state), and a stream that it cannot read stays an error there.
 
@@ -205,7 +205,7 @@ delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--
 
 `watch` follows the run: it reads the journal at each poll, shows each new event, and exits when it has a reason. The form of the output depends on standard output:
 
-- When standard output is a terminal, `watch` shows [the live view](#the-live-view): the progress of the run at the top, and a short line for each event that matters below it.
+- When standard output is a terminal, `watch` shows [the live view](#the-live-view): the run line and a table of the tickets at the top, and below them a short line for each event of the ticket that runs now.
 - When standard output is not a terminal, or with `--raw`, `watch` prints [the raw lines](#the-raw-lines): one line for each event. A [**coordinator**](../glossary.md#coordinator) can run `watch` as a background task, read the lines, and act on the exit code.
 
 The exit codes, the options, and the last line `position <seq>` are the same in the two forms. The position is the `seq` of the last event that `watch` reported.
@@ -310,30 +310,38 @@ The line gives the run id, the last line of the log that holds text, and the pat
 
 ### The live view
 
-On a terminal, `watch` draws a frame at each poll, in place of the frame before it. The frame has the live block at the top, a blank line, and the feed below:
+On a terminal, `watch` draws a frame at each poll, in place of the frame before it. The frame has the run line, a blank line, the ticket table, a divider, and the feed of the ticket that runs now. The example below is the frame for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold the glyphs `█ ░` (the bar), `● ▶ · ✗ –` (the nodes), `└─` (the tree), `✓ ● ○` (the phases) and `─` (the divider):
 
 ```
-run 20261016T030000Z-abcd running 50%, 1 of 2 ended, 1h00m used, ETA 59m10s, tokens 50k new, 1.3M cache
-  a built, 1h00m used, tokens 39k new, 1.1M cache
-  b running specialist, 50s used, tokens 12k new, 205k cache, last activity 12s ago
+run abcd  running  #############... 82%  5/7 ended  58m20s used  ETA 11m40s  213k new . 0 cache
 
-16:00  run 20261016T030000Z-abcd started · assure · 2 tickets
-16:00  #a started · python-specialist
-16:36  #a specialist finished · 36m · tokens 19k new, 980k cache · report ok
-16:52  #a gates green (pytest 16m, zensical 1s)
-16:52  #a verifier started
-17:00  #a verifier finished · 7m · tokens 19k new, 140k cache · report ok
-17:00  #a ✓ ACCEPT · built
-17:00  #b started · python-specialist
+#  plan      state    phase                                          used  new  cache
+1  * 66      + built                                               10m00s  39k      0
+2  \-* 72    + built                                               10m00s  39k      0
+3    \-* 67  + built                                               10m00s  39k      0
+4  * 68      + built                                               10m00s  39k      0
+5  * 69      + built                                               10m00s  39k      0
+6  \-> 70    running  specialist +  gates +  verifier *  fix-up o   8m20s  19k      0  active 2m20s
+7    \-. 71  pending
+------------------------------------------------------------------------------------------------------------------------
+16:50  #70 started · python-specialist
+16:55  #70 specialist finished · 5m · tokens 19k new, 0 cache · report ok
+16:56  #70 gates green (pytest 1m)
+16:56  #70 verifier started
+16:58  #70 verifier running · 2m · active 2m20s
 ```
 
-The live block is the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
+The run line and the table come from the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
 
-- The run line gives the run id, the state, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-`. A run that ended or paused shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `run <run id> running verifier, 66%, ...`.
-- A ticket line gives the id, the state, the phase of a running ticket, the time used, and the two token counts. While an agent of the ticket runs, it also gives the time since its last activity. While a gate of the ticket runs, it also gives the gate command and the time since the log of the gate changed, as the lines of `status` do.
-- For [a run with no stream reader](#a-run-with-no-stream-reader), the lines have no tokens and no last activity.
+- The run line gives the short run id, the state, a bar of 16 cells, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `running · verifier`.
+- The table has one row for each ticket, in plan order. The columns are `#` (the position in the plan), `plan`, `state`, `phase`, `used`, `new`, `cache`, and a live tail with no header. The `plan` column draws the [**blockers**](../glossary.md#blocker) of the plan as a tree: a ticket with a blocker sits under it with `└─`, two cells deeper for each level. The tree comes from `blocked_by` in the plan of `run-start` or of the newest `plan-change`. A journal of an earlier version of the engine records no plan, and then the tree is flat. The node glyph gives the state: `●` built, `▶` running, `·` pending, `✗` failed, and `–` skipped.
+- The `phase` cell of a running ticket is its phase track: `✓` for a phase that is done, `●` for the phase that runs, and `○` for a phase that is to come. A fix-up round shows its round and the limit, as `fix-up ● 1/2`. In `economy` mode a ticket has the phases `specialist` and `gates` only. The cell of a ticket that failed or was skipped gives the reason, with no path. In a paused run, the cell of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`.
+- The live tail of a running ticket gives `active <time>` since the last activity of its agent, or `gate <name> · log <time> ago` while a gate runs. After an agent or a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
+- For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no columns `new` and `cache`, and the live tail gives no activity.
 
-The feed has one short line for each event that matters. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
+Each column is as wide as its widest value, with 2 cells between two columns. The numbers align right. On a terminal of fewer than 100 columns, the run line has no bar. When the table is wider than the terminal, the columns drop in this order: `new` and `cache`, then the labels of the phase track (the glyphs stay, as `✓ ✓ ● ○`), then `used`.
+
+The feed holds only the lines of the ticket that runs now. The `step-start` of a ticket, or a `retry`, starts the feed again. So the lines of a ticket that ended, and a problem of it, stay until the next ticket starts. Before the first step, the feed holds the line of the start of the run. In `economy` mode, the verification of the chain is one group, and its lines name the stack: `stack python verifier started (#a, #b)`. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
 
 | Line | The events |
 |---|---|
@@ -342,12 +350,15 @@ The feed has one short line for each event that matters. A line starts with the 
 | `#a ✓ ACCEPT · built` | A verdict, or the gates, with the `step-end` that follows them. A [**REJECT**](../glossary.md#reject) gives the number of findings. |
 | `stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 1.1M cache` | The verdict of the chain of a stack in `economy` mode, with the `run-end` that follows it. |
 | `run built · 1h06m · tokens 50k new, 1.3M cache` | The `run-end`: the result, the time of the run, and its two token counts. |
+| `paused · before ticket d · go on with delegate run --resume ab12` | The `paused` event: where the run stopped, and the command that goes on with it, with the short run id. |
 
-The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance` and `lock-broken` have no line of their own. Each other event has a short line.
+The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it: `#70 verifier running · 2m · active 2m20s`. The last frame has no such line.
 
 A [problem](#the-problem-events) and a [stall](#the-stall) are lines that start with `✗`. For example, `16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json`, or `17:40  ✗ stall · no change for 30m`. The line of the time limit is `<time>  time limit · <N>m used · the run goes on`.
 
-The view cuts each line to the width of the terminal. A frame of a run that goes on fits the height of the terminal: it keeps the newest lines of the feed. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.
+Each part of the frame has the colour of its role, from the 16 ANSI colours of the theme of the terminal: green for a result that is good (`✓`, `●` built, `gates green`, the done phases, the bar), cyan for the ticket that runs now, yellow for `REJECT`, a fix-up, a continuation, a pause and `⚠ idle`, red for a failure, a problem and `gates red`, and blue for the tree. Faint text (SGR 2) is for the facts to read second: the times, the tokens, the header, the divider, and the rows that ended or are pending. Bold marks the short run id, the ticket that runs now, the verdict word, and the result of the run. The view sets no background colour. Each state also has a glyph or a word, so the view reads the same with no colour. When `NO_COLOR` is set and not empty, the frame has no SGR code. When the locale is not UTF-8 (`LC_ALL`, `LC_CTYPE`, `LANG`), the run line and the table use the ASCII glyphs `+ x > . * o - # . \- - !`, in the same columns.
+
+The view cuts each line to the width of the terminal. A frame fits the height of the terminal, with the last line free for the cursor. When the run line, the table and the feed do not fit, the rows of the built tickets fold to one line, `✓ built <count>  <ids in plan order>`. The rows of a running ticket and of a pending ticket do not fold, and a row under a folded row keeps its `└─`. Then the feed keeps its newest lines. The last frame keeps the whole feed, and the terminal scrolls it. Then `watch` prints the line `position <seq>`.
 
 ### The raw lines
 

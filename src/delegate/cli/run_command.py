@@ -44,12 +44,13 @@ from ..run.engine import (
     EngineError, PlanReview, RunInterrupted, check_start, new_run_id, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
+from ..run.output import short_run_id
 from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
-from .title import SEPARATOR, Title, short_run_id
+from .title import SEPARATOR, Title
 
 # The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
 EXIT_PAUSED: int = 3
