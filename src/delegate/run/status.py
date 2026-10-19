@@ -21,6 +21,10 @@ The report (`report`) gives the lines of `delegate status`: the state, the
 verdict and the branch of each ticket from the journal, with the progress of
 the snapshot. `view_lines` draws the snapshot as one line for the run and one
 for each ticket.
+
+`active_line` gives the one line of an active run (see `delegate.run.runs`):
+`delegate status` and `delegate watch` with no run id list the active runs in
+this form when more than one is active.
 """
 
 from __future__ import annotations
@@ -33,8 +37,8 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain
-from .journal import JournalError, plan_ids, read_new_events
-from .pause import is_paused, pause_requested
+from .journal import JournalError, activity_files, is_paused, last_change, newest_run_end, plan_ids, read_new_events
+from .pause import pause_requested
 from .runs import journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
@@ -53,17 +57,6 @@ PAUSED: str = "paused"
 
 # What the line of a ticket shows for a value that the journal does not hold.
 NONE: str = "-"
-
-
-def _end_of(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The `run-end` event of a run that ended, or None. A run that ended and was resumed works again, so its old
-    `run-end` does not end it when a `resume` follows."""
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "run-end":
-            return event
-    return None
 
 
 def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
@@ -345,7 +338,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
     start = events[0]
-    end = _end_of(events)
+    end = newest_run_end(events)
     paused = end is None and is_paused(events)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
@@ -472,3 +465,31 @@ def view_lines(snap: Snapshot, width: int) -> list[str]:
     for ticket in snap.tickets:
         lines.append(f"  {ticket.id} {ticket.state}" + (f" {ticket.phase}" if ticket.phase else "") + f", {_ticket_progress(ticket)}")
     return [line[: max(width, 1)] for line in lines]
+
+
+# The text between two parts of the line of an active run.
+ACTIVE_SEPARATOR: str = " · "
+
+
+def active_line(journal: Path, now: datetime) -> str:
+    """The one line of an active run. `now` is the time of the clock, in UTC.
+
+    The line gives the run id, the local start time, the mode, the progress, each running ticket and its phase, the
+    time since the last activity, the workflow file (or the run branch of a journal that names no workflow file), and
+    the command that follows the run. The last activity is the newest change of the journal, of the event streams, and
+    of the gate logs, as for the stall check of `delegate watch`. Raise JournalError when the journal is not valid.
+    """
+    events, _ = read_new_events(journal, 0, 1)
+    # The line needs no tokens, so the snapshot reads no event stream.
+    snap = snapshot_of(events, journal, lambda adapter: None, now)
+    start = events[0]
+    running = [f"ticket {t.id}" + (f" {t.phase}" if t.phase else "") for t in snap.tickets if t.state == RUNNING]
+    if not running:
+        running = [f"chain {snap.phase}" if snap.phase else "no ticket running"]
+    idle = _seconds(datetime.fromtimestamp(last_change(journal, activity_files(events)), now.tzinfo), now)
+    where = f"workflow {start['workflow']}" if start.get("workflow") else f"run branch {start['run_branch']}"
+    return ACTIVE_SEPARATOR.join([
+        snap.run_id, f"started {_time(start).astimezone().strftime('%Y-%m-%d %H:%M')}", str(start["mode"]),
+        f"{snap.tickets_ended} of {snap.tickets_total} ended, {snap.percent}%", ", ".join(running),
+        f"last activity {_duration(idle)} ago", where, f"delegate watch {snap.run_id}",
+    ])

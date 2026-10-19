@@ -79,6 +79,53 @@ def plan_ids(events: list[dict[str, object]]) -> list[str]:
     return [str(t) for t in events[0]["tickets"]]  # type: ignore[union-attr]
 
 
+def newest_run_end(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The `run-end` event of a run that ended, or None.
+
+    A run that ended and was resumed works again, so its old `run-end` does not end it when a `resume` follows.
+    `delegate status` gives the state of a run by this rule, and an active run has no such `run-end`.
+    """
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return None
+        if event["event"] == "run-end":
+            return event
+    return None
+
+
+def is_paused(events: list[dict[str, object]]) -> bool:
+    """True when the run of the events is paused: its newest `paused` comes after its newest `resume`."""
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return False
+        if event["event"] == "paused":
+            return True
+    return False
+
+
+# The fields of an event that name a file whose change is activity: the event stream of an agent, and the log of a gate.
+ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log")
+
+
+def activity_files(events: list[dict[str, object]]) -> set[Path]:
+    """The event streams and the gate logs that the events name (`ACTIVITY_FIELDS`)."""
+    return {Path(str(event[field])) for event in events for field in ACTIVITY_FIELDS if field in event}
+
+
+def last_change(journal: Path, files: set[Path]) -> float:
+    """The newest modification time of the journal and of the files of `files` that exist.
+
+    The stall check of `delegate watch` and the last activity of an active run use it.
+    """
+    times = [journal.stat().st_mtime]
+    for file in files:
+        try:
+            times.append(file.stat().st_mtime)
+        except FileNotFoundError:
+            continue  # a file that the journal names and the disk lacks cannot show a change
+    return max(times)
+
+
 class Journal:
     """Appends events to one file."""
 

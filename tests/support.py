@@ -8,6 +8,7 @@ no model.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import io
 import json
 import os
@@ -15,7 +16,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -504,11 +505,46 @@ def bare_repo(tmp_path: Path) -> Path:
     return copy_of(tmp_path / "repo", ("bare_repo",), _empty)
 
 
-def run_start(run_id: str, *tickets: str, mode: str = "assure") -> tuple[str, dict[str, object]]:
+def run_start(run_id: str, *tickets: str, mode: str = "assure", run_branch: str = "run/demo") -> tuple[str, dict[str, object]]:
     return "run-start", {
         "run_id": run_id, "workflow": "/w/workflow.toml", "mode": mode, "adapter": "scripted",
-        "base_branch": "main", "run_branch": "run/demo", "tickets": list(tickets),
+        "base_branch": "main", "run_branch": run_branch, "tickets": list(tickets),
     }
+
+
+@contextlib.contextmanager
+def live_lock(journal: Path, run_branch: str = "run/demo") -> Iterator[None]:
+    """Hold the lock of `run_branch` for the run of `journal` while the block runs, as the process of a run that works does.
+
+    It uses the lock class of the engine. The holder is this process, so the lock names a process that exists.
+    """
+    from delegate.run.lock import run_lock
+
+    with run_lock(journal.parents[2], run_branch, journal.parent.name):
+        yield
+
+
+# A child process that takes the lock of a run branch with the lock class of the engine, and ends with no release.
+STALE_LOCK_SCRIPT = """\
+import os, sys
+from pathlib import Path
+from delegate.run.lock import run_lock
+
+with run_lock(Path(sys.argv[1]), sys.argv[2], sys.argv[3]):
+    os._exit(0)
+"""
+
+
+def stale_lock(journal: Path, run_branch: str = "run/demo") -> None:
+    """Leave the lock of `run_branch` for the run of `journal`, held by a process that no longer exists, as a killed run leaves it."""
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(root / "src"), os.environ.get("PYTHONPATH")]))}
+    subprocess.run(
+        [sys.executable, "-c", STALE_LOCK_SCRIPT, str(journal.parents[2]), run_branch, journal.parent.name],
+        env=env, check=True, timeout=60,
+    )
 
 
 def step_start(ticket: str) -> tuple[str, dict[str, object]]:

@@ -66,7 +66,9 @@ delegate watch --raw
 
 See [the raw lines](../reference/status-and-watch.md#the-raw-lines).
 
-When the newest run has ended, `watch` with no run id shows none of its events. It prints one line with the result of that run, and exits. To see the events of a run that ended, give its run id:
+With no run id, `watch` follows the one active run, also when a newer run ended. A run is active when its journal has no `run-end` and a live process holds the lock of its [**run branch**](../glossary.md#run-branch). When more than one run is active, `watch` follows none: it prints one line for each active run, with the command that follows it, and exits 8. See [the run with no run id](../reference/status-and-watch.md#the-run-with-no-run-id).
+
+When no run is active and the newest run has ended, `watch` with no run id shows none of its events. It prints one line with the result of that run, and exits. When the newest run stopped with no `run-end`, the line tells how to resume it. To see the events of a run that ended, give its run id:
 
 ```bash
 delegate watch <run-id> --raw
@@ -122,7 +124,7 @@ A ticket with a recorded commit is not built again. A step that was open continu
 
 ### 2. Resume after a kill
 
-A process that is killed cannot release the lock of its [**run branch**](../glossary.md#run-branch). Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the [**resume**](../glossary.md#resume) takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
+A process that is killed cannot release the lock of its run branch. Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the [**resume**](../glossary.md#resume) takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
@@ -136,7 +138,7 @@ A [**coordinator**](../glossary.md#coordinator) agent can start a run for a pers
 delegate run --detach workflow.toml
 ```
 
-The command prints `run <run id>` and `log <path>`, and exits at once. The run goes on in its own process, and writes its output to the log file of the run. See [the detached run](../reference/run.md#the-detached-run). `delegate status` and `delegate watch` with no run id read the newest run. The coordinator obeys these rules from the start of the run to its end.
+The command prints `run <run id>` and `log <path>`, and exits at once. The run goes on in its own process, and writes its output to the log file of the run. See [the detached run](../reference/run.md#the-detached-run). `delegate status` and `delegate watch` with no run id read the one active run, or the newest run when no run is active. With more than one active run, they list the active runs, and `watch` exits 8: give the run id. The coordinator obeys these rules from the start of the run to its end.
 
 1. **Start the run detached.** Start the run with `delegate run --detach`, as in the example. The command starts the run process with the `setsid` system call, so the run is outside the process group of the tool shell. A harness can stop a background task at a time limit, and it can stop the processes of its tool shell. A run that only has `nohup` and `&` can stay in the process group of the tool shell.
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a background task, as in [step 2](#2-see-the-state). The harness then tells the coordinator when it exits. A background task has no terminal, so `watch` prints the raw lines, as with `--raw`. When it exits at a limit, start it again with `--from <position>`, as in [step 4](#4-go-on-after-a-limit).

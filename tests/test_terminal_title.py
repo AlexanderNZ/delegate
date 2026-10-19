@@ -20,7 +20,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, journal_path, make_repo, without_titles
+from .support import TITLE, Terminal, bare_repo, journal_path, live_lock, make_repo, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -89,7 +89,10 @@ def watch(repo: Path, monkeypatch, *extra: str, out: io.StringIO, waits: list) -
         waits.pop(0)()
 
     monkeypatch.setattr(time, "sleep", wait)
-    return delegate.main(["watch", "--repo", str(repo), *extra])
+    # The run is active: the process of a run that goes on holds the lock of its run branch.
+    (journal,) = journal_path(repo, "x").parents[1].glob("*/journal.jsonl")
+    with live_lock(journal):
+        return delegate.main(["watch", "--repo", str(repo), *extra])
 
 
 @pytest.mark.parametrize("extra", [pytest.param((), id="live-view"), pytest.param(("--raw",), id="raw-lines")])

@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from .journal import JournalError, read_new_events
+from .journal import ACTIVITY_FIELDS, JournalError, is_paused, last_change, read_new_events
 
 # One exit code for each reason that `watch` exits. Code 2 is also the exit code of a usage error.
 EXIT_SUCCEEDED: int = 0
@@ -32,6 +32,7 @@ EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
 EXIT_PAUSED: int = 7
+EXIT_CHOOSE: int = 8
 # 128 + 2, the number of SIGINT: the exit status that a shell gives to a process that Ctrl-C stopped.
 EXIT_INTERRUPTED: int = 130
 
@@ -42,13 +43,18 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_FAILED: "The journal holds `run-end` with the result `failed`.",
     EXIT_ERROR: (
         "A usage error, a repository with no run, an unknown run id, a journal that is not valid, "
-        "or a `--from` position beyond the end of the journal."
+        "a `--from` position beyond the end of the journal, or, with no run id, "
+        "[a newest run that stopped](#the-newest-run-that-stopped) when no run is active."
     ),
     EXIT_PROBLEM: "An event is a problem. See [the problem events](#the-problem-events).",
     EXIT_VERDICT: "`--until verdict` is set and the journal holds a `verdict` event.",
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
     EXIT_PAUSED: "The journal holds `paused`: a pause request stopped the run at a step boundary.",
+    EXIT_CHOOSE: (
+        "With no run id and no `--from`, more than one run is active. `watch` follows none. "
+        "See [the run with no run id](#the-run-with-no-run-id)."
+    ),
     EXIT_INTERRUPTED: "Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c).",
 }
 
@@ -62,6 +68,7 @@ EXIT_CODES: dict[int, str] = {
     EXIT_STALL: "stall",
     EXIT_TIME_LIMIT: "time limit",
     EXIT_PAUSED: "run paused",
+    EXIT_CHOOSE: "choose a run",
     EXIT_INTERRUPTED: "interrupted",
 }
 
@@ -143,6 +150,44 @@ def ended_run(journal: Path) -> EndedRun | None:
             problem = f"ticket {event.get('ticket')}: {reason}"
     end = events[-1]
     return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem)
+
+
+@dataclass(frozen=True)
+class StoppedRun:
+    """A run with no `run-end` and no live process: its id, the time of the newest event of its journal, and whether it
+    is paused. A pause, a crash, a kill and Ctrl-C stop a run so. `delegate run --resume` goes on with it."""
+
+    run_id: str
+    stopped: datetime
+    paused: bool
+
+    @property
+    def code(self) -> int:
+        """`EXIT_PAUSED` for a paused run, and `EXIT_ERROR` for a run that stopped: there is no run to follow."""
+        return EXIT_PAUSED if self.paused else EXIT_ERROR
+
+    def line(self) -> str:
+        """The one line of `watch` for a newest run that stopped, with the time of its newest event in the local time zone."""
+        at = self.stopped.astimezone().strftime("%Y-%m-%d %H:%M")
+        resume = f"go on with delegate run --resume {self.run_id}"
+        if self.paused:
+            return f"no run is active; the newest run {self.run_id} paused at {at}; {resume}"
+        return f"no run is active; the newest run {self.run_id} stopped at {at} with no run-end, and no process works on it; {resume}"
+
+
+def newest_run(journal: Path) -> EndedRun | StoppedRun:
+    """The one line of the newest run when no run is active: the run ended (`ended_run`), or it stopped.
+
+    The caller knows that the run is not active. A run whose newest event is not `run-end` then has no live process.
+    It is paused when its newest `paused` comes after its newest `resume`. Raise JournalError when the journal is not valid.
+    """
+    ended = ended_run(journal)
+    if ended is not None:
+        return ended
+    events, _ = read_new_events(journal, 0, 1)
+    if not events:
+        raise JournalError(f"journal {journal} holds no event")
+    return StoppedRun(journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), is_paused(events))
 
 
 def _superseded(events: list[dict[str, object]]) -> set[object]:
@@ -240,21 +285,6 @@ class _Tracker:
                 return f"the gates are not green: {'; '.join(red)}"
             return f"the step failed: {event['reason']}" if event.get("reason") else "the step failed"
         return None
-
-
-# The fields of an event that name a file whose change is activity: the event stream of an agent, and the log of a gate.
-ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log")
-
-
-def _last_change(journal: Path, files: set[Path]) -> float:
-    """The newest modification time of the journal and of the event streams and gate logs that exist."""
-    times = [journal.stat().st_mtime]
-    for file in files:
-        try:
-            times.append(file.stat().st_mtime)
-        except FileNotFoundError:
-            continue  # a file that the journal names and the disk lacks cannot show a change
-    return max(times)
 
 
 class Sink(Protocol):
@@ -401,7 +431,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                     return WatchResult(EXIT_VERDICT, position)
                 if ends:
                     return WatchResult(_stop_code(event), position)
-            if options.stall_minutes is not None and time.time() - _last_change(journal, files) >= options.stall_minutes * 60:
+            if options.stall_minutes is not None and time.time() - last_change(journal, files) >= options.stall_minutes * 60:
                 sink.stall(options.stall_minutes, last_event)
                 return WatchResult(EXIT_STALL, position)
             if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:

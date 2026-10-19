@@ -19,8 +19,8 @@ import pytest
 from delegate.cli import delegate
 
 from .support import (
-    TITLE, Terminal, bare_repo, event_names, frames, make_repo, read_journal, read_journal_file, resume_main, run_start,
-    step_start, ticket_of, write_journal,
+    TITLE, Terminal, bare_repo, event_names, frames, journal_path, live_lock, make_repo, read_journal, read_journal_file,
+    resume_main, run_start, step_start, ticket_of, write_journal,
 )
 from .test_run_multi import HEAD, ticket
 
@@ -78,7 +78,9 @@ def test_ctrl_c_in_watch_with_no_run_id_names_the_newest_run_in_the_line(tmp_pat
     a_run_that_goes_on(repo)
     monkeypatch.setattr(time, "sleep", ctrl_c)
 
-    code, _, err = watch(monkeypatch, capsys, io.StringIO(), "--repo", str(repo))
+    # The run is active: the process of a run that goes on holds the lock of its run branch.
+    with live_lock(journal_path(repo, "r1")):
+        code, _, err = watch(monkeypatch, capsys, io.StringIO(), "--repo", str(repo))
 
     assert code == INTERRUPTED
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"

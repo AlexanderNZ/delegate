@@ -17,7 +17,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, run_end, run_start, step_end, step_start, write_journal
+from .support import append_events, bare_repo, live_lock, run_end, run_start, step_end, step_start, write_journal
 
 POLL = ["--poll-seconds", "0.02"]
 
@@ -82,7 +82,9 @@ def test_watch_without_a_run_id_follows_the_newest_run_while_it_goes_on(tmp_path
     # The run ends while watch waits after its first read of the journal.
     monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, run_end("built", ["b"])))
 
-    code, out, _ = watch(repo, capsys)
+    # The run is active: the process of a run that goes on holds the lock of its run branch.
+    with live_lock(path):
+        code, out, _ = watch(repo, capsys)
 
     assert code == 0
     assert "run_id=new" in out and "run_id=old" not in out
@@ -199,18 +201,25 @@ def test_watch_without_a_run_id_gives_the_problem_of_the_retry_when_a_retry_fail
 def test_watch_without_a_run_id_follows_a_run_that_a_retry_continues_after_its_run_end(tmp_path, capsys, monkeypatch):
     # A skip is no problem event, so the replay of the events before the retry stops at no problem.
     repo = bare_repo(tmp_path)
-    path = write_journal(repo, "new", run_start("new", "a"), run_end("failed", [], ["a"]), retry("a", "skipped"))
+    # A retry resumes the run, as the engine does: it writes `resume`, then `retry`.
+    path = write_journal(
+        repo, "new", run_start("new", "a"), run_end("failed", [], ["a"]), ("resume", {"run_id": "new"}), retry("a", "skipped"),
+    )
     # The retry builds the ticket while watch waits after its first read of the journal.
     monkeypatch.setattr(
         time, "sleep", lambda seconds: append_events(path, step_start("a"), step_end("a"), run_end("built", ["a"]))
     )
 
-    code, out, err = watch(repo, capsys)
+    # The run is active: the process of the retry holds the lock of its run branch.
+    with live_lock(path):
+        code, out, err = watch(repo, capsys)
 
     assert (code, err) == (0, "")
     assert "no run is active" not in out
-    assert [line.split()[2] for line in out.splitlines()[:6]] == ["run-start", "run-end", "retry", "step-start", "step-end", "run-end"]
-    assert out.splitlines()[6:] == ["position 6"]
+    assert [line.split()[2] for line in out.splitlines()[:7]] == [
+        "run-start", "run-end", "resume", "retry", "step-start", "step-end", "run-end",
+    ]
+    assert out.splitlines()[7:] == ["position 7"]
 
 
 def test_watch_with_the_run_id_of_a_run_that_a_retry_built_replays_to_the_newest_run_end_and_exits_0(tmp_path, capsys):

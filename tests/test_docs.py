@@ -107,7 +107,7 @@ def test_the_command_writes_the_options_of_status_and_of_watch_into_their_page(p
     assert (code, err) == (0, "")
     assert "| `--poll-seconds <poll-seconds>` | How often to read the journal; default 1. |" in text
     assert "| `--until verdict` |" in text
-    assert "| `[<run-id>]` | The run to show; default is the newest run of the repository. |" in text
+    assert "| `[<run-id>]` | The run to show; default is the one active run, or the newest run of the repository when no run is active. |" in text
     assert "--old-flag" not in text
     assert "### The problem events" in text  # the prose after the section stays
 

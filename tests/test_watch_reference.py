@@ -22,9 +22,11 @@ outside_the_package = pytest.mark.skipif(
 
 
 def test_each_reason_to_exit_has_its_own_exit_code():
-    assert len(set(watch.EXIT_CODES)) == len(watch.EXIT_CODES) == 9
-    # 130 is the exit status that a shell gives for SIGINT: Ctrl-C ends the watch.
-    assert sorted(watch.EXIT_CODES) == [0, 1, 2, 3, 4, 5, 6, 7, 130]
+    assert len(set(watch.EXIT_CODES)) == len(watch.EXIT_CODES) == 10
+    # 8 tells a watch with no run id to choose one of the active runs. 130 is the exit status that a shell gives for
+    # SIGINT: Ctrl-C ends the watch.
+    assert sorted(watch.EXIT_CODES) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 130]
+    assert watch.EXIT_CODES[8] == "choose a run"
 
 
 @outside_the_package

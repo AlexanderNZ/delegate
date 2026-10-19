@@ -332,7 +332,7 @@ def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.setattr(time, "sleep", lambda seconds: run.add(2000, "run-end", result="built", built=["a", "b"], failed=[], skipped=[]))
-    assert delegate.main(["watch", "--repo", str(repo)]) == 0
+    assert delegate.main(["watch", run.path.parent.name, "--repo", str(repo)]) == 0
     return block_of(frames(out.getvalue())[0])
 
 
@@ -599,7 +599,7 @@ def follow(repo: Path, monkeypatch, run: Run, *extra: str, columns: int = 60) ->
 
     monkeypatch.setattr(time, "sleep", sleep)
     frozen(monkeypatch, 650)
-    code = delegate.main(["watch", "--repo", str(repo), *extra])
+    code = delegate.main(["watch", run.path.parent.name, "--repo", str(repo), *extra])
     return code, frames(out.getvalue()), waits
 
 
@@ -641,8 +641,8 @@ def test_watch_of_a_run_that_ended_draws_it_once_and_exits_with_no_wait(tmp_path
     run.add(640, "step-end", ticket="b", state="built", reason=None)
     run.add(641, "run-end", result="built", built=["first-ticket-with-a-long-id", "b"], failed=[], skipped=[])
 
-    # With no run id, a newest run that ended gets one line, so the case names the run.
-    code, drawn, waits = follow(repo, monkeypatch, run, "20261016T030000Z-abcd")
+    # With no run id, a newest run that ended gets one line. `follow` names the run.
+    code, drawn, waits = follow(repo, monkeypatch, run)
 
     assert (code, waits, len(drawn)) == (0, [], 1)
     assert drawn[0][0].startswith("run 20261016T030000Z-abcd built 100%")

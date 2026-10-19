@@ -9,8 +9,11 @@ the sink prints the raw line of each event.
 When standard output is a terminal, this module also sets the title of the terminal (`delegate.cli.title`): the short
 run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
 
-With no run id and no `--from`, a newest run that ended gets one line (`delegate.run.watch.EndedRun`) and the exit
-code of its result, and no replay of its journal.
+With no run id and no `--from`, the active runs decide (`delegate.run.runs.runs_of`). The one active run is followed,
+also when a newer run ended. With more than one, this module prints the line of each (`delegate.run.status.active_line`),
+follows none, and exits with `watch.EXIT_CHOOSE`. With none, the newest run gets one line and no replay of its journal:
+a run that ended (`delegate.run.watch.EndedRun`) exits with the code of its result, and a run that stopped
+(`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr.
 
 Ctrl-C ends the watch with `watch.EXIT_INTERRUPTED` (130), and the run goes on. The live view draws its last frame, and
 this module shows the cursor and sets the title to the reason `interrupted`. It then prints one line on stderr with the
@@ -28,7 +31,7 @@ from typing import TextIO
 from ..adapters.git import GitVersionControl
 from ..run import live, status, watch
 from ..run.journal import JournalError
-from ..run.runs import RunsError, journal_of
+from ..run.runs import RunsError, journal_of, runs_of
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title, short_run_id
 
@@ -68,7 +71,10 @@ def _position(text: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
-    parser.add_argument("run_id", nargs="?", help="the run to follow; default is the newest run of the repository")
+    parser.add_argument(
+        "run_id", nargs="?",
+        help="the run to follow; default is the one active run, or the newest run of the repository when no run is active",
+    )
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
     parser.add_argument(
         "--until", choices=[watch.UNTIL_VERDICT],
@@ -176,18 +182,39 @@ class _Titled:
         return f"{self._name}{SEPARATOR}{snap.percent}%{SEPARATOR}ETA {eta}"
 
 
+def _newest_run(newest: watch.EndedRun | watch.StoppedRun) -> int:
+    """Print the one line of the newest run when no run is active, and return its exit code.
+
+    The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set.
+    """
+    if isinstance(newest, watch.StoppedRun) and not newest.paused:
+        print(f"delegate watch: {newest.line()}", file=sys.stderr)
+        return newest.code
+    result = newest.result if isinstance(newest, watch.EndedRun) else "paused"
+    Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(newest.run_id)}{SEPARATOR}{result}")
+    print(newest.line())
+    return newest.code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     from_position = 0 if args.from_position is None else args.from_position
     options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, from_position, args.poll_seconds)
     try:
-        journal = journal_of(args.repo, args.run_id, GitVersionControl())
-        # With no run id and no `--from`, a newest run that ended gets one line, not a replay of its journal.
-        ended = watch.ended_run(journal) if args.run_id is None and args.from_position is None else None
-        if ended is not None:
-            Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(ended.run_id)}{SEPARATOR}{ended.result}")
-            print(ended.line())
-            return ended.code
+        if args.run_id is None and args.from_position is None:
+            runs = runs_of(args.repo, GitVersionControl())
+            if runs.chosen is None:
+                # More than one run is active: follow none, and list them.
+                now = utc_now()
+                listed = [status.active_line(active, now) for active in runs.active]  # an error prints no part of the list
+                print("\n".join([f"{len(runs.active)} runs are active; give a run id to follow one of them:", *listed]))
+                return watch.EXIT_CHOOSE
+            if not runs.active:
+                # No run is active: the newest run gets one line, not a replay of its journal.
+                return _newest_run(watch.newest_run(runs.newest))
+            journal = runs.chosen
+        else:
+            journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)
         live_view = not args.raw and sys.stdout.isatty()
         if live_view:

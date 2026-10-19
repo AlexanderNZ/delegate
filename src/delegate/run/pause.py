@@ -25,7 +25,7 @@ from pathlib import Path
 
 from ..ports.vcs import VersionControl
 from .engine import PAUSE_REQUEST_NAME, EngineError, state_directory
-from .journal import JournalError, read_new_events
+from .journal import JournalError, is_paused, newest_run_end, read_new_events
 from .lock import LockError, live_holder
 from .runs import RunsError, journal_of
 
@@ -34,29 +34,9 @@ class PauseError(Exception):
     """The run cannot be paused. The message names the run and the reason."""
 
 
-def is_paused(events: list[dict[str, object]]) -> bool:
-    """True when the run of the events is paused: its newest `paused` comes after its newest `resume`."""
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return False
-        if event["event"] == "paused":
-            return True
-    return False
-
-
 def pause_requested(journal: Path) -> bool:
     """True when the directory of the journal holds a pause request that the engine did not read yet."""
     return (journal.parent / PAUSE_REQUEST_NAME).is_file()
-
-
-def _ended(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The `run-end` of a run that ended, or None. A `resume` after a `run-end` goes on with the run."""
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "run-end":
-            return event
-    return None
 
 
 def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -> Path:
@@ -73,7 +53,7 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
     if not events or events[0]["event"] != "run-start":
         raise PauseError(f"journal {journal}: the first event is not 'run-start'")
     resume = f"delegate run --resume {run_id}"
-    end = _ended(events)
+    end = newest_run_end(events)
     if end is not None:
         raise PauseError(f"run {run_id!r} has ended with the result {end['result']!r}; there is no step boundary to pause at")
     if is_paused(events):
