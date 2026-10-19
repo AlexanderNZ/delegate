@@ -25,6 +25,7 @@ packages = ["delegate", "delegate.adapters", "delegate.cli", "delegate.definitio
 [tool.setuptools.package-data]
 "delegate.definitions" = ["templates/*.md"]
 "delegate.shared" = ["tiers.toml"]
+"delegate.docs" = ["figures/*/*.jsonl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
