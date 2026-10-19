@@ -42,11 +42,11 @@ run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
 progress: 45%, 1 of 4 ended, 18m20s used, ETA 21m40s, tokens 58k new, 0 cache
 journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
 
-#  plan     state    phase                                        verdict  branch        used  new  cache  last event
-1  * a      + built                                               ACCEPT   run/demo-a  10m00s  39k      0  2026-10-16T03:10:00+00:00
-2  \-> b    running  specialist +  gates +  verifier *  fix-up o           run/demo-b   8m20s  19k      0  2026-10-16T03:16:00+00:00  active 2m20s
-3    \-. c  pending
-4  . d      pending
+  #  plan          state       phase                                           verdict  branch              used    new   cache  last event
+  1  * a           + built                                                     ACCEPT   run/demo-a        10m00s    39k       0  2026-10-16T03:10:00+00:00
+  2  \-> b         running     specialist +  gates +  verifier *  fix-up o              run/demo-b         8m20s    19k       0  2026-10-16T03:16:00+00:00  active 2m20s
+  3    \-. c       pending
+  4  . d           pending
 ```
 
 The progress line comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta). It gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
@@ -66,7 +66,7 @@ The columns of the table:
 | `last event` | The time of the newest event of the ticket, as the journal records it (ISO 8601, UTC). Empty when there is none. |
 | (no header) | The live tail of a running ticket: `active <time>` since the last activity of its agent, or `gate <name> · log <time> ago` while a gate runs. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`. `status` has no stall time, so the tail gives no `⚠ idle`. |
 
-Each column is as wide as its widest value, with 2 cells between two columns. The numbers align right. `status` does not cut a line to the width of the terminal, and drops no column. On a terminal, each cell of the table has the colour of its role, as in the live view, and the verdict word is bold. The header lines have no colour. When `NO_COLOR` is set and not empty, or when standard output is not a terminal, the output has no SGR code. The text of `status` is for a person, and it can change in a later version. A program reads `status --json`: see [the snapshot](#the-snapshot).
+Each column has the width of its track in the design: `#` 3 cells, `plan` 12, `state` 10, `phase` 46, `verdict` 7, `branch` 15, `used` 7, `new` 5 and `cache` 6. A column with a value that is wider than its track is as wide as its widest value. `last event` and the live tail have no track. There are 2 cells between two columns. The numbers, and the headers `#`, `used`, `new` and `cache`, align right in their track. `status` does not cut a line to the width of the terminal, and drops no column. On a terminal, each cell of the table has the colour of its role, as in the live view, and the verdict word is bold. The header lines have no colour. When `NO_COLOR` is set and not empty, or when standard output is not a terminal, the output has no SGR code. The text of `status` is for a person, and it can change in a later version. A program reads `status --json`: see [the snapshot](#the-snapshot).
 
 On a terminal, `status` sets the title of the terminal to `delegate status`. See [the terminal title](#the-terminal-title).
 
@@ -331,20 +331,20 @@ On a terminal, `watch` draws a frame at each poll, in place of the frame before 
 ```
 run abcd  running  #############... 82%  5/7 ended  58m20s used  ETA 11m40s  213k new . 0 cache
 
-#  plan      state    phase                                          used  new  cache
-1  * 66      + built                                               10m00s  39k      0
-2  \-* 72    + built                                               10m00s  39k      0
-3    \-* 67  + built                                               10m00s  39k      0
-4  * 68      + built                                               10m00s  39k      0
-5  * 69      + built                                               10m00s  39k      0
-6  \-> 70    running  specialist +  gates +  verifier *  fix-up o   8m20s  19k      0  active 2m20s
-7    \-. 71  pending
+  #  plan          state       phase                                              used    new   cache
+  1  * 66          + built                                                      10m00s    39k       0
+  2  \-* 72        + built                                                      10m00s    39k       0
+  3    \-* 67      + built                                                      10m00s    39k       0
+  4  * 68          + built                                                      10m00s    39k       0
+  5  * 69          + built                                                      10m00s    39k       0
+  6  \-> 70        running     specialist +  gates +  verifier *  fix-up o       8m20s    19k       0  active 2m20s
+  7    \-. 71      pending
 ------------------------------------------------------------------------------------------------------------------------
-16:50  #70 started · python-specialist
-16:55  #70 specialist finished · 5m · tokens 19k new, 0 cache · report ok
-16:56  #70 gates green (pytest 1m)
-16:56  #70 verifier started
-16:58  #70 verifier running · 2m · active 2m20s
+16:50  #70  started · python-specialist
+16:55  #70  specialist finished · 5m · tokens 19k new, 0 cache · report ok
+16:56  #70  gates green (pytest 1m)
+16:56  #70  verifier started
+16:58  #70  verifier running · 2m · 0 new · 0 cache · active 2m20s
 ```
 
 The run line and the table come from the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
@@ -355,9 +355,9 @@ The run line and the table come from the snapshot of `status` (see [the snapshot
 - The live tail of a running ticket gives `active <time>` since the last activity of its agent, or `gate <name> · log <time> ago` while a gate runs. After an agent or a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no columns `new` and `cache`, and the live tail gives no activity.
 
-Each column is as wide as its widest value, with 2 cells between two columns. The numbers align right. On a terminal of fewer than 100 columns, the run line has no bar. When the table is wider than the terminal, the columns drop in this order: `new` and `cache`, then the labels of the phase track (the glyphs stay, as `✓ ✓ ● ○`), then `used`.
+Each column has the width of its track in the design: `#` 3 cells, `plan` 12, `state` 10, `phase` 46, `used` 7, `new` 5 and `cache` 6. A column with a value that is wider than its track is as wide as its widest value. The live tail has no track. There are 2 cells between two columns. The numbers, and the headers `#`, `used`, `new` and `cache`, align right in their track. On a terminal of fewer than 100 columns, the run line has no bar. When the table is wider than the terminal, each column first becomes as wide as its widest value. When the table is then still too wide, the columns drop in this order: `new` and `cache`, then the labels of the phase track (the glyphs stay, as `✓ ✓ ● ○`), then `used`.
 
-The feed holds only the lines of the ticket that runs now. The `step-start` of a ticket, or a `retry`, starts the feed again. So the lines of a ticket that ended, and a problem of it, stay until the next ticket starts. Before the first step, the feed holds the line of the start of the run. In `economy` mode, the verification of the chain is one group, and its lines name the stack: `stack python verifier started (#a, #b)`. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
+The feed holds only the lines of the ticket that runs now. The `step-start` of a ticket, or a `retry`, starts the feed again. So the lines of a ticket that ended, and a problem of it, stay until the next ticket starts. Before the first step, the feed holds the line of the start of the run. In `economy` mode, the verification of the chain is one group, and its lines name the stack: `stack python verifier started (#a, #b)`. A line starts with the local time of the event (`HH:MM`), then the ticket (`#<id>`), and then what happened. The ticket, or the stack, has a track as wide as the widest of the feed, and at least 3 cells, with 2 cells before and after it. A line with no ticket, as a problem, starts what happened on the track of the ticket. A line shows no path and no `None`: it shows only the name of a file. The feed joins the events that belong together into one line:
 
 | Line | The events |
 |---|---|
@@ -368,7 +368,7 @@ The feed holds only the lines of the ticket that runs now. The `step-start` of a
 | `run built · 1h06m · tokens 50k new, 1.3M cache` | The `run-end`: the result, the time of the run, and its two token counts. |
 | `paused · before ticket d · go on with delegate run --resume ab12` | The `paused` event: where the run stopped, and the command that goes on with it, with the short run id. |
 
-The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it: `#70 verifier running · 2m · active 2m20s`. The last frame has no such line.
+The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it, as `16:58  #70  verifier running · 2m · 43k new · 1.1M cache · active 2m20s`. The line gives the role, the time from its `agent-start`, the two token counts of its stream in faint text, and the time since its last activity. A stream that the harness has not opened yet has 0 tokens. For [a run with no stream reader](#a-run-with-no-stream-reader), and for a stream that cannot be read, the line has no token counts. The last frame has no such line.
 
 A [problem](#the-problem-events) and a [stall](#the-stall) are lines that start with `✗`. For example, `16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json`, or `17:40  ✗ stall · no change for 30m`. The line of the time limit is `<time>  time limit · <N>m used · the run goes on`.
 

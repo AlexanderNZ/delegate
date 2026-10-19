@@ -7,15 +7,19 @@ the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in 
 `design/design_handoff_delegate_terminal_output/docs/components.md`.
 
 A line of the feed is short: the local time (`HH:MM`), the ticket, and what happened. It shows no path and no `None`.
+The parts sit on the tracks of components.md § Feed: the time (5 cells), 2 cells, the subject (`#70`, or `stack python`
+of a chain) on a track as wide as the widest subject of the feed and at least `ID_CELLS`, 2 cells, and the text. A line
+with no subject, as a problem, starts its text on the track of the subject.
 The view joins the events that belong together into one line: the result of an agent with its report, the results of
 the gates of one round, and a verdict or the gates with the end of the step. A problem and a stall are lines that start
 with the glyph of a failure (`✗`).
 
 The feed keeps only the lines of the ticket that runs now. Its `step-start` (or a `retry`) starts a new group, so the
 lines of a ticket that ended stay until the next ticket starts. In `economy` mode the verification of the chain is one
-group, and its lines name the stack. While an agent runs, the last line of a frame tells it, with the time since its
-last activity. Each part of a line has the paint of its role (`output.paint`), which is plain text when `NO_COLOR` is
-set or standard output is not a terminal.
+group, and its lines name the stack. While an agent runs, the last line of a frame tells it, with the tokens of the agent
+(in `dim`, when the run has a reader of the event streams) and the time since its last activity. Each part of a line
+has the paint of its role (`output.paint`), which is plain text when `NO_COLOR` is set or standard output is not a
+terminal.
 
 The view reads the event streams only through the reader that the command gives (the `activity` method of the adapter
 of the run), so this module never imports an adapter.
@@ -33,6 +37,9 @@ from .journal import JournalError
 
 # The text between two parts of a line of the feed.
 SEPARATOR: str = " · "
+
+# The least width of the track of the subject of the feed (components.md § Feed: `#id` 3).
+ID_CELLS: int = 3
 
 # The role of the agent of each result event (the `role` of its `agent-start`), and the result event that each report event belongs to.
 AGENT_OF_RESULT: dict[str, str] = {"adapter-result": "specialist", "fixup-result": "fix-up", "verify-result": "verifier"}
@@ -68,13 +75,10 @@ def duration(seconds: float) -> str:
     return f"{whole // 3600}h{whole % 3600 // 60:02d}m"
 
 
-def _plain(spans: list[Span]) -> str:
-    return "".join(text for _, text in spans)
-
-
 @dataclass
 class _Line:
-    """A line of the feed. `role` paints the whole line, as for a problem. The subject of a `started` line is `now` and bold."""
+    """A line of the feed. `role` paints the whole line, as for a problem, except a part with a role of its own. With no
+    `role`, the time and the subject are `dim`, and the subject of a `started` line is `now` and bold."""
 
     time: datetime
     subject: str
@@ -82,20 +86,25 @@ class _Line:
     role: str = ""
     started: bool = False
 
-    def text(self) -> str:
-        return f"{local_time(self.time)}  " + (f"{self.subject} " if self.subject else "") + _plain(self.spans)
-
-    def painted(self) -> str:
+    def painted(self, id_cells: int) -> str:
+        """The line with the paint of each part. The subject sits on a track of `id_cells` cells, 2 cells before the text."""
+        gap = output.GAP
+        padding = " " * (id_cells - output.width(self.subject)) + gap
         if self.role:
-            return output.styled(self.role, self.text())
-        subject = output.styled("now bold" if self.started else "dim", self.subject) + " " if self.subject else ""
+            head: list[Span] = [(self.role, local_time(self.time) + gap + (self.subject + padding if self.subject else ""))]
+            spans = [(role or self.role, text) for role, text in self.spans]
+        else:
+            head = [("dim", local_time(self.time)), ("", gap)]
+            if self.subject:
+                head += [("now bold" if self.started else "dim", self.subject), ("", padding)]
+            spans = self.spans
         merged: list[Span] = []
-        for role, text in self.spans:  # the parts of one role next to each other get one paint
+        for role, text in [*head, *spans]:  # the parts of one role next to each other get one paint
             if merged and merged[-1][0] == role:
                 merged[-1] = (role, merged[-1][1] + text)
             else:
                 merged.append((role, text))
-        return output.styled("dim", local_time(self.time)) + "  " + subject + "".join(output.styled(role, text) for role, text in merged)
+        return "".join(output.styled(role, text) for role, text in merged)
 
 
 @dataclass
@@ -130,7 +139,8 @@ class LiveView:
         self._groups = 0  # the count of the groups so far
         self._in_chain = False  # the group is the verification of an `economy` chain
         self._waiting: dict[str, _Waiting] = {}  # by ticket id, in the order the lines started
-        self._agents: dict[tuple[str, str], datetime] = {}  # the start of the agent that runs, by ticket and role
+        # The start and the event stream of the agent that runs, by ticket and role.
+        self._agents: dict[tuple[str, str], tuple[datetime, object]] = {}
         self._gates: dict[tuple[str, str], datetime] = {}  # the start of the gate that runs, by ticket and command
         self._chain: dict[str, str] = {}  # the stack of the chain verification, by the ticket that its events name
         self._reader: status.StreamReader | None = None
@@ -189,7 +199,8 @@ class LiveView:
         if snap is not None:
             height = room - 1 - len(feed) if feed else room
             block = status.view_lines(snap, status.plan_tree(self._events), width, height, self._idle_limit)
-        lines = [line.painted() for line in feed]
+        id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
+        lines = [line.painted(id_cells) for line in feed]
         if not final:
             block = block[:room]
             space = max(0, room - len(block) - 1)
@@ -198,19 +209,35 @@ class LiveView:
         return [output.cut(line, width) for line in [*block, *divider, *lines]]
 
     def _running(self, snap: status.Snapshot) -> list[_Line]:
-        """A line for each agent that runs now: its role, the time since it started, and the time since its last activity."""
+        """A line for each agent that runs now: its role, the time since it started, its tokens in `dim` when the run has a
+        reader of the event streams, and the time since its last activity."""
         now = self._now()
         idle = {t.id: t.idle_seconds for t in snap.tickets}
         lines = []
-        for (ticket, role), started in self._agents.items():
-            text, paint = f"{role} running{SEPARATOR}{duration((now - started).total_seconds())}", "now"
+        for (ticket, role), (started, stream) in self._agents.items():
+            spans: list[Span] = [("", f"{role} running{SEPARATOR}{duration((now - started).total_seconds())}")]
+            tokens = self._agent_tokens(stream)
+            if tokens is not None:
+                spans += [JOIN, ("dim", tokens)]
+            paint = "now"
             seconds = idle.get(ticket)
             if seconds is not None and seconds >= self._idle_limit:
-                text, paint = text + f"{SEPARATOR}{output.glyphs().idle} idle {status.format_duration(seconds)}", "warn"
+                spans += [JOIN, ("", f"{output.glyphs().idle} idle {status.format_duration(seconds)}")]
+                paint = "warn"
             elif seconds is not None:
-                text += f"{SEPARATOR}active {status.format_duration(seconds)}"
-            lines.append(_Line(now, self._chain_subject(ticket, f"#{ticket}"), [("", text)], role=paint))
+                spans += [JOIN, ("", f"active {status.format_duration(seconds)}")]
+            lines.append(_Line(now, self._chain_subject(ticket, f"#{ticket}"), spans, role=paint))
         return lines
+
+    def _agent_tokens(self, stream: object) -> str | None:
+        """The tokens of the stream of an agent that runs, in the short form `12k new · 14k cache`, or None when the run has
+        no reader or the stream cannot be read. A stream that the harness has not opened yet has 0 tokens."""
+        if self._reader is None or stream is None:
+            return None
+        found = status.read_stream(self._reader, Path(str(stream)), is_live=True)
+        if found is None:
+            return None
+        return f"{status.format_tokens(found.tokens_new)} new{SEPARATOR}{status.format_tokens(found.tokens_cache)} cache"
 
     def _snapshot(self) -> status.Snapshot | None:
         """The snapshot of the events so far, or None when the journal does not start with `run-start`."""
@@ -281,7 +308,7 @@ class LiveView:
         if kind == "agent-start":
             # The newest agent of a ticket is the one that runs, as in the snapshot: the one before it ended.
             self._agents = {key: start for key, start in self._agents.items() if key[0] != ticket}
-            self._agents[(ticket, str(event["role"]))] = when
+            self._agents[(ticket, str(event["role"]))] = (when, event.get("event_stream"))
         elif kind == "gate-start":
             self._gates[(ticket, str(event["command"]))] = when
         elif kind == "verify-start" and "stack" in event:
@@ -299,10 +326,10 @@ class LiveView:
             return
         if kind in AGENT_OF_RESULT:
             role = AGENT_OF_RESULT[kind]
-            started = self._agents.pop((ticket, role), None)
+            agent = self._agents.pop((ticket, role), None)
             spans: list[Span] = [("", f"{role} {event['end_state']}")]
-            if started is not None:
-                spans += [JOIN, ("", duration((when - started).total_seconds()))]
+            if agent is not None:
+                spans += [JOIN, ("", duration((when - agent[0]).total_seconds()))]
             tokens = self._tokens(event.get("event_stream"))
             if tokens is not None:
                 spans += [JOIN, ("dim", tokens)]

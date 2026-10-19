@@ -9,8 +9,9 @@ The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and 
   standard error, as an error line, names that stream: it has no SGR code when standard error is not a terminal.
 * `glyphs()` gives the one glyph set. When the locale is not UTF-8, it gives the ASCII set of tokens.md. Each ASCII
   glyph has the width of its Unicode glyph, so the columns stay in the same positions.
-* `columns(rows, right)` pads each value to the widest value of its column, with 2 cells between columns. The
-  columns of numbers align right. A painted value is measured by the cells that it shows.
+* `columns(rows, right, tracks)` pads each value to the widest value of its column, or to the track of its column
+  when the track is wider, with 2 cells between columns. The columns of numbers align right. A painted value is
+  measured by the cells that it shows.
 * `styled(roles, text)` paints a text in more than one role, as `now bold`, and `cut(text, cells)` cuts a painted
   line to the width of the terminal.
 * The short forms of the words of a frame: `short_run_id`, `gate_name`, and `without_paths`.
@@ -127,15 +128,19 @@ def width(text: str) -> int:
     return len(SGR.sub("", text))
 
 
-def columns(rows: Sequence[Sequence[str]], right: Collection[int] = ()) -> list[str]:
+def columns(rows: Sequence[Sequence[str]], right: Collection[int] = (), tracks: Sequence[int] = ()) -> list[str]:
     """The lines of a table: each value padded to the widest value of its column, with 2 cells between columns.
 
-    `right` holds the indexes of the columns of numbers: their values, and their header, align right. The last column
-    gets no padding when it aligns left, so a line has no space at its end.
+    `right` holds the indexes of the columns of numbers: their values, and their header, align right. `tracks` gives
+    the design width of each column, in order: a column is as wide as its track when the track is wider than its widest
+    value. A column with no track, past the end of `tracks`, is as wide as its widest value. The last column gets no
+    padding when it aligns left, so a line has no space at its end.
     """
     if not rows:
         return []
-    widths = [max(width(row[index]) for row in rows) for index in range(len(rows[0]))]
+    widths = [
+        max(max(width(row[index]) for row in rows), tracks[index] if index < len(tracks) else 0) for index in range(len(rows[0]))
+    ]
     last = len(widths) - 1
     lines = []
     for row in rows:

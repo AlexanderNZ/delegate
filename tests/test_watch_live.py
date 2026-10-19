@@ -182,16 +182,16 @@ def watch(
 TABLE_AT_THE_FIRST_POLL = [
     "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  1h00m used  ETA 59m10s  50k new · 14k cache",
     "",
-    "#  plan  state    phase                                         used  new  cache",
-    "1  ● a   ✓ built                                               1h00m  39k      0",
-    "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○    50s  12k    14k  ⚠ idle 7d08h",
+    "  #  plan          state       phase                                              used    new   cache",
+    "  1  ● a           ✓ built                                                       1h00m    39k       0",
+    "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d08h",
     "─" * 200,
 ]
 
 FEED = [
-    "17:00  #b started · python-specialist",
-    "17:06  #b specialist finished · 6m · tokens 12k new, 14k cache · report ok",
-    "17:06  #b built",
+    "17:00  #b   started · python-specialist",
+    "17:06  #b   specialist finished · 6m · tokens 12k new, 14k cache · report ok",
+    "17:06  #b   built",
     "17:06  run built · 1h06m · tokens 50k new, 14k cache",
 ]
 
@@ -209,13 +209,13 @@ def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_runn
     assert code == 0
     first, last = frames(out)
     # The lines of ticket a went at the start of b. The last line of a frame that goes on tells the agent that runs.
-    assert first == [*TABLE_AT_THE_FIRST_POLL, FEED[0], "17:00  #b specialist running · 50s · ⚠ idle 7d08h"]
+    assert first == [*TABLE_AT_THE_FIRST_POLL, FEED[0], "17:00  #b   specialist running · 50s · 12k new · 14k cache · ⚠ idle 7d08h"]
     assert last == [
         "run r1  built  ████████████████ 100%  2/2 ended  1h06m used  50k new · 14k cache",
         "",
-        "#  plan  state    phase   used  new  cache",
-        "1  ● a   ✓ built         1h00m  39k      0",
-        "2  ● b   ✓ built         6m40s  12k    14k",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                       1h00m    39k       0",
+        "  2  ● b           ✓ built                                                       6m40s    12k     14k",
         "─" * 200,
         *FEED,
     ]
@@ -278,11 +278,11 @@ def test_a_frame_of_a_run_that_goes_on_fits_the_height_of_the_terminal_and_keeps
     assert first == [
         TABLE_AT_THE_FIRST_POLL[0],
         "",
-        "#  plan  state    phase                                        used  new  cache",
-        "   ✓ built 1  a",
-        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○   50s  12k    14k  ⚠ idle 7d08h",
+        "  #  plan          state       phase                                              used    new   cache",
+        "     ✓ built 1  a",
+        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d08h",
         "─" * 200,
-        "17:00  #b specialist running · 50s · ⚠ idle 7d08h",
+        "17:00  #b   specialist running · 50s · 12k new · 14k cache · ⚠ idle 7d08h",
     ]
     assert last[last.index("─" * 200) + 1:] == FEED  # the last frame keeps the whole feed, so the terminal scrolls it
 
@@ -300,7 +300,7 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
     assert code == 3
     (last,) = frames(out)
     assert last[-2:] == [
-        "16:36  #a specialist finished · 36m · tokens 19k new, 0 cache",
+        "16:36  #a   specialist finished · 36m · tokens 19k new, 0 cache",
         "16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json",
     ]
     assert out.splitlines()[-1] == "position 5"
@@ -326,9 +326,9 @@ def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its
     assert code == 0
     (last,) = frames(out)
     assert last[last.index("─" * 200) + 1:] == [
-        "16:11  stack python verifier started (#a)",
-        "16:16  stack python verifier finished · 5m · tokens 19k new, 0 cache · report ok",
-        "16:16  stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 0 cache",
+        "16:11  stack python  verifier started (#a)",
+        "16:16  stack python  verifier finished · 5m · tokens 19k new, 0 cache · report ok",
+        "16:16  stack python  ✓ ACCEPT · run built · 16m · tokens 39k new, 0 cache",
     ]
 
 
@@ -352,11 +352,11 @@ def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_t
     assert code == 3
     (last,) = frames(out)
     assert last[last.index("─" * 200) + 1:] == [
-        "16:00  #a started · python-specialist",
-        "16:36  #a specialist capped · 36m · tokens 19k new, 0 cache",
-        "16:36  #a continuation 1 of 2 · capped",
-        "16:40  #a specialist finished · 4m · tokens 19k new, 0 cache · report ok",
-        "16:41  #a gates red (pytest 1m red)",
+        "16:00  #a   started · python-specialist",
+        "16:36  #a   specialist capped · 36m · tokens 19k new, 0 cache",
+        "16:36  #a   continuation 1 of 2 · capped",
+        "16:40  #a   specialist finished · 4m · tokens 19k new, 0 cache · report ok",
+        "16:41  #a   gates red (pytest 1m red)",
         "16:41  ✗ #a the step continued 2 times (limit 2, trigger gates-red)",
     ]
 
@@ -469,7 +469,7 @@ END_REASONS = [
     pytest.param(ended_failed, (), 1, None, r"16:00  run failed · 1s · tokens 0 new, 0 cache", id="run-failed"),
     pytest.param(a_problem, (), 3, RAW_OF_A_PROBLEM, r"16:00  ✗ #a the step failed: crashed: OSError: disk full", id="problem"),
     pytest.param(a_problem_with_no_reason, (), 3, None, r"16:00  ✗ #a the step failed", id="problem-with-no-reason"),
-    pytest.param(a_verdict, ("--until", "verdict"), 4, RAW_OF_A_VERDICT, r"17:00  #a REJECT · 1 finding", id="verdict"),
+    pytest.param(a_verdict, ("--until", "verdict"), 4, RAW_OF_A_VERDICT, r"17:00  #a   REJECT · 1 finding", id="verdict"),
     pytest.param(a_stall, ("--stall-minutes", "5"), 5, None, r"\d\d:\d\d  ✗ stall · no change for 5m", id="stall"),
     pytest.param(
         a_run_that_goes_on, ("--max-minutes", "0.0001", "--poll-seconds", "0.01"), 6, None,

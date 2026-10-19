@@ -6,8 +6,10 @@ directory of a real temporary git repository and calls `delegate.main(["watch", 
 faked as in `test_watch_live`: the terminal (a standard output whose `isatty` is true, `COLUMNS` and `LINES`), the
 clock (`time.time`), the time zone (`TZ`), the locale (`LC_ALL`), and the wait between two polls (`time.sleep`).
 
-The expected lines are the cells of components.md: the columns are 2 cells apart, each column is as wide as its widest
-value, and the numbers align right.
+The expected lines are the cells of components.md: the columns are 2 cells apart, each column is as wide as its design
+track or as its widest value when that is wider, and the numbers align right. When the tracks make a line wider than
+the terminal, each column is as wide as its widest value, and then the columns drop (#130). A line of the feed puts the
+subject on a track of its own, 2 cells before the text.
 """
 
 from __future__ import annotations
@@ -145,12 +147,13 @@ def first_frame(repo: Path, monkeypatch, run: Run, columns: int, rows: int = 24)
 
 TRACK = "specialist ✓  gates ✓  verifier ●  fix-up ○"
 
+# The harness has not opened the stream of the verifier yet, so its waiting line has 0 tokens.
 FEED_OF_70 = [
-    "16:50  #70 started · python-specialist",
-    "16:55  #70 specialist finished · 5m · tokens 19k new, 0 cache · report ok",
-    "16:56  #70 gates green (pytest 1m)",
-    "16:56  #70 verifier started",
-    "16:58  #70 verifier running · 2m · active 2m20s",
+    "16:50  #70  started · python-specialist",
+    "16:55  #70  specialist finished · 5m · tokens 19k new, 0 cache · report ok",
+    "16:56  #70  gates green (pytest 1m)",
+    "16:56  #70  verifier started",
+    "16:58  #70  verifier running · 2m · 0 new · 0 cache · active 2m20s",
 ]
 
 
@@ -166,14 +169,14 @@ def test_frame_2a_at_120_columns_has_the_run_line_the_table_in_plan_order_with_t
     assert frame == [
         "run abcd  running  █████████████░░░ 82%  5/7 ended  58m20s used  ETA 11m40s  213k new · 0 cache",
         "",
-        "#  plan      state    phase                                          used  new  cache",
-        "1  ● 66      ✓ built                                               10m00s  39k      0",
-        "2  └─● 72    ✓ built                                               10m00s  39k      0",
-        "3    └─● 67  ✓ built                                               10m00s  39k      0",
-        "4  ● 68      ✓ built                                               10m00s  39k      0",
-        "5  ● 69      ✓ built                                               10m00s  39k      0",
-        f"6  └─▶ 70    running  {TRACK}   8m20s  19k      0  active 2m20s",
-        "7    └─· 71  pending",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● 66          ✓ built                                                      10m00s    39k       0",
+        "  2  └─● 72        ✓ built                                                      10m00s    39k       0",
+        "  3    └─● 67      ✓ built                                                      10m00s    39k       0",
+        "  4  ● 68          ✓ built                                                      10m00s    39k       0",
+        "  5  ● 69          ✓ built                                                      10m00s    39k       0",
+        f"  6  └─▶ 70        running     {TRACK}       8m20s    19k       0  active 2m20s",
+        "  7    └─· 71      pending",
         "─" * 120,
         *FEED_OF_70,
     ]
@@ -203,14 +206,14 @@ def test_frame_2a_at_80_columns_drops_the_bar_then_new_and_cache_then_the_phase_
 
 
 FEED_OF_A_FIXUP = [
-    "17:50  #70 started · python-specialist",
-    "17:55  #70 specialist finished · 5m · tokens 19k new, 0 cache · report ok",
-    "17:56  #70 gates green (pytest 1m)",
-    "17:56  #70 verifier started",
-    "17:58  #70 verifier finished · 2m · tokens 19k new, 0 cache · report ok",
-    "17:58  #70 REJECT · 1 finding",
-    "17:58  #70 fix-up round 1 started",
-    "17:59  #70 fix-up running · 1m · active 1m20s",
+    "17:50  #70  started · python-specialist",
+    "17:55  #70  specialist finished · 5m · tokens 19k new, 0 cache · report ok",
+    "17:56  #70  gates green (pytest 1m)",
+    "17:56  #70  verifier started",
+    "17:58  #70  verifier finished · 2m · tokens 19k new, 0 cache · report ok",
+    "17:58  #70  REJECT · 1 finding",
+    "17:58  #70  fix-up round 1 started",
+    "17:59  #70  fix-up running · 1m · 0 new · 0 cache · active 1m20s",
 ]
 
 
@@ -246,10 +249,10 @@ def test_at_120_columns_and_24_rows_the_built_rows_fold_and_every_column_stays(t
     assert frame[:6] == [
         "run abcd  running  ██████████████░░ 90%  11/13 ended  1h59m used  ETA 10m40s  464k new · 0 cache",
         "",
-        " #  plan      state    phase                                             used  new  cache",
-        "    ✓ built 11  59 60 61 62 64 65 66 72 67 68 69",
-        "12  └─▶ 70    running  specialist ✓  gates ✓  verifier ✓  fix-up ● 1/2  9m20s  39k      0  active 1m20s",
-        "13    └─· 71  pending",
+        "  #  plan          state       phase                                               used    new   cache",
+        "     ✓ built 11  59 60 61 62 64 65 66 72 67 68 69",
+        " 12  └─▶ 70        running     specialist ✓  gates ✓  verifier ✓  fix-up ● 1/2    9m20s    39k       0  active 1m20s",
+        " 13    └─· 71      pending",
     ]
     assert frame[7:] == FEED_OF_A_FIXUP
 
@@ -268,8 +271,8 @@ def test_a_frame_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("extra", "tail", "waiting"),
     [
-        pytest.param((), "⚠ idle 6m40s", "17:02  #70 verifier running · 6m · ⚠ idle 6m40s", id="past-the-default-of-5-minutes"),
-        pytest.param(("--stall-minutes", "10"), "active 6m40s", "17:02  #70 verifier running · 6m · active 6m40s", id="within-the-stall-minutes"),
+        pytest.param((), "⚠ idle 6m40s", "17:02  #70  verifier running · 6m · 0 new · 0 cache · ⚠ idle 6m40s", id="past-the-default-of-5-minutes"),
+        pytest.param(("--stall-minutes", "10"), "active 6m40s", "17:02  #70  verifier running · 6m · 0 new · 0 cache · active 6m40s", id="within-the-stall-minutes"),
     ],
 )
 def test_an_agent_idle_past_the_stall_time_shows_a_warning_in_the_live_tail_and_in_the_waiting_line(tmp_path, monkeypatch, extra, tail, waiting):
@@ -320,12 +323,12 @@ def test_in_economy_mode_the_feed_of_the_chain_verification_is_one_group_named_b
     assert frame == [
         "run r1  running · verifier  ██████████░░░░░░ 66%  2/2 ended  18m20s used  ETA 4m20s  39k new · 0 cache",
         "",
-        "#  plan  state    phase   used  new  cache",
-        "1  ● a   ✓ built         6m00s  19k      0",
-        "2  ● b   ✓ built         6m00s  19k      0",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                       6m00s    19k       0",
+        "  2  ● b           ✓ built                                                       6m00s    19k       0",
         "─" * 120,
-        "16:16  stack python verifier started (#a, #b)",
-        "16:18  stack python verifier running · 1m · active 1m40s",
+        "16:16  stack python  verifier started (#a, #b)",
+        "16:18  stack python  verifier running · 1m · 0 new · 0 cache · active 1m40s",
     ]
 
 
@@ -399,35 +402,35 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     assert fixup == [
         "run r1  running  ███░░░░░░░░░░░░░ 20%  0/4 ended  8m20s used  ETA -  39k new · 0 cache",
         "",
-        "#  plan     state    phase                                             used  new  cache",
-        "1  ▶ a      running  specialist ✓  gates ✓  verifier ✓  fix-up ● 1/2  8m20s  39k      0  active 20s",
-        "2  └─· b    pending",
-        "3    └─· c  pending",
-        "4  · d      pending",
+        "  #  plan          state       phase                                               used    new   cache",
+        "  1  ▶ a           running     specialist ✓  gates ✓  verifier ✓  fix-up ● 1/2    8m20s    39k       0  active 20s",
+        "  2  └─· b         pending",
+        "  3    └─· c       pending",
+        "  4  · d           pending",
         "─" * 120,
-        "16:00  #a started · python-specialist",
-        "16:05  #a specialist finished · 5m · tokens 19k new, 0 cache · report ok",
-        "16:06  #a gates green (pytest 1m)",
-        "16:06  #a verifier started",
-        "16:08  #a verifier finished · 2m · tokens 19k new, 0 cache · report ok",
-        "16:08  #a REJECT · 1 finding",
-        "16:08  #a fix-up round 1 started",
-        "16:08  #a fix-up running · 20s · active 20s",
+        "16:00  #a   started · python-specialist",
+        "16:05  #a   specialist finished · 5m · tokens 19k new, 0 cache · report ok",
+        "16:06  #a   gates green (pytest 1m)",
+        "16:06  #a   verifier started",
+        "16:08  #a   verifier finished · 2m · tokens 19k new, 0 cache · report ok",
+        "16:08  #a   REJECT · 1 finding",
+        "16:08  #a   fix-up round 1 started",
+        "16:08  #a   fix-up running · 20s · 0 new · 0 cache · active 20s",
     ]
     assert problem == [
         "run r1  running  ████░░░░░░░░░░░░ 25%  1/4 ended  21m10s used  ETA 25m30s  97k new · 0 cache",
         "",
-        "#  plan     state    phase                                          used  new  cache",
-        "1  ● a      ✓ built                                               11m40s  77k      0",
-        "2  └─▶ b    running  specialist ●  gates ○  verifier ○  fix-up ○   9m30s  19k      0  cont 2/2",
-        "3    └─· c  pending",
-        "4  · d      pending",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                      11m40s    77k       0",
+        "  2  └─▶ b         running     specialist ●  gates ○  verifier ○  fix-up ○       9m30s    19k       0  cont 2/2",
+        "  3    └─· c       pending",
+        "  4  · d           pending",
         "─" * 120,
-        "16:11  #b started · python-specialist",
-        "16:16  #b specialist capped · 5m · tokens 19k new, 0 cache",
-        "16:16  #b continuation 1 of 2 · capped",
-        "16:20  #b specialist finished · 3m · tokens 19k new, 0 cache · report ok",
-        "16:21  #b gates red (pytest 1m red)",
+        "16:11  #b   started · python-specialist",
+        "16:16  #b   specialist capped · 5m · tokens 19k new, 0 cache",
+        "16:16  #b   continuation 1 of 2 · capped",
+        "16:20  #b   specialist finished · 3m · tokens 19k new, 0 cache · report ok",
+        "16:21  #b   gates red (pytest 1m red)",
         "16:21  ✗ #b the step continued 2 times (limit 2, trigger gates-red)",
     ]
     position = int(out.splitlines()[-1].split()[1])
@@ -441,14 +444,14 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     assert frames(out) == [[
         "run r1  running  ████████░░░░░░░░ 50%  2/4 ended  26m00s used  ETA 26m00s  97k new · 0 cache",
         "",
-        "#  plan     state    phase                                             used  new  cache",
-        "1  ● a      ✓ built                                                  11m40s  77k      0",
-        "2  └─✗ b    failed   gates red: nix develop -c python3 -m pytest -q  14m20s  19k      0",
-        "3    └─· c  pending",
-        "4  · d      pending",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                      11m40s    77k       0",
+        "  2  └─✗ b         failed      gates red: nix develop -c python3 -m pytest -q   14m20s    19k       0",
+        "  3    └─· c       pending",
+        "  4  · d           pending",
         "─" * 120,
-        "16:25  #b specialist finished · 4m · tokens 19k new, 0 cache · report ok",
-        "16:26  #b gates red (pytest 1m red)",
+        "16:25  #b   specialist finished · 4m · tokens 19k new, 0 cache · report ok",
+        "16:26  #b   gates red (pytest 1m red)",
         "16:26  ✗ #b the gates are not green: nix develop -c python3 -m pytest -q",
     ]]
     position = int(out.splitlines()[-1].split()[1])
@@ -460,13 +463,13 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     assert frames(out) == [[
         "run r1  paused  ████████████░░░░ 75%  3/4 ended  26m00s used  97k new · 0 cache",
         "",
-        "#  plan     state    phase                                             used  new  cache",
-        "1  ● a      ✓ built                                                  11m40s  77k      0",
-        "2  └─✗ b    failed   gates red: nix develop -c python3 -m pytest -q  14m20s  19k      0",
-        "3    └─– c  skipped  blocked by b, which failed",
-        "4  · d      pending  paused before this step",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                      11m40s    77k       0",
+        "  2  └─✗ b         failed      gates red: nix develop -c python3 -m pytest -q   14m20s    19k       0",
+        "  3    └─– c       skipped     blocked by b, which failed",
+        "  4  · d           pending     paused before this step",
         "─" * 120,
-        "16:26  #c skipped · blocked by b, which failed",
+        "16:26  #c   skipped · blocked by b, which failed",
         "16:26  paused · before ticket d · go on with delegate run --resume r1",
     ]]
     position = int(out.splitlines()[-1].split()[1])
@@ -478,18 +481,18 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     assert frames(out) == [[
         "run r1  failed  ████████████████ 100%  4/4 ended  43m20s used  135k new · 0 cache",
         "",
-        "#  plan     state    phase                                             used  new  cache",
-        "1  ● a      ✓ built                                                  11m40s  77k      0",
-        "2  └─✗ b    failed   gates red: nix develop -c python3 -m pytest -q  14m20s  19k      0",
-        "3    └─– c  skipped  blocked by b, which failed",
-        "4  ● d      ✓ built                                                  10m00s  39k      0",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                      11m40s    77k       0",
+        "  2  └─✗ b         failed      gates red: nix develop -c python3 -m pytest -q   14m20s    19k       0",
+        "  3    └─– c       skipped     blocked by b, which failed",
+        "  4  ● d           ✓ built                                                      10m00s    39k       0",
         "─" * 120,
-        "16:33  #d started · python-specialist",
-        "16:38  #d specialist finished · 5m · tokens 19k new, 0 cache · report ok",
-        "16:39  #d gates green (pytest 1m)",
-        "16:39  #d verifier started",
-        "16:43  #d verifier finished · 4m · tokens 19k new, 0 cache · report ok",
-        "16:43  #d ✓ ACCEPT · built",
+        "16:33  #d   started · python-specialist",
+        "16:38  #d   specialist finished · 5m · tokens 19k new, 0 cache · report ok",
+        "16:39  #d   gates green (pytest 1m)",
+        "16:39  #d   verifier started",
+        "16:43  #d   verifier finished · 4m · tokens 19k new, 0 cache · report ok",
+        "16:43  #d   ✓ ACCEPT · built",
         "16:43  run failed · 43m · tokens 135k new, 0 cache",
     ]]
 
@@ -511,7 +514,7 @@ def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch)
     run_line, header, divider = frame[0], frame[2], next(line for line in frame if "─" * 50 in line)
     assert run_line.startswith("run \x1b[1mabcd\x1b[0m  running  \x1b[32m" + "█" * 14 + "\x1b[0m\x1b[2m░░\x1b[0m 90%")
     assert "\x1b[2m1h59m used\x1b[0m" in run_line and "\x1b[2m464k new · 0 cache\x1b[0m" in run_line
-    assert header.startswith(" \x1b[2m#\x1b[0m  \x1b[2mplan\x1b[0m  ") and header.endswith("\x1b[2mcache\x1b[0m")
+    assert header.startswith("  \x1b[2m#\x1b[0m  \x1b[2mplan\x1b[0m  ") and header.endswith("\x1b[2mcache\x1b[0m")
     assert divider == "\x1b[2m" + "─" * 120 + "\x1b[0m"
     built_row = next(line for line in frame if " 66" in SGR.sub("", line))
     assert "\x1b[32m●\x1b[0m" in built_row and "\x1b[32m✓\x1b[0m\x1b[2m built\x1b[0m" in built_row
@@ -521,12 +524,13 @@ def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch)
     assert "\x1b[36m\x1b[1mrunning\x1b[0m\x1b[0m" in running and "\x1b[33mfix-up ● 1/2\x1b[0m" in running
     assert "\x1b[32m✓\x1b[0m" in running and "\x1b[36mactive 1m20s\x1b[0m" in running
     feed = frame[frame.index(divider) + 1:]
-    assert feed[0] == "\x1b[2m17:50\x1b[0m  \x1b[36m\x1b[1m#70\x1b[0m\x1b[0m started · python-specialist"
+    assert feed[0] == "\x1b[2m17:50\x1b[0m  \x1b[36m\x1b[1m#70\x1b[0m\x1b[0m  started · python-specialist"
     assert "\x1b[32mgates green\x1b[0m\x1b[2m (pytest 1m)\x1b[0m" in feed[2]
     assert "\x1b[2mtokens 19k new, 0 cache\x1b[0m" in feed[1]
     assert "\x1b[33m\x1b[1mREJECT · 1 finding\x1b[0m\x1b[0m" in feed[5]
     assert "\x1b[33mfix-up round 1 started\x1b[0m" in feed[6]
-    assert feed[7] == "\x1b[36m17:59  #70 fix-up running · 1m · active 1m20s\x1b[0m"
+    # The waiting line is `now`, and its tokens are `dim`.
+    assert feed[7] == "\x1b[36m17:59  #70  fix-up running · 1m · \x1b[0m\x1b[2m0 new · 0 cache\x1b[0m\x1b[36m · active 1m20s\x1b[0m"
 
 
 def test_a_problem_line_is_bad_and_an_accept_has_a_check_in_ok_and_a_bold_word(tmp_path, monkeypatch):
@@ -581,12 +585,84 @@ def test_with_a_locale_that_is_not_utf8_the_frame_has_the_ascii_glyphs_in_the_sa
     assert ascii_frame[:6] == [
         "run abcd  running  ##############.. 90%  11/13 ended  1h59m used  ETA 10m40s  464k new . 0 cache",
         "",
-        " #  plan      state    phase                                             used  new  cache",
-        "    + built 11  59 60 61 62 64 65 66 72 67 68 69",
-        "12  \\-> 70    running  specialist +  gates +  verifier +  fix-up * 1/2  9m20s  39k      0  active 1m20s",
-        "13    \\-. 71  pending",
+        "  #  plan          state       phase                                               used    new   cache",
+        "     + built 11  59 60 61 62 64 65 66 72 67 68 69",
+        " 12  \\-> 70        running     specialist +  gates +  verifier +  fix-up * 1/2    9m20s    39k       0  active 1m20s",
+        " 13    \\-. 71      pending",
     ]
     assert ascii_frame[6] == "-" * 120
     # The run line, the table and the divider are ASCII. The feed keeps its joins (` · `).
     assert all(line.isascii() for line in ascii_frame[:7])
-    assert ascii_frame[12:14] == ["17:58  #70 REJECT · 1 finding", "17:58  #70 fix-up round 1 started"]
+    assert ascii_frame[12:14] == ["17:58  #70  REJECT · 1 finding", "17:58  #70  fix-up round 1 started"]
+
+
+# The cell where each track of the ticket table of frame 2a starts (components.md § Ticket table (watch)): `#` 3,
+# `plan` 12, `state` 10, `phase` 46, `used` 7, `new` 5, `cache` 6, and the live tail, with 2 cells between two tracks.
+TRACK_START: dict[str, int] = {"#": 0, "plan": 5, "state": 19, "phase": 31, "used": 79, "new": 88, "cache": 95, "": 103}
+TRACK_WIDTH: dict[str, int] = {"#": 3, "used": 7, "new": 5, "cache": 6}
+
+
+def at_cell(line: str, cell: int, text: str) -> bool:
+    """True when `text` starts at `cell` of the line, after a space or at the start of the line."""
+    return line[cell:cell + len(text)] == text and (cell == 0 or line[cell - 1] == " ")
+
+
+def right_in_track(line: str, track: str, text: str) -> bool:
+    """True when `text` ends at the last cell of the track of a column of numbers."""
+    end = TRACK_START[track] + TRACK_WIDTH[track]
+    return at_cell(line, end - len(text), text) and line[end:end + 2].strip() == ""
+
+
+def test_frame_2a_at_120_columns_and_24_rows_puts_each_column_of_the_header_and_of_a_running_row_on_its_design_track(
+    tmp_path, monkeypatch
+):
+    repo = bare_repo(tmp_path)
+    run = in_the_verifier(repo, SEVEN[:5])
+    Clock(monkeypatch, 3500)
+
+    frame = first_frame(repo, monkeypatch, run, columns=120, rows=24)
+
+    header, running = frame[2], frame[8]
+    assert [at_cell(header, TRACK_START[name], name) for name in ("plan", "state", "phase")] == [True] * 3, header
+    assert [right_in_track(header, name, name) for name in ("#", "used", "new", "cache")] == [True] * 4, header
+    assert right_in_track(running, "#", "6"), running
+    assert at_cell(running, TRACK_START["plan"], "└─▶ 70"), running
+    assert at_cell(running, TRACK_START["state"], "running"), running
+    assert at_cell(running, TRACK_START["phase"], TRACK), running
+    assert [right_in_track(running, name, text) for name, text in (("used", "8m20s"), ("new", "19k"), ("cache", "0"))] == [True] * 3
+    assert at_cell(running, TRACK_START[""], "active 2m20s"), running
+    assert all(len(line) <= 120 for line in frame)
+
+
+def test_the_feed_puts_the_id_on_its_own_track_and_the_waiting_line_gives_the_tokens_of_its_agent_in_dim(tmp_path, monkeypatch):
+    # The local time zone is 4 hours 22 minutes east of UTC: the run starts at 07:22 local time.
+    monkeypatch.setenv("TZ", "XXX-4:22")
+    time.tzset()
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "127", run_id="20261016T030000Z-abcd")
+    run.step_start(0, "127")
+    run.add(0, "agent-start", ticket="127", role="specialist", round=0,
+            event_stream=run.stream("127.specialist.stream.jsonl", "capped.jsonl", cut=True))
+    Clock(monkeypatch, 130)
+
+    code, out = watch(repo, monkeypatch, run.dir.name, "--stall-minutes", "1000000", sleep=ends_at_first_poll(run))
+
+    assert code == 1
+    feed = frames(out)[0][-2:]
+    # The cut stream of the specialist has 12k new tokens and 14k cache reads (as in `test_watch_live`).
+    assert feed[0] == "07:22  #127  started · python-specialist"
+    assert re.fullmatch(r"07:24  #127  specialist running · 2m · 12k new · 14k cache · active \S+", feed[1]), feed[1]
+    assert "\x1b[2m12k new · 14k cache\x1b[0m" in out  # the token part is `dim`
+
+
+def test_the_id_track_of_the_feed_is_at_least_3_cells_wide(tmp_path, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a", run_id="r1")
+    run.step_start(0, "a")
+    run.add(0, "agent-start", ticket="a", role="specialist", round=0, event_stream=str(run.dir / "reports" / "a.stream.jsonl"))
+    Clock(monkeypatch, 20)
+
+    frame = first_frame(repo, monkeypatch, run, columns=120)
+
+    # The harness has not opened the stream of the specialist yet, so it has 0 tokens.
+    assert frame[-2:] == ["16:00  #a   started · python-specialist", "16:00  #a   specialist running · 20s · 0 new · 0 cache · active 20s"]

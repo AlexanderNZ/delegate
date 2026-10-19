@@ -98,7 +98,7 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
             "branch": branch if states[ticket] == RUNNING else output.styled("dim", branch),
             "last event": output.styled("dim", str(own[-1]["time"])) if own else "",
         }
-    table = _table(snap, dict(plan_tree(events)), frozenset(), False, None, output.glyphs(), STATUS_HEADER, facts)
+    table = _table(snap, dict(plan_tree(events)), frozenset(), False, None, output.glyphs(), STATUS_HEADER, facts, tracked=True)
     return [*lines, "", *table]
 
 
@@ -306,7 +306,7 @@ def _ticket(
     idle = None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
-        found = _read(activity, Path(stream), is_live)
+        found = read_stream(activity, Path(stream), is_live)
         if found is None:
             tokens = None  # a count without this agent is not the count of the ticket
             continue
@@ -348,7 +348,7 @@ def _log_idle_seconds(log: Path, now: datetime) -> int | None:
     return _seconds(datetime.fromtimestamp(changed, now.tzinfo), now)
 
 
-def _read(activity: StreamReader, stream: Path, is_live: bool) -> Activity | None:
+def read_stream(activity: StreamReader, stream: Path, is_live: bool) -> Activity | None:
     """The activity in a stream, or None when the stream cannot be read.
 
     The stream of the agent that runs now (`is_live`) can be missing before the harness opens it: it then has no
@@ -505,10 +505,18 @@ TABLE_NUMBERS: frozenset[str] = frozenset({"#", "used", "new", "cache"})
 # and `branch` after `phase`, and `last event` before the live tail.
 STATUS_HEADER: tuple[str, ...] = ("#", "plan", "state", "phase", "verdict", "branch", "used", "new", "cache", "last event", "")
 
-# The steps of the fit to the width, in the order of components.md: each step drops more. The bar of the run line
-# goes first, by `BAR_COLUMNS`. Then `new` and `cache`, then the labels of the phase track, then `used`.
-FIT_STEPS: tuple[frozenset[str], ...] = (
-    frozenset(), frozenset({"new", "cache"}), frozenset({"new", "cache", "labels"}), frozenset({"new", "cache", "labels", "used"}),
+# The design width of each column of the two ticket tables, in cells (components.md § Ticket table (watch) and
+# § Ticket table (status)). A column is as wide as its track, or as its widest value when that is wider. `last event`
+# and the live tail have no track.
+TRACKS: dict[str, int] = {"#": 3, "plan": 12, "state": 10, "phase": 46, "verdict": 7, "branch": 15, "used": 7, "new": 5, "cache": 6}
+
+# The steps of the fit to the width, in the order of components.md: each step is the columns that drop, and whether
+# the columns keep their design tracks (`TRACKS`). The bar of the run line goes first, by `BAR_COLUMNS`. Then the
+# tracks shrink to the widest value of each column. Then `new` and `cache` drop, then the labels of the phase track,
+# then `used`.
+FIT_STEPS: tuple[tuple[frozenset[str], bool], ...] = (
+    (frozenset(), True), (frozenset(), False), (frozenset({"new", "cache"}), False), (frozenset({"new", "cache", "labels"}), False),
+    (frozenset({"new", "cache", "labels", "used"}), False),
 )
 
 # The phases of the track of a running ticket. In `economy` mode only the chain verifies, so a ticket has two phases.
@@ -526,15 +534,16 @@ def view_lines(
 
     The spec is `design/design_handoff_delegate_terminal_output/docs/components.md`. `tree` is the depth of each ticket
     (`plan_tree`). When the lines would be more than `height`, the built rows fold to one line. When a line of the
-    table is wider than `width`, the columns drop in the order of `FIT_STEPS`. An agent or a gate log that has not
-    changed for `idle_limit` seconds or more shows a warning in the live tail. The view names only the run id, the
-    ticket ids, the states, the phases, the reasons with no path, and the numbers. It shows no tool call.
+    table is wider than `width`, the tracks shrink and then the columns drop, in the order of `FIT_STEPS`. An agent or
+    a gate log that has not changed for `idle_limit` seconds or more shows a warning in the live tail. The view names
+    only the run id, the ticket ids, the states, the phases, the reasons with no path, and the numbers. It shows no
+    tool call.
     """
     glyph = output.glyphs()
     depths = dict(tree)
     fold = height is not None and 3 + len(snap.tickets) > height and any(t.state == BUILT for t in snap.tickets)
-    for dropped in FIT_STEPS:
-        table = _table(snap, depths, dropped, fold, idle_limit, glyph)
+    for dropped, tracked in FIT_STEPS:
+        table = _table(snap, depths, dropped, fold, idle_limit, glyph, tracked=tracked)
         if max(output.width(line) for line in table) <= width:
             break
     return [output.cut(line, max(width, 1)) for line in [_run_line(snap, width, glyph), "", *table]]
@@ -563,12 +572,14 @@ def _run_line(snap: Snapshot, width: int, glyph: output.Glyphs) -> str:
 
 def _table(
     snap: Snapshot, depths: dict[str, int], dropped: frozenset[str], fold: bool, idle_limit: int | None, glyph: output.Glyphs,
-    header: tuple[str, ...] = TABLE_HEADER, facts: dict[str, dict[str, str]] | None = None,
+    header: tuple[str, ...] = TABLE_HEADER, facts: dict[str, dict[str, str]] | None = None, tracked: bool = False,
 ) -> list[str]:
     """The lines of the ticket table: the header, and a row for each ticket in plan order, or the fold line of the built rows.
 
     `header` names the columns. `facts` gives, for each ticket id, the cells of the columns that the live view does not
-    have: `verdict`, `branch` and `last event` of `delegate status`.
+    have: `verdict`, `branch` and `last event` of `delegate status`. With `tracked`, each column is as wide as its
+    design track (`TRACKS`), or as its widest value when that is wider. Without it, each column is as wide as its
+    widest value.
     """
     names = [name for name in header if name not in dropped and (snap.tokens_new is not None or name not in ("new", "cache"))]
     rows = [[output.styled("dim", name) for name in names]]
@@ -581,9 +592,11 @@ def _table(
         cells = _row(snap, ticket, position, depths.get(ticket.id, 0), "labels" not in dropped, idle_limit, glyph)
         cells.update((facts or {}).get(ticket.id, {}))
         rows.append([cells[name] for name in names])
-    lines = [line.rstrip(" ") for line in output.columns(rows, right={i for i, name in enumerate(names) if name in TABLE_NUMBERS})]
+    tracks = [TRACKS.get(name, 0) if tracked else 0 for name in names]
+    right = {i for i, name in enumerate(names) if name in TABLE_NUMBERS}
+    lines = [line.rstrip(" ") for line in output.columns(rows, right=right, tracks=tracks)]
     if fold_at is not None:
-        number = max(output.width(row[0]) for row in rows)
+        number = max(tracks[0], *(output.width(row[0]) for row in rows))
         line = " " * number + output.GAP + output.styled("ok", glyph.built) + output.styled("dim", f" built {len(folded)}")
         lines.insert(fold_at, line + output.GAP + output.styled("dim", " ".join(folded)))
     return lines

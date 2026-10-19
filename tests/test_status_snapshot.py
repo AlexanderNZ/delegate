@@ -459,9 +459,10 @@ def test_plain_status_shows_the_percentage_the_eta_the_tokens_and_the_last_activ
         "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s, tokens 31k new, 14k cache",
         f"journal {run.path}",
         "",
-        "#  plan  state    phase" + " " * 38 + "  verdict  branch        used  new  cache  last event",
-        "1  ● a   ✓ built  " + " " * 43 + "  " + " " * 7 + f"  run/demo-a  10m00s  19k      0  {at(600)}",
-        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○  " + " " * 7 + f"  run/demo-b     50s  12k    14k  {at(600)}  active 7d07h",
+        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
+        "  1  ● a           ✓ built" + " " * 62 + f"run/demo-a        10m00s    19k       0  {at(600)}",
+        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○" + " " * 14
+        + f"run/demo-b           50s    12k     14k  {at(600)}  active 7d07h",
     ]
 
 
@@ -484,9 +485,9 @@ def test_each_form_of_status_shows_the_new_tokens_and_the_cache_tokens_of_the_ru
     assert status_row("\n".join(lines), "b")[9:11] == ["12k", "14k"]
     assert block == [
         "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s  31k new · 14k cache",
-        "#  plan  state    phase                                          used  new  cache",
-        "1  ● a   ✓ built                                               10m00s  19k      0",
-        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s  12k    14k  ⚠ idle 7d07h",
+        "  #  plan          state       phase                                              used    new   cache",
+        "  1  ● a           ✓ built                                                      10m00s    19k       0",
+        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s    12k     14k  ⚠ idle 7d07h",
     ]
 
 
@@ -504,9 +505,10 @@ def test_plain_status_of_a_run_that_ended_shows_its_progress_with_no_eta(tmp_pat
     # The skipped ticket has its reason in the phase cell, and no branch, no time used and no tokens.
     assert lines[3:] == [
         "",
-        "#  plan  state    phase" + " " * 7 + "  verdict  branch        used  new  cache  last event",
-        "1  ● a   ✓ built  " + " " * 12 + "  " + " " * 7 + f"  run/demo-a  10m00s  19k      0  {at(600)}",
-        "2  – b   skipped  blocked by x  " + " " * 7 + "  " + " " * 10 + "  " + " " * 6 + "  " + " " * 3 + "  " + " " * 5 + f"  {at(601)}",
+        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
+        "  1  ● a           ✓ built" + " " * 62 + f"run/demo-a        10m00s    19k       0  {at(600)}",
+        "  2  – b           skipped     blocked by x" + " " * 34 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7 + "  " + " " * 5
+        + "  " + " " * 6 + f"  {at(601)}",
     ]
 
 
@@ -564,7 +566,7 @@ def test_plain_status_on_a_run_whose_adapter_has_no_reader_shows_the_progress_an
 
     assert lines[1] == "progress: 50%, 1 of 2 ended, 10m50s used, ETA 9m10s"
     # The table has no columns `new` and `cache`, and the live tail of b gives no activity.
-    assert lines[4] == "#  plan  state    phase" + " " * 38 + "  verdict  branch        used  last event"
+    assert lines[4] == "  #  plan          state       phase" + " " * 41 + "  verdict  branch              used  last event"
     assert status_row("\n".join(lines), "a") == ["1", "● a", "✓ built", "run/demo-a", "10m00s", at(600)]
     assert status_row("\n".join(lines), "b") == [
         "2", "▶ b", "running", "specialist ●", "gates ○", "verifier ○", "fix-up ○", "run/demo-b", "50s", at(600),
@@ -583,10 +585,12 @@ def test_the_live_block_on_a_run_whose_adapter_has_no_reader_shows_the_progress_
     # The table has no columns `new` and `cache`, and the running row has no live tail.
     assert block_of(drawn[0]) == [
         "run r1  running  ████████░░░░░░░░ 50%  1/2 ended  10m50s used  ETA 9m10s",
-        "#  plan  state    phase                                          used",
-        "1  ● a   ✓ built                                               10m00s",
-        "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s",
+        "  #  plan          state       phase                                              used",
+        "  1  ● a           ✓ built                                                      10m00s",
+        "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s",
     ]
+    # The waiting line of the specialist of b has no tokens and no activity (#130).
+    assert re.fullmatch(r"\d\d:\d\d  #b   specialist running · 50s", drawn[0][-1]), drawn[0][-1]
 
 
 def a_live_run(repo: Path) -> Run:
@@ -828,15 +832,15 @@ def test_the_live_block_on_a_run_with_a_stream_that_cannot_be_read_shows_no_toke
     expected = {
         "ended": [
             f"run r1  running  ██████████░░░░░░ 66%  2/3 ended  10m50s used  ETA 5m15s  {new} new · 0 cache",
-            "#  plan  state    phase    used  new  cache",
-            f"1  ● a   ✓ built         10m00s  {new}      0",
-            "2  ● b   ✓ built            30s",
+            "  #  plan          state       phase                                              used    new   cache",
+            f"  1  ● a           ✓ built                                                      10m00s    {new}       0",
+            "  2  ● b           ✓ built                                                         30s",
         ],
         "live": [
             f"run r1  running  █████░░░░░░░░░░░ 33%  1/3 ended  10m50s used  ETA 19m10s  {new} new · 0 cache",
-            "#  plan  state    phase                                          used  new  cache",
-            f"1  ● a   ✓ built                                               10m00s  {new}      0",
-            "2  ▶ b   running  specialist ●  gates ○  verifier ○  fix-up ○     50s",
+            "  #  plan          state       phase                                              used    new   cache",
+            f"  1  ● a           ✓ built                                                      10m00s    {new}       0",
+            "  2  ▶ b           running     specialist ●  gates ○  verifier ○  fix-up ○         50s",
         ],
     }[where]
     assert (code, capsys.readouterr().err) == (0, "")
@@ -952,7 +956,7 @@ def test_the_live_block_shows_the_running_gate_and_the_time_since_its_log_change
     code, drawn, _ = follow(repo, monkeypatch, run, columns=200)
 
     assert code == 0
-    assert block_of(drawn[0])[2] == "1  ▶ a   running  specialist ✓  gates ●  verifier ○  fix-up ○  10m50s  19k      0  gate pytest · log 1m00s ago"
+    assert block_of(drawn[0])[2] == "  1  ▶ a           running     specialist ✓  gates ●  verifier ○  fix-up ○      10m50s    19k       0  gate pytest · log 1m00s ago"
 
 
 def test_the_running_gate_shows_for_a_run_whose_adapter_has_no_reader(tmp_path, capsys, monkeypatch, adapter_with_no_reader):

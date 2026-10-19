@@ -107,11 +107,12 @@ def test_the_status_of_a_running_run_is_the_header_lines_and_the_ticket_table_wi
         "progress: 45%, 1 of 4 ended, 18m20s used, ETA 21m40s, tokens 58k new, 0 cache",
         f"journal {run.path}",
         "",
-        "#  plan     state    phase" + " " * 38 + "  verdict  branch        used  new  cache  last event",
-        "1  ● a      ✓ built  " + " " * 43 + f"  ACCEPT   run/demo-a  10m00s  39k      0  {at(600)}",
-        "2  └─▶ b    running  specialist ✓  gates ✓  verifier ●  fix-up ○  " + " " * 7 + f"  run/demo-b   8m20s  19k      0  {at(960)}  active 2m20s",
-        "3    └─· c  pending",
-        "4  · d      pending",
+        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
+        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        "  2  └─▶ b         running     specialist ✓  gates ✓  verifier ●  fix-up ○              run/demo-b         8m20s    19k       0  "
+        + at(960) + "  active 2m20s",
+        "  3    └─· c       pending",
+        "  4  · d           pending",
     ]
 
 
@@ -130,12 +131,13 @@ def test_the_status_of_a_run_that_ended_gives_the_reason_of_a_failed_and_of_a_sk
         "progress: 100%, 4 of 4 ended, 26m00s used, tokens 97k new, 0 cache",
         f"journal {run.path}",
         "",
-        "#  plan     state    phase" + " " * 41 + "  verdict  branch        used  new  cache  last event",
-        "1  ● a      ✓ built  " + " " * 46 + f"  ACCEPT   run/demo-a  10m00s  39k      0  {at(600)}",
-        f"2  └─✗ b    failed   gates red: {PYTEST}  " + " " * 7 + f"  run/demo-b   6m00s  19k      0  {at(960)}",
-        "3    └─– c  skipped  blocked by b, which failed" + " " * 20 + "  " + " " * 7 + "  " + " " * 10 + "  " + " " * 6
-        + "  " + " " * 3 + "  " + " " * 5 + f"  {at(960)}",
-        "4  ● d      ✓ built  " + " " * 46 + f"  ACCEPT   run/demo-d  10m00s  39k      0  {at(1560)}",
+        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
+        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        f"  2  └─✗ b         failed      gates red: {PYTEST}           run/demo-b         6m00s    19k       0  {at(960)}",
+        "  3    └─– c       skipped     blocked by b, which failed" + " " * 20 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7
+        + "  " + " " * 5 + "  " + " " * 6 + f"  {at(960)}",
+        "  4  ● d           ✓ built                                                     ACCEPT   run/demo-d        10m00s    39k       0  "
+        + at(1560),
     ]
 
 
@@ -152,12 +154,12 @@ def test_the_status_of_a_paused_run_gives_paused_before_this_step_in_the_row_of_
         "progress: 25%, 1 of 4 ended, 10m00s used, tokens 39k new, 0 cache",
         f"journal {run.path}",
         "",
-        "#  plan     state    phase" + " " * 18 + "  verdict  branch        used  new  cache  last event",
-        "1  ● a      ✓ built  " + " " * 23 + f"  ACCEPT   run/demo-a  10m00s  39k      0  {at(600)}",
-        "2  └─· b    pending  paused before this step  " + " " * 7 + "  " + " " * 10 + "  " + " " * 6 + "  " + " " * 3
-        + "  " + " " * 5 + f"  {at(600)}",
-        "3    └─· c  pending",
-        "4  · d      pending",
+        "  #  plan          state       phase                                           verdict  branch              used    new   cache  last event",
+        "  1  ● a           ✓ built                                                     ACCEPT   run/demo-a        10m00s    39k       0  " + at(600),
+        "  2  └─· b         pending     paused before this step" + " " * 23 + "  " + " " * 7 + "  " + " " * 15 + "  " + " " * 7
+        + "  " + " " * 5 + "  " + " " * 6 + f"  {at(600)}",
+        "  3    └─· c       pending",
+        "  4  · d           pending",
     ]
 
 
@@ -249,7 +251,7 @@ def test_on_a_terminal_each_cell_of_the_table_has_the_colour_of_its_role_and_the
     assert [SGR.sub("", line) for line in painted] == plain
     assert [SGR.search(line) for line in painted[:4]] == [None] * 4
     header, a, b, c, _ = painted[4:]
-    assert header.startswith("\x1b[2m#\x1b[0m  \x1b[2mplan\x1b[0m")  # the header is faint
+    assert header.startswith("  \x1b[2m#\x1b[0m  \x1b[2mplan\x1b[0m")  # the header is faint
     assert "\x1b[1mACCEPT\x1b[0m" in a  # the verdict word is bold
     assert f"\x1b[2m{at(600)}\x1b[0m" in a  # the time of the last event is faint
     assert "\x1b[2mrun/demo-a\x1b[0m" in a  # each cell of a row that ended is faint
@@ -283,10 +285,12 @@ def test_with_a_locale_that_is_not_utf8_the_table_has_the_ascii_glyphs_in_the_sa
 
     assert [len(line) for line in ascii_lines] == [len(line) for line in unicode]
     assert ascii_lines[5:9] == [
-        "1  * a      + built  " + " " * 43 + f"  ACCEPT   run/demo-a  10m00s  39k      0  {at(600)}",
-        "2  \\-> b    running  specialist +  gates +  verifier *  fix-up o  " + " " * 7 + f"  run/demo-b   8m20s  19k      0  {at(960)}  active 2m20s",
-        "3    \\-. c  pending",
-        "4  . d      pending",
+        "  1  * a           + built                                                     ACCEPT   run/demo-a        10m00s    39k       0  "
+        + at(600),
+        "  2  \\-> b         running     specialist +  gates +  verifier *  fix-up o              run/demo-b         8m20s    19k       0  "
+        + at(960) + "  active 2m20s",
+        "  3    \\-. c       pending",
+        "  4  . d           pending",
     ]
 
 
@@ -305,3 +309,28 @@ def test_the_example_of_the_reference_page_is_the_output_of_status_for_the_run_t
 
     journal = f"journal /path/to/repo/.git/delegate/runs/{run_id}/journal.jsonl"
     assert example.splitlines() == [journal if line.startswith("journal ") else line for line in lines]
+
+
+# The cell where each track of the ticket table of `delegate status` starts (components.md § Ticket table (status)):
+# the tracks of `watch`, with `verdict` 7 and `branch` 15 after `phase`, and `last event` before the live tail.
+STATUS_TRACK_START: dict[str, int] = {
+    "#": 0, "plan": 5, "state": 19, "phase": 31, "verdict": 79, "branch": 88, "used": 105, "new": 114, "cache": 121, "last event": 129,
+}
+
+
+def test_the_status_table_puts_each_column_on_the_design_track_of_watch_with_three_more_columns(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    a_running_run(repo)
+    frozen(monkeypatch, 1100)
+
+    header, a, b = lines_of(repo, capsys)[4:7]
+
+    def starts(line: str, cell: int, text: str) -> bool:
+        return line[cell:cell + len(text)] == text and line[cell - 1] == " "
+
+    assert [starts(header, STATUS_TRACK_START[name], name) for name in ("plan", "state", "phase", "verdict", "branch", "last event")] == [True] * 6
+    assert header.startswith("  #  plan")  # the numbers and their header align right in their track
+    assert [starts(header, STATUS_TRACK_START[n] + w - len(n), n) for n, w in (("used", 7), ("new", 5), ("cache", 6))] == [True] * 3
+    assert a.startswith("  1  ● a") and starts(a, STATUS_TRACK_START["verdict"], "ACCEPT")
+    assert starts(b, STATUS_TRACK_START["branch"], "run/demo-b") and starts(b, STATUS_TRACK_START["used"] + 2, "8m20s")
+    assert starts(b, STATUS_TRACK_START["last event"], at(960)) and starts(b, STATUS_TRACK_START["last event"] + len(at(960)) + 2, "active 2m20s")

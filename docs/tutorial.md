@@ -143,8 +143,8 @@ run 20261009T031500Z-a1b2: built (mode assure, adapter claude-code)
 progress: 100%, 1 of 1 ended, 4m03s used, tokens 41k new, 655k cache
 journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
 
-#  plan  state    phase  verdict  branch         used  new  cache  last event
-1  ● 1   ✓ built         ACCEPT   run/sample-1  4m01s  41k   655k  2026-10-09T03:19:02.512384+00:00
+  #  plan          state       phase                                           verdict  branch              used    new   cache  last event
+  1  ● 1           ✓ built                                                     ACCEPT   run/sample-1       4m01s    41k    655k  2026-10-09T03:19:02.512384+00:00
 ```
 
 The state `built` and the verdict `ACCEPT` mean that the ticket is done and checked.
