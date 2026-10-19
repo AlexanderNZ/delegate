@@ -288,7 +288,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     and a resolution needs the file system.
 
     The guard fails closed. No python3, no command text, or a shell without the
-    bash string operators all end at exit 2, which blocks the call.
+    bash string operators all end at exit 2, which blocks the call. Under zsh
+    the guard first turns on sh emulation, so that zsh divides a segment into
+    words as bash does (#113).
     """
     quote = '\'"\'*|"\'"*'  # a leading double quote or a leading single quote
     redirect = "A redirection writes outside a temp directory."
@@ -402,6 +404,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     )
     return "; ".join(
         [
+            # zsh does not divide an unquoted expansion into words, so without this line it denies each temp write.
+            # In sh emulation zsh divides the words as bash and /bin/sh do, and the guard gives their verdicts.
+            '[ -z "${ZSH_VERSION-}" ] || emulate sh',
             'deny() { echo "verifier guard: the command segment [$1] is not permitted. $2" >&2; exit 2; }',
             f'istp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '

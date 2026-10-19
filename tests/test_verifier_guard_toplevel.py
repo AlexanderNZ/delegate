@@ -37,8 +37,8 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 #: The shells in which the Bash guard behaves as its table says: bash, and macOS /bin/sh.
 GUARD_SHELLS = ("bash", "/bin/sh")
 
-#: Each shell that runs the Bash guard. zsh is a third shell. It does not divide a segment into words, so the guard
-#: denies each temp write under zsh for that reason first (see the limits in skills/agent-definitions/SKILL.md).
+#: Each shell that runs the Bash guard. zsh is a third shell. The guard turns on sh emulation under zsh, so that zsh
+#: divides a segment into words as bash does (#113; see the limits in skills/agent-definitions/SKILL.md).
 SHELLS = (
     *GUARD_SHELLS,
     pytest.param("zsh", marks=pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not on PATH")),

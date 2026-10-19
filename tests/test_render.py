@@ -891,9 +891,9 @@ AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR = [
 ]
 
 #: The same rule with a space after the "&", or with a space between the
-#: descriptor and a closing quote. zsh does not divide a segment
-#: into words, so it denies these forms. SKILL.md records that difference, and
-#: a deny keeps the guard closed.
+#: descriptor and a closing quote. Before #113, the guard denied these forms
+#: under zsh, because zsh did not divide a segment into words. The guard now
+#: turns on sh emulation under zsh.
 AMPERSAND_REDIRECTION_TO_A_DESCRIPTOR_AFTER_A_SPACE = [
     "ls 2>& 1",
     "ls >& 2",
@@ -1061,7 +1061,7 @@ REDIRECTION_TO_ANOTHER_DEVICE = [
     "ls src &> >/dev/null",
 ]
 
-#: The forms with no space that zsh, which does not divide a segment into words, also permits (#105).
+#: The forms with no space, which the guard permitted under zsh also before the sh emulation of #113 (#105).
 REDIRECTION_TO_DEV_NULL_WITH_NO_SPACE = ["ls src >/dev/null", "ls src 2>/dev/null", "ls src &>/dev/null", "ls src >>/dev/null"]
 
 
