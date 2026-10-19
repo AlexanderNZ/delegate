@@ -1052,7 +1052,7 @@ REDIRECTION_TO_ANOTHER_DEVICE = [
     "ls src 2> /tmp/y>x",
     "ls src >> /tmp/y&>x",
     "cp src/a /tmp/c > /tmp/y>x",
-    # A word that starts with a sign after a lone sign: the guard of 1.4.0 denied it, and it stays denied.
+    # A word that starts with a sign after a lone sign is denied in each shell (in zsh, the guard of 1.4.0 permitted some).
     "ls src > >/tmp/y",
     "ls src 2> >>/tmp/y",
     "ls src &> >/dev/null",
