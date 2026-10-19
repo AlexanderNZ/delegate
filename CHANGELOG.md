@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-19
+
 ### Added
 
 - The verifier writes its verdict with the Write tool, only in a temp directory. On Claude Code, a hook on Write (marker `agent-definitions:verifier-write-guard`) permits a Write only to an absolute path with no `..` that starts with `/tmp/`, `/private/tmp/`, `/var/folders/` or `$TMPDIR`. On OpenCode, the edit map allows nothing in the project. The validator accepts Write only beside that guard. The verifier brief names the Write tool first (#98).
