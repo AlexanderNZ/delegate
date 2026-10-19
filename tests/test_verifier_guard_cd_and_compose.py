@@ -24,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -181,11 +182,124 @@ def test_a_cd_with_two_path_arguments_is_denied(repo, shell, command):
     _assert_denied(_guard(command, shell, repo), command, shell)
 
 
+#: The root directory: it is in no git tree, and it is not a temp path.
+needs_a_root_outside_each_git_tree = pytest.mark.skipif(
+    Path("/.git").exists(), reason="the root directory holds a .git entry"
+)
+
+
+@needs_a_root_outside_each_git_tree
 @pytest.mark.parametrize("shell", SHELLS)
-def test_a_relative_cd_is_denied_when_the_working_directory_is_in_no_repository(repo, shell):
-    plain = repo.parent / "outside"
-    command = "cd api && ./gradlew test"
-    _assert_denied(_guard(command, shell, plain), command, shell)
+def test_a_relative_cd_is_denied_when_the_working_directory_is_in_no_repository_and_not_a_temp_path(shell):
+    # From /, the relative path "etc" is the path /etc. It is outside a temp directory, and there is no git toplevel.
+    command = "cd etc && ./gradlew test"
+    _assert_denied(_guard(command, shell, Path("/")), command, shell)
+
+
+@needs_a_root_outside_each_git_tree
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_relative_cd_from_the_root_directory_to_a_temp_path_is_permitted(shell):
+    # From /, the relative path "tmp/proof" is the temp path /tmp/proof, as `cd /tmp/proof` is.
+    for command in ("cd tmp/proof && ./gradlew test", "cd /tmp/proof && ./gradlew test"):
+        _assert_permitted(_guard(command, shell, Path("/")), command, shell)
+
+
+# --- A relative cd in a copy with no .git entry (#131) ---------------------------
+
+#: The fixed temp prefixes of the guard, without a /private prefix.
+_TEMP_PREFIXES = ("/tmp/", "/var/folders/")
+
+
+def _without_private(path: str) -> str:
+    return path[len("/private"):] if path.startswith("/private/") else path
+
+
+@pytest.fixture
+def copy(repo):
+    """A copy of `repo` with no `.git` entry, in a directory whose path starts with a fixed temp prefix as text.
+
+    This is step 2 of the break-a-copy recipe. The pytest temp directory has such a path on macOS and on a Linux CI
+    host. A Nix build sandbox gives /build, so the copy then goes in /tmp.
+    """
+    base, made = Path(_without_private(str(repo.parent))), None
+    if not str(base).startswith(_TEMP_PREFIXES):
+        if not os.access("/tmp", os.W_OK):
+            pytest.skip("no writable directory with a fixed temp prefix")
+        made = base = Path(_without_private(os.path.realpath(tempfile.mkdtemp(dir="/tmp"))))
+    copy = base / "x"
+    shutil.copytree(repo, copy, symlinks=True)
+    shutil.rmtree(copy / ".git")
+    yield copy
+    if made is not None:
+        shutil.rmtree(made, ignore_errors=True)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd app && ./gradlew test",
+        "cd app/src && ./gradlew test",
+        "cd ./api && ./gradlew test",
+        "cd 'api' && ./gradlew test",
+        "cd api/ && ./gradlew test",
+        "cd . && ./gradlew test",
+        "cd api; docker compose -f compose.yml config",
+    ],
+)
+def test_a_relative_cd_in_a_temp_copy_with_no_git_entry_reaches_the_gate(copy, shell, command):
+    assert not (copy / ".git").exists()
+    _assert_permitted(_guard(command, shell, copy), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_relative_cd_and_an_absolute_cd_to_the_same_temp_path_get_the_same_verdict(copy, shell):
+    for command in ("cd app && ./gradlew test", f"cd {copy}/app && ./gradlew test"):
+        _assert_permitted(_guard(command, shell, copy), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd ../x && ./gradlew test",
+        "cd .. && ./gradlew test",
+        "cd app/../.. && ./gradlew test",
+        "cd ~/x && ./gradlew test",
+        "cd ~ && ./gradlew test",
+        "cd =ls && ./gradlew test",
+        "cd a* && ./gradlew test",
+        "cd ap? && ./gradlew test",
+        "cd [a]pp && ./gradlew test",
+        "cd {app,..} && ./gradlew test",
+        "cd $HOME && ./gradlew test",
+        "cd api app && ./gradlew test",
+        "cd app && echo x > f",
+        "cd app && touch f",
+        "cd app && ./gradlew test > out.log",
+    ],
+)
+def test_a_relative_cd_in_a_temp_copy_with_no_git_entry_keeps_the_other_denies(copy, shell, command):
+    _assert_denied(_guard(command, shell, copy), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_cd_deny_message_states_that_the_working_directory_is_in_no_git_tree(copy, shell):
+    command = "cd ../x && ./gradlew test"
+    result = _guard(command, shell, copy)
+    _assert_denied(result, command, shell)
+    assert f"The working directory [{copy}] is in no git tree" in result.stderr, (shell, result.stderr)
+    assert "toplevel" not in result.stderr, (shell, result.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_cd_deny_message_names_the_git_toplevel_when_there_is_one(repo, shell):
+    command = "cd ../outside && ./gradlew test"
+    result = _guard(command, shell, repo / "api")
+    _assert_denied(result, command, shell)
+    # The guard names each path without a /private prefix.
+    toplevel = _without_private(str(repo))
+    assert f"outside the git toplevel {toplevel} of the working directory" in result.stderr, (shell, result.stderr)
 
 
 @pytest.mark.parametrize("shell", SHELLS)

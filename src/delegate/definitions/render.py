@@ -116,11 +116,13 @@ TREE_SEARCH_LIMIT = 2000
 #: - `up(P)` gives the git tree that holds the path P: P or the nearest
 #:   directory above it with a `.git` entry. It is empty when no such
 #:   directory exists.
-#: - `top()` gives the git toplevel of the working directory of the hook
-#:   (#106): `up` of the absolute `cwd` of the input, or else of the working
-#:   directory of the process. Claude Code documents `cwd` as a common field of
-#:   the hook input: "Current working directory when the hook is invoked"
+#: - `cw()` gives the working directory of the hook: the absolute `cwd` of the
+#:   input, or else the working directory of the process, with no `..`
+#:   component. Claude Code documents `cwd` as a common field of the hook
+#:   input: "Current working directory when the hook is invoked"
 #:   (code.claude.com/docs/en/hooks.md, read 2026-10-19).
+#: - `top()` gives the git toplevel of the working directory of the hook
+#:   (#106): `up` of `cw()`.
 #: - `dn(h,b)` walks the directory b, and gives the first git tree below it
 #:   whose name with a "/" starts with the text h. It goes only into a
 #:   directory whose name with a "/" starts with h, or starts h. It does not go
@@ -134,7 +136,8 @@ TOPLEVEL_FINDER = (
     'u=lambda s: s[8:] if s.startswith("/private/") else s; '
     'up=lambda P: next((u(str(x)) for x in (P,*P.parents) if (x/".git").exists()),""); '
     'w=j.get("cwd"); '
-    'top=lambda: up(pathlib.Path(os.path.normpath(w if isinstance(w,str) and w.startswith("/") else os.getcwd()))); '
+    'cw=lambda: os.path.normpath(w if isinstance(w,str) and w.startswith("/") else os.getcwd()); '
+    "top=lambda: up(pathlib.Path(cw())); "
     "dn=lambda h,b: next((r for k,(D,ds,fs) in enumerate(os.walk(b)) for r in ("
     f'"+"+b if k>={TREE_SEARCH_LIMIT} else '
     '(u(D) if (u(D)+"/").startswith(h) else ds.clear()) if ".git" in ds+fs else '
@@ -169,7 +172,8 @@ TARGET_TREE_FINDER = (
 
 #: The shell text that reads a hook input from stdin for the verifier guard. It
 #: prints these lines: the git toplevel of the working directory (`top()`),
-#: the value of $TMPDIR without a trailing "/", one line for each git tree of
+#: the value of $TMPDIR without a trailing "/", the working directory
+#: (`cw()`) without a "/private" prefix, one line for each git tree of
 #: TARGET_TREE_FINDER and of the toplevel, one line with "+" for each directory
 #: that a walk could not search, and ":" with the command. The guard then fails
 #: closed when the command is empty: no command string, or a key that is
@@ -180,7 +184,7 @@ HOOK_COMMAND_READER = (
     f"{TOPLEVEL_FINDER}; r=top(); "
     "t=os.environ.get(\"TMPDIR\",\"\").rstrip(\"/\"); "
     f"{TARGET_TREE_FINDER}; "
-    "L=[r,t,*sorted(V|{r}-{\"\"})]; "
+    "L=[r,t,u(cw()),*sorted(V|{r}-{\"\"})]; "
     "(\"\\n\" in \"\".join(L)) and sys.exit(5); "
     "sys.stdout.write(\"\\n\".join(L)+\"\\n:\"+(c if isinstance(c, str) else \"\"))'"
 )
@@ -294,23 +298,28 @@ IN_TOPLEVEL_CHECK = " ".join(
 
 #: The shell function `incd`. It returns 0 when its argument, the path of a
 #: `cd`, names the git toplevel $wt of the working directory or a directory in
-#: it (#121). A `cd` writes nothing, so it may go there. It returns 1 when $wt
-#: is empty. It reads the path as the shell will: it removes each quote and
-#: backslash. A path that holds a pattern or an expansion character (*, ?, [,
-#: { or $), or that starts with "~" or "=", can name a path outside the tree,
-#: so it returns 1. A ".." component returns 1. A relative path with no ".."
-#: component stays below the working directory, which is in the toplevel, so
-#: it returns 0. An absolute path loses a "/private" prefix, each "//" and
-#: "/./" becomes one "/", a trailing "/" or "/." goes, and the path must then
-#: be the toplevel or start with the toplevel and a "/". It reads text: it does
-#: not resolve a symbolic link. It starts no process.
+#: it (#121), or is a relative path from the working directory $wd to a temp
+#: path (#131). A `cd` writes nothing, so it may go there. It reads the path
+#: as the shell will: it removes each quote and backslash. A path that holds a
+#: pattern or an expansion character (*, ?, [, { or $), or that starts with
+#: "~" or "=", can name a path outside the tree, so it returns 1. A ".."
+#: component returns 1. A relative path with no ".." component stays below
+#: the working directory. When $wt is not empty, the working directory is in
+#: the toplevel, so the path returns 0. When $wt is empty, the path is $wd, a
+#: "/" and the path, and it returns 0 only when that is a temp path (`istp`),
+#: as the same path in the absolute form does. An absolute path returns 1 when
+#: $wt is empty. Otherwise it loses a "/private" prefix, each "//" and "/./"
+#: becomes one "/", a trailing "/" or "/." goes, and the path must then be the
+#: toplevel or start with the toplevel and a "/". It reads text: it does not
+#: resolve a symbolic link. It starts no process.
 IN_TOPLEVEL_CD_CHECK = " ".join(
     [
-        r"""incd() { [ -n "$wt" ] || return 1;""",
+        r"""incd() {""",
         r"""wp=${1//\"/}; wp=${wp//\'/}; wp=${wp//\\/};""",
         r"""case "$wp" in ''|'~'*|'='*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) return 1 ;; esac;""",
         r"""case "$wp" in ..|../*|*/..|*/../*) return 1 ;; esac;""",
-        r"""case "$wp" in /*) ;; *) return 0 ;; esac;""",
+        r"""case "$wp" in /*) ;; *) [ -z "$wt" ] || return 0; [ -n "$wd" ] || return 1; istp "${wd%/}/$wp"; return ;; esac;""",
+        r"""[ -n "$wt" ] || return 1;""",
         r"""case "$wp" in /private/*) wp=${wp#/private} ;; esac;""",
         r"""while :; do case "$wp" in *//*) wp=${wp%%//*}/${wp#*//} ;; */./*) wp=${wp%%/./*}/${wp#*/./} ;; *) break ;; esac; done;""",
         r"""while :; do case "$wp" in */.) wp=${wp%/.} ;; */) wp=${wp%/} ;; *) break ;; esac; done;""",
@@ -375,9 +384,13 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     branch is absent.
 
     A "cd" takes one path argument: a temp path, or a directory in the git
-    toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A "cd"
-    writes nothing, and each later segment is tested on its own, so a relative
-    write target after the "cd" still fails the temp test.
+    toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A relative
+    path counts from the working directory, so in a copy with no .git entry in
+    a temp directory, "cd app" goes to a temp path and is permitted (#131). A
+    "cd" writes nothing, and each later segment is tested on its own, so a
+    relative write target after the "cd" still fails the temp test. When the
+    working directory is in no git tree, the deny message states that, and
+    names no toplevel.
 
     A temp path is a text prefix and a path with no ".." component. The guard
     rejects "..", it does not resolve it, because it reads the command as text
@@ -436,6 +449,11 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     cd_outside = (
         "The path is outside a temp directory and outside the git toplevel $wt of the working directory, "
         "or it holds .., ~ or an expansion character."
+    )
+    # With no toplevel, the message names no empty toplevel (#131).
+    cd_outside_no_tree = (
+        "The path is outside a temp directory, or it holds .., ~ or an expansion character. "
+        "The working directory [$wd] is in no git tree, so a cd can go only to a temp path."
     )
     prefix_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
     # An exact gate holds a double quote and a $( but never a single quote, so
@@ -506,7 +524,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         # directory (#121). bash 3.2 goes to the first of two paths, and zsh reads two paths as a substitution in the
         # working directory, so a cd takes one path only.
         f'case "$g" in cd|"cd "*) [ "$m" = 1 ] || deny "$seg" "{cd_one_path}"; '
-        f'istp "$d" || incd "$d" || deny "$seg" "{cd_outside}" ;; '
+        f'istp "$d" || incd "$d" || if [ -n "$wt" ]; then deny "$seg" "{cd_outside}"; '
+        f'else deny "$seg" "{cd_outside_no_tree}"; fi ;; '
         '*) istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; esac ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
@@ -542,11 +561,13 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             "case \"$ow\" in *'>'*) ow=${ow#*>} ;; *) [ -n \"$ox\" ] || return 1; return 0 ;; esac; done; }",
             # A file descriptor number, or "-", which closes a descriptor.
             "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
-            # The reader gives the git toplevel of the working directory ($wt), the value of $TMPDIR ($td), the git
-            # trees of the targets ($gt), the directories that a walk could not search ($gb) and the command, in that
-            # order. A line goes in an array only when a newline comes after it, so the loop always ends.
+            # The reader gives the git toplevel of the working directory ($wt), the value of $TMPDIR ($td), the
+            # working directory ($wd), the git trees of the targets ($gt), the directories that a walk could not search
+            # ($gb) and the command, in that order. A line goes in an array only when a newline comes after it, so the
+            # loop always ends.
             f"hi=$({HOOK_COMMAND_READER} 2>/dev/null)",
-            "wt=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; td=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; gt=(); gb=()",
+            "wt=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; td=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; "
+            "wd=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; gt=(); gb=()",
             "while :; do case \"$hi\" in /*$'\\n'*) gt+=(\"${hi%%$'\\n'*}\") ;; "
             "+/*$'\\n'*) wr=${hi%%$'\\n'*}; gb+=(\"${wr#+}\") ;; *) break ;; esac; hi=${hi#*$'\\n'}; done; cmd=$hi",
             'case "$cmd" in :*) cmd=${cmd#:} ;; *) cmd= ;; esac',
