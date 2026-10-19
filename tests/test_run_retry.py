@@ -11,7 +11,7 @@ adapter in the place of the harness.
 import pytest
 
 from .support import (
-    event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
+    append_events, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
 from .test_run_multi import HEAD, ticket
 
@@ -162,6 +162,107 @@ def test_a_retry_after_the_run_branch_moved_rebases_runs_the_gates_and_verifies_
     assert [(e["phase"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("rebase", True)]
     assert {"a.txt", "b.txt", "fixup-1.txt"} <= set(tree(repo, "run/demo"))
     assert sorted(retried[-1]["built"]) == ["a", "b"] and retried[-1]["failed"] == []
+
+
+def test_an_assure_retry_that_builds_the_step_also_builds_the_dependants_that_the_step_made_the_engine_skip(
+    tmp_path, capsys, scripted
+):
+    # Ticket b waits on a, and c waits on b. The verifier of a ends with no verdict, so a fails, and b and c are skipped.
+    end_with_no_verdict(scripted, scoped_only=False)
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",)))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    first = read_journal_file(repo, run_id)
+    assert [e["ticket"] for e in first if e["event"] == "skip"] == ["b", "c"]
+    healthy(scripted, "ACCEPT", "ACCEPT", "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, "")
+    assert [ticket_of(call) for call in scripted.calls] == ["b", "c"]
+    assert [ticket_of(call) for call in scripted.verifier_calls] == ["a", "b", "c"]
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert [(e["ticket"], e["state"]) for e in retried if e["event"] == "step-end"] == [("a", "built"), ("b", "built"), ("c", "built")]
+    assert "skip" not in event_names(retried)
+    assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
+    end = retried[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"], end["skipped"]) == ("run-end", "built", ["a", "b", "c"], [], [])
+
+
+def test_an_assure_retry_leaves_skipped_a_dependant_with_another_blocker_that_failed_until_that_blocker_is_built(
+    tmp_path, capsys, scripted
+):
+    # Ticket c waits on a and on b. The verifiers of a and b end with no verdict, so both fail, and c is skipped.
+    end_with_no_verdict(scripted, scoped_only=False)
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b") + ticket("c", ("a", "b")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    # B still failed, so c is skipped only because of b now, and the run fails.
+    assert code == 1 and "ticket c: skipped: blocked by b, which failed\n" in err
+    assert scripted.calls == []
+    skips = [e for e in after_retry(read_journal_file(repo, run_id)) if e["event"] == "skip"]
+    assert [(e["ticket"], e["blockers"]) for e in skips] == [("c", ["b"])]
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["built"], end["failed"], end["skipped"]) == ("run-end", ["a"], ["b"], ["c"])
+    healthy(scripted, "ACCEPT", "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b")
+
+    assert (code, err) == (0, "")
+    assert [ticket_of(call) for call in scripted.calls] == ["c"]
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"], end["skipped"]) == ("run-end", "built", ["a", "b", "c"], [], [])
+
+
+def test_an_assure_retry_of_a_step_that_crashed_builds_the_tickets_that_the_run_did_not_reach(tmp_path, capsys, scripted):
+    # The verifier of a raises, so the step crashes, the run ends, and b, which does not wait on a, is not reached.
+    def crash(request):
+        raise RuntimeError("the harness broke")
+
+    scripted.during_verifier = crash
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    (skip,) = [e for e in read_journal_file(repo, run_id) if e["event"] == "skip"]
+    assert (skip["ticket"], skip["reason"]) == ("b", "the run ended after ticket a crashed")
+    healthy(scripted, "ACCEPT", "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, "")
+    assert [ticket_of(call) for call in scripted.calls] == ["b"]
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"], end["skipped"]) == ("run-end", "built", ["a", "b"], [], [])
+
+
+def test_a_run_that_ends_with_a_skipped_ticket_and_no_failed_step_exits_one(tmp_path, capsys, scripted):
+    # The journal of a retry by version 1.7.1: the retry built a, b stayed skipped, and the run ended `built`.
+    # A resume with a plan change goes on with that run: it builds the new ticket c, and b stays skipped.
+    end_with_no_verdict(scripted, scoped_only=False)
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    append_events(
+        journal_path(repo, run_id),
+        ("resume", {"run_id": run_id, "built": [], "failed": ["a"], "skipped": ["b"], "open": None}),
+        ("retry", {"ticket": "a", "phase": "verifier", "round": 0, "reason": "the verifier ended failed with exit status -9"}),
+        ("step-end", {"ticket": "a", "state": "built", "reason": None}),
+        ("run-end", {"result": "built", "built": ["a"], "failed": [], "skipped": ["b"]}),
+    )
+    (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c"))
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert code == 1 and "Traceback" not in err
+    assert "ticket b: skipped" in err and "run failed" in out
+    assert [ticket_of(call) for call in scripted.calls] == ["c"]
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"], end["skipped"]) == ("run-end", "failed", ["a", "c"], [], ["b"])
 
 
 def test_a_retry_of_a_built_step_exits_one_names_the_ticket_and_changes_nothing(tmp_path, capsys, scripted):

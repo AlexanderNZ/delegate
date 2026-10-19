@@ -138,6 +138,28 @@ def unreached_reason(ticket_id: str, halted: bool) -> str:
     return f"the run ended after ticket {ticket_id} {'halted the run' if halted else 'crashed'}"
 
 
+def skipped_because_of(ticket_id: str, tickets: Sequence[tuple[str, Sequence[str]]], skipped: Mapping[str, str]) -> list[str]:
+    """The skipped tickets that the step of `ticket_id` made the engine skip, in plan order.
+
+    `tickets` holds the id of each ticket with the ids that block it, in plan
+    order, and `skipped` holds the reason of each skipped ticket. A skipped
+    ticket is in the list when one of its blockers is `ticket_id` or a ticket
+    of the list, or when the run did not reach it because `ticket_id` crashed.
+    A retry that goes on with the step checks these tickets again with the
+    skip rule. A ticket with another blocker that is not built is then skipped
+    again, so only a ticket that the step alone blocked is built.
+    """
+    causes = {ticket_id}
+    found: list[str] = []
+    for other, blocked_by in tickets:
+        if other not in skipped:
+            continue
+        if causes & set(blocked_by) or skipped[other] == unreached_reason(ticket_id, halted=False):
+            causes.add(other)
+            found.append(other)
+    return found
+
+
 def chain_predecessor(mode: str, order: Sequence[str], built: Collection[str]) -> str | None:
     """The ticket that the next ticket starts from, or None when it starts from the run (see `starts_from_run_branch`).
 

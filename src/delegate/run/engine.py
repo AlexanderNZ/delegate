@@ -79,9 +79,14 @@ runs the gates, and verifies the whole branch. In `economy` mode the phase is
 the specialist, which continues with the continuation limit of the mode again,
 or the check of its report. The tickets after the step that the run skipped are
 checked again, and the chain then goes on: the verification of the chain
-covers the built tickets whose work the run branch does not hold. The journal
-records `retry`, and then a new `step-end` and a new `run-end`. The newest of
-each wins.
+covers the built tickets whose work the run branch does not hold. In `assure`
+mode, the tickets that the step made the engine skip are checked again with
+the skip rule (see `domain.skipped_because_of`), so a ticket that only the
+step blocked is built after it, in plan order. The journal records `retry`,
+and then a new `step-end` and a new `run-end`. The newest of each wins.
+
+A run that ends with a failed step or a skipped ticket ends with the result
+`failed`.
 
 A run can pause. `delegate pause` writes a request file in the directory of the
 run (see `pause.py`), and the engine reads it at each step boundary: before a
@@ -235,7 +240,8 @@ class RunResult:
 
     @property
     def ok(self) -> bool:
-        return not self.failed
+        # A skipped ticket is work that the run did not build, so a run with one is not a success.
+        return not self.failed and not self.skipped
 
 
 def new_run_id() -> str:
@@ -918,6 +924,10 @@ def _execute(
             # The chain goes on after the step: the skip rule applies again to each ticket after it that was skipped.
             for later in order[[t.id for t in order].index(plan.ticket) + 1 :]:
                 skipped.pop(later.id, None)
+        else:
+            # The skip rule applies again to each ticket that the failed step made the engine skip.
+            for dependant in domain.skipped_because_of(plan.ticket, [(t.id, t.blocked_by) for t in order], skipped):
+                del skipped[dependant]
     complete = {*built, *failed, *skipped}
     ended_early = False
     paused: str | None = None
@@ -975,8 +985,9 @@ def _execute(
     if paused is not None:
         # A paused run has no `run-end`: a resume goes on with it.
         return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused)
+    # A skipped ticket is work that the run did not build, so the run fails, as `RunResult.ok` says.
     journal.append(
-        "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
+        "run-end", result=BUILT if not failed and not skipped else FAILED, built=built, failed=failed, skipped=list(skipped)
     )
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)

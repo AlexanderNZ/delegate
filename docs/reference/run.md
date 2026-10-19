@@ -226,7 +226,9 @@ The verifier round of the retry is the number of verdicts in the journal. A veri
 
 The run branch can move after the step failed, when the run built another ticket after it. The branch of the step then does not hold the tip of the run branch. The engine checks a fix-up commit, rebases the branch onto the run branch, runs the gates, and starts a full verifier at the round of the retry. The rejected commit is not on the rebased branch, so a scoped verifier cannot run.
 
-The engine writes `retry` before it goes on, then a new `step-end` and a new `run-end`. The newest `step-end` of a ticket wins, and so does the newest `run-end`. In `assure` mode, a ticket that the failed step made the engine skip stays skipped.
+The engine writes `retry` before it goes on, then a new `step-end` and a new `run-end`. The newest `step-end` of a ticket wins, and so does the newest `run-end`.
+
+In `assure` mode, the engine checks each ticket that the failed step made it skip again, with [the skip rule](#the-skip-rule). These are the skipped tickets that have the ticket of the step as a blocker, the skipped tickets that have one of those tickets as a blocker, and so on down the chain. After a crash of the step, they are also the tickets that the run did not reach. When the retry builds the step, the engine builds each of these tickets whose blockers are now built, in plan order, in the same resume. A ticket with another blocker that is not built is skipped again, and the journal records a new `skip` with the blockers that are not built. A ticket that the engine skipped only for another reason stays skipped, and the journal gets no new event for it. For example, ticket `c` is blocked by `a` and `b`, and both steps failed. `--retry a` builds `a`, and skips `c` again because `b` failed. `--retry b` then builds `b` and `c`.
 
 ### The retry in economy mode
 
@@ -494,8 +496,8 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 
 | Code | Meaning |
 |---|---|
-| 0 | No step failed. After a retry, a ticket that the failed step made the engine skip can stay skipped. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
-| 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, or a verifier rejected a ticket. The message names the input. No traceback is shown. |
+| 0 | No step failed, and no ticket was skipped. In `assure` mode, the verifier accepted every ticket. In `economy` mode, the verifier accepted every stack of the chain. |
+| 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a verifier rejected a ticket, or the run ended with a skipped ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 | 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
 | 130 | Ctrl-C stopped the run in the foreground. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c). |
@@ -661,7 +663,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
-| `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids) |
+| `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
 
 ## Limits of this version
 
