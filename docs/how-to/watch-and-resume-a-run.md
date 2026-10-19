@@ -1,6 +1,6 @@
 # How to watch and resume a run
 
-Use this page to follow a [**run**](../glossary.md#run), to pause it, to change its plan, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, to change its plan, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
@@ -45,7 +45,7 @@ When the run starts, the command prints three lines: `run <run id>`, `journal <p
 
 ### 2. See the state
 
-In a second terminal, in the same repository, read the state of the run. With no run id, `status` and `watch` read the one active run.
+In a second terminal, in the same repository, read the state of the run. With no run id, `status` and `watch` read the one [**active run**](../glossary.md#active-run).
 
 ```bash
 delegate status
@@ -187,7 +187,7 @@ Read each later ticket against the added and changed tickets. Change its text or
 delegate run --resume <run-id> --reviewed 2
 ```
 
-`--reviewed` takes the ids of the later tickets, separated by commas, or `all`. The journal records `plan-change`. The [**brief**](../glossary.md#brief) of each later ticket gets the section `Plan change`. Its [**specialist**](../glossary.md#specialist) reports `blocked` when the ticket no longer fits the new plan.
+`--reviewed` takes the ids of the later tickets, separated by commas, or `all`. The journal records `plan-change`. The [**brief**](../glossary.md#brief) of each later ticket gets the section [**`Plan change`**](../glossary.md#plan-change). Its [**specialist**](../glossary.md#specialist) reports `blocked` when the ticket no longer fits the new plan.
 
 ## Resume a run
 

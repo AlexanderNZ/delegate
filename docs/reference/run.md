@@ -111,9 +111,9 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run pauses at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the short run id: the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
+`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run [**pauses**](../glossary.md#pause) at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the [**short run id**](../glossary.md#short-run-id): the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
 
-The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a plan change, and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
+The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a [**plan change**](../glossary.md#plan-change), and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
 The engine treats each ticket by what the journal holds for it:
 
@@ -472,7 +472,7 @@ journal /repo/.git/delegate/runs/20261016T030000Z-e9dc/journal.jsonl
 follow it with delegate watch · pause it with delegate pause e9dc
 ```
 
-`delegate watch` with no run id follows the one active run. See [the run with no run id](status-and-watch.md#the-run-with-no-run-id).
+`delegate watch` with no run id follows the one [**active run**](../glossary.md#active-run). See [the run with no run id](status-and-watch.md#the-run-with-no-run-id).
 
 When the run ends or pauses, the command prints one line `delegate run: ticket <id>: <reason>` on stderr for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. Then it prints the summary line on stdout, and one retry line for each failed step, in plan order. A retry line comes also for a step that `--retry` cannot go on with. See [when a step cannot be retried](#when-a-step-cannot-be-retried).
 

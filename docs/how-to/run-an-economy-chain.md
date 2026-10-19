@@ -72,7 +72,7 @@ The engine does these things:
 5. It starts one [**blind**](../glossary.md#blind) verifier for the stack. The verifier gets the text of the three tickets, the diff of each ticket, and the output of the green gates.
 6. On [**ACCEPT**](../glossary.md#accept), it moves the run branch to the end of the chain.
 
-When the [**run**](../glossary.md#run) starts, the command prints `run <run id>`, `journal <path>`, and a line that tells how to follow and pause the run. When the run ends, it prints a summary line, for example `run built · 2s · 3 built · 0 failed · 0 skipped · 0 new · 0 cache`. It exits 0 when every ticket is built and accepted.
+When the [**run**](../glossary.md#run) starts, the command prints `run <run id>`, `journal <path>`, and a line that tells how to follow and [**pause**](../glossary.md#pause) the run. When the run ends, it prints a summary line, for example `run built · 2s · 3 built · 0 failed · 0 skipped · 0 new · 0 cache`. It exits 0 when every ticket is built and accepted.
 
 ### 4. Read the result
 

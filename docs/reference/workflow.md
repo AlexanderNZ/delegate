@@ -22,7 +22,7 @@ The options of `delegate run` are in [the options of the run reference](run.md#o
 | Code | Meaning |
 |---|---|
 | 0 | The workflow is valid. The plan is on stdout. |
-| 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the plan change refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
+| 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
 | 2 | A usage error. |
 
 The command reports the problems of a file in one run, not only the first. A ticket or a stack with a problem is left out of the later checks, so correct the problems and check the file again.
