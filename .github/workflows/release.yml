@@ -75,14 +75,18 @@ jobs:
       - name: Set the version and the CHANGELOG entry
         run: python scripts/release.py apply --version "$VERSION" --date "$(date -u +%F)"
 
+      # The annotated tag needs the identity too, also when the commit step makes no commit.
+      - name: Set the git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Commit the release
         run: |
           if git diff --quiet; then
             echo "pyproject.toml and CHANGELOG.md already hold v$VERSION; no commit."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "release: v$VERSION"
           git push origin HEAD:main
 
