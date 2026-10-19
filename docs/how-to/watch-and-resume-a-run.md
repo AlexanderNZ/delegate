@@ -108,7 +108,7 @@ A process that is killed cannot release the lock of its [**run branch**](../glos
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
-A run that the [**invariant**](../glossary.md#invariant) check halted, or that has a `run-end`, cannot be resumed.
+A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed. A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
 
 ## Report a run as a coordinator agent
 

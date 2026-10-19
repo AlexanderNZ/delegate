@@ -299,6 +299,44 @@ def _sections(*pairs: tuple[str, str]) -> str:
     return "\n\n".join(f"{title}\n\n{body}" for title, body in pairs) + "\n"
 
 
+# The title of the section that the brief of a later ticket gets after a plan change of its run.
+PLAN_CHANGE_HEADING: str = "## Plan change"
+
+
+def plan_change_text(changes: Sequence[tuple[str, str, str]], location: str, verifier: bool) -> str:
+    """The text of the section "Plan change" of the brief of a ticket that comes after an added or changed ticket.
+
+    `changes` holds each added or changed ticket before the ticket of the brief:
+    its id, `added` or `changed`, and its text. `location` says where the work
+    of those tickets is. A specialist that finds that its ticket no longer fits
+    reports `blocked`, and builds nothing. A verifier checks the diff against
+    the changed plan too.
+    """
+    parts = [
+        "The coordinator changed the plan of this run after this ticket was written. "
+        "These tickets were added or changed, and they come before this ticket in the plan:"
+    ]
+    parts += [f"### Ticket {ticket} ({kind})\n\n{text.rstrip(chr(10))}" for ticket, kind, text in changes]
+    parts.append(location)
+    if verifier:
+        parts.append(
+            "The ticket under verification was written before this change. Check the diff against the changed plan too. "
+            "A diff that does not fit the work of these tickets is a finding."
+        )
+    else:
+        parts.append(
+            "Check each assumption of this ticket against that work before you change a file. "
+            "If this ticket no longer fits the changed plan, build nothing: report the status `blocked`, "
+            "and give the reason in `blocked_reason`."
+        )
+    return "\n\n".join(parts)
+
+
+def plan_change_section(text: str | None) -> str:
+    """The section "Plan change" with `text`, to add at the end of a brief. Empty when `text` is None."""
+    return "" if text is None else "\n" + _sections((PLAN_CHANGE_HEADING, text))
+
+
 def full_brief(
     vcs: VersionControl,
     repo: str | Path,
@@ -307,6 +345,7 @@ def full_brief(
     task: str,
     stacks: Sequence[str] = (),
     gate_commands: Sequence[str] | None = None,
+    plan_change: str | None = None,
 ) -> str:
     """The first-pass brief: the task, the three-dot diff, and the gates.
 
@@ -317,6 +356,9 @@ def full_brief(
     The gates come from the delegation doc of the repository. `gate_commands`
     replaces them: the workflow engine knows the gate commands of the stack,
     and a repository need not hold a delegation doc.
+
+    With `plan_change`, the text of `plan_change_text`, the brief has the
+    section "Plan change" after the task.
     """
     command = f"git diff {base}...{branch}"
     diff = _diff(vcs, repo, base, branch, from_merge_base=True)
@@ -326,8 +368,10 @@ def full_brief(
         gates = read_gates(repo, _changed_files(vcs, repo, base, branch, from_merge_base=True), stacks)
     else:
         gates = _bash("\n".join(gate_commands))
+    plan = [(PLAN_CHANGE_HEADING, plan_change)] if plan_change is not None else []
     return _sections(
         ("## Task", task),
+        *plan,
         ("## Diff", f"`{command}`\n\n" + _fenced_diff(diff)),
         ("## Gates", gates),
     )
@@ -520,6 +564,7 @@ def specialist_brief(
     findings: str | None = None,
     red_gates: bool = False,
     gates_at_chain_end: bool = False,
+    plan_change: str | None = None,
 ) -> str:
     """The brief the engine sends a specialist: the ticket, the file boundary, the foreground rule, the gates, the report path.
 
@@ -536,6 +581,9 @@ def specialist_brief(
     With `gates_at_chain_end`, the engine runs the gates once, on the tip of an
     `economy` chain, and not after this ticket. The specialist runs the tests of
     what it changes.
+
+    With `plan_change`, the text of `plan_change_text`, the brief has the
+    section "Plan change" after the task.
     """
     if hotspots:
         reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
@@ -551,6 +599,8 @@ def specialist_brief(
     )
     report = _specialist_report_shape(ticket, worktree, report_path)
     pairs = [("## Task", f"Ticket {ticket}\n\n{text.rstrip(chr(10))}")]
+    if plan_change is not None:
+        pairs.append((PLAN_CHANGE_HEADING, plan_change))
     if rejected is not None and findings is not None:
         pairs.append(("## Findings to fix", findings.rstrip("\n")))
         cause = (
@@ -584,6 +634,7 @@ def continuation_brief(
     resumed: bool,
     gate_output: str | None = None,
     gates_at_chain_end: bool = False,
+    plan_change: str | None = None,
 ) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
@@ -593,7 +644,8 @@ def continuation_brief(
     A resumed session keeps the context of its first brief, so a resumed
     brief holds only the continuation and the gates again: the rule not to run
     a gate command must be near the output of red gates. A new agent has no
-    context, so its brief is the full specialist brief with the continuation added.
+    context, so its brief is the full specialist brief with the continuation added, and with the section "Plan
+    change" when `plan_change` is set.
     """
     lines = [
         f"Ticket {ticket}",
@@ -614,7 +666,9 @@ def continuation_brief(
     if resumed:
         return _sections(continuation, ("## Gates", _specialist_gates(gates, gates_at_chain_end)))
     section = _sections(continuation)
-    return specialist_brief(ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end) + "\n" + section
+    return specialist_brief(
+        ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end, plan_change=plan_change
+    ) + "\n" + section
 
 
 def report_correction_brief(
@@ -688,12 +742,16 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
 
 def verifier_run_brief(
     vcs: VersionControl,
-    copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path
+    copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path,
+    plan_change: str | None = None,
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
     The full brief comes from `full_brief`, so it holds the task, the diff and
     the gates, and never the specialist's report. `copy` is the temporary copy
-    of the branch that the engine prepared.
+    of the branch that the engine prepared. With `plan_change`, the brief has the
+    section "Plan change" after the task.
     """
-    return full_brief(vcs, copy, branch, base, task, gate_commands=gates) + verifier_run_sections(copy, report_path, "full")
+    return full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change) + verifier_run_sections(
+        copy, report_path, "full"
+    )

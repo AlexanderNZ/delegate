@@ -11,7 +11,9 @@ in the progress and the ETA as one more unit of the run. When the command has no
 the run, the snapshot has the progress and the ETA, and no tokens and no
 activity. A stream that the reader cannot read gives no tokens and no activity
 for its agent, and is not an error. It needs no workflow file, and no tool
-beyond git, which finds the state directory.
+beyond git, which finds the state directory. The tickets are the tickets of the
+newest plan of the run (see `journal.plan_ids`), so the progress and the ETA
+count a ticket that a plan change added.
 
 The report (`report`) gives the lines of `delegate status`: the state, the
 verdict and the branch of each ticket from the journal, with the progress of
@@ -29,7 +31,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain
-from .journal import JournalError, read_new_events
+from .journal import JournalError, plan_ids, read_new_events
 from .runs import journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
@@ -67,8 +69,7 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         f"progress: {_run_progress(snap)}", f"journal {journal}",
     ]
     progress = {t.id: t for t in snap.tickets}
-    tickets = [str(t) for t in start["tickets"]]  # type: ignore[union-attr]
-    for ticket in tickets:
+    for ticket in plan_ids(events):
         own = [e for e in events if e.get("ticket") == ticket]
         state, reason = PENDING, None
         for event in own:
@@ -343,7 +344,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     activity = reader_of(str(start["adapter"]))
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
-    for ticket in [str(t) for t in start["tickets"]]:  # type: ignore[union-attr]
+    for ticket in plan_ids(events):
         found, duration = _ticket(ticket, [e for e in events if e.get("ticket") == ticket], activity, now, end is not None)
         tickets.append(found)
         if duration is not None:

@@ -6,6 +6,11 @@ each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
 with a run that stopped, from its journal. `--retry <ticket>` with it goes on
 with one failed step of that run, also when the run ended.
 
+A resume with a workflow whose tickets differ from the newest plan of the run is
+a plan change. `--reviewed <ids>` names the later tickets that the coordinator
+reviewed. `--resume <run-id> --dry-run` prints the old order, the new order and
+the verdict of each rule of a plan change, and changes nothing.
+
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
@@ -25,7 +30,8 @@ from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
 from ..run.domain import START_RUN_BRANCH
-from ..run.engine import EngineError, new_run_id, run_workflow, state_directory, workflow_of_run
+from ..run.domain import PLAN_RULES
+from ..run.engine import EngineError, PlanReview, new_run_id, review_plan_change, run_workflow, state_directory, workflow_of_run
 from ..run.runs import RunsError, journal_of
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
@@ -51,8 +57,21 @@ def build_parser() -> argparse.ArgumentParser:
         "workflow", type=Path, nargs="?",
         help="path to the workflow TOML file; with --resume the default is the file that the run started from",
     )
-    parser.add_argument("--dry-run", action="store_true", help="validate the workflow and print the plan; create nothing")
-    parser.add_argument("--resume", metavar="RUN_ID", help="go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run")
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="validate the workflow and print the plan; with --resume, print the old order, the new order and the verdict of "
+        "each rule of a plan change; create nothing",
+    )
+    parser.add_argument(
+        "--resume", metavar="RUN_ID",
+        help="go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets "
+        "differ from the newest plan of the run is a plan change",
+    )
+    parser.add_argument(
+        "--reviewed", metavar="IDS", action="append",
+        help="with --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: "
+        "ticket ids separated by commas, or all",
+    )
     parser.add_argument(
         "--retry", metavar="TICKET",
         help="with --resume, go on with the failed step of TICKET, also in a run that ended; "
@@ -137,6 +156,34 @@ def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVers
     return 0
 
 
+def _print_review(review: PlanReview) -> int:
+    """Print what a resume does with the plan of the run: the orders, the verdict of each rule, and the later tickets.
+
+    Return 0 when the rules of a plan change accept the resume, and 1 when one refuses it. Each refusal also goes to stderr.
+    """
+    if review.check is None:
+        print(f"run {review.run_id}: no plan change")
+        print(f"order: {', '.join(review.new_order)}")
+        return 0
+    check = review.check
+    print(f"run {review.run_id}: plan change")
+    print(f"old order: {', '.join(review.old_order)}")
+    print(f"new order: {', '.join(review.new_order)}")
+    for rule, verdict, detail in review.verdicts():
+        print(f"rule {rule}: {verdict}: {PLAN_RULES[rule]}: {detail}")
+    if check.later:
+        print(f"later tickets to review, in plan order: {', '.join(check.later)}")
+    for ticket in review.new_order:
+        if ticket in review.texts:
+            print(f"ticket {ticket} ({'added' if ticket in check.added else 'changed'}):")
+            for line in review.texts[ticket].rstrip("\n").splitlines():
+                print(f"  {line}" if line else "")
+    problems = review.problems()
+    for problem in problems:
+        print(f"delegate run: {problem}", file=sys.stderr)
+    return 1 if problems else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -145,10 +192,11 @@ def main(argv: list[str] | None = None) -> int:
     vcs = GitVersionControl()
     if args.workflow is None and args.resume is None:
         parser.error("a workflow file or --resume RUN_ID is required")
-    if args.resume is not None and args.dry_run:
-        parser.error("--resume and --dry-run cannot go together")
     if args.retry is not None and args.resume is None:
         parser.error("--retry needs --resume RUN_ID")
+    if args.reviewed is not None and args.resume is None:
+        parser.error("--reviewed needs --resume RUN_ID")
+    reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
     if args.workflow is None:
@@ -167,6 +215,13 @@ def main(argv: list[str] | None = None) -> int:
         for problem in error.problems:
             print(f"delegate run: {args.workflow}: {problem}", file=sys.stderr)
         return 1
+    if args.dry_run and args.resume is not None:
+        try:
+            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed)
+        except EngineError as error:
+            print(f"delegate run: {error}", file=sys.stderr)
+            return 1
+        return _print_review(review)
     if not args.dry_run:
         # The composition point: the workflow names the adapter, and this driver picks it for the engine.
         try:
@@ -183,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_workflow(
                 workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                 break_lock=args.break_lock, on_start=lambda run_id: title.set(f"delegate run{SEPARATOR}{short_run_id(run_id)}"),
-                run_id=args.detached_run_id,
+                run_id=args.detached_run_id, reviewed=reviewed,
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

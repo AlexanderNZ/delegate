@@ -225,6 +225,32 @@ def test_the_reference_lists_the_retry_event_of_a_real_retried_journal_with_each
 
 
 @outside_the_package
+def test_the_reference_lists_the_plan_change_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
+    from .support import read_journal_file, resume_main
+    from .test_run_multi import HEAD, ticket
+
+    adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}, "b": {"b.txt": "b\n"}}))
+    try:
+        repo = make_repo(tmp_path, HEAD + ticket("a"))
+        assert delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)]) == 0
+        run_id = read_journal(capsys.readouterr().out)[0]["run_id"]
+        (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b"))
+        code, _, _ = resume_main(repo, capsys, run_id)
+    finally:
+        adapters.unregister("scripted")
+    assert code == 0
+    events = read_journal_file(repo, run_id)
+    rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
+    (change,) = [e for e in events if e["event"] == "plan-change"]
+    for event in (events[0], change):
+        for name in event:
+            if name not in ("seq", "time", "event"):
+                assert f"`{name}`" in rows[f"`{event['event']}`"], (event["event"], name)
+    for name in change["plan"][0]:
+        assert f"`{name}`" in rows["`run-start`"], name
+
+
+@outside_the_package
 def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
     from .support import kill_a_run, read_journal_file, resume_main
 

@@ -628,6 +628,40 @@ end.
    to another run and to a process that no longer exists, add `--break-lock`.
    First make sure that no other run uses the run branch.
 
+### Change the plan of a run
+A run can take a new ticket without a new run. Stop the run, or let it end.
+Edit the workflow file, then resume the run. The engine compares the workflow
+with the newest plan of the run, and applies these rules:
+
+1. **The built part is fixed.** Each ticket up to the last ticket that started
+   keeps its id, its text, its stack, its `blocked-by` and its place. The
+   engine refuses a change to one of them, and names the ticket and the field.
+2. **A new ticket goes after the built part.** Put it at the end, or before a
+   ticket that has not started. To make a ticket wait on the new work, add the
+   new ticket to its `blocked-by`.
+3. **A ticket that has not started can change or go.** A ticket that has
+   started cannot be removed.
+4. **No built work changes.** The engine refuses a new ticket before a ticket
+   that started. Retry the step, or start a new run.
+5. **A new ticket gets its own gates and verifier,** also in `economy` mode
+   after the verification of the chain.
+6. **Review each later ticket before the resume.** A later ticket has not
+   started and comes after an added or changed ticket. It was written before
+   the change, so a precondition can be wrong now. Run
+   `delegate run --resume <run-id> --dry-run` first. It prints the old order,
+   the new order, the verdict of each rule, and each later ticket, with the
+   text of each added or changed ticket. Read each later ticket against the new
+   work. Change its text or its `blocked-by` where a precondition changed.
+   Then resume with `--reviewed <ids>` or `--reviewed all`. Without a
+   `--reviewed` that covers each later ticket, the engine refuses the resume.
+7. **The later tickets check again when they build.** The specialist brief and
+   the verifier brief of each later ticket get the section "Plan change". A
+   specialist whose ticket no longer fits reports `blocked` with the reason,
+   and builds nothing. Read that reason, and change the plan again.
+
+The journal records each change as `plan-change`. `delegate status` counts the
+new tickets.
+
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a
 deploy target, a prod DB, an external service) must be serialized to the

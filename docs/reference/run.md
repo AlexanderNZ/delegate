@@ -1,7 +1,7 @@
 ---
 man: DELEGATE-RUN(1)
 man_name: "delegate-run — build the tickets of a workflow"
-synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--retry <ticket>] [--break-lock] [--detach] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
+synopsis: "delegate run [<workflow>] [--dry-run] [--resume <run-id>] [--reviewed <ids>] [--retry <ticket>] [--break-lock] [--detach] [--repo <repo>] [--tiers <tiers>] [--opencode-model <tier>=<model>] [--opencode-allow <model>]"
 ---
 
 # Reference: `delegate run`
@@ -24,8 +24,9 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | Option | Meaning |
 |---|---|
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
-| `--dry-run` | Validate the workflow and print the plan; create nothing. |
-| `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; it cannot go with --dry-run. |
+| `--dry-run` | Validate the workflow and print the plan; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
+| `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets differ from the newest plan of the run is a plan change. |
+| `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |
 | `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |
 | `--detach` | Start the run in a new process with setsid, outside the process group of the shell; write its output to the file run.log in the directory of the run; print the run id and the log path, and exit 0; it cannot go with --dry-run. |
@@ -110,7 +111,7 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 `delegate run --resume <run-id>` goes on with a run that stopped. A run stops when its process is killed, or is interrupted with Ctrl-C. Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`.
 
-The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch`, `run-branch` and the ticket ids must be the same. If one differs, the command exits 1 and names the field. A run that has a `run-end` cannot be resumed.
+The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a plan change, and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
 The engine treats each ticket by what the journal holds for it:
 
@@ -131,6 +132,37 @@ An open step goes on as follows:
 - Otherwise the engine spawns the specialist in the same worktree. If the branch holds commits beyond the point where it started, the prompt is a continuation brief with the reason `the run was interrupted`. If it holds none, the prompt is the first brief. A new agent has no context, so the engine never resumes a session across a stop.
 - The continuations that the journal holds count against the limit of the mode.
 - In `assure` mode, the verification starts again with a full pass. The first verifier of the resume has the round number equal to the number of [**verdicts**](../glossary.md#verdict) that the journal holds, and the limit of two fix-up rounds counts across the stop. A verifier run that ended with no verdict does not count: for example, a verifier that a stop or the time limit of a harness killed. The resume runs that round again.
+
+## The plan change
+
+A resume can add tickets to a run, and change or remove tickets that have not started. The built work of the run stays. To change the plan, stop the run, or let it end. Edit the workflow file. Then run `delegate run --resume <run-id> --dry-run` to see the change, and `delegate run --resume <run-id> --reviewed <ids> --detach` to go on.
+
+The plan of a run is the tickets in plan order, with the id, the stack, the `blocked-by` and the text of each ticket. `run-start` records it in the field `plan`, with the SHA-256 of each text. A resume compares the workflow with the newest plan of the run: the `plan` of the newest `plan-change`, or else the `plan` of `run-start`. When the plan is the same, the resume goes on as usual. When it differs, the engine applies these rules:
+
+1. **The built part is fixed.** The built part is each ticket of the old order up to the last ticket with a `step-start`. Each ticket in it keeps its id, its text, its stack, its `blocked-by` and its place in the order. A change to one of these fields is refused, and the message names the ticket and the field. A ticket that the run skipped inside the built part is fixed too, because the run went past it.
+2. **A new ticket goes after the built part.** It goes at the end, or before a ticket that has not started. The engine computes the order again from `blocked-by`, and the new order must start with the built part, in the same order. Each blocker of a new ticket must be in the plan. The branch of a new ticket must not exist.
+3. **A ticket that has not started can change.** Its text, its `blocked-by` and its stack can change, and so can its place among the tickets that have not started. "The next ticket needs the new work first" is one more entry in its `blocked-by`. A changed ticket that the run skipped is no longer skipped: the [**skip**](../glossary.md#skip) rule applies to it again.
+4. **No built work is changed.** A new ticket that comes before a ticket with a `step-start` is refused. The message tells the coordinator to retry the step, or to start a new run.
+5. **A new ticket gets its own gates and verifier.** In `economy` mode, the verification of the chain covers each built ticket whose work the run branch does not hold. It reads only the events after the newest `retry` or `plan-change`. So a ticket that a plan change adds after the verification of the chain gets its own gates and verifier, and the tickets that the chain verification accepted are not verified again.
+6. **The journal records the change.** The resume writes `resume`, then `plan-change` with the added, the changed and the removed tickets, the new order and the new plan. `delegate status` and `delegate watch` show the tickets of the newest plan, and the progress and the ETA count them.
+7. **A ticket that has started cannot be removed.** A ticket that has not started can be removed.
+8. **The coordinator reviews the later tickets.** A later ticket is a ticket that has not started and comes after an added or changed ticket, in the new order. A new ticket is not a later ticket. A resume with later tickets needs `--reviewed <ids>`, the ids separated by commas, or `--reviewed all`, that covers each of them. Without it, the resume is refused, and the message names the tickets to review. `plan-change` records the later tickets in `reviewed`. Read each later ticket against the added and changed tickets before the resume, and change its text or its `blocked-by` where a precondition changed.
+9. **Each later ticket gets the section "Plan change".** The specialist [**brief**](../glossary.md#brief) and the full verifier brief of each later ticket get the section `## Plan change`. It names each added or changed ticket that comes before the ticket, with its text, and says where the work of those tickets is. It tells the specialist to check the assumptions of its ticket against that work, and to report `blocked`, with the reason in `blocked_reason`, and build nothing, when the ticket no longer fits. It tells the verifier to check the diff against the changed plan too. A ticket before the first added or changed ticket gets no such section.
+
+A refused resume changes nothing: no journal line, no branch and no agent. The command exits 1 and names each ticket and field at fault.
+
+A plan change also goes on with a run that ended: a `run-end` before the newest `plan-change` does not end the run. A plan change does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted. A journal of an earlier version of `delegate` has no `plan` in `run-start`. A resume of such a run with the same ticket ids goes on as before. A plan change on such a run is refused: the engine cannot check the built part, so start a new run.
+
+### The dry run of a resume
+
+`delegate run [<workflow>] --resume <run-id> --dry-run` applies the rules, and changes nothing. It takes no lock. With no plan change, it prints `run <run id>: no plan change` and the order. With a plan change, it prints:
+
+- `old order:` and `new order:`, the ticket ids of each plan.
+- One line for each rule: `rule <n>: ok: <rule>: <detail>`, or `rule <n>: refused: <rule>: <reason>`.
+- `later tickets to review, in plan order:` and the later tickets, when there are any.
+- `ticket <id> (added):` or `ticket <id> (changed):` and the text of each added or changed ticket, in plan order, each line indented by two spaces.
+
+The dry run takes `--reviewed` too. It exits 1 when a rule of the plan change refuses the resume, and 0 when the rules accept it. Each refusal also goes to stderr. The dry run checks only the plan. It does not check the other conditions of a resume, for example the [**run lock**](../glossary.md#run-lock), or a run that ended with no plan change.
 
 ## The retry
 
@@ -512,7 +544,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 
 | `event` | Fields |
 |---|---|
-| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `base_commit` (the base of the run: the commit of `base_branch` at the start), `run_branch`, `tickets` (the ids in plan order) |
+| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `base_commit` (the base of the run: the commit of `base_branch` at the start), `run_branch`, `tickets` (the ids in plan order), `plan` (each ticket in plan order, as an object with `id`, `stack`, `blocked_by` and `text_sha256`, the SHA-256 of its text) |
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `agent-start` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (0 for the specialist and the first verifier, else the fix-up round), `event_stream` (the path of the stream of the agent). The engine writes it just before each agent starts: the specialist, each continuation, the fix-up specialist, and each verifier. The result event of the agent names the same path. |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream`, and `refused` when a permission mode of the harness refused a tool: a list of objects, each with the `tool` and the `mode`. `fixup-result` and `verify-result` have the same `refused` field. See [the settings of a host](claude-code-adapter.md#the-settings-of-a-host). |
@@ -525,6 +557,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `continuation` | `ticket`, `count` (1 for the first continuation), `limit`, `trigger` (`capped`, `failed`, `gates-red`, `report-invalid`, or `report-missing`), `mode` (`resume` or `brief`), `resume_session` (the session id that the request carries, or `null`), `commits` (the commits on the branch so far, each as `<sha> <subject>`), `reason` |
 | `continuation-limit` | `ticket`, `count` (the continuations made), `limit`, `trigger` (the cause of the last stop) |
 | `resume` | `run_id`, `built` (the tickets that are built), `failed`, `skipped` (the tickets that are complete in the journal), `open` (the ticket whose step was open, or `null`) |
+| `plan-change` | `added` (the ids of the new tickets), `changed` (the ids of the changed tickets), `fields` (for each changed ticket, the names of its changed fields: `text`, `stack`, `blocked-by`), `removed` (the ids of the removed tickets), `order` (the new order of the ticket ids), `reviewed` (the later tickets that `--reviewed` covered), `plan` (the new plan, in the form of `plan` of `run-start`). See [the plan change](#the-plan-change). |
 | `retry` | `ticket`, `phase` (where the step goes on: `gates`, `verifier`, or `scoped-verifier` in `assure` mode; `specialist` or `gates` in `economy` mode), `round` (the verifier round of the retry; 0 in `economy` mode), `reason` (the reason the step failed before). See [the retry](#the-retry). |
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
@@ -545,7 +578,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 ## Limits of this version
 
 - In `assure` mode with `ticket-start = "base-branch"`, a ticket with no `blocked-by` starts from the base of the run, not from the accepted work of the tickets before it. The rebase puts the accepted work under the branch before the gates run again and before the verifier starts. The specialist itself does not see that work.
-- The engine can resume a run only while the journal has no `run-end`. A run that a crash ended cannot be resumed: start a new run. `--retry` goes on with one failed step also after `run-end`. In `assure` mode, the tickets that the engine skipped for that step stay skipped.
+- The engine can resume a run only while the journal has no `run-end`, or with a plan change. A run that a crash ended cannot be resumed without a plan change: start a new run. `--retry` goes on with one failed step also after `run-end`. In `assure` mode, the tickets that the engine skipped for that step stay skipped.
 - During a retry of a run that ended, `delegate status` and `delegate watch` read the old `run-end` until the retry writes a new one.
 - If a process is killed between the move of the run branch and the write of `run-branch-advance`, the resume fails that step with the message `holds no commit beyond ... after the rebase`. The run branch holds the work of the ticket. Check it by hand.
 - In `economy` mode, a defect shows only at the end of the chain. That is also true for a defect that the gates find. The stack of a rejected chain fails as a whole when no finding names a ticket.

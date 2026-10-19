@@ -63,6 +63,13 @@ engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again. A verifier run that ended with no verdict does not
 count against the fix-up limit: the resume runs that round again.
 
+A resume can change the plan of the run: add tickets after the built part, and
+change or remove tickets that have not started. The rules are in
+`domain.check_plan_change`, and `_review` applies them to the newest plan of the
+run, from the journal. A refused change changes nothing. An accepted change
+writes `plan-change`, also goes on with a run that ended, and gives the brief of
+each later ticket the section "Plan change" (see `_plan_change_note`).
+
 A resume with `retry` goes on with one failed step, also in a run that ended
 (see `_retry_plan`). It uses the worktree and the commits of the step again,
 and goes on at the first phase that did not complete. In `assure` mode it
@@ -108,13 +115,13 @@ from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
-    report_correction_brief, specialist_brief, verifier_run_brief, verifier_run_sections,
+    plan_change_section, plan_change_text, report_correction_brief, specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree,
 )
-from .journal import Journal, JournalError, read_events
+from .journal import Journal, JournalError, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -336,12 +343,16 @@ class _Progress:
 
 
 def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
-    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended, unless `retrying`."""
+    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended, unless `retrying`.
+
+    A `run-end` before the newest `plan-change` does not end the run: a plan change goes on with a run that ended.
+    """
     progress = _Progress(events=events)
     started: str | None = None
-    for event in events:
+    last_change = max((index for index, event in enumerate(events) if event["event"] == "plan-change"), default=-1)
+    for index, event in enumerate(events):
         kind, ticket = event["event"], str(event.get("ticket"))
-        if kind == "run-end" and not retrying:
+        if kind == "run-end" and not retrying and index > last_change:
             raise EngineError(f"run {run_id!r} has ended with the result {event['result']!r}; it cannot be resumed")
         if kind == "step-start":
             started = ticket
@@ -372,14 +383,176 @@ def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = Fals
 
 
 def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str, object], run_id: str) -> None:
-    """Refuse a resume when the workflow is not the one that the run started from. The message names the field."""
+    """Refuse a resume when the workflow is not the one that the run started from. The message names the field.
+
+    The tickets can differ: the rules of a plan change decide (see `_review`).
+    """
     now: dict[str, object] = {
-        "mode": workflow.mode, "adapter": workflow.adapter, "base_branch": workflow.base_branch,
-        "run_branch": workflow.run_branch, "tickets": [t.id for t in plan_order(workflow)],
+        "mode": workflow.mode, "adapter": workflow.adapter, "base_branch": workflow.base_branch, "run_branch": workflow.run_branch,
     }
     for name, value in now.items():
         if run_start[name] != value:
             raise EngineError(f"workflow {workflow_path} differs from run {run_id}: {name} was {run_start[name]!r}, is now {value!r}")
+
+
+def _plan_of(workflow: Workflow) -> list[domain.PlanTicket]:
+    """The plan of a workflow: each ticket in plan order, with its stack, its blockers and the SHA-256 of its text."""
+    return [
+        domain.PlanTicket(t.id, t.stack, tuple(t.blocked_by), hashlib.sha256(t.text.encode()).hexdigest())
+        for t in plan_order(workflow)
+    ]
+
+
+def _plan_record(plan: list[domain.PlanTicket]) -> list[dict[str, object]]:
+    """The plan as the journal records it, in the field `plan` of `run-start` and of `plan-change`."""
+    return [{"id": t.id, "stack": t.stack, "blocked_by": list(t.blocked_by), "text_sha256": t.text_sha256} for t in plan]
+
+
+def _recorded_plan(events: list[dict[str, object]]) -> list[domain.PlanTicket] | None:
+    """The newest plan of a run: the plan of its newest `plan-change`, or else of `run-start`.
+
+    None when the journal records no plan: an earlier version of the engine wrote only the ticket ids.
+    """
+    records = [event["plan"] for event in events if event["event"] == "plan-change"] or [events[0].get("plan")]
+    if records[-1] is None:
+        return None
+    return [
+        domain.PlanTicket(str(r["id"]), str(r["stack"]), tuple(str(b) for b in r["blocked_by"]), str(r["text_sha256"]))  # type: ignore[index, union-attr]
+        for r in records[-1]  # type: ignore[union-attr]
+    ]
+
+
+@dataclass(frozen=True)
+class PlanReview:
+    """What a resume does with the plan of a run: the old and the new order, and the verdict of each rule of a plan change.
+
+    `check` is None when the tickets of the workflow are the newest plan of the
+    run. `missing` holds the later tickets that `--reviewed` does not cover.
+    `texts` holds the text of each added or changed ticket. `other` holds the
+    problems that are not a rule of the plan: an unknown id in `--reviewed`,
+    the branch of a new ticket that exists already, and a run that an
+    invariant violation halted.
+    """
+
+    run_id: str
+    mode: str
+    old_order: list[str]
+    new_order: list[str]
+    check: domain.PlanCheck | None
+    missing: list[str] = field(default_factory=list)
+    texts: dict[str, str] = field(default_factory=dict)
+    other: list[str] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return self.check is not None
+
+    def _rule_8(self) -> list[str]:
+        if not self.missing:
+            return []
+        names = ", ".join(repr(ticket) for ticket in self.missing)
+        return [
+            f"the plan change needs a review of the later tickets {names}: read each one against the added and changed tickets, "
+            f"change its text or its blocked-by where a precondition changed, then give --reviewed {','.join(self.check.later)} "  # type: ignore[union-attr]
+            "or --reviewed all"
+        ]
+
+    def problems(self) -> list[str]:
+        """Each message that refuses the resume, in the order of the rules."""
+        if self.check is None:
+            return list(self.other)
+        problems = [message for rule in sorted(self.check.problems) for message in self.check.problems[rule]]
+        return problems + self.other + self._rule_8()
+
+    def verdicts(self) -> list[tuple[int, str, str]]:
+        """The verdict of each rule of a plan change: its number, `ok` or `refused`, and the detail.
+
+        The problems in `other` are not rules of the plan: `problems` gives them.
+        """
+        check = self.check
+        assert check is not None
+        later = ", ".join(check.later)
+        notes = {
+            1: f"the built part is {', '.join(check.fixed) or 'empty'}",
+            2: f"added: {', '.join(check.added) or 'none'}",
+            3: "changed: " + (", ".join(f"{t} ({', '.join(f)})" for t, f in check.changed.items()) or "none"),
+            4: "no new ticket comes before a ticket that has started",
+            5: "each new ticket gets its own gates and verifier"
+            + (": the verification of the chain covers each built ticket whose work the run branch does not hold"
+               if self.mode == domain.ECONOMY else ""),
+            6: "the resume writes plan-change",
+            7: f"removed: {', '.join(check.removed) or 'none'}",
+            8: f"reviewed: {later}" if later else "no later ticket",
+            9: f"the briefs of {later} get the section" if later else "no brief gets the section",
+        }
+        found = {rule: list(messages) for rule, messages in check.problems.items()}
+        if self.missing:
+            found[8] = [f"needs --reviewed for {', '.join(self.missing)}"]
+        return [
+            (rule, "refused" if rule in found else "ok", "; ".join(found[rule]) if rule in found else notes[rule])
+            for rule in domain.PLAN_RULES
+        ]
+
+
+def _review(
+    workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, reviewed: tuple[str, ...],
+    branch_exists: Callable[[str], bool],
+) -> PlanReview:
+    """Apply the rules of a plan change to the workflow and the journal of a run. Change nothing.
+
+    The workflow is compared with the newest plan of the run, not with
+    `run-start`. Raise EngineError when a field other than the tickets differs
+    (see `_check_same_run`), or when the plan changed and the journal records
+    no plan to compare with.
+    """
+    _check_same_run(workflow, workflow_path, events[0], run_id)
+    old_order, new_plan = plan_ids(events), _plan_of(workflow)
+    new_order = [t.id for t in new_plan]
+    old = _recorded_plan(events)
+    if old is None:
+        if old_order != new_order:
+            raise EngineError(
+                f"workflow {workflow_path} differs from run {run_id}: tickets was {old_order!r}, is now {new_order!r}; "
+                "the journal of the run records no plan, because an earlier version of delegate started it, "
+                "so a plan change cannot be checked: start a new run"
+            )
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None)
+    if old == new_plan:
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None)
+    started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
+    check = domain.check_plan_change(old, new_plan, started)
+    other = [
+        f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
+        for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
+    ]
+    if any(event["event"] == "invariant-violation" for event in events):
+        other.append(f"an invariant violation halted run {run_id}, and a halted run cannot be resumed: start a new run")
+    for ticket in workflow.tickets:
+        branch = _ticket_branch(workflow, ticket)
+        if ticket.id in check.added and branch_exists(branch):
+            other.append(f"branch {branch!r} for the new ticket {ticket.id!r} exists already; delete it or give the ticket another id")
+    texts = {t.id: t.text for t in workflow.tickets if t.id in check.added or t.id in check.changed}
+    return PlanReview(run_id, workflow.mode, old_order, new_order, check, domain.unreviewed(check.later, reviewed), texts, other)
+
+
+def review_plan_change(
+    workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = ()
+) -> PlanReview:
+    """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
+
+    `delegate run --resume <run-id> --dry-run` prints the result. Raise
+    EngineError when the run is unknown, or when the workflow differs from the
+    run in a field other than the tickets.
+    """
+    top, state_dir = state_directory(repo, vcs)
+    try:
+        events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
+    except JournalError as error:
+        raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
+    if not events or events[0]["event"] != "run-start":
+        raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
+    with _vcs_errors():
+        return _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch))
 
 
 @dataclass(frozen=True)
@@ -529,7 +702,7 @@ def _check_chain_start(
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False, on_start: Callable[[str], None] | None = None,
-    run_id: str | None = None,
+    run_id: str | None = None, reviewed: tuple[str, ...] = (),
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -555,6 +728,12 @@ def run_workflow(
 
     `run_id` is the id of a new run. The default is a new id from `new_run_id`. `delegate run --detach` gives the id
     that it printed before it started the run process. A resume uses the id `resume`, and ignores `run_id`.
+
+    A resume with a workflow whose tickets differ from the newest plan of the run
+    is a plan change (see `_review` and `domain.check_plan_change`). `reviewed`
+    holds the ids of the later tickets that the coordinator reviewed, or
+    `all`. Raise EngineError, which names each ticket and field at fault, when
+    the rules refuse the change. A plan change also goes on with a run that ended.
     """
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
@@ -568,7 +747,7 @@ def run_workflow(
             if on_start is not None:
                 on_start(run_id)
             result = _execute(
-                workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry
+                workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry, reviewed
             )
             return result if break_lock else replace(result, taken_over=broken)
     except LockError as error:
@@ -578,7 +757,7 @@ def run_workflow(
 def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
-    retry: str | None = None,
+    retry: str | None = None, reviewed: tuple[str, ...] = (),
 ) -> RunResult:
     order = plan_order(workflow)
     plan: _RetryPlan | None = None
@@ -590,12 +769,17 @@ def _execute(
         journal.append(
             "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
+            plan=_plan_record(_plan_of(workflow)),
         )
         progress = _Progress()
     else:
         journal, events = _journal_events(state_dir, run_id)
-        progress = _restore(events, run_id, retrying=retry is not None)
-        _check_same_run(workflow, workflow_path, events[0], run_id)
+        with _vcs_errors():
+            review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch))
+        problems = review.problems()
+        if problems:
+            raise EngineError(f"workflow {workflow_path} changes the plan of run {run_id}, and the rules refuse it: " + "; ".join(problems))
+        progress = _restore(events, run_id, retrying=retry is not None or review.changed)
         with _vcs_errors():
             run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
         if not run_branch_exists:
@@ -609,6 +793,8 @@ def _execute(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket,
         )
+        if review.check is not None:
+            _record_plan_change(journal, workflow, review.check, progress)
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
@@ -669,6 +855,54 @@ def _execute(
         "run-end", result=BUILT if not failed else FAILED, built=built, failed=failed, skipped=list(skipped)
     )
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
+
+
+def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.PlanCheck, progress: _Progress) -> None:
+    """Write `plan-change`, and apply the change to the progress of the run.
+
+    A removed ticket leaves the run. A changed ticket that the run skipped is
+    no longer skipped: the skip rule applies to it again, with its new blockers.
+    """
+    plan = _plan_of(workflow)
+    journal.append(
+        "plan-change", added=check.added, changed=list(check.changed), fields=check.changed, removed=check.removed,
+        order=[t.id for t in plan], reviewed=check.later, plan=_plan_record(plan),
+    )
+    for ticket_id in [*check.removed, *check.changed]:
+        progress.skipped.pop(ticket_id, None)
+
+
+def _plan_change_note(journal: Journal, workflow: Workflow, ticket_ids: list[str], verifier: bool) -> str | None:
+    """The text of the section "Plan change" for the brief of the tickets `ticket_ids`, or None when none needs it.
+
+    A ticket needs it when a `plan-change` of the journal lists it as a later
+    ticket. The section names each ticket that such a change added or changed,
+    and that comes before the ticket in the plan, with its text.
+    """
+    events = [event for event in read_events(journal.path) if event["event"] == "plan-change"]
+    if not events:
+        return None
+    order = [t.id for t in plan_order(workflow)]
+    texts = {t.id: t.text for t in workflow.tickets}
+    kinds: dict[str, str] = {}
+    for event in events:
+        for target in ticket_ids:
+            if target not in event["reviewed"] or target not in order:  # type: ignore[operator]
+                continue
+            for kind in ("added", "changed"):
+                for ticket_id in event[kind]:  # type: ignore[attr-defined]
+                    if ticket_id in order and order.index(ticket_id) < order.index(target):
+                        kinds.setdefault(ticket_id, kind)
+    if not kinds:
+        return None
+    if workflow.mode == domain.ECONOMY:
+        location = (
+            "The engine builds these tickets before this ticket. Each ticket of the chain starts from the ticket before it, "
+            "so the branch of this ticket holds their work."
+        )
+    else:
+        location = f"The engine builds these tickets before this ticket, and their accepted work is on the run branch `{workflow.run_branch}`."
+    return plan_change_text([(t, kinds[t], texts[t]) for t in order if t in kinds], location, verifier)
 
 
 def _run_base(vcs: VersionControl, repo: Path, workflow: Workflow, events: list[dict[str, object]]) -> str:
@@ -901,15 +1135,17 @@ def _build_with_continuations(
     stack = workflow.stacks[ticket.stack]
     limit = domain.continuation_limit(workflow.mode)
     each_ticket = domain.gates_each_ticket(workflow.mode)
+    plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
-        ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket
+        ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
+        plan_change=plan_change,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
-                stop_reason, resumed=False, gates_at_chain_end=not each_ticket,
+                stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
             )
     resume_session: str | None = None
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -981,6 +1217,7 @@ def _build_with_continuations(
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
+                plan_change=plan_change,
             )
 
 
@@ -1270,12 +1507,14 @@ def _verify_round(
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
                     chain_brief(step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups)
+                    + plan_change_section(_plan_change_note(step.journal, step.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
                 prompt = first_pass + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
             elif fixup_body is None:
                 prompt = verifier_run_brief(
-                    step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path
+                    step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
+                    plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
                 )
             else:
                 prompt = fixup_body + verifier_run_sections(copy, report_path, mode)
@@ -1461,8 +1700,10 @@ class _ChainRun:
 
     The verification covers only the built tickets whose work the run branch
     does not hold yet, and reads only the journal events after the last
-    `retry`. So after a retry, the chain verification of the run before it
-    does not count, and the tickets that it accepted are not verified again.
+    `retry` or `plan-change`. So after a retry or a plan change, the chain
+    verification of the run before it does not count, and the tickets that it
+    accepted are not verified again. A ticket that a plan change added after
+    the chain verification gets its own gates and verifier.
     """
 
     def __init__(
@@ -1521,8 +1762,9 @@ class _ChainRun:
 
     def _verify_stacks(self) -> list[str]:
         every_event = read_events(self.journal.path)
-        retries = [index for index, e in enumerate(every_event) if e["event"] == "retry"]
-        events = every_event[retries[-1] + 1 :] if retries else every_event  # the verification of the chain since the last retry
+        retries = [index for index, e in enumerate(every_event) if e["event"] in ("retry", "plan-change")]
+        # The verification of the chain since the last retry or plan change.
+        events = every_event[retries[-1] + 1 :] if retries else every_event
         if any(e["event"] == "run-branch-advance" for e in events):
             return []  # a resume after the run branch moved: nothing is left to verify
         tip_ticket = self.chain[-1]

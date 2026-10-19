@@ -66,6 +66,19 @@ def read_new_events(path: Path, offset: int, next_seq: int) -> tuple[list[dict[s
     return events, offset + consumed
 
 
+def plan_ids(events: list[dict[str, object]]) -> list[str]:
+    """The ticket ids of the newest plan of a run, in plan order, from its events.
+
+    It is the `order` of the newest `plan-change`, or else the `tickets` of
+    `run-start`, the first event. The engine compares a workflow with this
+    plan, and `delegate status` counts its tickets.
+    """
+    for event in reversed(events):
+        if event["event"] == "plan-change":
+            return [str(t) for t in event["order"]]  # type: ignore[union-attr]
+    return [str(t) for t in events[0]["tickets"]]  # type: ignore[union-attr]
+
+
 class Journal:
     """Appends events to one file."""
 

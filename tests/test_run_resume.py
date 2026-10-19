@@ -197,14 +197,15 @@ def test_an_unknown_run_id_exits_one_and_names_the_id(tmp_path, capsys, scripted
 
 
 def test_a_workflow_that_differs_from_the_run_is_refused_and_the_message_names_the_field(tmp_path, capsys, scripted):
+    # The tickets can change under the rules of a plan change (see test_run_plan_change.py). The run branch cannot.
     repo = make_repo(tmp_path, THREE)
     run_id, _ = kill_a_run(repo, 3)
-    (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b", ("a",)))
+    (repo / "workflow.toml").write_text(THREE.replace('run-branch = "run/demo"', 'run-branch = "run/other"'))
     before = journal_path(repo, run_id).read_bytes()
 
     code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
-    assert code == 1 and "tickets" in err and run_id in err
+    assert code == 1 and "run_branch" in err and run_id in err
     assert journal_path(repo, run_id).read_bytes() == before
     assert scripted.calls == []
 
@@ -239,15 +240,18 @@ def test_run_with_neither_a_workflow_nor_a_resume_is_a_usage_error_that_says_wha
     assert code == 2 and "--resume" in capsys.readouterr().err
 
 
-def test_resume_and_dry_run_together_are_a_usage_error(tmp_path, capsys, scripted):
+def test_the_dry_run_of_a_resume_takes_no_lock_and_changes_nothing(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, THREE)
     run_id, _ = kill_a_run(repo, 3)
     before = journal_path(repo, run_id).read_bytes()
+    locks = sorted(p.name for p in (repo / ".git" / "delegate").rglob("*.lock"))
 
-    code = usage_error("--resume", run_id, "--dry-run", "--repo", str(repo))
+    code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
 
-    assert code == 2 and "--dry-run" in capsys.readouterr().err
+    assert (code, err) == (0, "") and f"run {run_id}: no plan change" in out
     assert journal_path(repo, run_id).read_bytes() == before
+    assert sorted(p.name for p in (repo / ".git" / "delegate").rglob("*.lock")) == locks
+    assert scripted.calls == []
 
 
 def test_the_continuations_in_the_journal_count_against_the_limit_after_a_stop(tmp_path, capsys, scripted):

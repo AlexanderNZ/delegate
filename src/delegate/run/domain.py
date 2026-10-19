@@ -2,7 +2,7 @@
 
 The modes, the limits of fix-up rounds and continuations, the dependency order
 of the tickets, the skip rule, the start of a ticket in a chain, the handling
-of a verdict, and the progress and the ETA of a run are here. Each rule is a function of plain values: strings,
+of a verdict, the rules of a plan change, and the progress and the ETA of a run are here. Each rule is a function of plain values: strings,
 numbers and lists. The module imports nothing from the package and nothing that
 does I/O. It has no git, no harness, no file system and no subprocess, and
 `tests/test_architecture.py` checks that. The engine reads and writes the world,
@@ -12,6 +12,7 @@ and asks this module what the rules say.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from typing import NamedTuple
 
 ASSURE: str = "assure"
 ECONOMY: str = "economy"
@@ -284,3 +285,110 @@ def seconds_to_end(durations: Sequence[float], not_ended: int, running_seconds: 
         return None
     mean = sum(durations) / len(durations)
     return max(0, int(mean * not_ended - running_seconds))
+
+
+# The rules of a plan change: a resume with a workflow whose tickets differ from the newest plan of the run (#107).
+# Each rule has a number, and the dry run of a resume prints the verdict of each one.
+PLAN_RULES: dict[int, str] = {
+    1: "the built part is fixed",
+    2: "a new ticket goes after the built part",
+    3: "a ticket that has not started can change",
+    4: "no built work is changed",
+    5: "a new ticket gets its own gates and verifier",
+    6: "the journal records the change",
+    7: "a ticket that has started cannot be removed",
+    8: "the coordinator reviews the later tickets",
+    9: "the brief of each later ticket gets the section Plan change",
+}
+
+# The value of `--reviewed` that covers every later ticket.
+REVIEWED_ALL: str = "all"
+
+
+class PlanTicket(NamedTuple):
+    """One ticket of a plan, as the journal records it: the id, the stack, the blockers, and the SHA-256 of the text."""
+
+    id: str
+    stack: str
+    blocked_by: tuple[str, ...]
+    text_sha256: str
+
+
+# The fields of a ticket that a plan change compares, with the name that a message gives each one.
+PLAN_FIELDS: tuple[tuple[str, str], ...] = (("text_sha256", "text"), ("stack", "stack"), ("blocked_by", "blocked-by"))
+
+
+class PlanCheck(NamedTuple):
+    """The result of the rules of a plan change.
+
+    `fixed` is the built part: the tickets of the old order up to the last
+    ticket that started. `changed` maps each changed ticket to the names of
+    its changed fields. `later` holds each ticket that has not started and
+    comes after an added or changed ticket, in the new order; an added ticket
+    is not in it. `problems` maps a rule number to the messages of that rule
+    that refuse the change.
+    """
+
+    fixed: list[str]
+    added: list[str]
+    changed: dict[str, list[str]]
+    removed: list[str]
+    later: list[str]
+    problems: dict[int, list[str]]
+
+
+def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], started: Collection[str]) -> PlanCheck:
+    """Apply the rules of a plan change to the old plan and the new plan, each in plan order.
+
+    `started` holds the ids of the tickets with a `step-start`. The built part
+    is fixed: each ticket in it keeps its id, its text, its stack, its
+    blockers and its place, and the new order starts with it. A ticket in the
+    built part that did not start (a ticket that the run skipped) is fixed
+    too, because the run went past it. A new ticket goes after the built part.
+    A ticket after the built part can change or go.
+    """
+    old_ids, new_ids = [t.id for t in old], [t.id for t in new]
+    by_id = {t.id: t for t in new}
+    last = max((old_ids.index(i) for i in started if i in old_ids), default=-1)
+    fixed = old_ids[: last + 1]
+    added = [i for i in new_ids if i not in old_ids]
+    removed = [i for i in old_ids if i not in new_ids]
+    changed: dict[str, list[str]] = {}
+    for ticket in old:
+        if ticket.id in by_id:
+            fields = [name for attribute, name in PLAN_FIELDS if getattr(ticket, attribute) != getattr(by_id[ticket.id], attribute)]
+            if fields:
+                changed[ticket.id] = fields
+    problems: dict[int, list[str]] = {}
+    last_started = fixed[-1] if fixed else None
+    for ticket_id in fixed:
+        where = "has started" if ticket_id in started else f"is in the built part, before ticket {last_started!r}, which has started"
+        if ticket_id in removed:
+            rule = 7 if ticket_id in started else 1
+            problems.setdefault(rule, []).append(f"ticket {ticket_id!r} {where}; it cannot be removed")
+        elif ticket_id in changed:
+            problems.setdefault(1, []).append(f"ticket {ticket_id!r} {where}; its {', '.join(changed[ticket_id])} changed")
+    if not problems and new_ids[: len(fixed)] != fixed:
+        end = new_ids.index(last_started) if last_started in new_ids else len(new_ids)
+        early = [i for i in new_ids[:end] if i in added]
+        if early:
+            problems[4] = [
+                f"ticket {i!r} is new and comes before ticket {last_started!r}, which has started; "
+                "a new ticket cannot go before built work: retry the step, or start a new run"
+                for i in early
+            ]
+        else:
+            problems[2] = [f"the new order {', '.join(new_ids)} does not start with the built part {', '.join(fixed)}"]
+    moved = [i for i in new_ids if i in added or i in changed]
+    later: list[str] = []
+    if moved:
+        first = new_ids.index(moved[0])
+        later = [i for i in new_ids[first + 1 :] if i not in added and i not in started]
+    return PlanCheck(fixed, added, changed, removed, later, problems)
+
+
+def unreviewed(later: Sequence[str], reviewed: Collection[str]) -> list[str]:
+    """The later tickets that `reviewed` does not cover, in plan order. `REVIEWED_ALL` covers every one."""
+    if REVIEWED_ALL in reviewed:
+        return []
+    return [ticket_id for ticket_id in later if ticket_id not in reviewed]
