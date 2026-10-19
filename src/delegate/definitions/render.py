@@ -191,21 +191,33 @@ HOOK_COMMAND_READER = (
 )
 
 
+def _prefixes(option: str, shortest: int) -> list[str]:
+    return [option[:n] for n in range(shortest, len(option) + 1)]
+
+
+#: The long output option of a GET-only command, and each of its prefixes
+#: with at least three characters after "--" (#141). A command built on
+#: argparse accepts a unique prefix of a long option, so "--out <path>" is
+#: the same option as "--output <path>".
+GET_ONLY_OUTPUT_OPTIONS = _prefixes("--output", 5)
+
 #: The shell text that examines the arguments of a GET-only command. It reads
 #: "$@", strips quote and backslash characters from each word, and denies a
 #: method flag, a body flag and an output flag, in each spelling. A hyphen-led
 #: word that is not a double-hyphen option is a short flag or a cluster of
 #: short flags (-sX, -XPOST, -dBODY), and it is denied when it holds X, d, f,
 #: F or o. An output flag is the one exception: its path must be in a temp
-#: directory, by the same rule as the temp-write commands.
+#: directory, by the same rule as the temp-write commands. The output flag is
+#: -o, --output, or a prefix of --output in GET_ONLY_OUTPUT_OPTIONS.
 GET_ONLY_ARGUMENT_CHECK = (
     "k=0; "
     'for a in "$@"; do '
     'if [ "$k" = 1 ]; then k=0; istmp "$a" || deny "$seg" "An output path is outside a temp directory."; continue; fi; '
     r'''a=${a//\"/}; a=${a//\'/}; a=${a//\\/}; '''
     'case "$a" in '
-    '--output=*) istmp "${a#--output=}" || deny "$seg" "An output path is outside a temp directory." ;; '
-    "--output|-o) k=1 ;; "
+    f'{"|".join(f"{o}=*" for o in GET_ONLY_OUTPUT_OPTIONS)}) '
+    'istmp "${a#*=}" || deny "$seg" "An output path is outside a temp directory." ;; '
+    f'{"|".join(GET_ONLY_OUTPUT_OPTIONS)}|-o) k=1 ;; '
     '-o?*) istmp "${a#-o}" || deny "$seg" "An output path is outside a temp directory." ;; '
     "--method|--method=*|--request|--request=*|--data*|--input|--input=*"
     '|--field|--field=*|--raw-field|--raw-field=*) deny "$seg" "This command reads only; $a makes it a write." ;; '
@@ -234,10 +246,6 @@ GIT_PAGER_OPTION = "--open-files-in-pager"
 #: it is -O: "-iOcat" runs cat. A letter that is not in this text makes the
 #: guard read further, so a letter that is missing gives a deny, never a hole.
 GIT_GREP_ARGUMENT_SHORT_OPTIONS = "efmABC"
-
-
-def _prefixes(option: str, shortest: int) -> list[str]:
-    return [option[:n] for n in range(shortest, len(option) + 1)]
 
 
 def _git_read_argument_check(grep: bool) -> str:
