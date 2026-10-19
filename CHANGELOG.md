@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-19
+
 ### Added
 
 - A resume can add or change the tickets of a run (#107). Pause the run (#108), stop it, or let it end. Then edit the workflow file, and run `delegate run --resume <run-id>`. The built part of the run is fixed. A new ticket goes at the end, or before a ticket that has not started, in the order of `blocked-by`. A ticket that has not started can change or go. A new ticket before built work, and a change to a built ticket, are refused, and the message names the ticket and the field. The coordinator reviews each later ticket that has not started, and names it with `--reviewed <ids>` (or `--reviewed all`). Without that, the resume is refused. The dry run of the resume prints the old order, the new order and the tickets to review. The journal records `plan-change`, and a later resume compares with the newest plan. The specialist brief and the verifier brief of each later ticket get a section "Plan change", so the specialist checks the assumptions of its ticket against the new work and reports `blocked` when the ticket no longer fits, and the verifier treats a diff that does not fit the changed plan as a finding.
