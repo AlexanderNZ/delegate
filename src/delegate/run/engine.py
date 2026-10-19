@@ -642,8 +642,20 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     or whose fix-up specialist, gave no valid report that says committed is
     refused. So is a step that the verifier accepted, or rejected after the
     last fix-up round. For `economy` mode, see `_economy_retry_plan`.
+
+    A run that an invariant violation halted is refused in each mode: the state
+    of the worktree that the verifier changed cannot be trusted.
     """
     refused = _refused(ticket_id, run_id)
+    violations = [e for e in progress.events if e["event"] == "invariant-violation"]
+    if violations:
+        violation = violations[-1]
+        changes = "; ".join(str(change) for change in violation["changes"])  # type: ignore[union-attr]
+        raise EngineError(
+            f"{refused}: an invariant violation halted the run at ticket {violation['ticket']!r}: "
+            f"the verifier changed the real worktree {violation['worktree']}: {changes}; "
+            "a halted run cannot be resumed: start a new run"
+        )
     if ticket_id not in {ticket.id for ticket in workflow.tickets}:
         raise EngineError(f"{refused}: it is not a ticket of the run")
     if ticket_id in progress.built:

@@ -8,6 +8,8 @@ at the verifier, or at the scoped verifier of the fix-up round. Each case calls
 adapter in the place of the harness.
 """
 
+import pytest
+
 from .support import (
     event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
@@ -208,6 +210,27 @@ def test_a_retry_of_a_step_whose_specialist_gave_no_valid_report_exits_one_and_s
     assert "ticket 'a'" in err and "specialist" in err
     assert journal_path(repo, run_id).read_bytes() == before
     assert scripted.calls == [] and scripted.verifier_calls == []
+
+
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+def test_a_retry_of_a_run_that_an_invariant_violation_halted_exits_one_names_the_violation_and_changes_nothing(
+    tmp_path, capsys, scripted, mode
+):
+    # In `assure` mode the verifier of ticket a halts the run, and b is skipped. In `economy` mode the chain verifier
+    # runs in the worktree of a, the only ticket of the chain.
+    text = HEAD + ticket("a") + ticket("b", ("a",)) if mode == "assure" else economy(ticket("a"))
+    repo = make_repo(tmp_path, text)
+
+    def write_in_the_real_worktree(request):
+        (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+        (run_dir / "a" / "oops.txt").write_text("by the verifier\n")
+
+    scripted.during_verifier = write_in_the_real_worktree
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    assert "invariant-violation" in event_names(read_journal_file(repo, run_id))
+
+    refused(repo, capsys, run_id, scripted, "a", "invariant violation", "oops.txt", "start a new run")
 
 
 def test_retry_without_resume_is_a_usage_error(tmp_path, capsys):

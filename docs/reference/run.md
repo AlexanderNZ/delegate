@@ -211,6 +211,8 @@ The dry run takes `--reviewed` too. It exits 1 when a rule of the plan change re
 
 `delegate run --resume <run-id> --retry <ticket>` goes on with one failed step of a run. A failed step has a `step-end`, so a resume without `--retry` does not build it again. The retry also works in a run that has a `run-end`. It takes the [**run lock**](../glossary.md#run-lock), and it builds the steps that are not complete, as a resume does.
 
+The retry does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted, in each mode and for each ticket of the run. The verifier changed the real worktree of a ticket, so the engine cannot trust the worktree and the branch that the retry would use. The command exits 1, names the ticket of the violation, the worktree and each change of the `invariant-violation` event, tells you to start a new run, and appends no event. A plain resume and a plan change of such a run are refused too. See [the worktree invariant](#the-worktree-invariant).
+
 The retry uses the worktree and the commits of the step again, and goes on at the first phase that did not complete. The phase comes from the journal events of the step. In `assure` mode the retry spawns no specialist:
 
 | Events of the failed step | Where the step goes on |
@@ -243,6 +245,7 @@ After the step, the chain goes on. The engine checks each ticket after the step 
 
 The command exits 1, names the ticket, and changes nothing, when the step cannot be retried:
 
+- An invariant violation halted the run. Start a new run.
 - The ticket is not a ticket of the run.
 - The step is built, was skipped, did not start, or is open. Resume an open step without `--retry`.
 - In `assure` mode: the specialist, or the fix-up specialist of the next round, gave no valid report that says `committed`. A retry of `assure` mode spawns no specialist.
@@ -314,7 +317,7 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 - Before each verifier run, the engine takes a snapshot of the worktree of the ticket: the HEAD commit, and for each path that `git status` reports, the status code and a hash of the content of the file. A file that git ignores is not in the snapshot. The engine takes the snapshot again when the verifier ends.
 - A difference is an [**invariant**](../glossary.md#invariant) violation. A verifier that commits, that adds or deletes a file, that edits a tracked file, or that rewrites a file which was already changed or untracked, makes the snapshots differ. The engine does this check for the first verifier of a ticket and for the verifier of each fix-up round.
 - A violation halts the run. The engine writes `verify-result`, then `invariant-violation` with the worktree, the HEAD commit before and after, and one entry in `changes` for each path that differs. The engine writes `step-end` with the state `failed` and the reason `invariant violation: ...`. It writes `skip` for each ticket that it did not reach, with the reason `the run ended after ticket <id> halted the run`. It writes `run-end` with the result `failed`. The command prints `delegate run: ticket <id>: invariant violation: ...` on stderr, and one skip line for each ticket that it did not reach. Then it prints the summary and the retry line on stdout, and exits 1.
-- The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A plain resume and a plan change of a run that a violation halted are refused. `--retry <ticket>` goes on with the halted step: it starts the verifier again. The tickets that the halt skipped stay skipped.
+- The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A plain resume, a plan change and a retry of a run that a violation halted are refused. See [the retry](#the-retry). Start a new run.
 - A verifier that writes only in its temporary copy does not halt the run. The engine removes the copy after each verifier run, also when the run halts.
 - The check covers the worktree of the ticket. It does not cover the main checkout of the repository, which the coordinator can change at any time, and it does not cover a path outside the repository.
 
