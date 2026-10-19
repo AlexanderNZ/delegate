@@ -30,7 +30,7 @@ The neutrality check needs `AGENT_DEFINITIONS_DENYLIST`, the path of the private
 
 ## Changelog
 
-Each change with an effect that a user can see adds an entry under `## [Unreleased]` of `CHANGELOG.md`, in the same branch, under `Added`, `Changed` or `Fixed`. The entry names the issue (`(#<n>)`). The release notes come from that file, so a change with no entry is missing from the release.
+Each change with an effect that a user can see adds an entry under `## [Unreleased]` of `CHANGELOG.md`, in the same branch, under `Added`, `Changed` or `Fixed`. The entry names the issue (`(#<n>)`). At a release, `scripts/release.py apply` moves the text under `## [Unreleased]` into the entry of the version, so a change with no entry is missing from that entry. The GitHub release notes come from the commit subjects.
 
 ## Breakage
 
