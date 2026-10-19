@@ -21,6 +21,8 @@ The first line of your report names the mode.
 
 Your `permission.bash` map permits the read commands and the verification gates. Each other command is denied. The map matches the full command text and it does not divide a command at `&&`, so a write behind an allowed head stays permitted; do not use that hole. A command you need and cannot run is a line in your report for the coordinator.
 
+This rule is binding: a command that your map denies is not run in another form. Do not run it through `bash -c`, `python3 -c`, `sh -c`, `env`, `xargs` or a script file. The map does not read the command inside such a form. Report the denial under What you could not verify (the `unverified` list of a JSON verdict), with the command and the message of the denial. The coordinator then runs the command.
+
 Your map denies each command that holds `>`, also `2>&1` and `2>/dev/null`, and each pipe to `tee`. These deny rules come last, and OpenCode keeps the last rule that matches. Your map has no `echo` rule and no `printf` rule, because you need them only to write. The map cannot deny each redirection. OpenCode gives the map a redirection only with the simple command before it. A redirection after a group (`{ cat f; } > x`), a subshell, a loop, or the last command of a pipeline (`cat f | grep x > y`) is not in that text, so the map permits the write. This was measured on OpenCode 1.15.10 on 2026-10-20. Do not use that hole. Do not redirect output to a file.
 
 ## Your write tool

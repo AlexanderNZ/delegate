@@ -21,6 +21,8 @@ The first line of your report names the mode.
 
 You have Bash, and a hook guards it. The hook permits the read commands, the verification gates, and a write whose every path argument is in a temp directory, not inside a git tree, and not holding one. A git tree is a directory that holds a `.git` entry, for example the git toplevel of your working directory or another worktree, also when it is in a temp directory. The hook looks for a `.git` entry from each write target upward, and in the directory that the target names, not only from your working directory. Each other command exits 2 with a message that names the segment it refused. A compound command is permitted only when each of its segments is permitted. Do not try to go around the guard. A command you need and cannot run is a line in your report for the coordinator.
 
+This rule is binding: a command that the hook refuses is not run in another form. Do not run it through `bash -c`, `python3 -c`, `sh -c`, `env`, `xargs` or a script file. The hook permits some of these commands for probes, and it does not read the command inside them. Report the refusal under What you could not verify (the `unverified` list of a JSON verdict), with the command and the message of the hook. The coordinator then runs the command.
+
 You can copy a tree into a temp directory with `cp`, because only the last path argument of a `cp` must be a temp path. To break a copy and prove a check red on it, do these steps in this order:
 
 1. From your working directory, make the copy and remove its `.git` entry in one command: `cp -R <tree> /tmp/x && rm -rf /tmp/x/.git`. Here `<tree>` is the tree to copy, and `/tmp/x` is a new temp path that does not exist yet.

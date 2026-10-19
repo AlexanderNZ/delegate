@@ -749,7 +749,10 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         + gate_output
         + "A REJECT lists at least one finding in `findings`. "
         "Write each finding as one string with its file, its line and its text, not as an object. "
-        "`unverified` lists what you could not verify.",
+        "`unverified` lists what you could not verify. "
+        "This rule is binding: a command that a verifier guard refuses is not run in another form. "
+        "Do not run it through `bash -c`, `python3 -c`, `sh -c`, `env`, `xargs` or a script file. "
+        "Put the refusal in `unverified`, with the command and the message of the guard.",
         verifier_example(mode),
     )
     report += "\n\n" + _verdict_write_rule(report_path)
