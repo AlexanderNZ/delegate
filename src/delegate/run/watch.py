@@ -245,6 +245,36 @@ def _superseded(events: list[dict[str, object]]) -> set[object]:
     return superseded
 
 
+# The events after a problem in the replay that show that the run went past it (#146): the engine continued or retried
+# the step of the ticket of the problem, or a step started or ended, or the run ended, after the problem.
+PAST_STEP: tuple[str, ...] = ("continuation", "retry")
+PAST_RUN: tuple[str, ...] = ("step-start", "step-end", "run-end")
+
+
+def _gone_past(replay: list[dict[str, object]]) -> set[object]:
+    """The `seq` of each event of the replay that the run went past: a problem there does not end the watch (#146).
+
+    The replay is the events of the journal when the watch starts. An event is gone past when a later event of the
+    replay is a `continuation` or a `retry` of its ticket, or a `step-start`, a `step-end` or a `run-end`. A replay whose
+    last event is a `run-end` or a `paused` is a run at its end, not a run that goes on, so no event of it is gone past,
+    and a run that failed stops at its first problem, as before.
+    """
+    if not replay or replay[-1]["event"] in RUN_STOPS:
+        return set()
+    past: set[object] = set()
+    run_later = False
+    step_later: set[str] = set()
+    for event in reversed(replay):
+        kind, ticket = event["event"], str(event.get("ticket"))
+        if run_later or ticket in step_later:
+            past.add(event["seq"])
+        if kind in PAST_RUN:
+            run_later = True
+        elif kind in PAST_STEP:
+            step_later.add(ticket)
+    return past
+
+
 def _result_code(result: object) -> int:
     """The exit code of the result of a `run-end` event."""
     return EXIT_SUCCEEDED if result == "built" else EXIT_FAILED
@@ -430,6 +460,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     last_event: dict[str, object] | None = None
     first_read = True
     resumed_at = 0
+    past: set[object] = set()  # the events of the replay that the run went past; a later read adds none (#146)
     try:
         while True:
             events, offset = read_new_events(journal, offset, next_seq)
@@ -438,6 +469,9 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 raise JournalError(f"journal {journal} holds {next_seq - 1} events, so --from {options.from_position} is beyond its end")
             if first_read:
                 resumed_at = _resumed_at(events)
+                past = _gone_past(events)
+            else:
+                past = set()
             first_read = False
             # An event that a later event of the same read supersedes (a retry continues the run) does not end the watch.
             superseded = _superseded(events)
@@ -450,7 +484,9 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 # `run-end` that a `resume` follows are its history, and so is an event that a later event of the same
                 # read supersedes: a problem, a verdict or a `run-end` there does not end the watch.
                 history = seq < resumed_at or seq in superseded
-                if history:
+                # A problem in the replay that a later event of the replay handles is history too, but only for the
+                # problem: a verdict or a stop there keeps its rule.
+                if history or seq in past:
                     problem = None
                 ends = event["event"] in RUN_STOPS and not history
                 if seq <= options.from_position:
