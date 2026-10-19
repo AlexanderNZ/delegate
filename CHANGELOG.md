@@ -4,6 +4,15 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- A resume can add or change the tickets of a run (#107). Stop the run, or let it end, change `workflow.toml`, and run `delegate run --resume <run-id>`. The built part of the run is fixed. A new ticket goes at the end, or before a ticket that has not started, in the order of `blocked-by`. A ticket that has not started can change or go. A new ticket before built work, and a change to a built ticket, are refused, and the message names the ticket and the field. The coordinator reviews each later ticket that has not started, and names it with `--reviewed <ids>` (or `--reviewed all`). Without that, the resume is refused. The dry run of the resume prints the old order, the new order and the tickets to review. The journal records `plan-change`, and a later resume compares with the newest plan. The specialist brief and the verifier brief of each later ticket get a section "Plan change", so its agent checks the assumptions of its ticket against the new work, and reports `blocked` when the ticket no longer fits.
+- `delegate pause <run-id>` stops a run at the next step boundary: before a step, a gate or a verifier starts. It cuts off no agent and no gate (#108). The journal records `pause-requested` and `paused`. `delegate status` shows `pausing` and `paused`, `delegate run` exits 3, and `delegate watch` exits 7 at `paused`. `delegate run --resume` goes on from a paused run, also with a plan change of #107.
+
+### Changed
+
+- Ctrl-C ends each `delegate` command with the exit code 130 and one line, not a traceback (#109). `watch` draws its last frame, shows the cursor, resets the title and prints the position to go on from. `run` in the foreground releases the lock, writes `interrupted` in the journal and prints how to resume. A resume goes on as after a crash.
+
 ### Fixed
 
 - A verifier stays read-only on the tree under review also when that tree is in a temp directory. On macOS, a worktree from `mktemp -d` is under `/var/folders`, and the Bash guard and the Write guard permitted a write to it. Each guard now finds the git toplevel of its working directory (the `cwd` of the hook input, or else the working directory of the process) in the `python3` process that it starts anyway, and denies a temp path in that toplevel, or a path that holds it, as a write target. It compares the paths without a `/private` prefix. A `cd` to the tree and a write to another temp path stay permitted. The working directory of a `delegate run` verifier is its temporary copy, so that verifier copies the copy again for a red proof, and the brief says so. The reference page records that the OpenCode maps have no `$TMPDIR` prefix (#106).
