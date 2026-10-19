@@ -61,3 +61,24 @@ def test_the_skill_page_names_the_flake_check_that_runs_the_suite():
 
     assert "runs in `nix flake check` as the `tests` check" in text
     assert "as the `agent-definitions` check" not in text
+
+
+# With a denylist, the build scans a second source: the kit. The check finds the plugin directories in the
+# parent of the kit root, so the second source keeps the layout of the repository (#102).
+@outside_the_package
+@pytest.mark.skipif(NIX is None, reason="nix is not installed, so the flake cannot be evaluated")
+def test_with_a_denylist_the_build_gives_a_kit_root_whose_parent_holds_the_plugins(tmp_path):
+    denylist = tmp_path / "denylist.txt"
+    denylist.write_text("zorblax\n")
+    expr = (
+        f'let flake = builtins.getFlake "{ROOT}"; '
+        "package = flake.packages.${builtins.currentSystem}.agent-definitions; "
+        f"in (package.override {{ neutralityDenylist = {denylist}; }}).AGENT_DEFINITIONS_KIT_ROOT"
+    )
+    kit_root = Path(subprocess.run(
+        ["nix", *FLAKES, "eval", "--impure", "--raw", "--expr", expr], capture_output=True, text=True, check=True, cwd=ROOT,
+    ).stdout)
+
+    assert sorted(p.name for p in kit_root.iterdir()) == ["agent-definitions", "agent-delegation"]
+    assert (kit_root.parent / "plugins" / "claude-code" / "hooks" / "register.tsx").is_file()
+    assert (kit_root.parent / ".claude-plugin" / "marketplace.json").is_file()

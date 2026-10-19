@@ -1,10 +1,16 @@
 """The neutrality check: the kit holds no personal or company term.
 
 The kit is the two skill directories `agent-delegation/` and
-`agent-definitions/`, in `skills/` of the repository. The consumer keeps a
-private denylist outside the kit and gives its path in AGENT_DEFINITIONS_DENYLIST.
-The check reads every file in the kit and reports each line that holds a
-denylisted term, unless the allowlist names that file and that term.
+`agent-definitions/`, in `skills/` of the repository, and the two plugin
+directories `plugins/` and `.claude-plugin/`, in the repository root. The
+consumer keeps a private denylist outside the kit and gives its path in
+AGENT_DEFINITIONS_DENYLIST. The check reads every file in the kit and reports
+each line that holds a denylisted term, unless the allowlist names that file
+and that term.
+
+A skill file has a path relative to the kit root, the directory that holds both
+skill directories. A plugin file has a path relative to the parent of the kit
+root, which is the repository root.
 
 Matching is case-insensitive and by substring. The allowlist is in the kit,
 at `agent-definitions/neutrality-allowlist.txt`. It names only terms that the
@@ -22,6 +28,8 @@ from typing import Mapping
 DENYLIST_VAR = "AGENT_DEFINITIONS_DENYLIST"
 KIT_ROOT_VAR = "AGENT_DEFINITIONS_KIT_ROOT"
 KIT_DIRS = ("agent-delegation", "agent-definitions")
+# The directories that ship the plugins, in the parent of the kit root.
+PLUGIN_DIRS = ("plugins", ".claude-plugin")
 ALLOWLIST = "agent-definitions/neutrality-allowlist.txt"
 
 # A pip build, pytest and macOS write these into a source tree. They copy or
@@ -29,6 +37,9 @@ ALLOWLIST = "agent-definitions/neutrality-allowlist.txt"
 GENERATED_DIRS = frozenset({"__pycache__", ".pytest_cache", "build"})
 GENERATED_DIR_SUFFIXES = (".egg-info",)
 GENERATED_FILES = frozenset({".DS_Store"})
+# Claude Code writes type declarations into a plugin that it loads from a
+# folder, at `plugins/<name>/.claude-plugin/types/`.
+GENERATED_PLUGIN_DIR = (".claude-plugin", "types")
 
 
 @dataclass(frozen=True, order=True)
@@ -131,20 +142,22 @@ def _is_generated(rel_parts: tuple[str, ...]) -> bool:
     )
 
 
-def _kit_files(kit_root: Path) -> list[tuple[str, Path]]:
+def _is_generated_plugin_file(rel_parts: tuple[str, ...]) -> bool:
+    # plugins/<name>/.claude-plugin/types/...
+    return rel_parts[0] == "plugins" and rel_parts[2:4] == GENERATED_PLUGIN_DIR
+
+
+def _files_under(root: Path, top_dirs: tuple[str, ...], missing: str) -> list[tuple[str, Path]]:
     files = []
-    for kit_dir in KIT_DIRS:
-        top = kit_root / kit_dir
+    for top_dir in top_dirs:
+        top = root / top_dir
         if not top.is_dir():
-            raise FileNotFoundError(
-                f"the kit root [{kit_root}] has no {kit_dir}/ directory; "
-                f"set {KIT_ROOT_VAR} to the directory that holds both kit directories"
-            )
+            raise FileNotFoundError(f"[{root}] has no {top_dir}/ directory; {missing}")
         for path in sorted(top.rglob("*")):
             if not path.is_file():
                 continue
-            rel = path.relative_to(kit_root)
-            if _is_generated(rel.parts):
+            rel = path.relative_to(root)
+            if _is_generated(rel.parts) or _is_generated_plugin_file(rel.parts):
                 continue
             # The allowlist names the terms it permits, so it is not scanned.
             if rel.as_posix() == ALLOWLIST:
@@ -153,12 +166,27 @@ def _kit_files(kit_root: Path) -> list[tuple[str, Path]]:
     return files
 
 
+def _kit_files(kit_root: Path) -> list[tuple[str, Path]]:
+    skills = _files_under(
+        kit_root,
+        KIT_DIRS,
+        f"set {KIT_ROOT_VAR} to the directory that holds both skill directories",
+    )
+    plugins = _files_under(
+        kit_root.parent,
+        PLUGIN_DIRS,
+        f"the parent of the kit root must hold both plugin directories {PLUGIN_DIRS}",
+    )
+    return skills + plugins
+
+
 def check_kit(environ: Mapping[str, str], default_kit_root: Path) -> Report:
     """Scan the kit. Skip with a notice when the denylist variable is not set.
 
-    `default_kit_root` is the directory that holds both kit directories. The
+    `default_kit_root` is the directory that holds both skill directories. The
     KIT_ROOT_VAR variable replaces it, for a build that copies the package
-    source away from the kit.
+    source away from the kit. The parent of the kit root holds both plugin
+    directories.
     """
     denylist = environ.get(DENYLIST_VAR, "")
     if not denylist:

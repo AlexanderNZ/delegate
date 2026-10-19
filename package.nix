@@ -6,9 +6,12 @@
 # repository and read real diffs from it.
 #
 # neutralityDenylist is the path of a private denylist file. With it, the
-# neutrality test scans the kit (agent-delegation/ and agent-definitions/)
-# for its terms. The build copies only the package, its tests and its example
-# (not the skills or the docs), so the kit comes in as a second source.
+# neutrality test scans the kit (skills/agent-delegation/,
+# skills/agent-definitions/, plugins/ and .claude-plugin/) for its terms. The
+# build copies only the package, its tests and its example (not the skills or
+# the docs), so the kit comes in as a second source. The second source keeps
+# the layout of the repository, because the check finds the plugin
+# directories in the parent of the kit root.
 # Without it, the neutrality test skips with a notice.
 #
 # runTests decides whether the build runs the pytest suite. It is false by
@@ -26,10 +29,12 @@
 }:
 let
   kit = lib.fileset.toSource {
-    root = ./skills;
+    root = ./.;
     fileset = lib.fileset.unions [
       ./skills/agent-delegation
       ./skills/agent-definitions
+      ./plugins
+      ./.claude-plugin
     ];
   };
 
@@ -75,7 +80,7 @@ python3.pkgs.buildPythonApplication {
 
   env = lib.optionalAttrs (neutralityDenylist != null) {
     AGENT_DEFINITIONS_DENYLIST = "${neutralityDenylist}";
-    AGENT_DEFINITIONS_KIT_ROOT = "${kit}";
+    AGENT_DEFINITIONS_KIT_ROOT = "${kit}/skills";
   };
 
   meta = {

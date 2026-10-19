@@ -11,7 +11,7 @@ import pytest
 
 from delegate.docs.neutrality import DENYLIST_VAR, Finding, StaleEntry, check_kit
 
-# tests/ -> the repository root -> skills/, the directory with both kit dirs.
+# tests/ -> the repository root -> skills/, the directory with both skill dirs.
 KIT_ROOT = Path(__file__).resolve().parents[1] / "skills"
 
 
@@ -23,14 +23,29 @@ def test_the_kit_holds_no_denylisted_term_outside_the_allowlist():
     assert report.passed, report.format()
 
 
-def _kit(root: Path, files: dict[str, str]) -> Path:
-    """Make a kit tree: both kit directories, plus the given files."""
-    (root / "agent-delegation").mkdir(parents=True)
-    (root / "agent-definitions").mkdir(parents=True)
+PLUGIN_DIRS = ("plugins", ".claude-plugin")
+
+
+def _write(root: Path, files: dict[str, str]) -> None:
     for rel, text in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+
+
+def _kit(repo: Path, files: dict[str, str], plugin_files: dict[str, str] | None = None) -> Path:
+    """Make a repository tree and return its kit root, `<repo>/skills`.
+
+    The kit root holds both skill directories and `files`. The repository root
+    holds both plugin directories and `plugin_files`.
+    """
+    root = repo / "skills"
+    (root / "agent-delegation").mkdir(parents=True)
+    (root / "agent-definitions").mkdir(parents=True)
+    for plugin_dir in PLUGIN_DIRS:
+        (repo / plugin_dir).mkdir(parents=True)
+    _write(root, files)
+    _write(repo, plugin_files or {})
     return root
 
 
@@ -139,8 +154,10 @@ def test_the_kit_root_variable_replaces_the_default_kit_root(tmp_path, denylist)
 
 
 def test_a_kit_root_without_both_kit_directories_fails_loud(tmp_path, denylist):
-    root = tmp_path / "kit"
+    root = tmp_path / "kit" / "skills"
     (root / "agent-delegation").mkdir(parents=True)
+    for plugin_dir in PLUGIN_DIRS:
+        (tmp_path / "kit" / plugin_dir).mkdir()
 
     with pytest.raises(FileNotFoundError, match="agent-definitions"):
         check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=root)
@@ -198,3 +215,83 @@ def test_an_allowlist_entry_that_names_a_missing_file_is_stale(tmp_path, denylis
         f"STALE_ALLOWLIST_ENTRY {ALLOWLIST}:2: [agent-delegation/gone.md quuxcorp]"
         in report.format()
     )
+
+
+def test_a_denylisted_term_in_a_plugin_file_fails_and_the_output_names_the_file(
+    tmp_path, denylist
+):
+    kit = _kit(tmp_path / "repo", {"agent-delegation/SKILL.md": "Clean.\n"}, plugin_files={
+        "plugins/demo/hooks/register.tsx": "// hook\n\nconst owner = 'Zorblax';\n",
+    })
+
+    report = check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
+
+    assert report.passed is False
+    assert report.findings == (Finding("plugins/demo/hooks/register.tsx", 3, "zorblax"),)
+    assert (
+        f"DENYLISTED_TERM plugins/demo/hooks/register.tsx:3: [zorblax] is not in {ALLOWLIST}"
+        in report.format()
+    )
+
+
+def test_a_denylisted_term_in_the_marketplace_file_fails(tmp_path, denylist):
+    kit = _kit(tmp_path / "repo", {}, plugin_files={
+        ".claude-plugin/marketplace.json": '{\n  "owner": "QuuxCorp"\n}\n',
+    })
+
+    report = check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
+
+    assert report.passed is False
+    assert report.findings == (Finding(".claude-plugin/marketplace.json", 2, "quuxcorp"),)
+
+
+def test_an_allowlist_entry_for_a_plugin_file_permits_its_term(tmp_path, denylist):
+    kit = _kit(
+        tmp_path / "repo",
+        {ALLOWLIST: "# a reason\nplugins/demo/hooks/register.tsx zorblax\n"},
+        plugin_files={"plugins/demo/hooks/register.tsx": "const owner = 'Zorblax';\n"},
+    )
+
+    report = check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
+
+    assert report.findings == ()
+    assert report.stale == ()
+    assert report.passed is True
+
+
+def test_the_plugin_directories_come_from_the_parent_of_the_kit_root_variable(
+    tmp_path, denylist
+):
+    from delegate.docs.neutrality import KIT_ROOT_VAR
+
+    clean = _kit(tmp_path / "clean", {})
+    other = _kit(tmp_path / "other", {}, plugin_files={"plugins/demo/README.md": "Zorblax.\n"})
+
+    report = check_kit(
+        {DENYLIST_VAR: str(denylist), KIT_ROOT_VAR: str(other)}, default_kit_root=clean
+    )
+
+    assert report.findings == (Finding("plugins/demo/README.md", 1, "zorblax"),)
+
+
+@pytest.mark.parametrize("missing", PLUGIN_DIRS)
+def test_a_repository_without_a_plugin_directory_fails_loud(tmp_path, denylist, missing):
+    kit = _kit(tmp_path / "repo", {})
+    (tmp_path / "repo" / missing).rmdir()
+
+    with pytest.raises(FileNotFoundError, match=f"{missing}/"):
+        check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
+
+
+def test_the_types_that_claude_code_writes_into_a_plugin_are_not_scanned(tmp_path, denylist):
+    # Claude Code writes type declarations into a plugin that it loads from a
+    # folder. The .gitignore of the repository holds them out of the tree.
+    kit = _kit(tmp_path / "repo", {}, plugin_files={
+        "plugins/demo/.claude-plugin/types/index.d.ts": "// Zorblax\n",
+        "plugins/demo/.claude-plugin/plugin.json": '{"name": "demo"}\n',
+    })
+
+    report = check_kit({DENYLIST_VAR: str(denylist)}, default_kit_root=kit)
+
+    assert report.passed is True
+    assert report.files == 1
