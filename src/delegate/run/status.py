@@ -494,6 +494,22 @@ def view_lines(snap: Snapshot, width: int) -> list[str]:
 ACTIVE_SEPARATOR: str = " · "
 
 
+def plan_tree(events: list[dict[str, object]]) -> list[tuple[str, int]]:
+    """The ticket ids of the newest plan of a run, in plan order, each with its depth in the tree of `blocked_by`.
+
+    The blockers come from the `plan` field of the newest `plan-change`, or else of `run-start` (#107). A ticket with
+    no blocker has depth 0, and a ticket with blockers sits one level under its deepest blocker. A blocker that is not
+    in the plan does not count. A journal of an earlier version of the engine records no plan: each ticket has depth 0.
+    """
+    records = [event.get("plan") for event in events if event["event"] == "plan-change"] or [events[0].get("plan")]
+    blockers = {str(r["id"]): [str(b) for b in r["blocked_by"]] for r in records[-1] or []}  # type: ignore[union-attr, index]
+    depths: dict[str, int] = {}
+    for ticket in plan_ids(events):
+        # Plan order puts each blocker before the tickets that it blocks.
+        depths[ticket] = max((depths[b] + 1 for b in blockers.get(ticket, []) if b in depths), default=0)
+    return list(depths.items())
+
+
 def active_line(journal: Path, now: datetime) -> str:
     """The one line of an active run. `now` is the time of the clock, in UTC.
 

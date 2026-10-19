@@ -35,6 +35,6 @@ def main(argv: list[str] | None = None) -> int:
     except pause.PauseError as error:
         print(f"delegate pause: {error}", file=sys.stderr)
         return EXIT_REFUSED
-    print(f"run {args.run_id}: pause requested; the run stops at its next step boundary")
+    print(f"run {path.parent.name}: pause requested; the run stops at its next step boundary")
     print(f"request {path}")
     return 0

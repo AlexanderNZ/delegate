@@ -123,14 +123,39 @@ def _failed_starts(state: Path) -> list[FailedStart]:
     return found
 
 
+def _full_run_id(state: Path, run_id: str) -> str:
+    """The full id of the run that `run_id` names: the run with that id, or else the one run whose short id it is.
+
+    The short id is the part of a run id after the last `-`. A run id that names no run comes back as it is, so the
+    caller gives its own error for an unknown run. Raise RunsError when more than one run has the short id.
+    """
+    runs = state / "runs"
+    if (runs / run_id).is_dir() or not runs.is_dir():
+        return run_id
+    matches = sorted(path.name for path in runs.iterdir() if path.is_dir() and path.name.rsplit("-", 1)[-1] == run_id)
+    if len(matches) > 1:
+        raise RunsError(f"run id {run_id!r} matches more than one run: {', '.join(matches)}; give the full run id")
+    return matches[0] if matches else run_id
+
+
+def run_id_of(repo: Path, run_id: str, vcs: VersionControl) -> str:
+    """The full id of the run that `run_id` names in the repository: a full run id, or the short id of one run.
+
+    `delegate run --resume` uses it. A run id that names no run comes back as it is. Raise RunsError when `repo` is not
+    a git repository, or when more than one run has the short id.
+    """
+    return _full_run_id(_state(repo, vcs), run_id)
+
+
 def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
     """The journal file of the run `run_id`, or of the newest run when `run_id` is `None`.
 
-    Raise RunsError when `repo` is not a git repository, when the run is
-    unknown, or when the repository has no run.
+    `run_id` is a full run id, or the short id of one run (`run_id_of`). Raise RunsError when `repo` is not a git
+    repository, when the run is unknown, when more than one run has the short id, or when the repository has no run.
     """
     state = _state(repo, vcs)
     if run_id is not None:
+        run_id = _full_run_id(state, run_id)
         journal = state / "runs" / run_id / JOURNAL_NAME
         if not journal.is_file():
             raise RunsError(f"run {run_id!r} not found in {repo}: no journal at {journal}")

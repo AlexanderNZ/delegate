@@ -44,7 +44,7 @@ from ..run.engine import (
     EngineError, PlanReview, RunInterrupted, check_start, new_run_id, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
-from ..run.runs import LOG_NAME, RunsError, journal_of
+from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
@@ -213,6 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
+    if args.resume is not None:
+        try:
+            args.resume = run_id_of(args.repo, args.resume, vcs)  # a short id names its run by the full id from here on
+        except RunsError as error:
+            print(f"delegate run: {error}", file=sys.stderr)
+            return 1
     if args.workflow is None:
         try:
             args.workflow = workflow_of_run(args.repo, args.resume, vcs)

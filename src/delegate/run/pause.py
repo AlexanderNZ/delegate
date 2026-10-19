@@ -42,6 +42,8 @@ def pause_requested(journal: Path) -> bool:
 def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -> Path:
     """Write the pause request of the run `run_id` of the repository, and return its path. `now` is the time of the request.
 
+    `run_id` is a full run id, or the short id of one run (`runs.run_id_of`).
+
     A second request before the engine reads the first one writes the file again. Raise PauseError, and write
     nothing, when the run is unknown, its journal is not valid, it ended, it is paused, or no live process works on it.
     """
@@ -50,6 +52,7 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
         events, _ = read_new_events(journal, 0, 1)
     except (RunsError, JournalError) as error:
         raise PauseError(str(error)) from None
+    run_id = journal.parent.name  # `run_id` can be a short id; the lock and the messages name the full id
     if not events or events[0]["event"] != "run-start":
         raise PauseError(f"journal {journal}: the first event is not 'run-start'")
     resume = f"delegate run --resume {run_id}"
