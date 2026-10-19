@@ -21,7 +21,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from . import output
 from .journal import ACTIVITY_FIELDS, JournalError, is_paused, last_change, read_new_events
+
+# A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
+Part = tuple[str, str]
+
+# The paint role of the result of a run that ended, in its one line (tokens.md): the result word is bold.
+RESULT_ROLES: dict[str, str] = {"built": "ok bold", "failed": "bad bold"}
+
+
+def _plain(parts: list[Part]) -> str:
+    return "".join(text for _, text in parts)
+
+
+def _painted(parts: list[Part]) -> str:
+    return "".join(output.styled(role, text) for role, text in parts)
+
 
 # One exit code for each reason that `watch` exits. Code 2 is also the exit code of a usage error.
 EXIT_SUCCEEDED: int = 0
@@ -123,10 +139,21 @@ class EndedRun:
 
     def line(self) -> str:
         """The one line of `watch` for a newest run that ended, with the time of its end in the local time zone."""
-        line = f"no run is active; the newest run {self.run_id} ended {self.result} at {self.ended.astimezone().strftime('%Y-%m-%d %H:%M')}"
+        return _plain(self._parts())
+
+    def painted(self) -> str:
+        """The line with the paint of tokens.md on a terminal: the result in its role and bold, the time faint, and the
+        first problem in `bad`."""
+        return _painted(self._parts())
+
+    def _parts(self) -> list[Part]:
+        parts = [
+            ("", f"no run is active; the newest run {self.run_id} ended "), (RESULT_ROLES.get(self.result, ""), self.result),
+            ("", " at "), ("dim", self.ended.astimezone().strftime("%Y-%m-%d %H:%M")),
+        ]
         if self.result != "built" and self.problem is not None:
-            line += f"; first problem: {self.problem}"
-        return line
+            parts += [("", "; "), ("bad", f"first problem: {self.problem}")]
+        return parts
 
 
 def ended_run(journal: Path) -> EndedRun | None:
@@ -167,11 +194,21 @@ class StoppedRun:
 
     def line(self) -> str:
         """The one line of `watch` for a newest run that stopped, with the time of its newest event in the local time zone."""
+        return _plain(self._parts())
+
+    def painted(self) -> str:
+        """The line with the paint of tokens.md on a terminal: `paused` in `warn`, and the time faint.
+
+        The line of a run that stopped with no pause is an error line on stderr, so the caller paints all of it.
+        """
+        return _painted(self._parts())
+
+    def _parts(self) -> list[Part]:
         at = self.stopped.astimezone().strftime("%Y-%m-%d %H:%M")
         resume = f"go on with delegate run --resume {self.run_id}"
         if self.paused:
-            return f"no run is active; the newest run {self.run_id} paused at {at}; {resume}"
-        return f"no run is active; the newest run {self.run_id} stopped at {at} with no run-end, and no process works on it; {resume}"
+            return [("", f"no run is active; the newest run {self.run_id} "), ("warn", "paused"), ("", " at "), ("dim", at), ("", f"; {resume}")]
+        return [("", f"no run is active; the newest run {self.run_id} stopped at {at} with no run-end, and no process works on it; {resume}")]
 
 
 def newest_run(journal: Path) -> EndedRun | StoppedRun:

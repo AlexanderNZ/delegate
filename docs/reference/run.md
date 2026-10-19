@@ -461,7 +461,24 @@ The command makes the directory of the run and the log before the run starts. A 
 
 ## Output and exit codes
 
-On stdout, the command prints `run <run id>` and `journal <path>`. On stderr, it prints one line `delegate run: ticket <id>: <reason>` for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout.
+When the run holds its lock and its journal records the start (`run-start`, or `resume` for a resume), before the first step, the command prints three lines on stdout. A resume that the engine refuses prints none of them.
+
+```
+run 20261016T030000Z-e9dc
+journal /repo/.git/delegate/runs/20261016T030000Z-e9dc/journal.jsonl
+follow it with delegate watch · pause it with delegate pause e9dc
+```
+
+When the run ends or pauses, the command prints one line `delegate run: ticket <id>: <reason>` on stderr for each failed step, and one line `delegate run: ticket <id>: skipped: <reason>` for each skipped ticket. Then it prints the summary line on stdout, and one retry line for each failed step, in plan order:
+
+```
+run failed · 1h06m · 1 built · 1 failed · 1 skipped · 50k new · 1.3M cache
+retry with delegate run --resume e9dc --retry a
+```
+
+The summary gives the result of the run (`built`, `failed` or `paused`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The lines give the short run id, the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it.
+
+On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
 
 With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. A check that fails before the start prints its error on stderr, exits 1, and starts no run process. See [the detached run](#the-detached-run).
 
@@ -481,7 +498,7 @@ Ctrl-C stops a run in the foreground at once. It does not wait for a step bounda
 
 1. It releases the [**run lock**](../glossary.md#run-lock) of the run branch.
 2. It writes `interrupted` in the journal. The run writes no `run-end`.
-3. It prints `run <run id>` and `journal <path>` on stdout, and one line on stderr. See the line below.
+3. It prints one line on stderr. See the line below. The lines `run <run id>` and `journal <path>` are on stdout from the start of the run.
 4. It exits with the code 130, as a shell gives for SIGINT. It shows no traceback.
 
 ```

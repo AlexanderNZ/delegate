@@ -38,7 +38,7 @@ from typing import TextIO
 from ..adapters.git import GitVersionControl
 from ..run import live, status, watch
 from ..run.journal import JournalError
-from ..run.output import cut, short_run_id
+from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
@@ -193,17 +193,22 @@ class _Titled:
         return f"{self._name}{SEPARATOR}{snap.percent}%{SEPARATOR}ETA {eta}"
 
 
+def _error(text: str) -> None:
+    """Print an error line of `watch` on stderr, in `bad` when stderr is a terminal (tokens.md)."""
+    print(styled("bad", f"delegate watch: {text}", sys.stderr), file=sys.stderr)
+
+
 def _newest_run(newest: watch.EndedRun | watch.StoppedRun) -> int:
     """Print the one line of the newest run when no run is active, and return its exit code.
 
     The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set.
     """
     if isinstance(newest, watch.StoppedRun) and not newest.paused:
-        print(f"delegate watch: {newest.line()}", file=sys.stderr)
+        _error(newest.line())
         return newest.code
     result = newest.result if isinstance(newest, watch.EndedRun) else "paused"
     Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(newest.run_id)}{SEPARATOR}{result}")
-    print(newest.line())
+    print(newest.painted())
     return newest.code
 
 
@@ -225,12 +230,12 @@ def _pick(runs: list[status.ActiveRun]) -> status.ActiveRun | None:
             raise
         if not answer:
             print(flush=True)
-            print("delegate watch: no run chosen", file=sys.stderr)
+            _error("no run chosen")
             return None
         text = answer.strip() or "1"
         if text.isdecimal() and 1 <= int(text) <= len(runs):
             return runs[int(text) - 1]
-        print(f"delegate watch: {text} is not a number from 1 to {len(runs)}", file=sys.stderr)
+        _error(f"{text} is not a number from 1 to {len(runs)}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -244,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
                 active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list
                 if not (sys.stdin.isatty() and sys.stdout.isatty()):
-                    print(f"delegate watch: {status.choices_line(active)}", file=sys.stderr)
+                    _error(status.choices_line(active))
                     return watch.EXIT_ERROR
                 picked = _pick(active)
                 if picked is None:
@@ -272,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             sink = _Titled(sink, journal, title)
         result = watch.follow(journal, options, sink)
     except (RunsError, JournalError) as error:
-        print(f"delegate watch: {error}", file=sys.stderr)
+        _error(str(error))
         return watch.EXIT_ERROR
     if result.code == watch.EXIT_INTERRUPTED:
         if live_view:

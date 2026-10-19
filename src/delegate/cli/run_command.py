@@ -12,9 +12,14 @@ a plan change. `--reviewed <ids>` names the later tickets that the coordinator
 reviewed. `--resume <run-id> --dry-run` prints the old order, the new order and
 the verdict of each rule of a plan change, and changes nothing.
 
+When the run holds its lock and its journal records the start, the command prints the start lines of frame 1k of the
+design (#119): `run <id>`, `journal <path>`, and the line that tells how to follow and pause the run. When the run ends
+or pauses, it prints the per-ticket lines on stderr, then the summary line `run <result> · <used> · ...` from the
+snapshot of the journal, and one retry line for each failed step. On a terminal the result has the colour of its role.
+
 Ctrl-C stops a run in the foreground at once. The engine releases the lock and records `interrupted` in the
-journal. The command prints `run <id>` and `journal <path>`, one line on stderr that tells how to resume, and exits
-`EXIT_INTERRUPTED` (130). `delegate pause` stays the way to stop a run at a step boundary.
+journal. The command prints one line on stderr that tells how to resume, and exits `EXIT_INTERRUPTED` (130). The
+start lines are on stdout already. `delegate pause` stays the way to stop a run at a step boundary.
 
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
@@ -38,22 +43,27 @@ from pathlib import Path
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
+from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
     EngineError, PlanReview, RunInterrupted, check_start, new_run_id, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
-from ..run.output import short_run_id
+from ..run.output import glyphs, short_run_id, styled
 from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
+from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
 
 # The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
 EXIT_PAUSED: int = 3
+
+# The paint role of the result of a run in its summary line (tokens.md): the result word is bold.
+RESULT_ROLES: dict[str, str] = {status.BUILT: "ok bold", status.FAILED: "bad bold", status.PAUSED: "warn bold"}
 
 # The program of a detached run process: it imports the package from the import path of the command that started it
 # (argv[1]), then runs `delegate` with the rest of its arguments. A Nix wrapper puts the package on the import path of
@@ -199,6 +209,33 @@ def _print_review(review: PlanReview) -> int:
     return 1 if problems else 0
 
 
+def _start_lines(run_id: str, journal: Path) -> list[str]:
+    """The start lines of a run: its id, its journal, and how to follow it and pause it with the short run id."""
+    dot = f" {glyphs().pending} "  # the separator of tokens.md, which has an ASCII form
+    return [f"run {run_id}", f"journal {journal}", f"follow it with delegate watch{dot}pause it with delegate pause {short_run_id(run_id)}"]
+
+
+def _end_lines(snap: status.Snapshot) -> list[str]:
+    """The summary line of a run that ended or paused, and one retry line for each failed step, in plan order.
+
+    The summary has the two token counts only when the snapshot has them. On a terminal, the result is in the colour of
+    its role, and the token counts are faint.
+    """
+    dot = f" {glyphs().pending} "
+    states = [ticket.state for ticket in snap.tickets]
+    parts = [
+        styled(RESULT_ROLES.get(snap.state, ""), f"run {snap.state}"), status.format_duration(snap.elapsed_seconds),
+        *(f"{states.count(state)} {state}" for state in (status.BUILT, status.FAILED, status.SKIPPED)),
+    ]
+    if snap.tokens_new is not None and snap.tokens_cache is not None:
+        parts.append(styled("dim", f"{status.format_tokens(snap.tokens_new)} new{dot}{status.format_tokens(snap.tokens_cache)} cache"))
+    retries = [
+        f"retry with delegate run --resume {short_run_id(snap.run_id)} --retry {ticket.id}"
+        for ticket in snap.tickets if ticket.state == status.FAILED
+    ]
+    return [dot.join(parts), *retries]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -261,11 +298,17 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             return _detach(argv, run_id, args.repo, args.resume is not None, vcs)
         title = Title(sys.stdout)
+        started: list[str] = []
+
+        def on_start(run_id: str, journal: Path) -> None:
+            title.set(f"delegate run{SEPARATOR}{short_run_id(run_id)}")
+            print("\n".join(_start_lines(run_id, journal)), flush=True)
+            started.append(run_id)
+
         try:
             result = run_workflow(
                 workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
-                break_lock=args.break_lock, on_start=lambda run_id: title.set(f"delegate run{SEPARATOR}{short_run_id(run_id)}"),
-                run_id=args.detached_run_id, reviewed=reviewed,
+                break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -274,8 +317,9 @@ def main(argv: list[str] | None = None) -> int:
             if stop.journal is None:
                 print("delegate: interrupted", file=sys.stderr)  # the run wrote no journal, so there is nothing to resume
                 return EXIT_INTERRUPTED
-            print(f"run {stop.run_id}")
-            print(f"journal {stop.journal}")
+            if not started:  # Ctrl-C came before the journal recorded the start of a resume
+                print(f"run {stop.run_id}")
+                print(f"journal {stop.journal}")
             print(f"delegate run: interrupted; the run {stop.run_id} stopped. Go on with delegate run --resume {stop.run_id}", file=sys.stderr)
             return EXIT_INTERRUPTED
         if result.taken_over is not None:
@@ -284,14 +328,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"process {result.taken_over.pid}, which no longer exists",
                 file=sys.stderr,
             )
-        print(f"run {result.run_id}")
-        print(f"journal {result.journal}")
         for ticket, reason in result.failures.items():
             print(f"delegate run: ticket {ticket}: {reason}", file=sys.stderr)
         for finding in result.unmapped:
             print(f"delegate run: unmapped finding: {finding}", file=sys.stderr)
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
+        print("\n".join(_end_lines(status.snapshot(args.repo, result.run_id, vcs, stream_reader_of, utc_now()))))
         if result.paused is not None:
             print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
             return EXIT_PAUSED

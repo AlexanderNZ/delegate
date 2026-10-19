@@ -36,12 +36,15 @@ def printed(out: str) -> tuple[str, Path]:
 
 
 def wait_for_ends(log: Path, ends: int) -> str:
-    """The text of the log when it holds the last line of `ends` runs of `delegate run`. Fail after `WAIT_SECONDS`."""
+    """The text of the log when it holds the summary line of `ends` runs of `delegate run`. Fail after `WAIT_SECONDS`.
+
+    The summary line `run <result> · ...` comes when a run ends (#119). The line `journal <path>` comes at the start.
+    """
     deadline = time.monotonic() + WAIT_SECONDS
     text = ""
     while time.monotonic() < deadline:
         text = log.read_text() if log.is_file() else ""
-        if len(re.findall(r"^journal ", text, flags=re.MULTILINE)) >= ends:
+        if len(re.findall(r"^run (?:built|failed|paused) ", text, flags=re.MULTILINE)) >= ends:
             return text
         time.sleep(0.2)
     raise AssertionError(f"the detached run did not end in {WAIT_SECONDS} seconds; the log holds:\n{text}")
@@ -78,7 +81,7 @@ def test_detach_with_resume_goes_on_with_the_same_run_in_a_new_session_and_appen
     assert (code, err) == (0, "")
     assert printed(out) == (run_id, log)
     text = wait_for_ends(log, 2)
-    assert [line for line in text.splitlines() if line.startswith("run ")] == [f"run {run_id}"] * 2
+    assert [line for line in text.splitlines() if re.fullmatch(r"run \S+", line)] == [f"run {run_id}"] * 2  # not the summary
     assert "retry" in event_names(read_journal_file(repo, run_id))
     calls = fake.calls()
     assert len(calls) >= 2, "the resumed run did not start the specialist again"

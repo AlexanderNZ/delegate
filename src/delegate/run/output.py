@@ -5,7 +5,8 @@ The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and 
 * `paint(role, text)` gives the text in the ANSI code of a role. Colour is semantic, so it follows the theme of the
   terminal: only the 16 ANSI colours, bold and faint, and never a background colour. `dim` is faint (SGR 2), not
   bright black, because bright black can be the colour of the background in some themes. When `NO_COLOR` is set
-  and not empty (no-color.org), or when standard output is not a terminal, the text has no SGR code.
+  and not empty (no-color.org), or when standard output is not a terminal, the text has no SGR code. A line for
+  standard error, as an error line, names that stream: it has no SGR code when standard error is not a terminal.
 * `glyphs()` gives the one glyph set. When the locale is not UTF-8, it gives the ASCII set of tokens.md. Each ASCII
   glyph has the width of its Unicode glyph, so the columns stay in the same positions.
 * `columns(rows, right)` pads each value to the widest value of its column, with 2 cells between columns. The
@@ -24,6 +25,7 @@ import sys
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 # The SGR code of each role of tokens.md. `fg` is the default foreground, so it has no code.
 ROLES: dict[str, str | None] = {
@@ -53,33 +55,37 @@ LAUNCHERS: frozenset[str] = frozenset({"nix", "develop", "uvx", "uv", "run", "np
 VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?!=)")
 
 
-def colour_on() -> bool:
-    """True when the output can have SGR codes: `NO_COLOR` is not set or is empty, and standard output is a terminal."""
-    return not os.environ.get("NO_COLOR") and sys.stdout.isatty()
+def colour_on(stream: TextIO | None = None) -> bool:
+    """True when the output can have SGR codes: `NO_COLOR` is not set or is empty, and the stream is a terminal.
+
+    The stream is standard output when `stream` is None.
+    """
+    return not os.environ.get("NO_COLOR") and (sys.stdout if stream is None else stream).isatty()
 
 
-def paint(role: str, text: str) -> str:
+def paint(role: str, text: str, stream: TextIO | None = None) -> str:
     """The text in the ANSI code of `role`, one of `fg dim bold ok now warn bad plan`, or the plain text.
 
-    The text is plain when `colour_on()` is false, and for `fg`. Raise ValueError for a role that tokens.md does not have.
+    The text is plain when `colour_on(stream)` is false, and for `fg`. `stream` is the stream that gets the text, and
+    standard output when it is None. Raise ValueError for a role that tokens.md does not have.
     """
     if role not in ROLES:
         raise ValueError(f"no paint role {role!r}; the roles are {', '.join(ROLES)}")
     code = ROLES[role]
-    if code is None or not colour_on():
+    if code is None or not colour_on(stream):
         return text
     return f"\x1b[{code}m{text}{RESET}"
 
 
-def styled(roles: str, text: str) -> str:
+def styled(roles: str, text: str, stream: TextIO | None = None) -> str:
     """The text in each role of `roles`, a list of roles with a space between them, as `now bold`. `paint` gives the codes.
 
-    An empty text and an empty list of roles give the text with no code.
+    An empty text and an empty list of roles give the text with no code. `stream` is as for `paint`.
     """
     if not text:
         return text
     for role in reversed(roles.split()):
-        text = paint(role, text)
+        text = paint(role, text, stream)
     return text
 
 

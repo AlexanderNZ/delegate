@@ -769,8 +769,8 @@ def check_start(
 
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
-    resume: str | None = None, retry: str | None = None, break_lock: bool = False, on_start: Callable[[str], None] | None = None,
-    run_id: str | None = None, reviewed: tuple[str, ...] = (),
+    resume: str | None = None, retry: str | None = None, break_lock: bool = False,
+    on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -792,8 +792,9 @@ def run_workflow(
     that holder in `taken_over`. `break_lock` also removes a lock of another run
     whose process no longer exists. No lock whose process is alive is removed.
 
-    `on_start` gets the run id when the run holds its lock, before the first step: `delegate run` puts the id in the
-    title of the terminal.
+    `on_start` gets the run id and the path of the journal when the run holds its lock and the journal records its
+    start (`run-start`, or `resume` and a plan change), before the first step. A resume that the engine refuses does not
+    call it. `delegate run` then puts the id in the title of the terminal and prints its start lines.
 
     Ctrl-C (`KeyboardInterrupt`) stops the run at once. The run releases its lock, appends `interrupted` to its
     journal, and raises RunInterrupted. A resume then goes on as after a crash.
@@ -813,12 +814,10 @@ def run_workflow(
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     try:
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
-            if on_start is not None:
-                on_start(run_id)
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed,
+                    reviewed, on_start,
                 )
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
@@ -842,7 +841,7 @@ def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
 def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
-    retry: str | None = None, reviewed: tuple[str, ...] = (),
+    retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
 ) -> RunResult:
     order = plan_order(workflow)
     plan: _RetryPlan | None = None
@@ -882,6 +881,8 @@ def _execute(
         )
         if review.check is not None:
             _record_plan_change(journal, workflow, review.check, progress)
+    if on_start is not None:
+        on_start(run_id, journal.path)
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
