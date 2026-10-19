@@ -32,7 +32,6 @@ EXIT_VERDICT: int = 4
 EXIT_STALL: int = 5
 EXIT_TIME_LIMIT: int = 6
 EXIT_PAUSED: int = 7
-EXIT_CHOOSE: int = 8
 # 128 + 2, the number of SIGINT: the exit status that a shell gives to a process that Ctrl-C stopped.
 EXIT_INTERRUPTED: int = 130
 
@@ -47,17 +46,15 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_ERROR: (
         "A usage error, a repository with no run, an unknown run id, a journal that is not valid, "
         "a `--from` position beyond the end of the journal, or, with no run id, "
-        "[a newest run that stopped](#the-newest-run-that-stopped) when no run is active."
+        "[a newest run that stopped](#the-newest-run-that-stopped) when no run is active, "
+        "or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, "
+        "or no answer at the prompt."
     ),
     EXIT_PROBLEM: "An event is a problem. See [the problem events](#the-problem-events).",
     EXIT_VERDICT: "`--until verdict` is set and the journal holds a `verdict` event.",
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
     EXIT_PAUSED: "The journal holds `paused`: a pause request stopped the run at a step boundary.",
-    EXIT_CHOOSE: (
-        "With no run id and no `--from`, more than one run is active. `watch` follows none. "
-        "See [the run with no run id](#the-run-with-no-run-id)."
-    ),
     EXIT_INTERRUPTED: "Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c).",
 }
 
@@ -71,7 +68,6 @@ EXIT_CODES: dict[int, str] = {
     EXIT_STALL: "stall",
     EXIT_TIME_LIMIT: "time limit",
     EXIT_PAUSED: "run paused",
-    EXIT_CHOOSE: "choose a run",
     EXIT_INTERRUPTED: "interrupted",
 }
 

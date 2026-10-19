@@ -10,8 +10,13 @@ When standard output is a terminal, this module also sets the title of the termi
 run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
 
 With no run id and no `--from`, the active runs decide (`delegate.run.runs.runs_of`). The one active run is followed,
-also when a newer run ended. With more than one, this module prints the line of each (`delegate.run.status.active_line`),
-follows none, and exits with `watch.EXIT_CHOOSE`. With none, the newest run gets one line and no replay of its journal:
+also when a newer run ended. With more than one, standard input and standard output on a terminal get the run picker of
+frame 2b (#118): the table of the active runs, newest first (`delegate.run.status.picker_lines`), and the prompt
+`watch which? [1]`. The reader types the number of a run, and Enter takes 1. Then this module follows that run. When
+standard input or standard output is not a terminal, nobody can answer the prompt: this module prints one line on stderr
+that names each active run (`delegate.run.status.choices_line`), follows none, and exits with `watch.EXIT_ERROR`. Ctrl-C
+at the prompt ends the command as before it finds a run: `delegate: interrupted` and 130. With no active run, the
+newest run gets one line and no replay of its journal:
 a run that ended (`delegate.run.watch.EndedRun`) exits with the code of its result, and a run that stopped
 (`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr. A newest run that failed
 at start (`delegate.run.runs.FailedStart`) has no journal: its line gives the last line of its log, and the exit code
@@ -33,7 +38,7 @@ from typing import TextIO
 from ..adapters.git import GitVersionControl
 from ..run import live, status, watch
 from ..run.journal import JournalError
-from ..run.output import short_run_id
+from ..run.output import cut, short_run_id
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
@@ -44,6 +49,9 @@ CLEAR_SCREEN: str = "\x1b[2J"
 HOME: str = "\x1b[H"
 CLEAR_LINE_END: str = "\x1b[K"
 CLEAR_DOWN: str = "\x1b[J"
+
+# The prompt of the run picker. The default answer, 1, is the newest active run.
+PROMPT: str = "watch which? [1] "
 
 # The terminal control sequence that shows the cursor. Ctrl-C can come while a frame is written, so the command writes
 # it after the last frame.
@@ -199,6 +207,32 @@ def _newest_run(newest: watch.EndedRun | watch.StoppedRun) -> int:
     return newest.code
 
 
+def _pick(runs: list[status.ActiveRun]) -> status.ActiveRun | None:
+    """Show the run picker on the terminal, read the answer, and return the run that the reader chose.
+
+    Enter takes 1. An answer that is not the number of a row gets one line on stderr, and the prompt again. Return None
+    at the end of the input, with one line on stderr. Ctrl-C ends the line of the prompt and goes to the caller.
+    """
+    width = shutil.get_terminal_size().columns
+    print("\n".join(cut(line, width) for line in status.picker_lines(runs, utc_now())), flush=True)
+    while True:
+        sys.stdout.write(PROMPT)
+        sys.stdout.flush()
+        try:
+            answer = sys.stdin.readline()
+        except KeyboardInterrupt:
+            print(flush=True)  # the line of `delegate: interrupted` starts on a line of its own
+            raise
+        if not answer:
+            print(flush=True)
+            print("delegate watch: no run chosen", file=sys.stderr)
+            return None
+        text = answer.strip() or "1"
+        if text.isdecimal() and 1 <= int(text) <= len(runs):
+            return runs[int(text) - 1]
+        print(f"delegate watch: {text} is not a number from 1 to {len(runs)}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     from_position = 0 if args.from_position is None else args.from_position
@@ -207,12 +241,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.run_id is None and args.from_position is None:
             runs = runs_of(args.repo, GitVersionControl())
             if runs.chosen is None:
-                # More than one run is active: follow none, and list them.
-                now = utc_now()
-                listed = [status.active_line(active, now) for active in runs.active]  # an error prints no part of the list
-                print("\n".join([f"{len(runs.active)} runs are active; give a run id to follow one of them:", *listed]))
-                return watch.EXIT_CHOOSE
-            if not runs.active:
+                # More than one run is active: the reader chooses one, or, with no terminal, follow none.
+                active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list
+                if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                    print(f"delegate watch: {status.choices_line(active)}", file=sys.stderr)
+                    return watch.EXIT_ERROR
+                picked = _pick(active)
+                if picked is None:
+                    return watch.EXIT_ERROR
+                journal = picked.journal
+            elif not runs.active:
                 # No run is active: the newest run gets one line, not a replay of its journal.
                 if isinstance(runs.newest, FailedStart):
                     # The run failed at start: it has no journal.
@@ -220,7 +258,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(runs.newest.line())
                     return watch.EXIT_FAILED
                 return _newest_run(watch.newest_run(runs.newest))
-            journal = runs.active[0]
+            else:
+                journal = runs.active[0]
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)

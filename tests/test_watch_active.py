@@ -24,9 +24,6 @@ from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
 # The time limit ends a watch that follows a run with no end, so a case fails and does not wait.
 POLL = ["--poll-seconds", "0.02", "--max-minutes", "0.1"]
 
-# The exit code of `watch` when more than one run is active and no run id chooses one.
-EXIT_CHOOSE = 8
-
 
 def main(capsys, *argv):
     code = delegate.main(list(argv))
@@ -92,8 +89,8 @@ def test_watch_without_a_run_id_and_no_active_run_prints_the_one_line_of_the_new
     assert out.count("\n") == 1
 
 
-def test_watch_without_a_run_id_lists_two_active_runs_follows_none_and_exits_with_the_code_to_choose_a_run(
-    tmp_path, capsys, twelve_hours_east,  # noqa: F811 - the fixture
+def test_watch_without_a_run_id_and_two_active_runs_not_on_a_terminal_names_them_on_stderr_follows_none_and_exits_2(
+    tmp_path, capsys,
 ):
     repo = bare_repo(tmp_path)
     first, second = two_active_runs(repo)
@@ -101,16 +98,12 @@ def test_watch_without_a_run_id_lists_two_active_runs_follows_none_and_exits_wit
     with live_lock(first, "run/one"), live_lock(second, "run/two"):
         code, out, err = watch(repo, capsys)
 
-    assert (code, err) == (EXIT_CHOOSE, "")
-    assert out.splitlines() == [
-        "2 runs are active; give a run id to follow one of them:",
-        f"r-assure · started {local_start(first, twelve_hours_east)} · assure · 1 of 2 ended, 50% · ticket b specialist"
-        " · last activity 2h00m ago · workflow /w/workflow.toml · delegate watch r-assure",
-        f"r-economy · started {local_start(second, twelve_hours_east)} · economy · 0 of 1 ended, 0% · ticket x specialist"
-        " · last activity 2h00m ago · workflow /w/workflow.toml · delegate watch r-economy",
-    ]
-    # No event is replayed, and no position is printed.
-    assert "run-start" not in out and "position" not in out
+    # Exit 2 replaces the exit 8 of #110 (#118): a coordinator cannot answer the prompt of the picker.
+    assert (code, out) == (2, "")
+    assert err == (
+        "delegate watch: 2 runs are active in this repository; give a run id: "
+        "r-economy (run/two, running), r-assure (run/one, running)\n"
+    )
 
 
 def test_watch_without_a_run_id_does_not_count_a_run_with_no_run_end_and_no_live_process_as_active(tmp_path, capsys, monkeypatch):
@@ -162,18 +155,16 @@ def test_watch_without_a_run_id_reports_a_newest_run_that_is_paused_in_one_line_
     )
 
 
-def test_status_without_a_run_id_lists_two_active_runs_in_the_form_of_watch(tmp_path, capsys, twelve_hours_east):  # noqa: F811
+def test_status_without_a_run_id_lists_two_active_runs_newest_first_and_exits_0(tmp_path, capsys):
     repo = bare_repo(tmp_path)
     first, second = two_active_runs(repo)
 
     with live_lock(first, "run/one"), live_lock(second, "run/two"):
         code, out, err = status(repo, capsys)
-        _, watched, _ = watch(repo, capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[0] == "2 runs are active; give a run id to show one of them:"
-    assert out.splitlines()[1:] == watched.splitlines()[1:]
-    assert [line.split(" · ")[0] for line in out.splitlines()[1:]] == ["r-assure", "r-economy"]
+    assert out.splitlines()[0] == "2 runs are active in this repository"
+    assert [line.split()[1] for line in out.splitlines()[2:]] == ["r-economy", "r-assure"]
 
 
 def test_status_without_a_run_id_shows_the_one_active_run_when_a_newer_run_ended(tmp_path, capsys):

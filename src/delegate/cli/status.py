@@ -6,8 +6,9 @@ the harness adapter of the run, and hands its stream reader to the use case. An 
 know, or that has no stream reader, gives no reader: the output then has the progress and no tokens.
 
 With no run id, the active runs decide (`delegate.run.runs.runs_of`), as for `delegate watch`: the one active run, or
-the newest run when no run is active. With more than one active run, the lines list each active run
-(`delegate.run.status.active_line`), and `--json` is an error, because one snapshot cannot hold two runs. A newest
+the newest run when no run is active. With more than one active run, the output is the table of the run picker of
+`delegate watch`, newest first (`delegate.run.status.picker_lines`), with no prompt, and `--json` is an error, because one
+snapshot cannot hold two runs. A newest
 run that failed at start (`delegate.run.runs.FailedStart`) has no journal: the output is one line with the last line of
 its log, and `--json` is an error, because the run has no snapshot.
 """
@@ -77,8 +78,8 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     raise RunsError(f"{len(runs.active)} runs are active: {ids}; give a run id to show one of them")
                 now = utc_now()
-                listed = [status.active_line(active, now) for active in runs.active]  # an error prints no part of the list
-                print("\n".join([f"{len(runs.active)} runs are active; give a run id to show one of them:", *listed]))
+                active = status.active_runs(runs.active, now)  # an error prints no part of the list
+                print("\n".join(status.picker_lines(active, now)))
                 return 0
             if isinstance(runs.chosen, FailedStart):
                 # The newest run failed at start: it has no journal, so no report and no snapshot.

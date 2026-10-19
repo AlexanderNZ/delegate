@@ -210,7 +210,7 @@ delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--
 
 The exit codes, the options, and the last line `position <seq>` are the same in the two forms. The position is the `seq` of the last event that `watch` reported.
 
-With no run id and no `--from`, `watch` follows the one active run of the repository. When no run is active, it prints one line for the newest run, and no event. When more than one run is active, it prints one line for each active run, follows none, and exits 8. See [the run with no run id](#the-run-with-no-run-id).
+With no run id and no `--from`, `watch` follows the one active run of the repository. When no run is active, it prints one line for the newest run, and no event. When more than one run is active, it shows [the run picker](#the-run-picker) on a terminal. Otherwise it prints one line on stderr that names each active run, follows none, and exits 2. See [the run with no run id](#the-run-with-no-run-id).
 
 On a terminal, `watch` also shows the progress of the run in the title of the terminal, in the two forms. See [the terminal title](#the-terminal-title).
 
@@ -247,28 +247,41 @@ A run directory with a `run.log` and no journal is the directory of a [detached 
 |---|---|---|
 | One | Shows the active run, also when a newer run ended. | Follows the active run, also when a newer run ended. |
 | None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
-| More than one | Prints the list of the active runs, and exits 0. With `--json`, it exits 2, and the message names each active run. | Prints the list of the active runs, follows none, and exits 8. It replays no event, and prints no line `position <seq>`. |
+| More than one | Prints the table of the active runs, with no prompt, and exits 0. With `--json`, it exits 2, and the message names each active run. | On a terminal, shows [the run picker](#the-run-picker), and follows the run that you choose. Otherwise, prints one line on stderr that names each active run, follows none, and exits 2. |
 
-The list has one line with the number of the active runs, and then one line for each active run, the oldest run first:
+### The run picker
+
+When `watch` gets no run id and no `--from`, more than one run is active, and standard input and standard output are terminals, `watch` shows the run picker. It prints the number of the active runs, a table with one row for each active run, the newest run first, and the prompt `watch which? [1]`. The example below is for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold `·` (the separator) and `▶` (a running ticket):
 
 ```
-2 runs are active; give a run id to follow one of them:
-20261019T040911Z-d636 · started 2026-10-19 17:09 · assure · 6 of 13 ended, 46% · ticket 7 specialist · last activity 1m05s ago · workflow /path/to/workflow.toml · delegate watch 20261019T040911Z-d636
-20261019T051148Z-ff1a · started 2026-10-19 18:11 · economy · 0 of 1 ended, 0% · ticket 12 gates · last activity 12s ago · workflow /path/to/other.toml · delegate watch 20261019T051148Z-ff1a
+2 runs are active in this repository
+#  run                    run branch    mode     since  progress          now
+1  20261019T051148Z-ff1a  run/fix-auth  economy  18:11  0/1 ended . 0%    > 12 gates . active 12s
+2  20261019T040911Z-d636  run/plan      assure   17:09  6/13 ended . 46%  > 7 specialist . active 1m05s
+watch which? [1]
 ```
 
-The first line of `status` is `2 runs are active; give a run id to show one of them:`. The other lines are the same for the two commands. The parts of the line of an active run:
+Type the number of a run, and push Enter. Enter alone takes 1, the newest run. `watch` then follows that run, as it follows a run that you name. An answer that is not the number of a row gets one line on stderr, and the prompt again. At the end of the input (Ctrl-D), `watch` follows no run, and exits 2. Ctrl-C at the prompt prints `delegate: interrupted` on stderr, and `watch` exits 130. See [Ctrl-C](#ctrl-c).
 
-| Part | Meaning |
+`status` with no run id prints the same lines, with no prompt, and exits 0. It does not ask, so a script can read it. The columns of the table:
+
+| Column | Meaning |
 |---|---|
-| The run id | The id of the run. |
-| `started <date> <time>` | The local date and time of the `run-start` event. |
-| The mode | The [**mode**](../glossary.md#mode) of the run. |
-| `<n> of <total> ended, <percent>%` | The tickets that ended, and the percentage of [the snapshot](#the-snapshot). |
-| `ticket <id> <phase>` | Each running ticket and its phase, separated by `, `. While the verification of an `economy` chain runs, `chain <phase>`. When no ticket runs, `no ticket running`. |
-| `last activity <time> ago` | The time since the newest change of the journal, of the event streams and of the gate logs that the journal names. The [stall](#the-stall) check of `watch` uses the same files. |
-| `workflow <path>` | The workflow file of the `run-start` event. A journal that names no workflow file gives `run branch <branch>`. |
-| `delegate watch <run-id>` | The command that follows the run. |
+| `#` | The number to type at the prompt. |
+| `run` | The run id. On a terminal, its short id is bold. |
+| `run branch` | The [**run branch**](../glossary.md#run-branch) of the run. |
+| `mode` | The [**mode**](../glossary.md#mode) of the run. |
+| `since` | The local time of the `run-start` event. A run that did not start today also has the day of the week, as `Mon 17:09`. |
+| `progress` | The tickets that ended, of all the tickets, and the percentage of [the snapshot](#the-snapshot). |
+| `now` | Each running ticket and its phase, separated by `, `. While the verification of an `economy` chain runs, `chain <phase>`. When no ticket runs, `no ticket running`. Before them, the state of a run that is not `running`, as `pausing`. Then `active <time>`: the time since the newest change of the journal, of the event streams and of the gate logs that the journal names. The [stall](#the-stall) check of `watch` uses the same files. |
+
+When standard input or standard output is not a terminal, nobody can answer the prompt, for example a coordinator that runs `watch` as a background task. `watch` then follows no run. It prints one line on stderr that gives each active run, the newest run first, with its run branch and its state, and it exits 2:
+
+```
+delegate watch: 2 runs are active in this repository; give a run id: 20261019T051148Z-ff1a (run/fix-auth, running), 20261019T040911Z-d636 (run/plan, running)
+```
+
+`watch` replays no event, and prints no line `position <seq>`. Give the run id, or its short id, to follow one of the runs.
 
 ### The newest run that ended
 
@@ -373,13 +386,12 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 |---|---|---|
 | 0 | run succeeded | The journal holds `run-end` with the result `built`. |
 | 1 | run failed | The journal holds `run-end` with the result `failed`, or, with no run id, [the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active. |
-| 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active. |
+| 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active, or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, or no answer at the prompt. |
 | 3 | problem | An event is a problem. See [the problem events](#the-problem-events). |
 | 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
 | 6 | time limit | `--max-minutes` is set and the time is used. |
 | 7 | run paused | The journal holds `paused`: a pause request stopped the run at a step boundary. |
-| 8 | choose a run | With no run id and no `--from`, more than one run is active. `watch` follows none. See [the run with no run id](#the-run-with-no-run-id). |
 | 130 | interrupted | Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c). |
 
 <!-- generated:end watch-exit-codes -->
@@ -441,7 +453,7 @@ Ctrl-C stops the watch. It does not stop the run. `watch` then does these steps:
 watch: stopped at position <seq>; the run goes on. Resume with delegate watch <run id> --from <seq>
 ```
 
-The position is the `seq` of the last event that `watch` reported. `watch <run id> --from <seq>` goes on after that event. See [the position](#the-position). When Ctrl-C comes before `watch` finds the run, `watch` prints `delegate: interrupted` on stderr and exits 130.
+The position is the `seq` of the last event that `watch` reported. `watch <run id> --from <seq>` goes on after that event. See [the position](#the-position). When Ctrl-C comes before `watch` finds the run, for example at the prompt of [the run picker](#the-run-picker), `watch` prints `delegate: interrupted` on stderr and exits 130.
 
 ## The terminal title
 

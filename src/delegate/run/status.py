@@ -26,14 +26,15 @@ the branch and the last event of each ticket from the journal. `view_lines` draw
 the snapshot for the live view of `delegate watch`: the run line and the ticket
 table of frame 2a of the design (#116). The two tables share their columns.
 
-`active_line` gives the one line of an active run (see `delegate.run.runs`):
-`delegate status` and `delegate watch` with no run id list the active runs in
-this form when more than one is active.
+When more than one run is active (see `delegate.run.runs`), `delegate status`
+and `delegate watch` with no run id show the run picker of frame 2b (#118):
+`active_runs` reads each active run, newest first, `picker_lines` draws the
+table, and `choices_line` gives the one line that names each run.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -654,10 +655,6 @@ def _live_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Gly
     return f" {glyph.pending} ".join(parts)
 
 
-# The text between two parts of the line of an active run.
-ACTIVE_SEPARATOR: str = " · "
-
-
 def plan_tree(events: list[dict[str, object]]) -> list[tuple[str, int]]:
     """The ticket ids of the newest plan of a run, in plan order, each with its depth in the tree of `blocked_by`.
 
@@ -674,25 +671,81 @@ def plan_tree(events: list[dict[str, object]]) -> list[tuple[str, int]]:
     return list(depths.items())
 
 
-def active_line(journal: Path, now: datetime) -> str:
-    """The one line of an active run. `now` is the time of the clock, in UTC.
+@dataclass(frozen=True)
+class ActiveRun:
+    """One active run, for the run picker (frame 2b, #118): its journal, its snapshot with no tokens, its run branch,
+    the time of its `run-start` event, and the seconds since its last activity.
 
-    The line gives the run id, the local start time, the mode, the progress, each running ticket and its phase, the
-    time since the last activity, the workflow file (or the run branch of a journal that names no workflow file), and
-    the command that follows the run. The last activity is the newest change of the journal, of the event streams, and
-    of the gate logs, as for the stall check of `delegate watch`. Raise JournalError when the journal is not valid.
+    The last activity is the newest change of the journal, of the event streams, and of the gate logs, as for the stall
+    check of `delegate watch`.
     """
-    events, _ = read_new_events(journal, 0, 1)
-    # The line needs no tokens, so the snapshot reads no event stream.
-    snap = snapshot_of(events, journal, lambda adapter: None, now)
-    start = events[0]
-    running = [f"ticket {t.id}" + (f" {t.phase}" if t.phase else "") for t in snap.tickets if t.state == RUNNING]
-    if not running:
-        running = [f"chain {snap.phase}" if snap.phase else "no ticket running"]
-    idle = _seconds(datetime.fromtimestamp(last_change(journal, activity_files(events)), now.tzinfo), now)
-    where = f"workflow {start['workflow']}" if start.get("workflow") else f"run branch {start['run_branch']}"
-    return ACTIVE_SEPARATOR.join([
-        snap.run_id, f"started {_time(start).astimezone().strftime('%Y-%m-%d %H:%M')}", str(start["mode"]),
-        f"{snap.tickets_ended} of {snap.tickets_total} ended, {snap.percent}%", ", ".join(running),
-        f"last activity {format_duration(idle)} ago", where, f"delegate watch {snap.run_id}",
-    ])
+
+    journal: Path
+    snap: Snapshot
+    run_branch: str
+    started: datetime
+    idle_seconds: int
+
+
+def active_runs(journals: Sequence[Path], now: datetime) -> list[ActiveRun]:
+    """Each active run of `journals`, the newest run first. `now` is the time of the clock, in UTC.
+
+    The picker numbers the runs in this order, so 1 is the newest run. Raise JournalError when a journal is not valid.
+    """
+    found = []
+    for journal in journals:
+        events, _ = read_new_events(journal, 0, 1)
+        # The picker needs no tokens, so the snapshot reads no event stream.
+        snap = snapshot_of(events, journal, lambda adapter: None, now)
+        changed = datetime.fromtimestamp(last_change(journal, activity_files(events)), now.tzinfo)
+        found.append(ActiveRun(journal, snap, str(events[0]["run_branch"]), _time(events[0]), _seconds(changed, now)))
+    return sorted(found, key=lambda run: run.started, reverse=True)
+
+
+# The columns of the run picker, in order, and the columns of numbers, which align right.
+PICKER_HEADER: tuple[str, ...] = ("#", "run", "run branch", "mode", "since", "progress", "now")
+PICKER_NUMBERS: frozenset[int] = frozenset({0})
+
+
+def picker_lines(runs: Sequence[ActiveRun], now: datetime) -> list[str]:
+    """The lines of the run picker: `<n> runs are active in this repository`, and a table with one row for each run.
+
+    The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Run picker). The rows keep the
+    order of `runs`. A row gives the number to choose, the full run id with its short id bold, the run branch, the mode,
+    the local start time (with the day of the week when the run did not start today), the progress, and what runs now
+    with the time since the last activity. `now` is the time of the clock, in UTC.
+    """
+    glyph = output.glyphs()
+    dot = f" {glyph.pending} "
+    today = now.astimezone().date()
+    rows = [[output.styled("dim", name) for name in PICKER_HEADER]]
+    for number, run in enumerate(runs, start=1):
+        snap = run.snap
+        prefix, _, short = snap.run_id.rpartition("-")
+        started = run.started.astimezone()
+        running = [f"{t.id} {t.phase}" if t.phase else t.id for t in snap.tickets if t.state == RUNNING]
+        if snap.phase:
+            running.append(f"chain {snap.phase}")
+        doing = output.styled("now", f"{glyph.running} {', '.join(running)}") if running else output.styled("dim", "no ticket running")
+        if snap.state != RUNNING:
+            doing = output.styled("warn", snap.state) + dot + doing
+        rows.append([
+            output.styled("dim", str(number)),
+            prefix + ("-" if prefix else "") + output.styled("bold", short),
+            run.run_branch,
+            snap.mode,
+            output.styled("dim", started.strftime("%H:%M" if started.date() == today else "%a %H:%M")),
+            f"{snap.tickets_ended}/{snap.tickets_total} ended{dot}{snap.percent}%",
+            doing + dot + output.styled("now", f"active {format_duration(run.idle_seconds)}"),
+        ])
+    table = [line.rstrip(" ") for line in output.columns(rows, right=PICKER_NUMBERS)]
+    return [f"{len(runs)} runs are active in this repository", *table]
+
+
+def choices_line(runs: Sequence[ActiveRun]) -> str:
+    """The one line that names each active run, in the order of `runs`, for a reader that cannot answer a prompt.
+
+    The copy deck gives it: `<n> runs are active in this repository; give a run id: <id> (<branch>, <state>), …`.
+    """
+    named = ", ".join(f"{run.snap.run_id} ({run.run_branch}, {run.snap.state})" for run in runs)
+    return f"{len(runs)} runs are active in this repository; give a run id: {named}"
