@@ -601,6 +601,13 @@ def review_plan_change(
         return _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch))
 
 
+def _refuse_plan_change(review: PlanReview, workflow_path: Path, run_id: str) -> None:
+    """Raise EngineError, which names each problem, when the rules of a plan change refuse the resume."""
+    problems = review.problems()
+    if problems:
+        raise EngineError(f"workflow {workflow_path} changes the plan of run {run_id}, and the rules refuse it: " + "; ".join(problems))
+
+
 @dataclass(frozen=True)
 class _RetryPlan:
     """Where a failed step goes on: the phase and the verifier round, from the journal events of the step (`prior`).
@@ -746,15 +753,17 @@ def _check_chain_start(
 
 
 def check_start(
-    workflow: Workflow, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *, resume: bool = False,
-    break_lock: bool = False,
+    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *,
+    resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (),
 ) -> None:
-    """The checks of a run that need no agent: the tier of each role, the lock, and for a new run the branches. Create nothing.
+    """The checks of a run that need no agent: the tier of each role, the lock, and the branches or the plan. Create nothing.
 
     Raise EngineError, which names the input at fault, when a check fails. A run branch in use is reported first: the
     run branch of a run that works exists. A new run needs its base branch, and a run branch and ticket branches that
-    do not exist. `run_workflow` does these checks before it takes the lock. `delegate run --detach` does them before it
-    starts the run process, so a run that cannot start gives its error on stderr and exits non-zero, as in the foreground.
+    do not exist. A resume needs the journal of the run, and the rules of a plan change (see `_review`), with the later
+    tickets in `reviewed`, must accept the workflow. `run_workflow` does these checks before it takes the lock.
+    `delegate run --detach` does them before it starts the run process, so a run that cannot start gives its error on
+    stderr and exits non-zero, as in the foreground.
     """
     repo, state_dir = state_directory(repo, vcs)
     for role in ("specialist", "verifier"):
@@ -763,7 +772,9 @@ def check_start(
         check_free(state_dir, workflow.run_branch, run_id, break_stale=break_lock)
     except LockError as error:
         raise EngineError(str(error)) from None
-    if not resume:
+    if resume:
+        _refuse_plan_change(review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed), workflow_path, run_id)
+    else:
         _check_branches(workflow, repo, vcs)
 
 
@@ -809,7 +820,9 @@ def run_workflow(
     the rules refuse the change. A plan change also goes on with a run that ended.
     """
     run_id = resume if resume is not None else (run_id or new_run_id())
-    check_start(workflow, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock)
+    check_start(
+        workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
+    )
     repo, state_dir = state_directory(repo, vcs)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     try:
@@ -862,9 +875,8 @@ def _execute(
         journal, events = _journal_events(state_dir, run_id)
         with _vcs_errors():
             review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch))
-        problems = review.problems()
-        if problems:
-            raise EngineError(f"workflow {workflow_path} changes the plan of run {run_id}, and the rules refuse it: " + "; ".join(problems))
+        # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
+        _refuse_plan_change(review, workflow_path, run_id)
         progress = _restore(events, run_id, retrying=retry is not None or review.changed)
         with _vcs_errors():
             run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)

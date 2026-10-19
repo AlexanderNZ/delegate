@@ -26,9 +26,10 @@ output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
 limit, then does not stop the run. Before it starts the process, it makes the
 checks of the run that need no agent (`engine.check_start`): the workflow, the
-tiers, the lock, and for a new run the base branch and a free run branch. A
-check that fails prints its error on stderr, exits 1, and starts no process, as
-a run in the foreground does.
+tiers, the lock, for a new run the base branch and a free run branch, and for a
+resume the rules of a plan change with `--reviewed`. A check that fails prints
+its error on stderr, exits 1, and starts no process, as a run in the foreground
+does.
 """
 
 from __future__ import annotations
@@ -292,7 +293,10 @@ def main(argv: list[str] | None = None) -> int:
             run_id = args.resume if args.resume is not None else new_run_id()
             try:
                 # The checks that need no agent come before the run process, so their error goes to the caller.
-                check_start(workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None, break_lock=args.break_lock)
+                check_start(
+                    workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
+                    break_lock=args.break_lock, reviewed=reviewed,
+                )
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
                 return 1

@@ -137,6 +137,30 @@ def test_a_resume_with_a_plan_change_and_no_review_of_the_later_tickets_is_refus
     assert change["order"] == ["a", "x", "b", "c"]
 
 
+def test_a_detached_resume_with_a_plan_change_and_no_review_exits_1_with_the_refusal_and_starts_no_run_process(
+    tmp_path, capsys, scripted
+):
+    # The check before the run process makes the review of the plan change (#133), as the run in the foreground does.
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",)))
+    run_id = stopped_at_the_verifier_of(repo, capsys, scripted, "a")
+    write_workflow(repo, HEAD + ticket("a") + ticket("x", ("a",)) + ticket("b", ("x",)) + ticket("c", ("b",)))
+    before = journal_path(repo, run_id).read_bytes()
+    log = journal_path(repo, run_id).parent / "run.log"
+
+    for reviewed in ((), ("--reviewed", "b")):
+        detached = resume_main(repo, capsys, run_id, "--detach", *reviewed)
+        foreground = resume_main(repo, capsys, run_id, *reviewed)
+
+        code, out, err = detached
+        assert (code, out) == (1, ""), out
+        assert "the rules refuse it" in err and "--reviewed" in err and "'c'" in err
+        assert detached == foreground, "the detached start and the run in the foreground give different results"
+        # No run process started: the run has no log, its journal did not change, and no agent was called.
+        assert not log.exists()
+        assert journal_path(repo, run_id).read_bytes() == before
+        assert scripted.calls == [] and scripted.verifier_calls == []
+
+
 def test_the_briefs_of_a_later_ticket_hold_the_plan_change_section_and_a_ticket_before_the_insertion_point_has_none(
     tmp_path, capsys, scripted
 ):
