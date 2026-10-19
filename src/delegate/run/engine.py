@@ -295,17 +295,18 @@ def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None
         run_branch_taken = vcs.branch_exists(repo, workflow.run_branch)
     if not base_exists:
         raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
-    if run_branch_taken:
-        raise EngineError(
-            f"run-branch {workflow.run_branch!r} exists already in the repository {repo}; an earlier run can leave it. "
-            "Delete it or choose another run-branch"
-        )
+    # A taken ticket branch is reported before a taken run branch: an earlier run leaves both, and the ticket names the step.
     for ticket in workflow.tickets:
         branch = _ticket_branch(workflow, ticket)
         with _vcs_errors():
             taken = vcs.branch_exists(repo, branch)
         if taken:
             raise EngineError(f"branch {branch!r} for ticket {ticket.id!r} exists already; delete it or choose another run-branch")
+    if run_branch_taken:
+        raise EngineError(
+            f"run-branch {workflow.run_branch!r} exists already in the repository {repo}; an earlier run can leave it. "
+            "Delete it or choose another run-branch"
+        )
 
 
 def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
