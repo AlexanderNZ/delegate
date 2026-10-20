@@ -255,12 +255,13 @@ def _gone_past(replay: list[dict[str, object]]) -> set[object]:
     """The `seq` of each event of the replay that the run went past: a problem there does not end the watch (#146).
 
     The replay is the events of the journal when the watch starts. An event is gone past when a later event of the
-    replay is a `continuation` or a `retry` of its ticket, or a `step-start`, a `step-end` or a `run-end`. A replay whose
-    last event is a `run-end` or a `paused` is a run at its end, not a run that goes on, so no event of it is gone past,
-    and a run that failed stops at its first problem, as before.
+    replay is a `continuation` or a `retry` of its ticket, or a `step-start`, a `step-end` or a `run-end`. The rule is
+    the same for a replay whose last event is a `run-end` or a `paused`, a run at its end (#151), but that last event is
+    the end, not an event that goes past a problem. So the watch of an ended run stops at a problem that only the end
+    follows, and replays to the end past each other problem.
     """
-    if not replay or replay[-1]["event"] in RUN_STOPS:
-        return set()
+    if replay and replay[-1]["event"] in RUN_STOPS:
+        replay = replay[:-1]
     past: set[object] = set()
     run_later = False
     step_later: set[str] = set()

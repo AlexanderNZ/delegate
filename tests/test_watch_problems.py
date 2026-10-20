@@ -1,5 +1,10 @@
 """`delegate watch` exits on the first problem event, with the exit code `3`, and names the ticket and the reason.
 
+In the replay, a problem that a later event of the run goes past is history (#146), also when the run has ended (#151):
+a `step-end` goes past each problem of its step. So a run that failed stops at the `step-end` of the step that failed,
+and its reason gives the cause. A case that checks the problem of one event writes a journal with no later event that
+goes past it.
+
 A problem is a step that ends blocked or partial, a step whose gates are not
 green, an agent that fails or returns no result, or a second continuation of the
 same step. The headline cases build a real run with a scripted adapter and then
@@ -49,8 +54,10 @@ def test_a_step_that_ends_blocked_or_partial_is_a_problem_that_names_the_ticket_
     code, out, err, _ = build_then_watch(tmp_path, capsys, ScriptedAdapter(report_text=report))
 
     assert (code, err) == (PROBLEM, "")
-    assert problem_line(out) == f"watch: problem: ticket a: the step ended {status}: the export format is not decided"
-    assert "step-end" not in out  # the problem ends the watch before the step ends
+    reason = f"the specialist reported status '{status}': the export format is not decided"
+    assert problem_line(out) == f"watch: problem: ticket a: the step failed: {reason}"
+    # The step-end goes past the report of the specialist, so the problem is at the step end (#151).
+    assert out.splitlines()[-3].split()[2] == "step-end"
 
 
 def test_a_step_whose_gates_are_not_green_is_a_problem_that_names_the_ticket_and_the_gate(tmp_path, capsys, git_identity):
@@ -70,25 +77,48 @@ def test_an_agent_that_ends_failed_is_a_problem_that_names_the_ticket_and_the_en
     code, out, err, _ = build_then_watch(tmp_path, capsys, ScriptedAdapter(failing_tickets={"a"}))
 
     assert (code, err) == (PROBLEM, "")
-    assert problem_line(out) == "watch: problem: ticket a: the specialist ended failed with exit status 1"
+    assert problem_line(out) == (
+        "watch: problem: ticket a: the step failed: the specialist ended failed with exit status 1; the continuation limit of 2 is reached"
+    )
 
 
 def test_an_agent_that_returns_no_result_is_a_problem_that_names_the_ticket_and_the_report(tmp_path, capsys, git_identity):
     code, out, err, events = build_then_watch(tmp_path, capsys, ScriptedAdapter(write_report=False))
 
     assert (code, err) == (PROBLEM, "")
-    assert problem_line(out).startswith("watch: problem: ticket a: the specialist returned no valid result: ")
-    assert "report" in problem_line(out)
+    assert problem_line(out).startswith("watch: problem: ticket a: the step failed: report missing: the specialist wrote no file at ")
+    assert problem_line(out).endswith("a.specialist.json; the continuation limit of 2 is reached")
 
 
-def test_the_second_continuation_of_a_step_is_a_problem_and_the_first_is_not(tmp_path, capsys, git_identity):
-    # The specialist is capped twice, then finishes. Capped is not a failure; the second continuation is the problem.
+def continuation(count: int) -> tuple[str, dict[str, object]]:
+    return "continuation", {
+        "ticket": "a", "count": count, "limit": 2, "trigger": "capped", "mode": "resume", "resume_session": "s1",
+        "commits": [], "reason": "the specialist ended capped",
+    }
+
+
+def test_the_second_continuation_of_a_step_is_a_problem_and_the_first_is_not(tmp_path, capsys):
+    # Capped is not a failure; the second continuation is the problem. No later event goes past it.
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), continuation(1), continuation(2))
+
+    code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
+    out = capsys.readouterr().out
+
+    assert code == PROBLEM
+    assert out.splitlines()[-2:] == ["watch: problem: ticket a: the step continued 2 times (limit 2, trigger capped)", "position 4"]
+
+
+def test_a_second_continuation_is_history_when_the_run_built_the_step_after_it(tmp_path, capsys, git_identity):
+    # The specialist is capped twice, then finishes, and the run is built: the step-end goes past the problem (#151).
     adapter = ScriptedAdapter(outcomes=[("capped", 0), ("capped", 0), ("finished", 0)])
 
     code, out, err, _ = build_then_watch(tmp_path, capsys, adapter)
 
-    assert (code, err) == (PROBLEM, "")
-    assert problem_line(out) == "watch: problem: ticket a: the step continued 2 times (limit 2, trigger capped)"
+    assert (code, err) == (0, "")
+    assert "watch: problem" not in out
+    continuations = [line.split() for line in out.splitlines() if line.split()[2:3] == ["continuation"]]
+    assert [[field for field in line if field.startswith("count=")] for line in continuations] == [["count=1"], ["count=2"]]
 
 
 def test_a_finished_agent_with_the_exit_status_of_sigterm_and_a_valid_report_is_not_a_problem(tmp_path, capsys, git_identity):
@@ -136,7 +166,8 @@ def test_a_verifier_that_returns_no_result_is_a_problem_that_names_the_ticket(tm
     code, out, err, _ = build_then_watch(tmp_path, capsys, ScriptedAdapter(write_verifier_report=False))
 
     assert (code, err) == (PROBLEM, "")
-    assert problem_line(out).startswith("watch: problem: ticket a: the verifier returned no valid result: ")
+    assert problem_line(out).startswith("watch: problem: ticket a: the step failed: report missing: the verifier wrote no file at ")
+    assert problem_line(out).endswith("verdict.json")
 
 
 @pytest.mark.parametrize(
@@ -175,7 +206,7 @@ def test_a_verifier_that_returns_no_result_is_a_problem_that_names_the_ticket(tm
 )
 def test_each_agent_role_that_fails_or_returns_no_result_is_a_problem(tmp_path, capsys, event, fields, reason):
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), (event, {"ticket": "a", **fields}), step_end("a", "failed", "x"), run_end("failed", [], ["a"]))
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), (event, {"ticket": "a", **fields}), run_end("failed", [], ["a"]))
 
     code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
     out = capsys.readouterr().out
@@ -202,15 +233,16 @@ def test_a_step_that_failed_for_any_other_reason_is_a_problem_that_gives_the_rea
 REFUSED_HINT: str = "give the agents a settings file with DELEGATE_AGENT_SETTINGS"
 
 
-def test_a_tool_that_a_permission_mode_refused_is_in_the_journal_and_is_a_problem_that_names_the_tool_and_the_mode(tmp_path, capsys, git_identity):
+def test_a_tool_that_a_permission_mode_refused_is_in_the_journal_and_is_history_when_the_run_built_the_step(tmp_path, capsys, git_identity):
     adapter = ScriptedAdapter(refusals={"specialist": (("Bash", "don't ask"), ("Edit", "don't ask"))})
 
     code, out, _, events = build_then_watch(tmp_path, capsys, adapter)
 
     (result,) = [event for event in events if event["event"] == "adapter-result"]
     assert result["refused"] == [{"tool": "Bash", "mode": "don't ask"}, {"tool": "Edit", "mode": "don't ask"}]
-    assert code == PROBLEM
-    assert problem_line(out) == f"watch: problem: ticket a: the specialist was refused Bash, Edit in don't ask mode; {REFUSED_HINT}"
+    # The scripted specialist does its work also with the refusal, and the run is built: the step-end goes past it (#151).
+    assert code == 0
+    assert "watch: problem" not in out
 
 
 def test_an_agent_with_no_refused_tool_writes_no_refused_field(tmp_path, capsys, git_identity):
@@ -223,20 +255,22 @@ def test_an_agent_with_no_refused_tool_writes_no_refused_field(tmp_path, capsys,
 @pytest.mark.parametrize(
     ("event", "fields", "role"),
     [
+        pytest.param("adapter-result", {}, "specialist", id="specialist"),
         pytest.param("verify-result", {"round": 0}, "verifier", id="verifier"),
         pytest.param("fixup-result", {"round": 1}, "fix-up specialist", id="fixup"),
     ],
 )
 def test_each_agent_role_that_a_permission_mode_refused_is_a_problem(tmp_path, capsys, event, fields, role):
     repo = bare_repo(tmp_path)
-    result = {"exit_status": 0, "end_state": "finished", "session_id": None, "event_stream": "/s", "refused": [{"tool": "Bash", "mode": "don't ask"}]}
-    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), (event, {"ticket": "a", **fields, **result}), step_end("a", "failed", "x"), run_end("failed", [], ["a"]))
+    refused = [{"tool": "Bash", "mode": "don't ask"}, {"tool": "Edit", "mode": "don't ask"}]
+    result = {"exit_status": 0, "end_state": "finished", "session_id": None, "event_stream": "/s", "refused": refused}
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), (event, {"ticket": "a", **fields, **result}), run_end("failed", [], ["a"]))
 
     code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
     out = capsys.readouterr().out
 
     assert code == PROBLEM
-    assert problem_line(out) == f"watch: problem: ticket a: the {role} was refused Bash in don't ask mode; {REFUSED_HINT}"
+    assert problem_line(out) == f"watch: problem: ticket a: the {role} was refused Bash, Edit in don't ask mode; {REFUSED_HINT}"
 
 
 def test_a_refused_result_after_an_idle_timeout_clears_the_idle_mark_so_the_next_result_is_checked(tmp_path, capsys):
@@ -250,7 +284,7 @@ def test_a_refused_result_after_an_idle_timeout_clears_the_idle_mark_so_the_next
         ("idle-timeout", {"ticket": "a", "role": "verifier", "round": 0, "seconds": 900}),
         ("verify-result", {"ticket": "a", "round": 0, **refused}),
         ("verify-result", {"ticket": "a", "round": 1, **failed}),
-        step_end("a", "failed", "x"), run_end("failed", [], ["a"]),
+        run_end("failed", [], ["a"]),
     )
 
     code = delegate.main(["watch", "r1", "--repo", str(repo), "--from", "4", *POLL])

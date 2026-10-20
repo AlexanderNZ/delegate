@@ -123,3 +123,55 @@ def test_watch_follows_a_resumed_run_past_a_failed_step_before_the_crash_when_th
     assert (code, err) == (1, "")  # the result of the run, not a problem
     assert "watch: problem" not in out
     assert "reason=boom" in out.splitlines()[2]
+
+
+def ended_run_with_a_handled_problem(*end: tuple[str, dict[str, object]]) -> tuple[tuple[str, dict[str, object]], ...]:
+    """A run of tickets a and b: the specialist of ticket a ended with SIGTERM, the continuation built the ticket, then `end`."""
+    return (
+        run_start("r1", "a", "b"), step_start("a"), specialist_result("a", "failed", 143), continuation("a"),
+        specialist_result("a", "finished", 0), valid_report_event("a"), step_end("a"), *end,
+    )
+
+
+PAUSED = (("pause-requested", {"ticket": "b", "requested_at": None}), ("paused", {"ticket": "b", "before": "step"}))
+
+
+@pytest.mark.parametrize("extra", [(), ("--raw",)], ids=["not-a-terminal", "raw"])
+@pytest.mark.parametrize(
+    ("end", "code_of_end"),
+    [((step_start("b"), step_end("b"), run_end("built", ["a", "b"])), 0), (PAUSED, 7)],
+    ids=["run-end-built", "paused"],
+)
+def test_watch_replays_an_ended_run_past_a_problem_that_the_run_went_past(tmp_path, capsys, monkeypatch, extra, end, code_of_end):
+    # The run is at its end when watch starts (#151): no process holds the lock, and the last event is the end.
+    repo = bare_repo(tmp_path)
+    write_journal(repo, "r1", *ended_run_with_a_handled_problem(*end))
+    monkeypatch.setattr(time, "sleep", no_more_polls)
+
+    code, out, err = watch(repo, capsys, "r1", *extra)
+
+    assert (code, err) == (code_of_end, "")
+    assert "watch: problem" not in out
+    lines = out.splitlines()
+    assert lines[2] == f"3 {lines[2].split()[1]} adapter-result ticket=a exit_status=143 end_state=failed session_id=s1 event_stream=/s/a"
+    count = 7 + len(end)
+    assert [line.split()[0] for line in lines[:count]] == [str(seq) for seq in range(1, count + 1)]
+    assert lines[count - 1].split()[2] == end[-1][0]
+    assert lines[-1] == f"position {count}"
+
+
+@pytest.mark.parametrize("extra", [(), ("--raw",)], ids=["not-a-terminal", "raw"])
+@pytest.mark.parametrize("end", [(run_end("failed", [], ["a"]),), PAUSED], ids=["run-end-failed", "paused"])
+def test_watch_stops_an_ended_run_at_its_last_problem_when_no_later_event_goes_past_it(tmp_path, capsys, monkeypatch, extra, end):
+    # The step-end goes past the problem of the specialist, but only the end of the run follows the failed step.
+    repo = bare_repo(tmp_path)
+    write_journal(
+        repo, "r1", run_start("r1", "a", "b"), step_start("a"), specialist_result("a", "failed", 143),
+        step_end("a", "failed", "boom"), *end,
+    )
+    monkeypatch.setattr(time, "sleep", no_more_polls)
+
+    code, out, err = watch(repo, capsys, "r1", *extra)
+
+    assert (code, err) == (PROBLEM, "")
+    assert out.splitlines()[-2:] == ["watch: problem: ticket a: the step failed: boom", "position 4"]
