@@ -360,7 +360,8 @@ def _states_the_walk_limit(text: str, removes: bool = True) -> None:
     """
     (sentence,) = [s for s in re.split(r"(?<=\.) ", text) if f"at most {TREE_SEARCH_LIMIT} directories" in s]
     assert "temp copy in place" in sentence, sentence
-    assert "the system removes temp directories" in sentence, sentence
+    # No source shows that the system removes temp directories, so the sentence does not claim it (#160).
+    assert "the system removes" not in sentence, sentence
     if removes:
         assert f"one directory at a time, each with fewer than {TREE_SEARCH_LIMIT} directories" in sentence, sentence
 
@@ -393,17 +394,25 @@ NO_COPY_RULE = (
     "do not make the red proof",
     "`unverified`",
     "the refused command and its message",
-    "as read-only checks",
+    # A gate can write build output, so the gates are not read-only checks (#160).
+    "can still run",
+    "build output",
+    "source file",
     "the work under review",
+    # Only the engine of a `delegate run` checks the worktree (#160).
+    "In a `delegate run`, the engine checks that",
     # A page links the glossary term, as `[**worktree invariant**](...)`.
     "worktree invariant",
 )
+
+#: The sentence of the rule (#152) for a verifier that no engine runs: a person or a coordinator spawns it (#160).
+OUTSIDE_A_RUN = "Outside a run, the rule is the same, and nothing checks it."
 
 AGENT_DELEGATION_SKILL = ROOT / "skills" / "agent-delegation" / "SKILL.md"
 COMMITTED_VERIFIERS = (ROOT / ".claude" / "agents" / "delegate-verifier.md", ROOT / ".opencode" / "agents" / "delegate-verifier.md")
 
 
-def _states_the_no_copy_rule(text: str) -> None:
+def _states_the_no_copy_rule(text: str, outside_a_run: bool = True) -> None:
     """`text` states the rule of #152 in the paragraph or list item that holds the words of the case.
 
     The text of each case goes from the words "cannot make the copy" to the end of the paragraph or of the list item,
@@ -414,15 +423,19 @@ def _states_the_no_copy_rule(text: str) -> None:
         for match in NO_COPY.finditer(text)
     ]
     assert cases, "the text does not state the case of a copy that cannot be made"
-    missing = [[part for part in NO_COPY_RULE if part not in case] for case in cases]
+    rule = (*NO_COPY_RULE, OUTSIDE_A_RUN) if outside_a_run else NO_COPY_RULE
+    missing = [[part for part in rule if part not in case] for case in cases]
     assert [] in missing, list(zip(cases, missing))
 
 
 def test_the_brief_and_the_rendered_verifiers_state_the_rule_when_the_copy_cannot_be_made(rendered, tmp_path):
     # The report of #152: Claude Code refused `cp -R` and `rm -r` on a host, and a verifier that could not make its
     # copy ran its checks in the worktree under review.
-    _states_the_no_copy_rule(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "full"))
-    _states_the_no_copy_rule(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "fix-up", engine_gates=True))
+    # The brief is the brief of a `delegate run`, so it has no case outside a run.
+    _states_the_no_copy_rule(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "full"), outside_a_run=False)
+    _states_the_no_copy_rule(
+        verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "fix-up", engine_gates=True), outside_a_run=False
+    )
     for harness in ("claude-code", "opencode"):
         _states_the_no_copy_rule(_section(_body(rendered, harness), "Your shell"))
 
@@ -436,3 +449,60 @@ def test_the_brief_and_the_rendered_verifiers_state_the_rule_when_the_copy_canno
 )
 def test_the_enforcement_page_the_skills_and_the_committed_verifiers_state_the_rule_when_the_copy_cannot_be_made(path):
     _states_the_no_copy_rule(path.read_text())
+
+
+# --- The verifier prose is exact (#160) ----------------------------------------
+
+#: The sentences that #160 replaced. Each one stated more than is true: git rejects `--outp=` for `log`, `show` and
+#: `diff`, no engine checks a verifier that a person spawns, no source shows that the system removes temp directories,
+#: and a gate can write build output.
+OLD_SENTENCES = (
+    "each prefix of it that git can accept",
+    "some git versions accept a unique prefix",
+    "the system removes temp directories",
+    "as read-only checks",
+    "and the engine checks that you left it as it was",
+    "and the engine checks that the verifier left it as it was",
+)
+
+#: The rule of the git output option, as the rendered Claude Code verifier states it.
+GIT_OUTPUT_RULE = "the hook denies `--output` and each prefix of it, such as `--outp`, whether or not git accepts that prefix"
+
+
+def _holds_no_old_sentence(text: str) -> None:
+    flat = " ".join(text.split())
+    assert [old for old in OLD_SENTENCES if old in flat] == [], flat
+
+
+def test_the_brief_and_the_rendered_verifiers_hold_none_of_the_old_sentences(rendered, tmp_path):
+    # The report of #160: a consumer verifier found three sentences that are not exact.
+    for mode, engine_gates in (("full", False), ("fix-up", True)):
+        _holds_no_old_sentence(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", mode, engine_gates=engine_gates))
+    for path in sorted(rendered.rglob("*")):
+        if path.is_file():
+            _holds_no_old_sentence(path.read_text())
+
+
+def test_the_rendered_claude_code_verifier_states_that_the_guard_is_stricter_than_git(rendered):
+    section = " ".join(_section(_body(rendered, "claude-code"), "Your shell").split())
+
+    assert GIT_OUTPUT_RULE in section, section
+
+
+# The docs, the skills and the committed agents are outside the package source, as in a Nix build.
+@outside_the_package
+@pytest.mark.parametrize(
+    "path",
+    [ENFORCEMENT_PAGE, SKILL, AGENT_DELEGATION_SKILL, *COMMITTED_VERIFIERS],
+    ids=lambda path: path.relative_to(ROOT).as_posix(),
+)
+def test_the_enforcement_page_the_skills_and_the_committed_verifiers_hold_none_of_the_old_sentences(path):
+    _holds_no_old_sentence(path.read_text())
+
+
+# The skill is outside the package source, as in a Nix build.
+@outside_the_package
+def test_the_skill_states_that_the_git_output_rule_is_stricter_than_git():
+    flat = " ".join(SKILL.read_text().split())
+
+    assert "each prefix of it down to `--ou`, alone or with `=<path>`, whether or not git accepts that prefix" in flat

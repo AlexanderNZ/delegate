@@ -767,7 +767,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         # context does not import that context, so the number is text here, and a test compares the two.
         "In a directory that a write target names, the guards read at most 2000 directories, and they deny a target "
         "that they could not search to the end: leave a large temp copy in place, because the engine removes both "
-        "copies when you end and the system removes temp directories, or first remove the parts that hold no git tree, one directory at a time, each with "
+        "copies when you end, or first remove the parts that hold no git tree, one directory at a time, each with "
         "fewer than 2000 directories. "
         # The engine makes the proof copy before the verifier starts, so the verifier needs no `cp -R` and no `rm -r`,
         # which a host can refuse (#153).
@@ -778,8 +778,9 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         "This rule is binding: if the proof copy is missing, or a step in it is refused or fails, "
         "do not break a check, a test or a file in this copy or in the worktree under review, and do not make the red "
         "proof there. Put the red proof in `unverified`, with the refused command and its message, or with the path of "
-        "the missing proof copy. You can still run the gates in this copy as read-only checks. The worktree is the work under review, and the engine checks that "
-        "you left it as it was (the worktree invariant). "
+        "the missing proof copy. You can still run the gates in this copy. A gate can write build output there, for example "
+        "`dist/` or `build/`. Do not change a source file in this copy or in the worktree. The worktree is the work under "
+        "review. In a `delegate run`, the engine checks that you left it as it was (the worktree invariant). "
         "Never push.\n\n" + _report_rule("copy", report_path)
     )
     gate_output = (

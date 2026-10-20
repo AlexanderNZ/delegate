@@ -467,9 +467,12 @@ writes the index and the branch of the real worktree.
    or a step fails, must obey this rule: do not break a check, a test or a
    file in the worktree under review, and do not make the red proof there.
    Put the red proof in `unverified`, with the refused command and its
-   message. The gates can still run in the worktree as read-only checks.
-   The worktree is the work under review, and the engine checks that the
-   verifier left it as it was (the worktree invariant) (#152).
+   message. The gates can still run in the worktree. A gate can write build
+   output there, for example `dist/` or `build/`, and the verifier changes no
+   source file there. The worktree is the work under review. In a
+   `delegate run`, the engine checks that the verifier left it as it was (the
+   worktree invariant) (#152). Outside a run, the rule is the same, and
+   nothing checks it.
 4. In a `delegate run`, the engine makes the proof copy for the verifier
    before the verifier starts: a copy of the tree with no `.git` entry, beside
    the temporary copy. The brief names it, and the verifier goes to it with

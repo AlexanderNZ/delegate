@@ -276,8 +276,9 @@ GET_ONLY_ARGUMENT_CHECK = (
 
 
 #: The long option of `git diff`, `git log` and `git show` that writes a file
-#: (#140). Some git versions accept a unique prefix of a long option, so each
-#: prefix down to "--ou" is the same option. "--o" is with the run options
+#: (#140). The guard denies each prefix down to "--ou" as this option, whether
+#: or not git accepts that prefix (#160): git 2.54.0 rejects "--outp=" for
+#: `git log`, `git show` and `git diff`. "--o" is with the run options
 #: below: it is also a prefix of --open-files-in-pager.
 GIT_OUTPUT_OPTION = "--output"
 
@@ -583,7 +584,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     in_unsearched = (
         f"The walk in the directory [$wr] read {TREE_SEARCH_LIMIT} directories and did not reach the end, "
         "so the guard cannot tell that the write target holds no git tree. The limit keeps each guard call short. "
-        "Leave a large temp copy in place, because the system removes temp directories, or first remove the parts "
+        "Leave a large temp copy in place, or first remove the parts "
         f"that hold no git tree, one directory at a time, each with fewer than {TREE_SEARCH_LIMIT} directories."
     )
     # The shell removes a redirection before it runs the command, so a path

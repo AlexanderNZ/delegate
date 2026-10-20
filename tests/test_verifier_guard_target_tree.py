@@ -313,6 +313,8 @@ def test_the_deny_of_a_target_that_the_walk_could_not_search_names_the_limit_and
             ), result.stderr
             assert "Leave a large temp copy in place" in result.stderr, result.stderr
             assert "one directory at a time" in result.stderr, result.stderr
+            # No source shows that the system removes temp directories (#160).
+            assert "the system removes" not in result.stderr, result.stderr
     write = _write(trees, plain, shell, trees.copy)
 
     assert write.returncode == 2, write.stderr
