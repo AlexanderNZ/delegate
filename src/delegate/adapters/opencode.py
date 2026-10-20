@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
+from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
 
@@ -59,18 +60,19 @@ CONFIG_VARIABLE: str = "OPENCODE_CONFIG_CONTENT"
 NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
 
 
-def _environment(servers: tuple[McpServer, ...]) -> dict[str, str] | None:
-    """The environment of the harness: the environment of the engine, with the servers added to the inline configuration.
+def _environment(servers: tuple[McpServer, ...]) -> dict[str, str]:
+    """The environment of the harness: the process environment of the engine, with the servers added to the inline configuration.
 
-    `None` (the environment of the engine, unchanged) when there is no server.
+    The process environment of the engine (see `environment.process_environment`), unchanged, when there is no server.
     An inline configuration that the engine already has keeps its other fields
     and its own servers. Raise AdapterError when that configuration is not a
     JSON object.
     """
+    environment = process_environment()
     if not servers:
-        return None
+        return environment
     try:
-        config = json.loads(os.environ.get(CONFIG_VARIABLE) or "{}")
+        config = json.loads(environment.get(CONFIG_VARIABLE) or "{}")
     except json.JSONDecodeError:
         config = None
     if not isinstance(config, dict) or not isinstance(config.get("mcp", {}), dict):
@@ -81,7 +83,7 @@ def _environment(servers: tuple[McpServer, ...]) -> dict[str, str] | None:
             mcp[server.name] = {"type": "remote", "url": server.url}
         else:
             mcp[server.name] = {"type": "local", "command": list(server.command)}
-    return {**os.environ, CONFIG_VARIABLE: json.dumps(config)}
+    return {**environment, CONFIG_VARIABLE: json.dumps(config)}
 
 
 def _tokens_of(event: dict[str, object], stream: Path) -> tuple[int, int]:

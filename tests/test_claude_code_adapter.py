@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import delegate
 import pytest
 from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
@@ -552,3 +553,23 @@ def test_each_added_directory_goes_to_the_command_as_an_add_dir_option(tmp_path,
     assert argv[argv.index("--add-dir") + 1] == str(proof)
     assert argv.count("--add-dir") == 1
     assert "--add-dir" not in without["argv"]
+
+
+# The directory that holds the `delegate` package that the engine imported.
+ENGINE_SOURCE: Path = Path(delegate.__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize("entries, expected", [
+    ([str(ENGINE_SOURCE), "/other/src"], "/other/src"),
+    (["/other/src", str(ENGINE_SOURCE) + os.sep, "/more/src"], f"/other/src{os.pathsep}/more/src"),
+    ([str(ENGINE_SOURCE)], None),
+])
+def test_the_agent_does_not_get_the_pythonpath_entry_of_the_engine_package_and_keeps_the_other_entries(tmp_path, monkeypatch, entries, expected):
+    # The report of #154: with the engine on PYTHONPATH, a test in the proof copy imported the engine, not the code under review.
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(entries))
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path))
+
+    (call,) = fake.calls()
+    assert call["env"].get("PYTHONPATH") == expected

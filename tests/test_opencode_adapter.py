@@ -9,11 +9,13 @@ date of each recording).
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import delegate
 import pytest
 from delegate import adapters
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
@@ -408,3 +410,25 @@ def test_the_last_text_part_of_the_session_is_the_final_text_of_the_result(tmp_p
     result = adapters.get("opencode").run(request(tmp_path))
 
     assert result.final_text == "THE-LAST-TEXT"
+
+
+# The directory that holds the `delegate` package that the engine imported.
+ENGINE_SOURCE: Path = Path(delegate.__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize("servers", [(), (McpServer("browser", command=("npx", "@playwright/mcp@latest")),)])
+@pytest.mark.parametrize("entries, expected", [
+    ([str(ENGINE_SOURCE), "/other/src"], "/other/src"),
+    (["/other/src", str(ENGINE_SOURCE) + os.sep, "/more/src"], f"/other/src{os.pathsep}/more/src"),
+    ([str(ENGINE_SOURCE)], None),
+])
+def test_the_agent_does_not_get_the_pythonpath_entry_of_the_engine_package_and_keeps_the_other_entries(tmp_path, monkeypatch, entries, expected, servers):
+    # The report of #154: with the engine on PYTHONPATH, a test in the proof copy imported the engine, not the code under review.
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(entries))
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("opencode").run(request(tmp_path, mcp_servers=servers))
+
+    (call,) = fake.calls()
+    assert call["env"].get("PYTHONPATH") == expected

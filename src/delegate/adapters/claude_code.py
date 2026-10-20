@@ -46,6 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
+from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
 
@@ -196,7 +197,7 @@ class ClaudeCodeAdapter:
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
         stream = request.event_stream
-        process = run_harness(command, request, env={**os.environ, **FOREGROUND_ENVIRONMENT})
+        process = run_harness(command, request, env={**process_environment(), **FOREGROUND_ENVIRONMENT})
         if not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"

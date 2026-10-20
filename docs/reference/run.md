@@ -67,6 +67,10 @@ The engine never merges to `base-branch`, never pushes, and never closes a ticke
 
 The engine sets `core.fsmonitor` to false for each worktree (see [the push guard](#the-push-guard)) and in the configuration of each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
 
+### The environment of an agent and a gate
+
+Each agent and each gate command gets the environment of the engine, with one change: `PYTHONPATH` does not hold the directory that contains the `delegate` package of the engine. When the engine imports its own package through `PYTHONPATH`, for example a frozen engine in a run of the kit on its own repository, the engine removes each entry that names that directory. The other entries stay, in their order. When no entry stays, `PYTHONPATH` is not set for the agent or the gate. Thus a test in a worktree or in a proof copy imports the code under review, not the code of the engine. The `claude-code` adapter, the `opencode` adapter and the gates of the engine apply the same rule.
+
 ### The base of the run
 
 A run has one base: the commit of `base-branch` at the start of the run. The journal records it in the field `base_commit` of `run-start`. The run branch starts at that commit.

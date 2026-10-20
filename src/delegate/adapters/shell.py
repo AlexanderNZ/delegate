@@ -8,6 +8,9 @@ The backend reads the standard output and the standard error of the command
 as they come. When the caller gives a log file, the backend appends each part
 to that file at once, so the file grows while the command runs. The result
 holds the standard output, then the standard error, as before.
+
+The command gets the process environment of `delegate.adapters.environment`,
+the same environment that each agent gets.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from pathlib import Path
 from typing import IO, BinaryIO
 
 from ..ports.gates import GateResult
+from .environment import process_environment
 
 # The most bytes that one read from a pipe of the command takes.
 READ_SIZE: int = 65536
@@ -47,7 +51,10 @@ class ShellGateRunner:
         lock = threading.Lock()
         handle = log.open("ab") if log is not None else None
         try:
-            process = subprocess.Popen(["bash", "-c", command], cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            process = subprocess.Popen(
+                ["bash", "-c", command], cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=process_environment(),
+            )
             readers = [
                 threading.Thread(target=_copy, args=(pipe, parts, handle, lock), daemon=True)
                 for pipe, parts in ((process.stdout, out), (process.stderr, err))

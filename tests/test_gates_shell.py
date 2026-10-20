@@ -4,6 +4,11 @@ Each case calls `run` and reads the result. No case imports a private function
 of the backend.
 """
 
+import os
+from pathlib import Path
+
+import delegate
+import pytest
 from delegate.adapters.shell import ShellGateRunner
 from delegate.ports.gates import GateResult, GateRunner
 
@@ -75,3 +80,27 @@ def test_a_command_with_no_log_file_writes_no_file(tmp_path):
 
     assert result.output == "out\n"
     assert list(tmp_path.iterdir()) == []
+
+
+# The directory that holds the `delegate` package that the engine imported.
+ENGINE_SOURCE: Path = Path(delegate.__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize("entries, expected", [
+    ([str(ENGINE_SOURCE), "/other/src"], "/other/src"),
+    (["/other/src", str(ENGINE_SOURCE) + os.sep, "/more/src"], f"/other/src{os.pathsep}/more/src"),
+    ([str(ENGINE_SOURCE)], "unset"),
+])
+def test_a_gate_command_does_not_get_the_pythonpath_entry_of_the_engine_package_and_keeps_the_other_entries(tmp_path, monkeypatch, entries, expected):
+    # The report of #154: a gate gets the same environment as an agent, so its tests import the code under review.
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(entries))
+
+    result = ShellGateRunner().run('echo "${PYTHONPATH-unset}"', tmp_path)
+
+    assert result == GateResult(exit_status=0, output=f"{expected}\n")
+
+
+def test_a_gate_command_keeps_the_other_variables_of_the_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("DELEGATE_TEST_MARKER", "kept")
+
+    assert ShellGateRunner().run('echo "$DELEGATE_TEST_MARKER"', tmp_path).output == "kept\n"
