@@ -14,6 +14,10 @@ rendered body or from the verifier brief in the order of the text, runs the
 rendered Bash guard on it in bash, /bin/sh and zsh with the working directory
 of that step, and then runs the step, as the harness does.
 
+The recipe removes the `.git` entry with `rm -r`, not `rm -rf` (#149). A deny
+rule for `rm -rf` in the user settings of a host refused the old form. `rm -r`
+removes the pointer file of a worktree and the `.git` directory of a checkout.
+
 OpenCode has no map rule for the tree under review (measured on OpenCode
 1.15.10 on 2026-10-19), so the rendered OpenCode verifier and the enforcement
 page state that limit.
@@ -36,7 +40,7 @@ from delegate import adapters
 from delegate.cli import delegate
 from delegate.definitions.render import TREE_SEARCH_LIMIT
 from delegate.definitions.validate import split_frontmatter
-from delegate.run.brief import verifier_run_sections
+from delegate.run.brief import red_proof_copy, verifier_run_sections
 
 from .pages import outside_the_package
 from .support import ScriptedAdapter, git, make_repo, read_journal
@@ -63,7 +67,10 @@ FULL_RULE = "in a temp directory, not inside a git tree, and not holding one"
 
 #: The recipe of the rendered Claude Code verifier, in the order of the text. `<tree>` is the tree to copy, and
 #: `/tmp/x` is a new temp path.
-BODY_STEPS = ("cp -R <tree> /tmp/x && rm -rf /tmp/x/.git", "cd /tmp/x")
+BODY_STEPS = ("cp -R <tree> /tmp/x && rm -r /tmp/x/.git", "cd /tmp/x")
+
+#: The old form of the removal, which a deny rule for `rm -rf` refuses (#149).
+RM_RF_GIT = re.compile(r"rm -rf \S*/\.git\b")
 
 
 def _body(rendered: Path, harness: str) -> str:
@@ -137,7 +144,9 @@ def _follow(hook: str, shell: str, base: Path, start: Path, copy: Path, steps: l
     for command in steps:
         verdict = _guard(hook, shell, command, cwd, base)
         assert verdict.returncode == 0, (shell, str(cwd), command, verdict.stderr)
-        ran = subprocess.run(["bash", "-c", command], cwd=cwd, capture_output=True, text=True)
+        # The harness gives the command no terminal on standard input, so `rm -r` does not ask before it removes a
+        # read-only file, for example an object in a `.git` directory.
+        ran = subprocess.run(["bash", "-c", command], cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         assert ran.returncode == 0, (command, ran.stderr)
         if command.startswith("cd "):
             cwd = Path(command[len("cd "):])
@@ -176,10 +185,17 @@ def test_the_opencode_verifier_states_the_toplevel_rule_for_the_write_tool(rende
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_each_step_of_the_recipe_of_the_rendered_verifier_passes_the_guard(rendered, base, shell):
-    # The tree is a git worktree, so its .git entry is a pointer file.
-    tree = base / "wt"
-    git(_repository(base), "worktree", "add", "-q", "-b", "feature", str(tree))
+@pytest.mark.parametrize("kind", ["worktree", "checkout"])
+def test_each_step_of_the_recipe_of_the_rendered_verifier_passes_the_guard(rendered, base, shell, kind):
+    # The .git entry of a worktree is a pointer file, and the .git entry of a main checkout is a directory (#149).
+    main = _repository(base)
+    if kind == "worktree":
+        tree = base / "wt"
+        git(main, "worktree", "add", "-q", "-b", "feature", str(tree))
+        assert (tree / ".git").is_file()
+    else:
+        tree = main
+        assert (tree / ".git").is_dir()
     copy = base / "x"
     body = _section(_body(rendered, "claude-code"), "Your shell")
     _in_order(body, list(BODY_STEPS))
@@ -197,7 +213,7 @@ def test_each_step_of_the_recipe_of_the_verifier_brief_passes_the_guard(rendered
     git(base, "clone", "-q", str(_repository(base)), str(copy))
     brief = verifier_run_sections(copy, scratch / "verdict.json", "full")
     proof = scratch / "proof"
-    steps = [f"cp -R {copy} {proof} && rm -rf {proof}/.git", f"cd {proof}"]
+    steps = [f"cp -R {copy} {proof} && rm -r {proof}/.git", f"cd {proof}"]
     _in_order(brief, steps)
 
     _follow(_bash_hook(rendered), shell, base, copy, proof, steps)
@@ -243,10 +259,36 @@ def test_the_guard_denies_the_removal_of_the_git_entry_after_a_cd_to_the_copy(re
     copy = base / "x"
     shutil.copytree(tree, copy)
 
-    verdict = _guard(_bash_hook(rendered), shell, f"rm -rf {copy}/.git", copy, base)
+    verdict = _guard(_bash_hook(rendered), shell, f"rm -r {copy}/.git", copy, base)
 
     assert verdict.returncode == 2, verdict.stderr
     assert (copy / ".git").exists()
+
+
+def test_the_brief_and_the_rendered_verifiers_remove_the_git_entry_with_rm_r_not_rm_rf(rendered, tmp_path):
+    # The report of #149: the user settings of a host deny `Bash(rm -rf *)`, so the old recipe was refused there.
+    copy = tmp_path / "copy"
+    brief = verifier_run_sections(copy, tmp_path / "verdict.json", "full")
+    claude_code = _section(_body(rendered, "claude-code"), "Your shell")
+
+    assert f"rm -r {red_proof_copy(copy)}/.git`" in brief
+    assert "rm -r /tmp/x/.git`" in claude_code
+    for text in (brief, *(path.read_text() for path in sorted(rendered.glob("*/*.md")))):
+        assert not RM_RF_GIT.findall(text)
+
+
+# The docs, the skills and the committed agents are outside the package source, as in a Nix build.
+@outside_the_package
+def test_no_page_skill_or_committed_agent_removes_the_git_entry_with_rm_rf():
+    # The changelog keeps the old form in the entries of past versions, so it is not in this list.
+    places = [
+        *ROOT.glob("docs/**/*.md"), *ROOT.glob("skills/**/*.md"),
+        *ROOT.glob(".claude/agents/*.md"), *ROOT.glob(".opencode/agents/*.md"),
+    ]
+    assert places
+    found = {path.relative_to(ROOT).as_posix(): RM_RF_GIT.findall(path.read_text()) for path in places}
+
+    assert not {name: hits for name, hits in found.items() if hits}
 
 
 def test_the_brief_and_the_body_tell_the_verifier_not_to_go_to_the_copy_first(rendered, tmp_path):

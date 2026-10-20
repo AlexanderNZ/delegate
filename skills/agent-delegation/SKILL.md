@@ -457,7 +457,10 @@ merge then lands on the wrong ref.
 gitdir of the real worktree. A `git add` or `git commit` in the copy then
 writes the index and the branch of the real worktree.
 
-1. After the copy, remove `<copy>/.git` before any git command in the copy.
+1. Remove `<copy>/.git` in the same command as the copy, before any git
+   command in the copy: `cp -R <tree> <copy> && rm -r <copy>/.git`. Use
+   `rm -r`, not `rm -rf`: it removes the `.git` file of a worktree and the
+   `.git` directory of a checkout, and a host can deny `rm -rf`.
 2. If the copy needs its own repository, run `git init` in the copy after the
    removal.
 

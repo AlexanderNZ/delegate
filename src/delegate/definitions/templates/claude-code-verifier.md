@@ -27,7 +27,7 @@ This rule is binding: a command that the hook refuses is not run in another form
 
 You can copy a tree into a temp directory with `cp`, because only the last path argument of a `cp` must be a temp path. To break a copy and prove a check red on it, do these steps in this order:
 
-1. From your working directory, make the copy and remove its `.git` entry in one command: `cp -R <tree> /tmp/x && rm -rf /tmp/x/.git`. Here `<tree>` is the tree to copy, and `/tmp/x` is a new temp path that does not exist yet.
+1. From your working directory, make the copy and remove its `.git` entry in one command: `cp -R <tree> /tmp/x && rm -r /tmp/x/.git`. Here `<tree>` is the tree to copy, and `/tmp/x` is a new temp path that does not exist yet.
 2. Go to the copy: `cd /tmp/x`.
 3. Break the copy, and prove a check red on it.
 

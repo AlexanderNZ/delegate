@@ -738,7 +738,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         "copies when you end and the system removes temp directories, or first remove the parts that hold no git tree, one directory at a time, each with "
         "fewer than 2000 directories. "
         "To prove a test red, break a second copy. From this copy, make the second copy and remove its `.git` entry "
-        f"in one command: `cp -R {copy} {proof} && rm -rf {proof}/.git`. Then go to it with `cd {proof}`, break it, "
+        f"in one command: `cp -R {copy} {proof} && rm -r {proof}/.git`. Then go to it with `cd {proof}`, break it, "
         "and run the test there. Do not go to the second copy before you remove its `.git` entry, and do not remove the entry "
         "in a later command. A second copy with a `.git` entry is a git tree, and the guards deny the removal. "
         "Never push.\n\n" + _report_rule("copy", report_path)
