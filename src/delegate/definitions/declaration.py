@@ -11,12 +11,23 @@ from pathlib import Path
 KNOWN_KEYS = {
     "description", "tier", "skills", "prompt", "references",
     "maxTurns", "effort", "pair", "readOnly", "gateCommands",
-    "getOnlyCommands", "outputLanguage", "trackedFileBuild",
+    "getOnlyCommands", "outputLanguage", "trackedFileBuild", "contextLoad",
 }
 
 #: The languages an agent can be told to write its report in. "none" adds no
 #: language rule. "ste" adds the ASD-STE100 Simplified Technical English rule.
 OUTPUT_LANGUAGES = ("none", "ste")
+
+#: How the context skill loads its references. "blocks" (the default) reads
+#: each reference with a load-time block. "read" writes no load-time block: the
+#: first instruction of the skill tells the agent to read each reference with
+#: the Read tool, for a host where a load-time block cannot run (issue #148).
+CONTEXT_LOADS = ("blocks", "read")
+
+#: The line that a context skill with contextLoad = "read" carries below its
+#: header comment. The validator reads it from the file on disk: a skill with
+#: this line must hold no load-time block.
+CONTEXT_LOAD_READ_MARKER = "<!-- agent-definitions:context-load read -->"
 
 #: A gate command is plain words separated by single spaces. The guard puts it
 #: in a bash case pattern, and the OpenCode map in a glob: no quote, no shell
@@ -51,6 +62,7 @@ class Agent:
     get_only_commands: list[str] = field(default_factory=list)
     output_language: str = "none"
     tracked_file_build: bool = False
+    context_load: str = "blocks"
 
 
 def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[str]:
@@ -108,6 +120,12 @@ def _tracked_file_build(key: str, value) -> bool:
     return value
 
 
+def _context_load(key: str, value) -> str:
+    if not isinstance(value, str) or value not in CONTEXT_LOADS:
+        raise ValueError(f'agent {key!r}: contextLoad must be "blocks" or "read", not {value!r}')
+    return value
+
+
 def parse_declaration(data: dict) -> list[Agent]:
     agents = data.get("agents", data)
     out: list[Agent] = []
@@ -133,6 +151,7 @@ def parse_declaration(data: dict) -> list[Agent]:
                 get_only_commands=_gate_commands(key, spec.get("getOnlyCommands", []), "getOnlyCommands"),
                 output_language=_output_language(key, spec.get("outputLanguage", "none")),
                 tracked_file_build=_tracked_file_build(key, spec.get("trackedFileBuild", False)),
+                context_load=_context_load(key, spec.get("contextLoad", "blocks")),
             )
         )
     return out

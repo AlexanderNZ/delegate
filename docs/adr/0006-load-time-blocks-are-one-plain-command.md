@@ -30,6 +30,12 @@ Issue 145, a report of 2026-09-25, gives the refusal of a compound block in auto
 
 Issue 196, a comment of 2026-10-08, Claude Code 2.1.287. A headless `claude -p --permission-mode auto` run from a subdirectory of the repository spawned a verifier whose plain blocks used `git grep` with a `:/` pathspec. The verifier started and quoted the correct lines. Limit: a `-p` run does not prove that the agent saw the output of the load-time block. The interactive check is still open.
 
+### Note of 2026-10-20: `EnterWorktree` and an isolated agent
+
+A consumer repository reported on 2026-10-20 that no pair agent could start. The load-time block of the context skill was refused with `Shell command permission check failed for pattern "<the block>": Permission to use Bash has been denied because Claude Code is running in don't ask mode.` A repro on the agent host the same day, Claude Code 2.1.283, narrowed the trigger. The trigger is not the `dontAsk` permission mode that the message names: in `dontAsk` mode with no allow rule, a read-only block loaded. The trigger is a coordinator session that called `EnterWorktree` and then started an agent with worktree isolation, on the Agent call or in the frontmatter. That agent did not start. Each of these loaded: no `EnterWorktree`; `EnterWorktree` and then an agent with no isolation; `EnterWorktree`, then `ExitWorktree`, then an isolated agent. The inline and the fenced forms of the block behaved the same. The upstream bug is reported separately.
+
+This note does not change the decision below. It adds two consequences: the `agent-delegation` skill tells a coordinator to call `ExitWorktree` before it spawns an isolated pair specialist, and `bootstrap --context-load read` writes a context skill with no load-time block, for a host where a load-time block cannot run (issue #148).
+
 ## Decision
 
 Each load-time block of a context skill is one plain command: one line, with no `$(...)`, no `;`, no `if`, no pipe, no redirect and no assignment prefix. `bootstrap` makes each decision that a compound block made at load time when it writes the skill. It counts the lines of each reference and writes the full-text block or the heading-index block. Each block is `git grep` with a `:/` pathspec, so that it reads the same file from the repository root and from each subdirectory.

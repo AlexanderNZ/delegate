@@ -12,7 +12,9 @@ the agent templates hold the shape of an agent file. Both are
 written twice in the template: `$$(...)` in `context-skill.md` renders as
 `$(...)` in the skill. The load-time blocks hold no dollar sign: each one is
 one plain command, because a compound block can stop a subagent from
-starting (see `live_read`).
+starting (see `live_read`). With `contextLoad = "read"`, two other templates,
+`context-skill-read.md` and `context-skill-read-section.md`, write a skill with
+no load-time block: the agent reads each reference with the Read tool.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from string import Template
 
 import yaml
 
-from .declaration import OUTPUT_LANGUAGES, parse_declaration
+from .declaration import CONTEXT_LOAD_READ_MARKER, CONTEXT_LOADS, OUTPUT_LANGUAGES, parse_declaration
 from .render import render
 from ..shared.tiers import Tiers
 from .validate import validate_set
@@ -133,8 +135,31 @@ def live_read(repo: Path, path: str) -> tuple[str, str]:
     )
 
 
-def context_skill(repo: Path, name: str, domain: str, references: list[str], command: str) -> str:
-    """The `<name>-context` skill, one live-read section per reference."""
+def context_skill(
+    repo: Path, name: str, domain: str, references: list[str], command: str, context_load: str | None = None
+) -> str:
+    """The `<name>-context` skill, one live-read section per reference.
+
+    With `context_load` "read", each section tells the agent to read its
+    reference with the Read tool, and the skill holds no load-time block.
+    """
+    frontmatter = _frontmatter(
+        {"name": f"{name}-context", "description": skill_description(name, domain, references)}
+    )
+    if context_load == "read":
+        section = _template("context-skill-read-section")
+        sections = "\n\n".join(
+            section.substitute(heading=_heading(r), path=reference_path(r)).strip("\n") for r in references
+        )
+        text = _template("context-skill-read").substitute(
+            frontmatter=frontmatter,
+            command=command,
+            marker=CONTEXT_LOAD_READ_MARKER,
+            title=name,
+            domain=domain,
+            sections=sections,
+        )
+        return text.rstrip("\n") + "\n"
     section = _template("context-skill-section")
     blocks = []
     for r in references:
@@ -142,9 +167,7 @@ def context_skill(repo: Path, name: str, domain: str, references: list[str], com
         blocks.append(section.substitute(heading=_heading(r), note=note, read=read).strip("\n"))
     sections = "\n\n".join(blocks)
     text = _template("context-skill").substitute(
-        frontmatter=_frontmatter(
-            {"name": f"{name}-context", "description": skill_description(name, domain, references)}
-        ),
+        frontmatter=frontmatter,
         command=command,
         title=name,
         domain=domain,
@@ -187,6 +210,7 @@ def declaration_toml(
     get_only_commands: Sequence[str] = (),
     output_language: str | None = None,
     tracked_file_build: bool = False,
+    context_load: str | None = None,
 ) -> str:
     """The `[agents.<name>]` declaration, in the key order the skill documents.
 
@@ -217,6 +241,8 @@ def declaration_toml(
         lines.append(f"outputLanguage = {_toml_string(output_language)}")
     if tracked_file_build:
         lines.append("trackedFileBuild = true")
+    if context_load is not None:
+        lines.append(f"contextLoad = {_toml_string(context_load)}")
     if prompt.strip():
         lines.append("prompt = " + _toml_multiline(prompt))
     return "\n".join(lines) + "\n"
@@ -235,6 +261,7 @@ def rerun_command(
     get_only_commands: Sequence[str] = (),
     output_language: str | None = None,
     tracked_file_build: bool = False,
+    context_load: str | None = None,
 ) -> str:
     """The command that reproduces this run, with `--repo .` for portability.
 
@@ -259,6 +286,8 @@ def rerun_command(
         parts += ["--output-language", output_language]
     if tracked_file_build:
         parts += ["--tracked-file-build"]
+    if context_load is not None:
+        parts += ["--context-load", context_load]
     parts += ["--skills-root", skills_root]
     return " ".join(shlex.quote(p) for p in parts)
 
@@ -311,6 +340,7 @@ def plan(
     get_only_commands: Sequence[str] = (),
     output_language: str | None = None,
     tracked_file_build: bool = False,
+    context_load: str | None = None,
 ) -> tuple[dict[Path, str], dict[str, dict[str, str]]]:
     """The skill and the declaration to write, and the pair to render from them.
 
@@ -321,6 +351,10 @@ def plan(
     if output_language is not None and output_language not in OUTPUT_LANGUAGES:
         raise BootstrapError(
             f"unknown output language {output_language!r}; permitted values: {', '.join(OUTPUT_LANGUAGES)}"
+        )
+    if context_load is not None and context_load not in CONTEXT_LOADS:
+        raise BootstrapError(
+            f"unknown context load {context_load!r}; permitted values: {', '.join(CONTEXT_LOADS)}"
         )
     missing = [reference_path(r) for r in references if not (repo / reference_path(r)).exists()]
     if missing:
@@ -338,15 +372,15 @@ def plan(
 
     command = rerun_command(
         name, domain, tier, skills, references, prompt_file, max_turns, skills_root, gate_commands,
-        get_only_commands, output_language, tracked_file_build,
+        get_only_commands, output_language, tracked_file_build, context_load,
     )
     declared_skills = [f"{name}-context", *skills]
     skill_dir = repo / skills_root / f"{name}-context"
     sources = {
-        skill_dir / "SKILL.md": context_skill(repo, name, domain, references, command),
+        skill_dir / "SKILL.md": context_skill(repo, name, domain, references, command, context_load),
         skill_dir / "agents.toml": declaration_toml(
             name, domain, tier, declared_skills, references, prompt, max_turns, command, gate_commands,
-            get_only_commands, output_language, tracked_file_build,
+            get_only_commands, output_language, tracked_file_build, context_load,
         ),
     }
 
@@ -377,11 +411,12 @@ def run(
     get_only_commands: Sequence[str] = (),
     output_language: str | None = None,
     tracked_file_build: bool = False,
+    context_load: str | None = None,
 ) -> int:
     try:
         sources, rendered = plan(
             repo, name, domain, tier, skills, references, prompt_file, max_turns, skills_root, tiers,
-            gate_commands, get_only_commands, output_language, tracked_file_build,
+            gate_commands, get_only_commands, output_language, tracked_file_build, context_load,
         )
     except BootstrapError as e:
         print(e, file=sys.stderr)

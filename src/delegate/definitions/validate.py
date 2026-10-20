@@ -12,6 +12,7 @@ from pathlib import Path
 
 import yaml
 
+from .declaration import CONTEXT_LOAD_READ_MARKER
 from .render import VERIFIER_GUARD_MARKER, VERIFIER_WRITE_GUARD_MARKER, VERIFIER_WRITE_PATH_PREFIXES
 from ..shared.tiers import Tiers
 
@@ -152,6 +153,11 @@ FINDING_CODES: dict[str, str] = {
         "a load-time block (`` ```! ``) of a preloaded skill holds, outside quotes, `$(`, a backtick, `;`, `&&`, a double pipe, "
         "a pipe, `if` or a redirection; Claude Code cannot analyse the command, so a subagent that preloads the skill does not "
         "start (ADR 0006). The finding gives the file and the line"
+    ),
+    "LOAD_BLOCK_IN_READ_SKILL": (
+        f"a preloaded skill that carries `{CONTEXT_LOAD_READ_MARKER}` (a context skill with `contextLoad = \"read\"`) "
+        "holds a load-time block (`` ```! ``); that skill must read its references with the Read tool only. "
+        "The finding gives the file and the line"
     ),
 }
 
@@ -506,6 +512,10 @@ def _refused_forms(command: str) -> list[str]:
 def load_time_block_findings(skill: Path) -> list[Finding]:
     """One LOAD_BLOCK_NOT_PLAIN finding for each load-time block of a skill that is not one plain command.
 
+    A skill that carries CONTEXT_LOAD_READ_MARKER (bootstrap with
+    contextLoad = "read") also gives one LOAD_BLOCK_IN_READ_SKILL finding for
+    each load-time block, plain or not, at the line that opens the block.
+
     A load-time block is a fenced block that opens with ```! . Claude Code runs
     its command when it loads the skill, and only when it can analyse the
     command: a block with shell syntax stops a subagent that preloads the skill
@@ -518,13 +528,23 @@ def load_time_block_findings(skill: Path) -> list[Finding]:
     load_time = False
     forms: list[str] = []
     first = None
-    for number, line in enumerate(skill.read_text().splitlines(), start=1):
+    lines = skill.read_text().splitlines()
+    # A skill written with contextLoad = "read" must hold no load-time block.
+    read_only_load = any(line.strip() == CONTEXT_LOAD_READ_MARKER for line in lines)
+    for number, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not in_fence:
             if stripped.startswith("```"):
                 in_fence = True
                 load_time = stripped[3:].strip() == "!"
                 forms, first = [], None
+                if load_time and read_only_load:
+                    findings.append(Finding(
+                        "LOAD_BLOCK_IN_READ_SKILL", str(skill),
+                        "this skill was written with contextLoad = \"read\", and it holds a load-time block; "
+                        "remove the block, and read the document with the Read tool",
+                        line=number,
+                    ))
             continue
         if stripped == "```":
             if load_time and forms:

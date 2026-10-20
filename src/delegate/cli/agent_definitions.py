@@ -132,6 +132,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         get_only_commands=list(getattr(args, "get_only_command", None) or []),
         output_language=getattr(args, "output_language", None),
         tracked_file_build=bool(getattr(args, "tracked_file_build", False)),
+        context_load=getattr(args, "context_load", None),
     )
 
 
@@ -200,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--tracked-file-build",
         action="store_true",
         help="the build reads tracked files only, as a flake does; the specialist then stages every new file",
+    )
+    b.add_argument(
+        "--context-load",
+        metavar="MODE",
+        help="how the context skill loads its references: blocks | read (the Read tool, no load-time block); "
+        "default: write no field",
     )
     b.add_argument("--skills-root", default=DEFAULT_SKILLS_ROOT, help=f"default {DEFAULT_SKILLS_ROOT}")
     b.add_argument(

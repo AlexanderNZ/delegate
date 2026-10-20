@@ -26,6 +26,7 @@ prompt = "Domain notes the agent needs."
 # getOnlyCommands = ["./scripts/api"]          # optional: commands the verifier may run only without a method, body or output flag (see "Gate commands")
 # outputLanguage = "ste"   # optional: "none" (the default) or "ste" (see "Rendering rules")
 # trackedFileBuild = true  # optional: the build reads tracked files only, as a flake does (default false)
+# contextLoad = "read"     # optional: "blocks" (the default) or "read"; how bootstrap writes the context skill (see "Bootstrap")
 ```
 
 The full example is `examples/java-spring.toml` in the repository.
@@ -94,7 +95,8 @@ none of them.
 agent-definitions bootstrap --repo PATH --name NAME --domain TEXT --tier TIER \
   --skill NAME [--skill NAME ...] --reference PATH [--reference PATH ...] \
   [--prompt-file FILE] [--max-turns N] [--gate-command CMD ...] [--get-only-command CMD ...] \
-  [--output-language none|ste] [--tracked-file-build] [--skills-root DIR] [--dry-run]
+  [--output-language none|ste] [--tracked-file-build] [--context-load blocks|read] \
+  [--skills-root DIR] [--dry-run]
 ```
 
 It writes six files.
@@ -112,6 +114,7 @@ It writes six files.
 - **The command renders into a temporary directory and validates it**, never the harness directory. On a finding it prints each finding, exits 1, and writes no agent file. The skill and the declaration are on disk before that pass, because the validator reports `MISSING_SKILL` for a context skill it cannot find.
 - **`--dry-run` prints every file with its content and writes nothing.** It does not validate: the context skill is not on disk, so the pass would report a skill that the real run creates.
 - **`--output-language` and `--tracked-file-build` write the two neutral declaration options.** `--output-language ste` writes `outputLanguage = "ste"`, and the rendered pair then carries the ASD-STE100 rule. `--output-language none` writes `outputLanguage = "none"`. Any other value exits 1 and names the permitted values, `none` and `ste`. `--tracked-file-build` writes `trackedFileBuild = true`, and the rendered Claude Code specialist then carries the flake reason (see "Rendering rules"). Without a flag the declaration holds no such key, and the declaration, the context skill, and the rendered pair are the same bytes as before the flags existed.
+- **`--context-load` selects how the context skill loads its references.** `--context-load read` writes `contextLoad = "read"`, and the context skill then has no load-time block. Its first instruction tells the agent to read each reference document with the Read tool before any other step, in the order of the references, and to stop and report when a reference is missing. Each reference gets a section with the instruction ``Read `<path>` with the Read tool.`` The skill carries the line `<!-- agent-definitions:context-load read -->` below its header comment, and `validate` gives `LOAD_BLOCK_IN_READ_SKILL` for each load-time block in a skill with that line. Use `read` on a host where a load-time block cannot run. `--context-load blocks` writes `contextLoad = "blocks"`, and the skill is the skill of the default. Any other value exits 1 and names the permitted values, `blocks` and `read`. Without the flag the declaration holds no `contextLoad` key. `render` reads the key and writes the same agent files for each value.
 - **`--get-only-command` writes `getOnlyCommands`**, as `--gate-command` writes `gateCommands`. Repeat it for each command. The entry rules are the rules of "Gate commands". Without the flag the declaration holds no `getOnlyCommands` key.
 - **A second run with the same arguments writes the same bytes.** A run with different arguments replaces all six files. The command never changes `docs/agents/delegation.md`.
 
@@ -121,7 +124,7 @@ A live-read block is one plain `git grep` command. Claude Code runs a load-time 
 
 The `:/` pathspec names the file from the top of the working tree, so a block reads the same file from the repository root and from each subdirectory. In a linked worktree it reads the files of that worktree, uncommitted changes included. An earlier form of the block used a path relative to the working directory, and a continuation spawned from `app/` stopped in about 250 ms. `--untracked` with `--no-exclude-standard` also reads a file that is not in the index and a file that `.gitignore` names, so a block reads any file on disk, as the `sed` block did. `-E` sets the pattern type, because `grep.patternType` in a git config changes the default. A block needs no shell syntax and no assignment prefix, so it stays one command that Claude Code can analyse. The context skill is for a git repository: outside one, each block returns an error. A block that exits with no output can also mean that its reference file is missing or renamed.
 
-The two templates are `definitions/templates/context-skill.md` and `definitions/templates/context-skill-section.md`, data in the package like the agent templates. Both are `string.Template` files, so each dollar sign the generated text needs is written twice: `$$(...)` in `context-skill.md` is `$(...)` in the skill.
+The two templates are `definitions/templates/context-skill.md` and `definitions/templates/context-skill-section.md`, data in the package like the agent templates. With `contextLoad = "read"`, `definitions/templates/context-skill-read.md` and `definitions/templates/context-skill-read-section.md` replace them. Both are `string.Template` files, so each dollar sign the generated text needs is written twice: `$$(...)` in `context-skill.md` is `$(...)` in the skill.
 
 ## Verifier modes
 
@@ -255,6 +258,7 @@ Decision of 2026-09-19 ([ADR 0001](../../docs/adr/0001-effort-follows-the-model.
 | `MISSING_SKILL` | a preloaded skill absent from `--skills-dir` |
 | `DESCRIPTION_BUDGET` | combined Claude Code descriptions exceed the budget in `tiers.toml` |
 | `LOAD_BLOCK_NOT_PLAIN` | a load-time block (`` ```! ``) of a preloaded skill holds, outside quotes, `$(`, a backtick, `;`, `&&`, a double pipe, a pipe, `if` or a redirection; Claude Code cannot analyse the command, so a subagent that preloads the skill does not start (ADR 0006). The finding gives the file and the line |
+| `LOAD_BLOCK_IN_READ_SKILL` | a preloaded skill that carries `<!-- agent-definitions:context-load read -->` (a context skill with `contextLoad = "read"`) holds a load-time block (`` ```! ``); that skill must read its references with the Read tool only. The finding gives the file and the line |
 
 <!-- generated:end finding-codes -->
 

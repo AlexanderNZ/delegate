@@ -70,7 +70,7 @@ delegate validate [<rendered>] [--claude-code <dir>] [--opencode <dir>] [--skill
 
 <!-- generated:end validate-options -->
 
-With `--skills-dir`, `validate` also reads each skill that a Claude Code agent preloads, in `--skills-dir` and in `--user-skills-dir`, and checks each load-time block: a fenced block that opens with `` ```! ``. A block that holds `$(`, a backtick, `;`, `&&`, a double pipe, a pipe, `if` or a redirection outside quotes gives the finding `LOAD_BLOCK_NOT_PLAIN`, with the file and the line. One plain command passes, for example `sed -n '1,20p' docs/gates.md`. A sign in single quotes is text, so `grep -n -E 'a|b' docs/gates.md` also passes. The rule comes from [**ADR**](../glossary.md#adr) 0006, `docs/adr/0006-load-time-blocks-are-one-plain-command.md`.
+With `--skills-dir`, `validate` also reads each skill that a Claude Code agent preloads, in `--skills-dir` and in `--user-skills-dir`, and checks each load-time block: a fenced block that opens with `` ```! ``. A block that holds `$(`, a backtick, `;`, `&&`, a double pipe, a pipe, `if` or a redirection outside quotes gives the finding `LOAD_BLOCK_NOT_PLAIN`, with the file and the line. One plain command passes, for example `sed -n '1,20p' docs/gates.md`. A sign in single quotes is text, so `grep -n -E 'a|b' docs/gates.md` also passes. The rule comes from [**ADR**](../glossary.md#adr) 0006, `docs/adr/0006-load-time-blocks-are-one-plain-command.md`. A skill that carries the line `<!-- agent-definitions:context-load read -->` was written with `contextLoad = "read"`, and each load-time block in it gives the finding `LOAD_BLOCK_IN_READ_SKILL`, with the file and the line, also when the block is one plain command.
 
 ## `delegate bootstrap`
 
@@ -97,6 +97,7 @@ delegate bootstrap --repo <dir> --name <name> --domain <text> --tier <tier> --sk
 | `--get-only-command <cmd>` | A command the verifier may run only without -X, alone or with arguments; repeat it. |
 | `--output-language <language>` | The language of agent text: none \| ste (ASD-STE100); default: write no field. |
 | `--tracked-file-build` | The build reads tracked files only, as a flake does; the specialist then stages every new file. |
+| `--context-load <mode>` | How the context skill loads its references: blocks \| read (the Read tool, no load-time block); default: write no field. |
 | `--skills-root <skills-root>` | Default .claude/skills. |
 | `--user-skills-dir <user-skills-dir>` | A second skills directory to search; default: ~/.claude/skills. |
 | `--dry-run` | Print every file with its content and write nothing. |
@@ -104,6 +105,8 @@ delegate bootstrap --repo <dir> --name <name> --domain <text> --tier <tier> --sk
 <!-- generated:end bootstrap-options -->
 
 Each load-time block of the context skill is one plain command. A block with `$(...)`, `;`, `if` or a pipe stopped a subagent from starting with each of the `--permission-mode` values `default` (manual), `acceptEdits` and `auto`, measured on Claude Code 2.1.283 on 2026-09-26. No Claude Code documentation states this rule: it is a measured behaviour. [**ADR**](../glossary.md#adr) 0006, `docs/adr/0006-load-time-blocks-are-one-plain-command.md`, records the measurements and their source. See [the decision records](../explanation/decision-records.md). The context skill carries the same note.
+
+With `--context-load read`, the declaration gets `contextLoad = "read"`, and the context skill has no load-time block. Its first instruction tells the agent to read each reference with the Read tool before any other step, in the order of the references, and to stop and report when a reference is missing. Use it on a host where a load-time block cannot run. `--context-load blocks` writes `contextLoad = "blocks"` and the skill of the default. Any other value exits 1 and names the permitted values, `blocks` and `read`. Without the flag, the declaration holds no `contextLoad` key, and the files are the same bytes as before the flag existed.
 
 ## `delegate brief`
 
@@ -207,5 +210,6 @@ The OpenCode `bash` map of the verifier is smaller than the table. It has no `ec
 | `MISSING_SKILL` | a preloaded skill absent from `--skills-dir` |
 | `DESCRIPTION_BUDGET` | combined Claude Code descriptions exceed the budget in `tiers.toml` |
 | `LOAD_BLOCK_NOT_PLAIN` | a load-time block (`` ```! ``) of a preloaded skill holds, outside quotes, `$(`, a backtick, `;`, `&&`, a double pipe, a pipe, `if` or a redirection; Claude Code cannot analyse the command, so a subagent that preloads the skill does not start (ADR 0006). The finding gives the file and the line |
+| `LOAD_BLOCK_IN_READ_SKILL` | a preloaded skill that carries `<!-- agent-definitions:context-load read -->` (a context skill with `contextLoad = "read"`) holds a load-time block (`` ```! ``); that skill must read its references with the Read tool only. The finding gives the file and the line |
 
 <!-- generated:end finding-codes -->

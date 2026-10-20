@@ -277,6 +277,14 @@ command permission check failed".
   user and asks for a mode change.
 - Do not spawn the agent again in a loop. Each new spawn in the same mode fails
   the same way.
+- A coordinator that called `EnterWorktree` calls `ExitWorktree` before it
+  spawns a pair specialist with worktree isolation, on the Agent call or in
+  the frontmatter. Without that step, the context skill of that agent does not
+  load, and the agent does not start (measured on Claude Code 2.1.283,
+  2026-10-20). An agent with no isolation loads the skill.
+- A host where a load-time block cannot run bootstraps the pair with
+  `--context-load read`. The context skill then has no load-time block: the
+  agent reads each reference with the Read tool.
 
 ### A capped specialist resumes — it never re-spawns
 A specialist that reaches its turn cap stops mid-task. The harness reports the
