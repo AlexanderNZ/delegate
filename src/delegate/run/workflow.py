@@ -41,6 +41,9 @@ class Stack:
     mcp_servers: tuple[McpServer, ...] = ()
     # The commands that the engine runs in each tree before an agent starts in it (#155). Empty: none.
     prepare: tuple[str, ...] = ()
+    # The text that the engine adds to each brief of a role of this stack (#156). None: no notes.
+    specialist_notes: str | None = None
+    verifier_notes: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,12 +205,15 @@ class _Reader:
 TOP_LEVEL_FIELDS: tuple[str, ...] = (
     "base-branch", "run-branch", "mode", "adapter", "ticket-start", "tier-overrides", "stacks", "tickets",
 )
-STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare")
+STACK_FIELDS: tuple[str, ...] = (
+    "specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare",
+    "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file",
+)
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
 
 
-def _read_stacks(reader: _Reader, value: object) -> dict[str, Stack]:
+def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]:
     stacks: dict[str, Stack] = {}
     table = reader.table(value, "stacks") if value is not None else None
     if value is None:
@@ -225,9 +231,49 @@ def _read_stacks(reader: _Reader, value: object) -> dict[str, Stack]:
         servers = _read_mcp_servers(reader, stack.get("mcp-servers", {}), f"{field}.mcp-servers")
         # `prepare` is optional. When it is there, the check is the check of `gates`.
         prepare = reader.string_list(stack, "prepare", f"{field}.prepare", at_least_one=True) if "prepare" in stack else []
-        if None not in (specialist, verifier, gates, hotspots, servers, prepare):
-            stacks[name] = Stack(name, specialist, verifier, gates, hotspots, servers, tuple(prepare))  # type: ignore[arg-type]
+        problems = len(reader.problems)
+        notes = {role: _read_notes(reader, stack, role, field, root) for role in ROLES}
+        if None not in (specialist, verifier, gates, hotspots, servers, prepare) and len(reader.problems) == problems:
+            stacks[name] = Stack(
+                name, specialist, verifier, gates, hotspots, servers, tuple(prepare),  # type: ignore[arg-type]
+                specialist_notes=notes["specialist"], verifier_notes=notes["verifier"],
+            )
     return stacks
+
+
+def _read_notes(reader: _Reader, stack: dict[str, object], role: str, field: str, root: Path) -> str | None:
+    """The notes of `role` in a stack: the inline `<role>-notes`, the content of the file `<role>-notes-file`, or None.
+
+    Both fields are optional, and a stack gives at most one of them. The caller
+    sees a defect as a new entry in `reader.problems`.
+    """
+    inline, file = f"{role}-notes", f"{role}-notes-file"
+    if inline in stack and file in stack:
+        reader.problems.append(f"{field}: give at most one of {inline} and {file}")
+        return None
+    if inline in stack:
+        return reader.string(stack, inline, f"{field}.{inline}")
+    if file not in stack:
+        return None
+    name = reader.string(stack, file, f"{field}.{file}")
+    if name is None:
+        return None
+    text = _read_file(reader, root, name, f"{field}: {file}")
+    if text is not None and not text.strip():
+        reader.problems.append(f"{field}: {file} {name!r} is empty")
+        return None
+    return text
+
+
+def _read_file(reader: _Reader, root: Path, name: str, where: str) -> str | None:
+    """The content of the file `name`, relative to `root`. A file that cannot be read is a problem that starts with `where`."""
+    try:
+        return (root / name).read_text()
+    except FileNotFoundError:
+        reader.problems.append(f"{where} {name!r} not found (looked in {root})")
+    except OSError as error:
+        reader.problems.append(f"{where} {name!r} cannot be read: {error}")
+    return None
 
 
 def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpServer, ...] | None:
@@ -288,19 +334,13 @@ def _read_ticket_text(reader: _Reader, raw: dict[str, object], label: str, root:
     name = reader.string(raw, "text-file", f"{label}: text-file")
     if name is None:
         return None
-    try:
-        return (root / name).read_text()
-    except FileNotFoundError:
-        reader.problems.append(f"{label}: text-file {name!r} not found (looked in {root})")
-    except OSError as error:
-        reader.problems.append(f"{label}: text-file {name!r} cannot be read: {error}")
-    return None
+    return _read_file(reader, root, name, f"{label}: text-file")
 
 
 def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] = ()) -> Workflow:
     """Read and check a workflow file. Raise WorkflowError with every defect found.
 
-    `text-file` paths are relative to the directory of the workflow file.
+    `text-file` paths and the paths of the notes files of a stack are relative to the directory of the workflow file.
     """
     try:
         data = tomllib.loads(Path(path).read_text())
@@ -339,7 +379,7 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
         reader.problems.append(f"tier-overrides.{role}: must be a string, not {overrides_table[role]!r}")
     reader.problems.extend(_tier_override_problems(overrides, tiers))
 
-    stacks = _read_stacks(reader, data.get("stacks"))
+    stacks = _read_stacks(reader, data.get("stacks"), Path(path).parent)
     tickets = _read_tickets(reader, data.get("tickets"), Path(path).parent)
     known_ids = {t.id for t in tickets}
     for ticket in tickets:

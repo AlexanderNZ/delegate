@@ -353,6 +353,10 @@ def main(argv: list[str] | None = None) -> int:
     for stack in workflow.stacks.values():
         for command in stack.prepare:
             print(f"stack {stack.name} prepare: {command}")
+        for role, notes in (("specialist", stack.specialist_notes), ("verifier", stack.verifier_notes)):
+            if notes is not None:
+                print(f"stack {stack.name} {role}-notes:")
+                print("\n".join(f"  {line}" if line.strip() else "" for line in notes.strip().splitlines()))
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
     return 0

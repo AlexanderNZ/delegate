@@ -134,8 +134,8 @@ from ..shared.tiers import Tiers
 from . import domain
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
-    plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief, verifier_run_brief,
-    verifier_run_sections,
+    notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
+    verifier_run_brief, verifier_run_sections,
 )
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
@@ -1377,7 +1377,7 @@ def _build_with_continuations(
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
         ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
-        plan_change=plan_change,
+        plan_change=plan_change, notes=stack.specialist_notes,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
@@ -1385,6 +1385,7 @@ def _build_with_continuations(
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
+                notes=stack.specialist_notes,
             )
     resume_session: str | None = None
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -1456,7 +1457,7 @@ def _build_with_continuations(
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
-                plan_change=plan_change,
+                plan_change=plan_change, notes=stack.specialist_notes,
             )
 
 
@@ -1647,7 +1648,7 @@ def _run_fixup(
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
     prompt = specialist_brief(
         ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text,
-        red_gates=red_gates,
+        red_gates=red_gates, notes=step.stack.specialist_notes,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -1744,6 +1745,8 @@ def _verify_round(
         try:
             with _vcs_errors():
                 step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
+            # Each verifier brief holds the verifier notes of the stack after the gates, before the working copy.
+            notes = notes_section(step.stack.verifier_notes)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
@@ -1751,14 +1754,15 @@ def _verify_round(
                     + plan_change_section(_plan_change_note(step.journal, step.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
-                prompt = first_pass + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                prompt = first_pass + notes + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
             elif fixup_body is None:
                 prompt = verifier_run_brief(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
                     plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
+                    notes=step.stack.verifier_notes,
                 )
             else:
-                prompt = fixup_body + verifier_run_sections(copy, report_path, mode)
+                prompt = fixup_body + notes + verifier_run_sections(copy, report_path, mode)
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.

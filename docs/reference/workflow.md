@@ -129,7 +129,7 @@ The verifier tier never goes down, in any mode. The `verifier` entry must name a
 
 ## Stacks
 
-Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers` and `prepare` are optional.
+Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -139,6 +139,10 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
+| `specialist-notes` | string | The text that the engine adds to each specialist brief of this stack. Give at most one of `specialist-notes` and `specialist-notes-file`. See [Notes](#notes). |
+| `specialist-notes-file` | string | The path of a local file that holds the specialist notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
+| `verifier-notes` | string | The text that the engine adds to each verifier brief of this stack. Give at most one of `verifier-notes` and `verifier-notes-file`. See [Notes](#notes). |
+| `verifier-notes-file` | string | The path of a local file that holds the verifier notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
 
 ### Prepare
 
@@ -159,6 +163,27 @@ The engine runs the commands in order, with the environment of a gate, in each t
 - In the temporary copy of each verifier, before the verifier starts. The engine makes the proof copy after the commands, so the proof copy holds what they made.
 
 A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate, and it starts no fix-up round. See [the prepare commands](run.md#the-prepare-commands). `delegate run --dry-run` prints the line `stack <name> prepare: <command>` for each command.
+
+### Notes
+
+Some text applies to each ticket of a stack, for example how the repository is set up, or that the host has no visual gate. Put this text in the notes of the stack, not in each ticket.
+
+```toml
+[stacks.web]
+specialist = "web-specialist"
+verifier = "web-verifier"
+gates = ["npm test"]
+hotspots = []
+specialist-notes = "Run `npm run setup` once before the tests."
+verifier-notes-file = "notes/web-verifier.md"
+```
+
+The engine adds the text as the section `## Notes of this stack` to each [**brief**](../glossary.md#brief) of the stack:
+
+- The specialist notes go to the specialist brief, the continuation brief and the fix-up brief of the specialist.
+- The verifier notes go to the full verifier brief, the fix-up verifier brief and the chain brief.
+
+The specialist briefs do not hold the verifier notes, and the verifier briefs do not hold the specialist notes. The notes do not replace the ticket text, and they do not change the rules of the brief. The section says that the ticket and the rules of the brief win where they differ from the notes. See [the specialist brief](run.md#the-specialist-brief) and [the verifier step](run.md#the-verifier-step). `delegate run --dry-run` prints the line `stack <name> specialist-notes:` or `stack <name> verifier-notes:`, and then each line of the notes, with two spaces before it.
 
 ### MCP servers
 
@@ -220,4 +245,6 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 | Tickets wait on each other. | Every ticket in the cycle. A ticket that blocks itself is a cycle. |
 | Two tickets have one id. | The id. |
 | A `text-file` does not exist. | The ticket and the path. |
+| A stack gives both `specialist-notes` and `specialist-notes-file`, or both `verifier-notes` and `verifier-notes-file`. | The stack and the two fields, for example `stacks.web: give at most one of verifier-notes and verifier-notes-file`. |
+| A `specialist-notes-file` or a `verifier-notes-file` does not exist, or it is empty. | The stack, the field and the path. |
 | An MCP server has both `command` and `url`, or neither. | The server, for example `stacks.web.mcp-servers.browser`. |
