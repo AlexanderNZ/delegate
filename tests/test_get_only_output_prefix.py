@@ -63,20 +63,18 @@ def worktree(tmp_path, git_identity) -> Path:
     return root
 
 
-def _guard(command: str, shell: str, cwd: Path) -> subprocess.CompletedProcess:
-    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process."""
+def _guard(command: str, shell: str, cwd: Path, tmpdir: Path | None = None) -> subprocess.CompletedProcess:
+    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process.
+
+    When `tmpdir` is given, the guard runs with `TMPDIR` set to it.
+    """
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)})
     argv, executable = [shutil.which(shell) or shell, "-c", HOOK], None
     if shell == "/bin/sh" and sys.platform != "darwin":
         # The Linux Nix build sandbox's /bin/sh is busybox. Run bash as `sh`, the shell of a NixOS host.
         argv[0], executable = "sh", shutil.which("bash")
-    return subprocess.run(argv, executable=executable, input=payload, capture_output=True, text=True, cwd=cwd)
-
-
-def _worktree_path(worktree: Path) -> str:
-    # On macOS the real path starts with /private/var/folders/, which is no temp prefix. Without /private, the path
-    # is in a temp directory, so only the git tree rule (#125) can deny it.
-    return str(worktree).removeprefix("/private")
+    env = None if tmpdir is None else {**os.environ, "TMPDIR": f"{tmpdir}/"}
+    return subprocess.run(argv, executable=executable, input=payload, capture_output=True, text=True, env=env, cwd=cwd)
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -85,8 +83,13 @@ def _worktree_path(worktree: Path) -> str:
     ["--out {path}", "--out={path}", "--outpu {path}", "--outp {path}/out", "--outpu={path}/out", "--output {path}"],
 )
 def test_a_prefix_of_output_with_a_path_in_the_worktree_is_denied(worktree, shell, spelling):
-    command = "agent-definitions render " + spelling.format(path=_worktree_path(worktree))
-    r = _guard(command, shell, worktree)
+    # The path is $TMPDIR/<path in the temp base>, and the guard runs with TMPDIR set to the temp base. Thus the path
+    # is a temp path also where the temp base has no temp prefix of the guard (/build in the Linux Nix build sandbox),
+    # and only the git tree rule (#125) can deny it.
+    base = worktree.parent
+    path = "$TMPDIR/" + worktree.relative_to(base).as_posix()
+    command = "agent-definitions render " + spelling.format(path=path)
+    r = _guard(command, shell, worktree, tmpdir=base)
     assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
     assert f"[{command}]" in r.stderr, (shell, command, r.stderr)
     assert "git toplevel" in r.stderr, (shell, command, r.stderr)

@@ -82,14 +82,18 @@ def repo(tmp_path, git_identity) -> Path:
     return root
 
 
-def _guard(command: str, shell: str, cwd: Path) -> subprocess.CompletedProcess:
-    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process."""
+def _guard(command: str, shell: str, cwd: Path, tmpdir: Path | None = None) -> subprocess.CompletedProcess:
+    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process.
+
+    When `tmpdir` is given, the guard runs with `TMPDIR` set to it.
+    """
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)})
     argv, executable = [shutil.which(shell) or shell, "-c", HOOK], None
     if shell == "/bin/sh" and sys.platform != "darwin":
         # The Linux Nix build sandbox's /bin/sh is busybox. Run bash as `sh`, the shell of a NixOS host.
         argv[0], executable = "sh", shutil.which("bash")
-    return subprocess.run(argv, executable=executable, input=payload, capture_output=True, text=True, cwd=cwd)
+    env = None if tmpdir is None else {**os.environ, "TMPDIR": f"{tmpdir}/"}
+    return subprocess.run(argv, executable=executable, input=payload, capture_output=True, text=True, env=env, cwd=cwd)
 
 
 # --- git grep is a read --------------------------------------------------------------
@@ -215,10 +219,12 @@ def test_an_output_option_with_a_temp_path_is_permitted(repo, shell, command):
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_an_output_path_in_a_git_tree_in_a_temp_directory_is_denied(repo, shell):
-    # The repository of the test is in a temp directory. A write into it changes a git tree (#125). On macOS the real
-    # path starts with /private/var/folders/, which is no temp prefix, so the path loses its /private prefix.
-    command = f"git diff --output={str(repo).removeprefix('/private')}/out.diff"
-    r = _guard(command, shell, repo)
+    # The repository of the test is in a temp directory. A write into it changes a git tree (#125). The path is
+    # $TMPDIR/<path in the temp base>, and the guard runs with TMPDIR set to the temp base. Thus the path is a temp
+    # path also where the temp base has no temp prefix of the guard (/build in the Linux Nix build sandbox).
+    base = repo.parent
+    command = f"git diff --output=$TMPDIR/{repo.relative_to(base).as_posix()}/out.diff"
+    r = _guard(command, shell, repo, tmpdir=base)
     assert r.returncode == 2, (shell, command, r.stderr)
     assert "git toplevel" in r.stderr, (shell, command, r.stderr)
 
