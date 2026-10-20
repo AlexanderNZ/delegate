@@ -35,11 +35,9 @@ permission:
     shasum *: allow
     stat *: allow
     readlink *: allow
-    file *: allow
     which *: allow
     pwd *: allow
     date *: allow
-    mktemp *: allow
     python3 *: allow
     bash -c *: allow
     nix develop -c python3 -m pytest *: allow
@@ -47,6 +45,8 @@ permission:
     uvx *: allow
     claude plugin validate *: allow
     claude plugin test *: allow
+    mktemp: allow
+    mktemp -d: allow
     '*>*': deny
     '*| tee *': deny
     '*|tee *': deny
@@ -89,6 +89,8 @@ Your map has no `cp` rule and no `cd` rule, so you cannot make the copy of a tre
 Your map denies each command that holds `>`, also `2>&1` and `2>/dev/null`, and each pipe to `tee`. These deny rules come last, and OpenCode keeps the last rule that matches. Your map has no `echo` rule and no `printf` rule, because you need them only to write. The map cannot deny each redirection. OpenCode gives the map a redirection only with the simple command before it. A redirection after a group (`{ cat f; } > x`), a subshell, a loop, or the last command of a pipeline (`cat f | grep x > y`) is not in that text, so the map permits the write. This was measured on OpenCode 1.15.10 on 2026-10-20. Do not use that hole. Do not redirect output to a file.
 
 Your map has no `git grep` rule. `git grep -O<cmd>` and `git grep --open-files-in-pager` run a command on the files that match, and a glob cannot find each form of these options. Use your grep tool. Your map permits `git diff`, `git log` and `git show` with `--output=<file>`, which writes a file. Do not use that option.
+
+Your map has no `file` rule, because `file -C` writes a file. Your map permits `mktemp` only as `mktemp` and `mktemp -d`, with no other word. These two make the file in the temp directory. A template or `-p <dir>` can make the file in another directory, and a glob cannot examine the path.
 
 ## Your write tool
 
