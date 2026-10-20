@@ -623,12 +623,12 @@ end.
    `log <path>`, and exits 0.
    A harness can stop a background task at a time limit. A run that only has
    `nohup` and `&` can stay in the process group of your shell.
-2. **Name the run by its id.** The run id is on the line `run <run id>`. The
+   Name the run by its id. The run id is on the line `run <run id>`. The
    short run id is the part of the run id after the last `-`, for example
    `e9dc`. `delegate status`, `delegate watch`, `delegate pause` and
    `--resume` take the run id or the short run id. A short id that more than
    one run has is an error: the command names each match and changes nothing.
-3. **Follow the run with `delegate watch`.** Start `delegate watch` as a
+2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
    background task, with `--stall-minutes` and `--max-minutes`. The harness
    then tells you when it exits. A background task has no terminal, so
    `watch` prints one raw line for each event, as with `--raw`. On a terminal,
@@ -639,32 +639,33 @@ end.
    holds the lock of its run branch. With more than one active run and no
    terminal, `watch` names each active run on stderr, follows none, and exits
    with the code 2. Then give the run id.
-4. **Show `delegate status` as it is.** At each report to the person, show the
+3. **Show `delegate status` as it is.** At each report to the person, show the
    output of `delegate status`, as it is. The coordinator does not write its
    own script to read the journal or an event stream. If the output does not
    show a fact that the person needs, tell the person. With no run id,
    `status` shows the one active run, or the newest run when no run is
    active. With more than one active run, it prints a table of the active
    runs: give the run id.
-5. **Report a stall at once.** A stalled agent is an agent with no activity
+4. **Report a stall at once.** A stalled agent is an agent with no activity
    for the stall limit, the time that `--stall-minutes` sets. `delegate watch`
    then exits 5, with the reason `stall`. Tell the person at once, and give
    the output of `delegate status`.
-6. **Pause a run at a step boundary.** Run `delegate pause <run-id>`. The
-   pause cuts off no agent and no gate. The run stops at its next step
-   boundary. `delegate status` shows `pausing` while the run is active, and
-   `paused` after the stop. `delegate watch` exits 7. The run
-   process prints `paused <where>; go on with delegate run --resume <run-id>`,
-   and exits 3. A run with no live process cannot be paused:
-   `delegate pause` exits 1. Ctrl-C stops a run in the foreground with no wait.
-   The run then writes `interrupted` in its journal, prints one line that
-   tells how to resume, and exits 130.
-7. **Resume a stopped run.** When the run process stops or pauses before the
-   run ends, go on with `delegate run --detach --resume <run-id>`. The resume
-   takes over the lock of the same run when its process no longer exists. If
-   the lock belongs to another run and to a process that no longer exists,
-   add `--break-lock`. First make sure that no other run uses the run branch.
-8. **Retry a failed step.** A failed step goes on with
+5. **Pause, resume or retry a run.** To pause a run at a step boundary, run
+   `delegate pause <run-id>`. The pause cuts off no agent and no gate. The run
+   stops at its next step boundary. `delegate status` shows `pausing` while
+   the run is active, and `paused` after the stop. `delegate watch` exits 7.
+   The run process prints
+   `paused <where>; go on with delegate run --resume <run-id>`, and exits 3.
+   A run with no live process cannot be paused: `delegate pause` exits 1.
+   Ctrl-C stops a run in the foreground with no wait. The run then writes
+   `interrupted` in its journal, prints one line that tells how to resume,
+   and exits 130.
+   When the run process stops or pauses before the run ends, go on with
+   `delegate run --detach --resume <run-id>`. The resume takes over the lock
+   of the same run when its process no longer exists. If the lock belongs to
+   another run and to a process that no longer exists, add `--break-lock`.
+   First make sure that no other run uses the run branch.
+   A failed step goes on with
    `delegate run --detach --resume <run-id> --retry <ticket>`, also in a run
    that ended. When the retry builds the step, the engine also builds each
    ticket that the step made it skip, in plan order, when its blockers are
