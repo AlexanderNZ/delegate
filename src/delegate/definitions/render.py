@@ -193,11 +193,24 @@ TOPLEVEL_FINDER = (
 #: `V` holds, for each path, the git tree that holds it (`up`), and the first
 #: git tree that it holds (`dn`). An extra path is no risk: each name in `V` is
 #: a real git tree, or a directory that the walk could not search.
+#:
+#: A relative write target counts from the working directory (#159). When the
+#: working directory is in no git tree (`r` is empty), each word and each part
+#: that does not start with `/`, `$`, `~` or `=` is also a path: the working
+#: directory, a "/" and the part, with no `/private` prefix, and each `//` and
+#: `/./` made one `/`. Only such a path that starts with `/tmp/` or
+#: `/var/folders/` counts, because the shell check denies each other relative
+#: target by the temp rule. The test is on the full path, not on the working
+#: directory: from `/`, the part `tmp/x` is the temp path `/tmp/x`. When the
+#: working directory is in a git tree, the shell check denies each relative
+#: target by the toplevel `r`, so the finder reads no more directories there.
 TARGET_TREE_FINDER = (
     's=(c if isinstance(c,str) else "").replace(chr(34),"").replace(chr(39),"").replace(chr(92),""); '
     'K=("/tmp/","/var/folders/","$TMPDIR"); '
     'X={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) for i in range(len(p)) if p.startswith(K,i) '
     'for x in (re.sub("/(?:[.]/|/)+","/",u(t+p[i+7:] if p.startswith("$TMPDIR",i) else p[i:])),) if x.startswith("/")}; '
+    'X|={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) if p and p[0] not in "/$~=" '
+    'for x in (re.sub("/(?:[.]/|/)+","/",u(cw()+"/"+p)),) if x.startswith(K[:2])} if not r else set(); '
     'G=lambda x: min([i for i in map(x.find,"*?[{$") if i>=0] or [-1]); '
     'A=lambda x,g: (pathlib.Path(x[:g]),x[:g],x[:x[:g].rfind("/")] or "/") if g>=0 '
     'else (lambda P: (P,str(P).rstrip("/")+"/",str(P)))(pathlib.Path(x)); '
@@ -400,6 +413,32 @@ IN_TOPLEVEL_CHECK = " ".join(
 )
 
 
+#: The shell function `rl`. It sets $rp to the path that a write target, its
+#: argument, names (#159). An absolute path, a path that starts with "$", "~"
+#: or "=", and a path with a pattern or an expansion character (*, ?, [, { or
+#: $) stay as they are, so the temp test reads them as before. When the working
+#: directory $wd is in no git tree ($wt is empty), a relative path counts from
+#: $wd, as the path of a `cd` does (#131): $rp is $wd, a "/" and the path. When
+#: $wd is in the git toplevel $wt, a relative path with no ".." component is in
+#: that toplevel, so the path stays as it is, and the deny gives the message
+#: of 1.8.0. The path may be in one pair of quotes. A quote
+#: or a backslash in another place stays as it is: the guard divides a segment
+#: into words at each space, also inside quotes, so the word can be part of a
+#: longer path. After a `cd` in the same command ($cdx is 1), the working
+#: directory of the later segments is not $wd, so the path stays as it is. A
+#: path that stays as it is and is not absolute fails the temp test. The
+#: caller then tests $rp with each rule of an absolute path: a temp path, no
+#: ".." component, not in a git tree and not holding one. It starts no process.
+RELATIVE_TARGET_RESOLVER = " ".join(
+    [
+        r"""rl() { rp=$1; [ "$cdx" = 0 ] && [ -z "$wt" ] && [ -n "$wd" ] || return 0; rw=$1;""",
+        r"""case "$rw" in "'"?*"'"|'"'?*'"') rw=${rw#?}; rw=${rw%?} ;; esac;""",
+        r"""case "$rw" in ''|/*|'~'*|'='*|*\'*|*\"*|*\\*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) return 0 ;; esac;""",
+        r"""rp=${wd%/}/$rw; }""",
+    ]
+)
+
+
 #: The shell function `incd`. It returns 0 when its argument, the path of a
 #: `cd`, names the git toplevel $wt of the working directory or a directory in
 #: it (#121), or is a relative path from the working directory $wd to a temp
@@ -510,10 +549,18 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A relative
     path counts from the working directory, so in a copy with no .git entry in
     a temp directory, "cd app" goes to a temp path and is permitted (#131). A
-    "cd" writes nothing, and each later segment is tested on its own, so a
-    relative write target after the "cd" still fails the temp test. When the
-    working directory is in no git tree, the deny message states that, and
-    names no toplevel.
+    "cd" writes nothing, and each later segment is tested on its own. A
+    relative write target after a "cd" in the same command stays as it is, so
+    it fails the temp test. When the working directory is in no git tree, the
+    deny message states that, and names no toplevel.
+
+    A relative write target counts from the working directory of the hook
+    input, as the path of a "cd" does (RELATIVE_TARGET_RESOLVER, #159). When
+    the working directory is in no git tree, the target is the working
+    directory, a "/" and the path, and each rule of an absolute target applies
+    to it. So in a temp copy with no .git entry, "touch app/x" and
+    "echo x > app/x" are permitted. When the working directory is in a git
+    tree, each relative target is in that tree, so it is a deny.
 
     A temp path is a text prefix and a path with no ".." component. The guard
     rejects "..", it does not resolve it, because it reads the command as text
@@ -735,7 +782,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         # working directory, so a cd takes one path only.
         f'case "$g" in cd|"cd "*) [ "$m" = 1 ] || deny "$seg" "{cd_one_path}"; '
         f'istp "$d" || incd "$d" || if [ -n "$wt" ]; then deny "$seg" "{cd_outside}"; '
-        f'else deny "$seg" "{cd_outside_no_tree}"; fi ;; '
+        f'else deny "$seg" "{cd_outside_no_tree}"; fi; cdx=1 ;; '
         '*) istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; esac ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
@@ -758,7 +805,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             IN_TOPLEVEL_CD_CHECK,
             # A write target: a temp path that is not in a git tree and holds none (#106, #125). A temp path in a
             # git tree, or that holds one, denies the command at once, with its own reason.
-            f'istmp() {{ istp "$1" || return 1; inwt "$1"; case $? in 0) deny "$seg" "{in_toplevel}" ;; '
+            # A relative write target counts from the working directory (#159).
+            RELATIVE_TARGET_RESOLVER,
+            f'istmp() {{ rl "$1"; istp "$rp" || return 1; inwt "$rp"; case $? in 0) deny "$seg" "{in_toplevel}" ;; '
             f'3) deny "$seg" "{in_unsearched}" ;; esac; return 0; }}',
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
@@ -800,6 +849,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             'case "$q" in s|d) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
             'The guard fails closed." >&2; exit 2 ;; esac',
             "set -f",
+            # No cd came before the first segment, so a relative write target counts from the working directory.
+            "cdx=0",
             # The divider keeps the spaces at each end of a segment. The prefix
             # tests match from the first word, so remove them.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '

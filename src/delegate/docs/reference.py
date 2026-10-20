@@ -140,7 +140,8 @@ def guard_table() -> str:
         f"| shell reads | {_commands(shell_reads)} |",
         f"| temp writes | {_commands(render.VERIFIER_TEMP_WRITE_COMMANDS)} — each one only when every path argument starts with {temp_paths}. "
         "A redirection target obeys the same rule, in every segment, but it can also be exactly `/dev/null`, "
-        "which writes no file: `2>/dev/null` is permitted. |",
+        "which writes no file: `2>/dev/null` is permitted. A relative path counts from the working directory of the "
+        "hook, as the path of a `cd` does: in a temp copy with no `.git` entry, `touch app/x` is permitted. |",
         f"| temp destination | {_commands(render.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
         "The earlier path arguments are sources, and a read of any path is a read. A `cd` takes one path argument, "
         "and it may also go to a directory in the git toplevel of the working directory, with no `..` component: "
