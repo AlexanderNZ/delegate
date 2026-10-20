@@ -463,6 +463,13 @@ writes the index and the branch of the real worktree.
    `.git` directory of a checkout, and a host can deny `rm -rf`.
 2. If the copy needs its own repository, run `git init` in the copy after the
    removal.
+3. A verifier that cannot make the copy, because the harness refuses a step
+   or a step fails, must obey this rule: do not break a check, a test or a
+   file in the worktree under review, and do not make the red proof there.
+   Put the red proof in `unverified`, with the refused command and its
+   message. The gates can still run in the worktree as read-only checks.
+   The worktree is the work under review, and the engine checks that the
+   verifier left it as it was (the worktree invariant) (#152).
 
 ## Merge protocol (sequential, coordinator-owned)
 Before each merge and each push, run `git branch --show-current` in the

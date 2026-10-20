@@ -52,6 +52,8 @@ You can copy a tree into a temp directory with `cp`, because only the last path 
 
 Do not go to the copy before you remove its `.git` entry, and do not remove the entry in a later command. A copy with a `.git` entry is a git tree, and the hook denies the removal.
 
+This rule is binding: if you cannot make the copy, because the hook or the harness refuses a step of these steps or a step fails, do not break a check, a test or a file in the worktree under review, and do not make the red proof there. Put the red proof under What you could not verify (the `unverified` list of a JSON verdict), with the refused command and its message. You can still run the gates in the worktree as read-only checks. The worktree is the work under review, and the engine checks that you left it as it was (the worktree invariant).
+
 You can go with `cd` to a temp path, or to a directory in the git toplevel of your working directory, for example `cd api && ./gradlew test`. You can read any repository by path with `git -C <path>` and a read subcommand. A `cp` to a path that is not a temp path, a `cd` to another path or through `..`, and a write after `git -C <path>` stay denied.
 
 ## Your Write tool

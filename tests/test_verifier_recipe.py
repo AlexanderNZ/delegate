@@ -348,3 +348,60 @@ def test_the_rendered_verifiers_and_the_brief_state_the_limit_of_the_walk(render
 def test_the_enforcement_page_and_the_skill_state_the_limit_of_the_walk():
     _states_the_walk_limit(ENFORCEMENT_PAGE.read_text())
     _states_the_walk_limit(SKILL.read_text())
+
+
+# --- The copy cannot be made (#152) ----------------------------------------------
+
+#: The words that start the rule for a verifier that cannot make the copy of a red proof.
+NO_COPY = re.compile(r"cannot make the (?:second )?copy")
+
+#: The parts of the rule (#152), each in the text that follows the words of the case.
+NO_COPY_RULE = (
+    "do not break a check, a test or a file in",
+    "the worktree under review",
+    "do not make the red proof",
+    "`unverified`",
+    "the refused command and its message",
+    "as read-only checks",
+    "the work under review",
+    # A page links the glossary term, as `[**worktree invariant**](...)`.
+    "worktree invariant",
+)
+
+AGENT_DELEGATION_SKILL = ROOT / "skills" / "agent-delegation" / "SKILL.md"
+COMMITTED_VERIFIERS = (ROOT / ".claude" / "agents" / "delegate-verifier.md", ROOT / ".opencode" / "agents" / "delegate-verifier.md")
+
+
+def _states_the_no_copy_rule(text: str) -> None:
+    """`text` states the rule of #152 in the paragraph or list item that holds the words of the case.
+
+    The text of each case goes from the words "cannot make the copy" to the end of the paragraph or of the list item,
+    with each run of white space as one space, because a skill wraps its lines.
+    """
+    cases = [
+        " ".join(re.split(r"\n\s*\n|\n(?=\d+\. |- )", text[match.start():], maxsplit=1)[0].split())
+        for match in NO_COPY.finditer(text)
+    ]
+    assert cases, "the text does not state the case of a copy that cannot be made"
+    missing = [[part for part in NO_COPY_RULE if part not in case] for case in cases]
+    assert [] in missing, list(zip(cases, missing))
+
+
+def test_the_brief_and_the_rendered_verifiers_state_the_rule_when_the_copy_cannot_be_made(rendered, tmp_path):
+    # The report of #152: Claude Code refused `cp -R` and `rm -r` on a host, and a verifier that could not make its
+    # copy ran its checks in the worktree under review.
+    _states_the_no_copy_rule(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "full"))
+    _states_the_no_copy_rule(verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "fix-up", engine_gates=True))
+    for harness in ("claude-code", "opencode"):
+        _states_the_no_copy_rule(_section(_body(rendered, harness), "Your shell"))
+
+
+# The docs, the skills and the committed agents are outside the package source, as in a Nix build.
+@outside_the_package
+@pytest.mark.parametrize(
+    "path",
+    [ENFORCEMENT_PAGE, SKILL, AGENT_DELEGATION_SKILL, *COMMITTED_VERIFIERS],
+    ids=lambda path: path.relative_to(ROOT).as_posix(),
+)
+def test_the_enforcement_page_the_skills_and_the_committed_verifiers_state_the_rule_when_the_copy_cannot_be_made(path):
+    _states_the_no_copy_rule(path.read_text())

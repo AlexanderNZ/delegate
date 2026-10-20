@@ -741,6 +741,12 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         f"in one command: `cp -R {copy} {proof} && rm -r {proof}/.git`. Then go to it with `cd {proof}`, break it, "
         "and run the test there. Do not go to the second copy before you remove its `.git` entry, and do not remove the entry "
         "in a later command. A second copy with a `.git` entry is a git tree, and the guards deny the removal. "
+        # A host can refuse `cp -R` and `rm -r` (#152). Then the verifier must not make the red proof in the tree.
+        "This rule is binding: if you cannot make the second copy, because a step of these steps is refused or fails, "
+        "do not break a check, a test or a file in this copy or in the worktree under review, and do not make the red "
+        "proof there. Put the red proof in `unverified`, with the refused command and its message. You can still run "
+        "the gates in this copy as read-only checks. The worktree is the work under review, and the engine checks that "
+        "you left it as it was (the worktree invariant). "
         "Never push.\n\n" + _report_rule("copy", report_path)
     )
     gate_output = (
