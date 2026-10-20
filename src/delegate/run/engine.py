@@ -169,6 +169,10 @@ PHASE_REBASE: str = "rebase"
 PHASE_FIXUP: str = "fixup"
 PHASE_CHAIN: str = domain.GATES_OF_CHAIN
 
+# The `tree` of a `prepare-start` and a `prepare-result`: the worktree of a ticket, or the temporary copy of a verifier (#155).
+TREE_WORKTREE: str = "worktree"
+TREE_VERIFY_COPY: str = "verify-copy"
+
 # The `trigger` of a `fixup-start` of a chain: red gates on the tip of the chain, or a REJECT.
 TRIGGER_GATES_RED: str = "gates-red"
 TRIGGER_REJECT: str = "reject"
@@ -1195,8 +1199,10 @@ def _specialist_done(prior: list[dict[str, object]]) -> bool:
     return valid > spawned
 
 
-def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> None:
+def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: str, base: str, hooks_dir: Path) -> bool:
     """Make the worktree of a ticket through the port, or reuse the one that is there, and install the push guard in it.
+
+    Return True when the port made a new worktree, and False when it reused one.
 
     The port keeps the file watcher off for the worktree (`core.fsmonitor=false`
     in its own configuration), whatever the global setting of the user is.
@@ -1205,12 +1211,57 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
     which the kill stopped is aborted. A branch without a worktree gets a new
     worktree. Raise EngineError when the worktree holds another branch.
     """
+    made = not worktree.is_dir()
     with _vcs_errors():
         vcs.ensure_worktree(repo, worktree, branch, base)
     try:
         install_push_guard(vcs, repo, worktree, hooks_dir)
     except GuardError as error:
         raise EngineError(str(error)) from None
+    return made
+
+
+def _run_prepare(
+    gates: GateRunner, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int
+) -> None:
+    """Run the `prepare` commands of `stack` in `path`, in order, through the gate runner (#155).
+
+    `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A git tree holds no ignored
+    file, so a stack that needs installed dependencies names the commands that
+    install them. The engine runs them itself, with the environment of a gate,
+    before an agent starts in the tree. The journal records `prepare-start` and
+    `prepare-result` for each command, and each command gets its own log file.
+    A command that fails is not a red gate: it starts no fix-up round. Raise
+    `_StepFailed` with the reason `prepare failed: <command>`, and run no later command.
+    """
+    fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
+    for command in stack.prepare:
+        log = _gate_log_path(journal, ticket, f"prepare-{tree}", round_number)
+        journal.append("prepare-start", **fields, command=command, prepare_log=str(log))
+        result = gates.run(command, path, log=log)
+        journal.append("prepare-result", **fields, command=command, exit_status=result.exit_status, prepare_log=str(log))
+        if not result.green:
+            raise _StepFailed(f"prepare failed: {command}")
+
+
+def _prepare_ticket_worktree(gates: GateRunner, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool) -> None:
+    """Run the `prepare` commands of `stack` in the worktree of `ticket` when it needs them. Raise `_StepFailed` when one fails.
+
+    The worktree needs them when the engine made it now (`made`), or when the
+    journal holds no complete prepare of it: a run that stopped or failed
+    before the last command of `prepare` was green. A worktree that the engine
+    prepared before keeps what the commands made, so they do not run again.
+    """
+    if not stack.prepare:
+        return
+    if not made:
+        last = None
+        for event in read_events(journal.path):
+            if event["event"] in ("prepare-start", "prepare-result") and event.get("ticket") == ticket and event.get("tree") == TREE_WORKTREE:
+                last = event
+        if last is not None and last["event"] == "prepare-result" and last["exit_status"] == 0 and last["command"] == stack.prepare[-1]:
+            return
+    _run_prepare(gates, journal, stack, ticket, TREE_WORKTREE, worktree, 0)
 
 
 def _build_ticket(
@@ -1244,7 +1295,7 @@ def _build_ticket(
     if prior is None:
         with _vcs_errors():
             base_commit = vcs.commit_of(repo, start_ref)
-        _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
+        made = _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         journal.append(
             "step-start", ticket=ticket.id, stack=ticket.stack, branch=branch, worktree=str(worktree),
             base_commit=base_commit, agent=stack.specialist, tier=tier, model=model,
@@ -1259,7 +1310,7 @@ def _build_ticket(
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
-        _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
+        made = _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         if retried is None:
             specialist_done = _specialist_done(prior)
             continuations = sum(1 for e in prior if e["event"] == "continuation")
@@ -1270,6 +1321,10 @@ def _build_ticket(
         rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
         if rebases:
             rebased_onto = str(rebases[-1]["onto_commit"])
+    try:
+        _prepare_ticket_worktree(gates, journal, stack, ticket.id, worktree, made)
+    except _StepFailed as failed:
+        return str(failed)
     # The commits of a ticket are the commits beyond the point where its branch started, or, after a rebase,
     # beyond the commit of the run branch that the branch was rebased onto. So the hotspot check and the
     # continuation brief see the commits of this ticket only.
@@ -1706,6 +1761,8 @@ def _verify_round(
                 prompt = fixup_body + verifier_run_sections(copy, report_path, mode)
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
+        # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
+        _run_prepare(step.gates, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
         added = _make_proof_copy(copy)
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
@@ -1844,8 +1901,9 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     fixup_held = plan.rejected is not None and _holds(vcs, step.repo, plan.rejected, branch_ref)
     goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_GATES
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
-    _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
+    made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
+        _prepare_ticket_worktree(step.gates, step.journal, step.stack, ticket.id, step.worktree, made)
         if plan.rejected is not None and fixup_held:
             brief = _checked_fixup_brief(step, plan.round, plan.rejected, _findings_text(list(plan.findings)))
             if on_tip:

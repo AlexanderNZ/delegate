@@ -546,6 +546,12 @@ scopes each fix-up, and records each step in a journal.
   when you need your own judgement between steps.
 - The engine never merges to the base branch, never pushes, and never closes a
   ticket. Those actions stay with the coordinator.
+- A stack that needs installed dependencies (for example `node_modules`) names
+  the install commands in the `prepare` field of its stack, not in its gates.
+  A tree that git makes holds no ignored file, and the verifier guard permits
+  only the gate commands. The engine runs `prepare` itself in the worktree
+  before the specialist starts, and in the copy of each verifier before it
+  makes the proof copy. A `prepare` command that fails ends the step.
 
 ### The two modes
 The modes trade cost against feedback time. The table holds every setting that

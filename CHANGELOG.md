@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- A stack of a workflow can name `prepare`: a list of commands that the engine runs itself in each tree before an agent starts in it (#155). A tree that git makes holds no ignored file, so before, the worktree of a ticket, the temporary copy of a verifier and the proof copy held no installed dependencies, for example no `node_modules`, and the gates of a JavaScript stack failed there. The verifier guard permits only the gate commands, so the only workaround was `npm ci` in the gates. Now the engine runs the `prepare` commands in order, through the gate runner and with the environment of a gate: in the worktree after it makes it and before the specialist starts (again when a resume or a retry makes the worktree again, or when a stop or a failure came before the last command was green), and in the temporary copy of each verifier before it makes the proof copy, so the proof copy holds what the commands made. The journal records `prepare-start` and `prepare-result` for each command, with the tree, the directory, the exit status and the path of its log file, `runs/<run id>/gates/<ticket id>/prepare-<tree>-<round>.log`. A command that fails ends the step `failed` with the reason `prepare failed: <command>`; it is not a gate, and it starts no continuation and no fix-up round. The check of the workflow checks the field as it checks `gates`, and `delegate run --dry-run` prints `stack <name> prepare: <command>` for each command. With no field, nothing changes. The log of a running `prepare` command counts as activity for `delegate watch --stall-minutes` and for `delegate status`. `docs/reference/workflow.md`, `docs/reference/run.md` and the `agent-delegation` skill describe the field.
+
 ## [1.8.0] - 2026-10-20
 
 ### Added

@@ -103,12 +103,13 @@ def is_paused(events: list[dict[str, object]]) -> bool:
     return False
 
 
-# The fields of an event that name a file whose change is activity: the event stream of an agent, and the log of a gate.
-ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log")
+# The fields of an event that name a file whose change is activity: the event stream of an agent, the log of a gate,
+# and the log of a `prepare` command.
+ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log", "prepare_log")
 
 
 def activity_files(events: list[dict[str, object]]) -> set[Path]:
-    """The event streams and the gate logs that the events name (`ACTIVITY_FIELDS`)."""
+    """The event streams, the gate logs and the prepare logs that the events name (`ACTIVITY_FIELDS`)."""
     return {Path(str(event[field])) for event in events for field in ACTIVITY_FIELDS if field in event}
 
 

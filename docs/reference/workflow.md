@@ -129,7 +129,7 @@ The verifier tier never goes down, in any mode. The `verifier` entry must name a
 
 ## Stacks
 
-Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The field `mcp-servers` is optional.
+Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers` and `prepare` are optional.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -138,6 +138,27 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | [**`gates`**](../glossary.md#gate) | list of strings | The gate commands. The engine runs them. At least one is required. |
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
+| `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
+
+### Prepare
+
+A tree that git makes holds no ignored file. So the worktree of a ticket, the [**temporary copy**](../glossary.md#temporary-copy) of the verifier and the proof copy hold no installed dependencies, for example no `node_modules`. An agent cannot always install them: the [**verifier guard**](../glossary.md#verifier-guard) permits only the gate commands. Put the install commands in `prepare`, not in `gates`.
+
+```toml
+[stacks.web]
+specialist = "web-specialist"
+verifier = "web-verifier"
+gates = ["npm test"]
+hotspots = []
+prepare = ["npm ci"]
+```
+
+The engine runs the commands in order, with the environment of a gate, in each tree before an agent starts in it:
+
+- In the worktree of a ticket, after the engine makes it and before the specialist starts. When a resume or a retry makes the worktree again, the commands run again before the gates.
+- In the temporary copy of each verifier, before the verifier starts. The engine makes the proof copy after the commands, so the proof copy holds what they made.
+
+A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate, and it starts no fix-up round. See [the prepare commands](run.md#the-prepare-commands). `delegate run --dry-run` prints the line `stack <name> prepare: <command>` for each command.
 
 ### MCP servers
 

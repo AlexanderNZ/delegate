@@ -350,6 +350,9 @@ def main(argv: list[str] | None = None) -> int:
     for number, ticket in enumerate(plan_order(workflow), start=1):
         blocked = ", ".join(ticket.blocked_by) or "none"
         print(f"ticket {ticket.id} ({number}/{len(workflow.tickets)}): stack {ticket.stack}, blocked by {blocked}")
+    for stack in workflow.stacks.values():
+        for command in stack.prepare:
+            print(f"stack {stack.name} prepare: {command}")
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
     return 0

@@ -39,6 +39,8 @@ class Stack:
     gates: list[str]
     hotspots: list[str]
     mcp_servers: tuple[McpServer, ...] = ()
+    # The commands that the engine runs in each tree before an agent starts in it (#155). Empty: none.
+    prepare: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,7 +202,7 @@ class _Reader:
 TOP_LEVEL_FIELDS: tuple[str, ...] = (
     "base-branch", "run-branch", "mode", "adapter", "ticket-start", "tier-overrides", "stacks", "tickets",
 )
-STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots", "mcp-servers")
+STACK_FIELDS: tuple[str, ...] = ("specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare")
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
 
@@ -221,8 +223,10 @@ def _read_stacks(reader: _Reader, value: object) -> dict[str, Stack]:
         gates = reader.string_list(stack, "gates", f"{field}.gates", at_least_one=True)
         hotspots = reader.string_list(stack, "hotspots", f"{field}.hotspots", at_least_one=False)
         servers = _read_mcp_servers(reader, stack.get("mcp-servers", {}), f"{field}.mcp-servers")
-        if None not in (specialist, verifier, gates, hotspots, servers):
-            stacks[name] = Stack(name, specialist, verifier, gates, hotspots, servers)  # type: ignore[arg-type]
+        # `prepare` is optional. When it is there, the check is the check of `gates`.
+        prepare = reader.string_list(stack, "prepare", f"{field}.prepare", at_least_one=True) if "prepare" in stack else []
+        if None not in (specialist, verifier, gates, hotspots, servers, prepare):
+            stacks[name] = Stack(name, specialist, verifier, gates, hotspots, servers, tuple(prepare))  # type: ignore[arg-type]
     return stacks
 
 

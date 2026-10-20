@@ -463,7 +463,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
     started = time.monotonic()
     offset, next_seq, position = 0, 1, options.from_position
     tracker = _Tracker()
-    files: set[Path] = set()  # the event streams and the gate logs that the journal names
+    files: set[Path] = set()  # the event streams, the gate logs and the prepare logs that the journal names
     last_event: dict[str, object] | None = None
     first_read = True
     resumed_at = 0

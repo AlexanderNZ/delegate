@@ -1033,8 +1033,8 @@ class ActiveRun:
     """One active run, for the run picker (frame 2b, #118): its journal, its snapshot with no tokens, its run branch,
     the time of its `run-start` event, and the seconds since its last activity.
 
-    The last activity is the newest change of the journal, of the event streams, and of the gate logs, as for the stall
-    check of `delegate watch`.
+    The last activity is the newest change of the journal, of the event streams, of the gate logs and of the prepare
+    logs, as for the stall check of `delegate watch`.
     """
 
     journal: Path
