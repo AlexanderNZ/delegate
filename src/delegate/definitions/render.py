@@ -89,6 +89,39 @@ VERIFIER_TEMP_DEST_COMMANDS: tuple[str, ...] = ("cp", "cd")
 
 VERIFIER_TEMP_PATH_PREFIXES: tuple[str, ...] = ("/tmp/", "/private/tmp/", "$TMPDIR", "/var/folders/")
 
+#: The options of `env` that the guard removes with `env` (#158). Each one
+#: changes only the environment of the command, or the output of a bare `env`.
+#: "-u" and "--unset" take the next word, and "-u<name>" and "--unset=<name>"
+#: are the same options. Each other option is a deny: -S runs the words of a
+#: string, -C changes the directory, -P changes the search path, and -a changes
+#: the name of the command.
+VERIFIER_ENV_OPTIONS: tuple[str, ...] = ("-i", "-0", "-", "--ignore-environment", "--null")
+
+#: The read commands that the guard does not permit behind `env` (#158). The
+#: guard cannot examine the command that they run. The gates need them as the
+#: first word of a segment, not behind `env`.
+VERIFIER_ENV_HIDDEN_READS: tuple[str, ...] = ("bash -c", "python3")
+
+#: The options of `find` that run a command or write a file (#158). find (and
+#: bfs, with -rm) reads each of them as a separate word, with no abbreviation.
+VERIFIER_FIND_DENIED_OPTIONS: tuple[str, ...] = (
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-delete",
+    "-rm",
+    "-fprint",
+    "-fprint0",
+    "-fprintf",
+    "-fls",
+)
+
+#: The options of `rg` that run a command (#158): --pre runs a command on each
+#: file that it searches, and --hostname-bin runs a command for the hostname of
+#: a hyperlink. rg accepts no abbreviation of a long option.
+VERIFIER_RG_DENIED_OPTIONS: tuple[str, ...] = ("--pre", "--hostname-bin")
+
 
 def _exact_or_prefix(commands: tuple[str, ...]) -> str:
     """A bash case pattern. It matches each command alone or with arguments."""
@@ -442,6 +475,25 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     gate that runs with a repository's .envrc is tested as the gate command.
     "direnv allow" writes direnv's allow list, and it stays a deny.
 
+    A segment that starts with "env" loses "env" and its options
+    (VERIFIER_ENV_OPTIONS, and "-u <name>"), and the rest is tested as its own
+    command, with every rule (#158). A bare "env", or "env" with only options
+    and NAME=value assignments, stays a read. An assignment before a command
+    denies, as an assignment prefix without env does: GIT_EXTERNAL_DIFF,
+    GIT_CONFIG_* and PATH make a read command run a program. The guard divides
+    these words at each space, so a word with a quote, a backslash, an
+    expansion or a pattern character denies: it can move the start of the
+    command. Another option denies. Behind "env", the commands of
+    VERIFIER_ENV_HIDDEN_READS deny.
+
+    After "find", the options of VERIFIER_FIND_DENIED_OPTIONS deny, and after
+    "rg", the options of VERIFIER_RG_DENIED_OPTIONS deny: they run a command or write a file
+    (#158). "sed -n" is a read only as a line range,
+    "sed -n '<start>,<end>p' <path>...": a sed script can run a command (the
+    GNU "e" command) or write a file ("w"), and an option can edit a file in
+    place ("-i"). The guard does not parse a sed script, so it denies each
+    other form.
+
     `gates` are the repository's gate commands from its declaration. The
     gates differ in each repository, so the global list holds none of them
     (ADR 0004). Each plain gate is permitted like a read command, in that
@@ -541,6 +593,81 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         "A substitution runs a command that the guard cannot examine. Only an exact gate of the declaration, "
         "given as the full command, may hold one. To search for the text, put the dollar sign in brackets."
     )
+    env_word = (
+        "The word $ew holds a quote, a backslash, an expansion or a pattern character. The guard reads the words "
+        "before the command of env as text, so it cannot tell where the command starts."
+    )
+    env_option = (
+        "The env option $ew is not permitted. Only -i, -0, -u <name>, - and -- are permitted: another option can run "
+        "a string as a command, or change the directory, the search path or the name of the command."
+    )
+    env_hidden = "After env, bash -c and python3 are not permitted, because the guard cannot examine the command that they run."
+    # An assignment can make a read run a program: GIT_EXTERNAL_DIFF=touch makes "git diff" write files, and
+    # GIT_CONFIG_* and PATH do the same. The guard denies an assignment prefix without env too.
+    env_assignment = (
+        "The assignment $ea comes before a command. An assignment can make a read command run a program, "
+        "for example GIT_EXTERNAL_DIFF, GIT_CONFIG_* or PATH, so it is not permitted before a command, "
+        "with env or without it."
+    )
+    env_options = "|".join(f"0{o}" for o in VERIFIER_ENV_OPTIONS)
+    # env reads its options until the first word that is not an option, or
+    # until "--" ($ed). After the options, each word with "=" is an assignment.
+    # The first other word starts the command. A loop removes each env, so
+    # "env env touch f" is tested as "touch f". $eh is 1 when an env went. $ea
+    # holds the first assignment: with no command after it, env only prints.
+    env_strip = (
+        "eh=0; "
+        'while :; do case "$g" in "env "*) eh=1 ;; *) break ;; esac; et=${g#env}; ev=0; ed=0; ea=; '
+        'while :; do et=${et#"${et%%[! ]*}"}; ew=${et%% *}; et=${et#"$ew"}; '
+        r"""case "$ew" in *\'*|*\"*|*\\*|*\$*|*\**|*\?*|*\[*|*\{*|*\~*) """
+        f'deny "$seg" "{env_word}" ;; esac; '
+        'if [ "$ev" = 1 ]; then ev=0; continue; fi; '
+        'case "$ed$ew" in '
+        "0--) ed=1 ;; "
+        "?) g=env; break ;; "
+        f"{env_options}|0--unset=*|0-u?*) ;; "
+        "0-u|0--unset) ev=1 ;; "
+        f'0-*) deny "$seg" "{env_option}" ;; '
+        '?*=*) [ -n "$ea" ] || ea=$ew ;; '
+        f'*) [ -z "$ea" ] || deny "$seg" "{env_assignment}"; g=$ew$et; break ;; '
+        "esac; done; done; "
+        f'[ "$eh" = 0 ] || case "$g" in {_exact_or_prefix(VERIFIER_ENV_HIDDEN_READS)}) deny "$seg" "{env_hidden}" ;; esac; '
+    )
+    # A find option and the rg option that run a command or write a file (#158). Each word loses its quotes and
+    # backslashes first, as the shell removes them.
+    unquote = r"""a=${a//\"/}; a=${a//\'/}; a=${a//\\/}; """
+    find_rg_branches = (
+        f'"find"|"find "*) for a in "$@"; do {unquote}'
+        f'case "$a" in {"|".join(VERIFIER_FIND_DENIED_OPTIONS)}) '
+        'deny "$seg" "The find option $a runs a command or writes a file, so it is not permitted." ;; esac; done ;; '
+        f'"rg"|"rg "*) for a in "$@"; do {unquote}'
+        f'case "$a" in {"|".join(f"{o}|{o}=*" for o in VERIFIER_RG_DENIED_OPTIONS)}) '
+        'deny "$seg" "The rg option $a runs a command, so it is not permitted." ;; '
+        "esac; done ;; "
+    )
+    # "sed -n" is a read only as a line range (#158). A bare "sed -n" has no script, so it stays a read of the
+    # table. The script is the word after -n: digits, at most one comma,
+    # and "p", with "$" as the last address only in single quotes. Each later word is a path: no option, and no
+    # quote, backslash, expansion or pattern character, so the shell gives sed the same words as the guard reads.
+    sed_only_range = (
+        "A sed -n command is permitted only as a line range: sed -n '<start>,<end>p' <path>. "
+        "A sed script can run a command or write a file, and a sed option can edit a file in place. "
+        "To search for a pattern, use grep."
+    )
+    sed_branch = (
+        '"sed -n "*) shift 2; sw=${1-}; [ "$#" = 0 ] || shift; sq=0; sv=$sw; '
+        """case "$sw" in "'"?*"'") sq=1; sv=${sw#?}; sv=${sv%?} ;; '"'?*'"') sv=${sw#?}; sv=${sv%?} ;; esac; """
+        f'case "$sv" in *p) ;; *) deny "$seg" "{sed_only_range}" ;; esac; sb=${{sv%p}}; '
+        r"""case "$sb" in ''|*[!0-9,\$]*|*,*,*|,*|*,) """
+        f'deny "$seg" "{sed_only_range}" ;; esac; '
+        r"""case "$sb" in *\$*) [ "$sq" = 1 ] || """
+        f'deny "$seg" "{sed_only_range}"; '
+        r"""case "$sb" in \$|*,\$) ;; *) """
+        f'deny "$seg" "{sed_only_range}" ;; esac ;; esac; '
+        'for a in "$@"; do '
+        r"""case "$a" in -*|*\'*|*\"*|*\\*|*\$*|*\**|*\?*|*\[*|*\{*|*\~*) """
+        f'deny "$seg" "{sed_only_range}" ;; esac; done ;; '
+    )
     get_only_branch = f"{_exact_or_prefix(get_only)}) {GET_ONLY_ARGUMENT_CHECK} ;; " if get_only else ""
     git_reads = tuple(c for c in VERIFIER_READ_COMMANDS if c.startswith("git ") and c != "git grep")
     other_reads = tuple(c for c in VERIFIER_READ_COMMANDS if not c.startswith("git "))
@@ -573,6 +700,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         'case "$g" in "nix develop "*) t=${g#nix develop }; '
         'case "$t" in -*) ;; *) t=${t#* } ;; esac; '
         'case "$t" in "-c "*|"--command "*) g=${t#* } ;; *) g="nix develop" ;; esac ;; esac; '
+        f"{env_strip}"
         # A compose file is a read. Remove each "-f <file>" and "--file <file>" after "docker compose", as "-C <path>"
         # after "git". "docker compose -f x.yml" with nothing after it becomes "docker compose", which is no gate.
         'case "$g" in "docker compose "*) t=${g#docker compose }; '
@@ -586,6 +714,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         # A git read command with an option that writes a file or runs a command is no read (#140).
         f'"git grep"|"git grep "*) {_git_read_argument_check(grep=True)} ;; '
         f"{_exact_or_prefix(git_reads)}) {_git_read_argument_check(grep=False)} ;; "
+        f"{find_rg_branches}"
+        f"{sed_branch}"
         f"{_exact_or_prefix(other_reads + prefix_gates)}) ;; "
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
         'for a in "$@"; do '
@@ -787,8 +917,11 @@ def verifier_external_directory_permission() -> dict[str, str]:
 #: the command, and the shell makes the option from other text: "-iOcat" and
 #: "-'O'cat" are -O, "-eFOO" is not, and "--op" is the long option. A deny glob
 #: wide enough for each form also denies most searches, so the map has no
-#: `git grep` rule. The OpenCode verifier has its grep tool.
-VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("git grep", "echo", "printf")
+#: `git grep` rule. The OpenCode verifier has its grep tool. `env` runs the
+#: command after its options and assignments (#158), and a rule "env *" also
+#: matches "env touch <file>". A glob cannot examine the words after env, so
+#: the map has no `env` rule.
+VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("git grep", "echo", "printf", "env")
 
 #: The deny rules that close the OpenCode verifier map (#123). They come after
 #: the read allows, because OpenCode keeps the last matching rule
