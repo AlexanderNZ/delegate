@@ -19,12 +19,14 @@ branch onto the run branch, and runs the gates again on the rebased tree. A
 gate runs at most once green on one commit: when the journal holds a green
 result of the gate on the commit, the engine writes `gate-skip` and does not
 run it again. So a rebase that keeps the commit, and a resume, run no gate a
-second time. On ACCEPT the engine fast-forwards the run branch to the
-verified commit. On REJECT the engine starts a fix-up round: it writes the
+second time. The verifier brief gives the output of the green gates on the
+rebased commit, so the verifier does not run the gates again. On ACCEPT the
+engine fast-forwards the run branch to the verified commit. On REJECT the engine starts a fix-up round: it writes the
 findings to a file, sends the specialist a fix-up brief in the same worktree,
 requires the fix as a new commit on top of the rejected commit, runs the gates,
-and spawns a fresh verifier with the scoped brief (the findings and the delta
-from the rejected commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
+and spawns a fresh verifier with the scoped brief (the findings, the delta
+from the rejected commit, and the output of the green gates on the fix-up
+commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
 the step fails. The run branch moves only on ACCEPT.
 
 The engine records the HEAD and the status of the worktree of the ticket before
@@ -1579,31 +1581,40 @@ def _verify_ticket(step: _Step, first_round: int = 0) -> str | None:
         return str(failed)
 
 
-def _accepted_commit(step: _Step, first_round: int = 0, first_body: str | None = None) -> str:
+def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, str] | None = None) -> str:
     """Verify the branch of the step blind, and return the commit that a verifier accepted.
 
     A REJECT starts a fix-up round, up to `FIXUP_ROUND_LIMIT` of the mode.
     Each round, and the first pass, spawns a fresh verifier. Raise `_Rejected`
     after the last round, and `_StepFailed` for any other cause.
 
+    Each verifier brief gives the output of the gates that the engine ran green
+    on the commit under verification, so the verifier does not run them again
+    (see `_engine_gates_text`).
+
     A resume sets `first_round` to the number of verdicts that the journal
     holds. The first pass of the resume is a full verification at that round
     number, and the limit counts across the stop. A retry that goes on at the
-    scoped verifier gives its fix-up brief in `first_body`: the first pass is
-    then the scoped verifier of the fix-up commit that the branch holds.
+    scoped verifier gives the rejected commit and the findings text of its
+    fix-up round in `first_fixup`: the first pass is then the scoped verifier
+    of the fix-up commit that the branch holds.
     """
     mode = step.workflow.mode
     used_up = domain.rounds_used_up_reason(mode, first_round)
     if used_up:
         raise _StepFailed(used_up)
-    rejected = ""
+    rejected, findings_text = first_fixup if first_fixup is not None else ("", None)
     report: VerifierReport | None = None
     for round_number in domain.verification_rounds(mode, first_round):
-        fixup_body = first_body if round_number == first_round else None
         if report is not None:
-            fixup_body = _fixup_round(step, round_number, rejected, report.findings)
+            findings_text = _fixup_round(step, round_number, rejected, report.findings)
+        gates_text = _engine_gates_text(step)
+        fixup_body = (
+            None if findings_text is None
+            else _checked_fixup_brief(step, round_number, rejected, findings_text, gates_text)
+        )
         verified = _tip(step.vcs, step.repo, step.branch)
-        report = _verify_round(step, round_number, fixup_body)
+        report = _verify_round(step, round_number, fixup_body, gates_text)
         if domain.is_accepted(report.verdict):
             return verified
         rejected = verified
@@ -1612,17 +1623,38 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_body: str | None =
 
 
 def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> str:
-    """Run one fix-up round and return the scoped brief for the fresh verifier.
+    """Run one fix-up round and return the findings text for the scoped brief of the fresh verifier.
 
     The engine writes the findings to a file and sends the specialist a fix-up
     brief in the same worktree (see `_run_fixup`). The fix must be a new commit
-    on top of the rejected commit, which the brief generator checks. The engine
-    then runs the gates itself.
+    on top of the rejected commit, which the brief generator checks before any
+    gate runs. The engine then runs the gates itself. The caller makes the
+    scoped brief after the gates, so the brief holds their green output.
     """
     findings_text = _run_fixup(step, round_number, rejected, _findings_text(findings))
-    brief = _checked_fixup_brief(step, round_number, rejected, findings_text)
+    _checked_fixup_brief(step, round_number, rejected, findings_text)
     _fixup_gates(step, round_number)
-    return brief
+    return findings_text
+
+
+def _engine_gates_text(step: _Step) -> str | None:
+    """The `## Gates` text of a verifier brief of one ticket: the green gate output of the engine on the tip of its branch.
+
+    The verifier reviews the tip of the branch of the step: the rebased commit,
+    or the fix-up commit. When the journal holds a green `gate-result` of each
+    gate of the stack on that commit, the text gives that output (see
+    `green_gates_text`), and the verifier does not run the gates again, as for
+    a chain. Return None for a stack with no gates, or when a gate has no green
+    result on that commit: the brief then gives the gate commands.
+    """
+    commit = _tip(step.vcs, step.repo, step.branch)
+    outputs: list[tuple[str, str]] = []
+    for gate in step.stack.gates:
+        green = _green_result(step.journal, gate, commit)
+        if green is None:
+            return None
+        outputs.append((gate, str(green.get("output_tail", ""))))
+    return green_gates_text(commit, outputs) if outputs else None
 
 
 def _run_fixup(
@@ -1724,8 +1756,9 @@ def _verify_round(
     The verifier gets the task or the findings, and the diff or the delta, and
     the gates. It never gets the report of the specialist.
 
-    For a chain, `gates_text` gives the output of the gates that the engine ran
-    green on the tip, so the verifier does not run them, `fixups` gives the
+    `gates_text` gives the output of the gates that the engine ran green on the
+    tip, so the verifier does not run them. A fix-up brief in `fixup_body`
+    holds the same text. For a chain, `fixups` gives the
     fix-up commits of red gates that the full pass must see, and `earlier_fixups`
     gives the fix-up commits of the stacks verified before (see `chain_brief`).
     """
@@ -1759,10 +1792,10 @@ def _verify_round(
                 prompt = verifier_run_brief(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
                     plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
-                    notes=step.stack.verifier_notes,
+                    notes=step.stack.verifier_notes, gates_text=gates_text,
                 )
             else:
-                prompt = fixup_body + notes + verifier_run_sections(copy, report_path, mode)
+                prompt = fixup_body + notes + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
@@ -1909,11 +1942,12 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     try:
         _prepare_ticket_worktree(step.gates, step.journal, step.stack, ticket.id, step.worktree, made)
         if plan.rejected is not None and fixup_held:
-            brief = _checked_fixup_brief(step, plan.round, plan.rejected, _findings_text(list(plan.findings)))
+            findings_text = _findings_text(list(plan.findings))
+            _checked_fixup_brief(step, plan.round, plan.rejected, findings_text)
             if on_tip:
                 if plan.phase == RETRY_GATES:
                     _fixup_gates(step, plan.round)
-                return _advance_run_branch(step, _accepted_commit(step, plan.round, brief))
+                return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
         elif goes_on == RETRY_VERIFIER:
             return _advance_run_branch(step, _accepted_commit(step, plan.round))
         reason = _rebase_onto_run_branch(step)

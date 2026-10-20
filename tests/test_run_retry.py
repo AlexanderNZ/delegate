@@ -71,6 +71,9 @@ def test_a_step_that_failed_at_the_scoped_verifier_goes_on_at_the_scoped_verifie
     assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.fixup_calls == []
     (verifier,) = scripted.verifier_calls
     assert verifier.prompt.startswith(SCOPED) and FINDING in verifier.prompt
+    # The gates do not run again, and the brief gives the green output that the journal holds for the fix-up commit (#157).
+    gates = verifier.prompt.split("\n## Gates\n", 1)[1].split("\n## ", 1)[0]
+    assert f"`{fixed}`" in gates and "fixup-1.txt" in gates and "Do not run these gates again" in gates
     assert git(repo, "rev-parse", "run/demo").strip() == fixed
     events = read_journal_file(repo, run_id)
     retried = after_retry(events)

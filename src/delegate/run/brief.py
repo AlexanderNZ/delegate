@@ -366,6 +366,7 @@ def full_brief(
     stacks: Sequence[str] = (),
     gate_commands: Sequence[str] | None = None,
     plan_change: str | None = None,
+    gates_text: str | None = None,
 ) -> str:
     """The first-pass brief: the task, the three-dot diff, and the gates.
 
@@ -378,13 +379,17 @@ def full_brief(
     and a repository need not hold a delegation doc.
 
     With `plan_change`, the text of `plan_change_text`, the brief has the
-    section "Plan change" after the task.
+    section "Plan change" after the task. `gates_text` replaces the whole text
+    of the `## Gates` section, as in `chain_brief`: the engine gives the output
+    of the gates that it ran green (see `green_gates_text`).
     """
     command = f"git diff {base}...{branch}"
     diff = _diff(vcs, repo, base, branch, from_merge_base=True)
     if not diff.strip():
         raise BriefError(f"{command} is empty. The branch holds no change to verify.")
-    if gate_commands is None:
+    if gates_text is not None:
+        gates = gates_text
+    elif gate_commands is None:
         gates = read_gates(repo, _changed_files(vcs, repo, base, branch, from_merge_base=True), stacks)
     else:
         gates = _bash("\n".join(gate_commands))
@@ -802,7 +807,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
 def verifier_run_brief(
     vcs: VersionControl,
     copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path,
-    plan_change: str | None = None, notes: str | None = None,
+    plan_change: str | None = None, notes: str | None = None, gates_text: str | None = None,
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
@@ -810,10 +815,13 @@ def verifier_run_brief(
     the gates, and never the specialist's report. `copy` is the temporary copy
     of the branch that the engine prepared. With `plan_change`, the brief has the
     section "Plan change" after the task. With `notes`, the verifier notes of
-    the stack, the section "Notes of this stack" comes after the gates.
+    the stack, the section "Notes of this stack" comes after the gates. With
+    `gates_text`, the output of the gates that the engine ran green on the
+    commit under verification (see `green_gates_text`), the brief gives that
+    output in place of the gate commands, and the verifier does not run the gates.
     """
     return (
-        full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change)
+        full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text)
         + notes_section(notes)
-        + verifier_run_sections(copy, report_path, "full")
+        + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None)
     )
