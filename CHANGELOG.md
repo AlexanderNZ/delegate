@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-20
+
 ### Added
 
 - A declaration key, `contextLoad`, selects how the context skill loads its references (#148). `contextLoad = "blocks"` is the default, as before. With `contextLoad = "read"`, the context skill has no load-time block: its first instruction tells the agent to read each reference document with the Read tool before any other step, in the order of the references, and to stop and report when a reference is missing. Use it on a host where a load-time block cannot run. `agent-definitions bootstrap` takes `--context-load read` (and `--context-load blocks`), and any other value exits 1. The skill carries the line `<!-- agent-definitions:context-load read -->`, and `validate` gives the new finding `LOAD_BLOCK_IN_READ_SKILL` for each load-time block in a skill with that line. Without the flag, `bootstrap` writes the same bytes as before. The `agent-delegation` skill and ADR 0006 record a measurement of 2026-10-20 on Claude Code 2.1.283: a coordinator that called `EnterWorktree` and then spawns an agent with worktree isolation cannot load the context skill of that agent, so the coordinator calls `ExitWorktree` first.
