@@ -8,8 +8,10 @@ Neither form runs another command, so the rules of #158 did not cover them.
 
 Now the guard examines the words of `mktemp`. It permits `mktemp` when the
 file that it makes is in a temp directory: with no template, with `-t` and one
-name, with `-p <temp path>` or `--tmpdir[=<temp path>]`, or with a template
-that is a temp path. It denies each other form. macOS mktemp reads the word
+name, with `-p <temp path>` or `--tmpdir[=<temp path>]` and names with no
+"/", or with a template that is a temp path. After `-p`, `--tmpdir` or `-t`,
+at any position, a template with a "/" denies: mktemp makes it in that
+directory or in $TMPDIR, not in the working directory. It denies each other form. macOS mktemp reads the word
 after `-t` as a prefix in $TMPDIR, and it makes one more file for each
 template, in the working directory, so `-t` permits one name only, with no
 "/". The guard denies `-C` and `--compile` after `file`, also in a cluster of
@@ -52,6 +54,7 @@ DECLARATION = {"agents": {"stack": {"description": "A repository with one stack.
 
 MKTEMP_TEMPLATE = "A mktemp template that is not a temp path makes a file outside a temp directory."
 MKTEMP_DIRECTORY = "mktemp makes its file in the directory of -p or --tmpdir"
+MKTEMP_SLASH = "After -p, --tmpdir or -t, mktemp makes the template in that directory or in the system temp directory"
 FILE_COMPILE = "compiles a magic file and writes it"
 
 
@@ -272,6 +275,62 @@ def test_a_relative_mktemp_template_counts_from_a_working_directory_in_no_git_tr
     # .git entry, that is a temp path, as for each other write target (#159).
     copy = temp_base / "copy"
     (copy / "app").mkdir(parents=True)
+    _permitted(_guard(command, shell, copy), shell, command)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "form",
+    [
+        "mktemp -p {par} wt/fXXXXXX",
+        "mktemp -p {par} wt/src/fXXXXXX",
+        "mktemp -dp {par} wt/dXXXXXX",
+        "mktemp -p{par} wt/fXXXXXX",
+        "mktemp --tmpdir={par} wt/src/fXXXXXX",
+        "mktemp --tmp={par} wt/fXXXXXX",
+        "mktemp -p {par} -- wt/fXXXXXX",
+        # GNU mktemp and macOS mktemp both read -p after the template.
+        "mktemp wt/fXXXXXX -p {par}",
+        "mktemp wt/fXXXXXX --tmpdir={par}",
+        # macOS mktemp puts an absolute template after the directory of -p too: {par}//tmp/x.
+        "mktemp -p {par} /tmp/xXXXXXX",
+        # --tmpdir with no value and -t put the name in $TMPDIR, which can hold a git tree.
+        "mktemp --tmpdir copy/fXXXXXX",
+        "mktemp -t copy/f",
+        "mktemp -dt copy/f",
+        "mktemp -tcopy/f",
+    ],
+)
+def test_a_mktemp_template_with_a_slash_after_a_directory_option_is_denied(temp_base, git_identity, shell, form):
+    # The working directory is a temp copy in no git tree, as the proof copy of
+    # a verifier (#153). After -p, --tmpdir or -t, mktemp makes the template in
+    # that directory or in $TMPDIR, not in the working directory. A "/" in the
+    # template can go into a git tree there: GNU mktemp made {par}/sub/f<random>
+    # for "-p {par} sub/fXXXXXX", and macOS mktemp made $TMPDIR/sub/f.<random>
+    # for "-t sub/f". Before this fix, the guard tested the template against
+    # the working directory, and permitted each form.
+    par = temp_base / "par"
+    (par / "wt" / "src").mkdir(parents=True)
+    git(par / "wt", "init", "-q", "-b", "main")
+    copy = temp_base / "copy"
+    (copy / "wt" / "src").mkdir(parents=True)
+    command = form.format(par=_without_private(par))
+    _denied(_guard(command, shell, copy), shell, command, MKTEMP_SLASH)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "form",
+    ["mktemp -p {par} fXXXXXX", "mktemp -d -p {par} dXXXXXX", "mktemp --tmpdir={par} fXXXXXX", "mktemp -t f"],
+)
+def test_a_mktemp_name_with_no_slash_after_a_directory_option_is_permitted(temp_base, git_identity, shell, form):
+    # The file is {par}/f<random> or $TMPDIR/f.<random>: next to the git tree, not in it.
+    par = temp_base / "par"
+    (par / "wt").mkdir(parents=True)
+    git(par / "wt", "init", "-q", "-b", "main")
+    copy = temp_base / "copy"
+    copy.mkdir()
+    command = form.format(par=_without_private(par))
     _permitted(_guard(command, shell, copy), shell, command)
 
 

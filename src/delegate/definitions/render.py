@@ -144,6 +144,14 @@ MKTEMP_TEMPLATE_MESSAGE = (
 #: The deny message of a mktemp directory that is not a temp path (#161).
 MKTEMP_DIRECTORY_MESSAGE = "mktemp makes its file in the directory of -p or --tmpdir, so that directory must be a temp path."
 
+#: The deny message of a mktemp template with a "/" when -p, --tmpdir or -t
+#: is in the command (#161). mktemp then makes the template in that directory
+#: or in the system temp directory, not in the working directory.
+MKTEMP_SLASH_MESSAGE = (
+    "After -p, --tmpdir or -t, mktemp makes the template in that directory or in the system temp directory, "
+    "so a template with a / can name a path in a git tree there. Give one name with no / (mktemp -p /tmp xXXXXXX)."
+)
+
 
 def _exact_or_prefix(commands: tuple[str, ...]) -> str:
     """A bash case pattern. It matches each command alone or with arguments."""
@@ -558,10 +566,15 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
 
     "mktemp" makes a file, and the guard permits it only when that file is in
     a temp directory (#161): with no template, with -t and one name with no
-    "/", with -p <dir> or --tmpdir[=<dir>] where <dir> is a temp path, or with
-    templates that are temp paths. A name with no "/" is permitted also when it
-    is a temp path, because the working directory is a temp directory in no git
-    tree. macOS mktemp reads the word after -t as a prefix in $TMPDIR, also a
+    "/", with -p <dir> or --tmpdir[=<dir>] where <dir> is a temp path and names
+    with no "/", or with templates that are temp paths. A name with no "/" is
+    permitted also when it is a temp path, because the working directory is a
+    temp directory in no git tree. After -p, --tmpdir or -t, mktemp makes each
+    template in that directory or in $TMPDIR, not in the working directory, and
+    macOS mktemp puts also an absolute template after the directory of -p. GNU
+    mktemp and macOS mktemp both read these options also after a template. So
+    when one of them is in the command, at any position, a template with a "/"
+    denies. macOS mktemp reads the word after -t as a prefix in $TMPDIR, also a
     word with a hyphen, and it makes one more file for each template, in the
     working directory. So after -t, the guard tests the next word as a
     template too, and -t permits one name only. After "--", and after the
@@ -735,7 +748,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     # A redirection is no argument of mktemp. A lone sign gives its target in the next word ($mr). A word that holds a
     # sign gives the text before the sign as a word, unless that text is a file descriptor number or "&".
     mktemp_file_branches = (
-        '"mktemp"|"mktemp "*) shift; mf=0; mt=0; mp=0; mn=0; mk=0; mx=0; mb=0; mr=0; '
+        '"mktemp"|"mktemp "*) shift; mf=0; mt=0; mp=0; mn=0; mk=0; mx=0; mb=0; mr=0; mo=0; ms=0; '
         'for a in "$@"; do '
         'if [ "$mr" = 1 ]; then mr=0; continue; fi; '
         "case \"$a\" in '>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>'|'<'|'<<'|'0<'|*'>&'|*'<&') mr=1; continue ;; "
@@ -747,23 +760,28 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         # The word after a lone -t: macOS mktemp reads it as the prefix of -t, also with a hyphen, and GNU mktemp reads
         # it as an option or a template.
         'if [ "$mb" = 1 ]; then mb=0; mtpl "$a"; case "$a" in -*) ;; *) continue ;; esac; '
-        # After the first template, a mktemp that does not reorder its arguments reads each word as a template.
-        'elif [ "$mf" = 1 ]; then case "$a" in -*) mtpl "$a" ;; esac; fi; '
+        # After the first template, a mktemp that does not reorder its arguments reads each word as a template. A
+        # mktemp that reorders them reads the word as an option, so a "/" in it does not count in $ms.
+        'elif [ "$mf" = 1 ]; then case "$a" in -*) mq=$ms; mtpl "$a"; ms=$mq ;; esac; fi; '
         'case "$a" in '
         "--) mx=1 ;; "
-        f'{"|".join(f"{o}=*" for o in MKTEMP_TMPDIR_OPTIONS)}) [ "$mf" = 1 ] || mp=1; '
+        # $mo records -p, --tmpdir or -t at any position: GNU mktemp and macOS mktemp read them also after a template.
+        f'{"|".join(f"{o}=*" for o in MKTEMP_TMPDIR_OPTIONS)}) mo=1; [ "$mf" = 1 ] || mp=1; '
         'mdir "${a#*=}" ;; '
-        f'{"|".join(MKTEMP_TMPDIR_OPTIONS)}) [ "$mf" = 1 ] || mp=1 ;; '
+        f'{"|".join(MKTEMP_TMPDIR_OPTIONS)}) mo=1; [ "$mf" = 1 ] || mp=1 ;; '
         "--*) ;; "
         # A cluster of short options. The text after the first "p" is the directory of -p, or else the next word is.
         # Before that "p", a "t" is -t: macOS mktemp reads the text after it, or else the next word, as its prefix.
         '-?*) mw=${a#-}; mc=${mw%%p*}; '
-        'case "$mc" in *t*) [ "$mf" = 1 ] || mt=1; mc=${mw#*t}; if [ -n "$mc" ]; then mtpl "$mc"; else mb=1; fi ;; esac; '
-        'case "$mw" in *p*) [ "$mf" = 1 ] || mp=1; mc=${mw#*p}; '
+        'case "$mc" in *t*) mo=1; [ "$mf" = 1 ] || mt=1; mc=${mw#*t}; if [ -n "$mc" ]; then mtpl "$mc"; else mb=1; fi ;; esac; '
+        'case "$mw" in *p*) mo=1; [ "$mf" = 1 ] || mp=1; mc=${mw#*p}; '
         'if [ -n "$mc" ]; then mdir "$mc"; else mk=1; fi ;; esac ;; '
         '*) mf=1; mtpl "$a" ;; '
         "esac; done; "
         '[ "$mk" = 0 ] || deny "$seg" "The option -p needs a path argument."; '
+        # After -p, --tmpdir or -t, the template is in that directory or in $TMPDIR, and the guard tested it against
+        # the working directory. A name with no "/" stays in that directory, which mdir tested. A "/" can go below it.
+        f'[ "$mo" = 0 ] || [ "$ms" = 0 ] || deny "$seg" "{MKTEMP_SLASH_MESSAGE}"; '
         # A name with no "/" is in the directory of -p or --tmpdir, or after -t in $TMPDIR. macOS mktemp makes each
         # template in the working directory also with -t, so -t permits one name only.
         '[ "$mn" = 0 ] || [ "$mp" = 1 ] || { [ "$mt" = 1 ] && [ "$mn" = 1 ]; } '
@@ -892,8 +910,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             f'istmp() {{ rl "$1"; istp "$rp" || return 1; inwt "$rp"; case $? in 0) deny "$seg" "{in_toplevel}" ;; '
             f'3) deny "$seg" "{in_unsearched}" ;; esac; return 0; }}',
             # A template of mktemp (#161): a temp path, or a name with no "/" that the caller counts in $mn. A name with
-            # an expansion or a pattern character can be a path after the shell expands it.
-            'mtpl() { istmp "$1" && return 0; '
+            # an expansion or a pattern character can be a path after the shell expands it. $ms records a "/" in a
+            # template, for the test of -p, --tmpdir and -t.
+            'mtpl() { case "$1" in */*) ms=1 ;; esac; istmp "$1" && return 0; '
             "case \"$1\" in */*|''|.|..|'~'*|'='*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) "
             f'deny "$seg" "{MKTEMP_TEMPLATE_MESSAGE}" ;; esac; mn=$((mn+1)); }}',
             # The directory of mktemp -p or --tmpdir (#161). mktemp makes a new name in it, so the guard tests that name,
