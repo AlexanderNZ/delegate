@@ -42,6 +42,8 @@ The `bash` map of a rendered verifier has no `git grep` rule (#140). `git grep -
 
 The `bash` map of a rendered verifier has no `env` rule (#158). `env` runs the command after its options and assignments, and a pattern `env *` also matches `env touch <file>` and `env -i rm <file>`. A pattern cannot examine the words after `env`, so the map leaves `env` out, and the catch-all deny denies each `env` command. The Claude Code guard removes `env` and its options, and it tests the command after them.
 
+The `bash` map of a rendered verifier has no `file` rule, and it permits `mktemp` only as `mktemp` and `mktemp -d` (#161). `file -C` writes a compiled magic file, and `mktemp` makes the file that its template names, or a file in the directory of `-p`. A pattern cannot examine a cluster of short options, a template or a directory, so the map denies each other form of `mktemp` and each `file` command. The Claude Code guard examines their words, and it also permits `file` without `-C`, `mktemp -t <name>`, and a template or a `-p` directory that is a temp path.
+
 ## What the agent gets
 
 The agent gets:

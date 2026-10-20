@@ -122,6 +122,28 @@ VERIFIER_FIND_DENIED_OPTIONS: tuple[str, ...] = (
 #: a hyperlink. rg accepts no abbreviation of a long option.
 VERIFIER_RG_DENIED_OPTIONS: tuple[str, ...] = ("--pre", "--hostname-bin")
 
+#: The long option of `mktemp` that names the directory of the file (#161),
+#: and each prefix of it down to "--t". GNU mktemp accepts a unique prefix of a
+#: long option, and no other long option of mktemp starts with "--t".
+MKTEMP_TMPDIR_OPTIONS = ["--tmpdir"[:n] for n in range(3, len("--tmpdir") + 1)]
+
+#: The short options of `file` that take an argument (#161). In a cluster of
+#: short options, file reads the rest of the word after one of them as its
+#: argument, so a "C" after it is no option: "-mC" is the magic file "C". A
+#: "C" before it is -C: "-Cm" compiles. A letter that is not in this text makes
+#: the guard read further, so a letter that is missing gives a deny, never a
+#: hole.
+FILE_ARGUMENT_SHORT_OPTIONS = "efFmMP"
+
+#: The deny message of a mktemp template that is not in a temp directory (#161).
+MKTEMP_TEMPLATE_MESSAGE = (
+    "A mktemp template that is not a temp path makes a file outside a temp directory. Give no template "
+    "(mktemp, mktemp -d), a temp path (mktemp /tmp/x.XXXXXX), or -t with one name and no / (mktemp -d -t x)."
+)
+
+#: The deny message of a mktemp directory that is not a temp path (#161).
+MKTEMP_DIRECTORY_MESSAGE = "mktemp makes its file in the directory of -p or --tmpdir, so that directory must be a temp path."
+
 
 def _exact_or_prefix(commands: tuple[str, ...]) -> str:
     """A bash case pattern. It matches each command alone or with arguments."""
@@ -534,6 +556,20 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
     place ("-i"). The guard does not parse a sed script, so it denies each
     other form.
 
+    "mktemp" makes a file, and the guard permits it only when that file is in
+    a temp directory (#161): with no template, with -t and one name with no
+    "/", with -p <dir> or --tmpdir[=<dir>] where <dir> is a temp path, or with
+    templates that are temp paths. A name with no "/" is permitted also when it
+    is a temp path, because the working directory is a temp directory in no git
+    tree. macOS mktemp reads the word after -t as a prefix in $TMPDIR, also a
+    word with a hyphen, and it makes one more file for each template, in the
+    working directory. So after -t, the guard tests the next word as a
+    template too, and -t permits one name only. After "--", and after the
+    first template, each word is a template too. After "file", -C and
+    --compile (each prefix down to "--co") deny, also in a cluster of short
+    options before a letter of FILE_ARGUMENT_SHORT_OPTIONS: they write a
+    compiled magic file.
+
     `gates` are the repository's gate commands from its declaration. The
     gates differ in each repository, so the global list holds none of them
     (ADR 0004). Each plain gate is permitted like a read command, in that
@@ -693,6 +729,50 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         'deny "$seg" "The rg option $a runs a command, so it is not permitted." ;; '
         "esac; done ;; "
     )
+    # mktemp makes the file that its template names, and file -C writes a compiled magic file (#161). The words lose
+    # their quotes and backslashes first, as for find and rg.
+    file_compile = "The file option $a compiles a magic file and writes it, so it is not permitted. Without -C, file is a read."
+    # A redirection is no argument of mktemp. A lone sign gives its target in the next word ($mr). A word that holds a
+    # sign gives the text before the sign as a word, unless that text is a file descriptor number or "&".
+    mktemp_file_branches = (
+        '"mktemp"|"mktemp "*) shift; mf=0; mt=0; mp=0; mn=0; mk=0; mx=0; mb=0; mr=0; '
+        'for a in "$@"; do '
+        'if [ "$mr" = 1 ]; then mr=0; continue; fi; '
+        "case \"$a\" in '>'|'>>'|'1>'|'1>>'|'2>'|'2>>'|'&>'|'&>>'|'<'|'<<'|'0<'|*'>&'|*'<&') mr=1; continue ;; "
+        "*'>'*|*'<'*) mw=${a%%'>'*}; mw=${mw%%'<'*}; "
+        "case \"$mw\" in ''|'&') continue ;; *[!0-9]*) a=$mw ;; *) continue ;; esac ;; esac; "
+        f"{unquote}"
+        'if [ "$mk" = 1 ]; then mk=0; mdir "$a"; continue; fi; '
+        'if [ "$mx" = 1 ]; then mtpl "$a"; continue; fi; '
+        # The word after a lone -t: macOS mktemp reads it as the prefix of -t, also with a hyphen, and GNU mktemp reads
+        # it as an option or a template.
+        'if [ "$mb" = 1 ]; then mb=0; mtpl "$a"; case "$a" in -*) ;; *) continue ;; esac; '
+        # After the first template, a mktemp that does not reorder its arguments reads each word as a template.
+        'elif [ "$mf" = 1 ]; then case "$a" in -*) mtpl "$a" ;; esac; fi; '
+        'case "$a" in '
+        "--) mx=1 ;; "
+        f'{"|".join(f"{o}=*" for o in MKTEMP_TMPDIR_OPTIONS)}) [ "$mf" = 1 ] || mp=1; '
+        'mdir "${a#*=}" ;; '
+        f'{"|".join(MKTEMP_TMPDIR_OPTIONS)}) [ "$mf" = 1 ] || mp=1 ;; '
+        "--*) ;; "
+        # A cluster of short options. The text after the first "p" is the directory of -p, or else the next word is.
+        # Before that "p", a "t" is -t: macOS mktemp reads the text after it, or else the next word, as its prefix.
+        '-?*) mw=${a#-}; mc=${mw%%p*}; '
+        'case "$mc" in *t*) [ "$mf" = 1 ] || mt=1; mc=${mw#*t}; if [ -n "$mc" ]; then mtpl "$mc"; else mb=1; fi ;; esac; '
+        'case "$mw" in *p*) [ "$mf" = 1 ] || mp=1; mc=${mw#*p}; '
+        'if [ -n "$mc" ]; then mdir "$mc"; else mk=1; fi ;; esac ;; '
+        '*) mf=1; mtpl "$a" ;; '
+        "esac; done; "
+        '[ "$mk" = 0 ] || deny "$seg" "The option -p needs a path argument."; '
+        # A name with no "/" is in the directory of -p or --tmpdir, or after -t in $TMPDIR. macOS mktemp makes each
+        # template in the working directory also with -t, so -t permits one name only.
+        '[ "$mn" = 0 ] || [ "$mp" = 1 ] || { [ "$mt" = 1 ] && [ "$mn" = 1 ]; } '
+        f'|| deny "$seg" "{MKTEMP_TEMPLATE_MESSAGE}" ;; '
+        f'"file"|"file "*) for a in "$@"; do {unquote}'
+        f'case "$a" in --co*) deny "$seg" "{file_compile}" ;; --*) ;; '
+        f'-*) fw=${{a#-}}; fw=${{fw%%[{FILE_ARGUMENT_SHORT_OPTIONS}]*}}; case "$fw" in *C*) deny "$seg" "{file_compile}" ;; esac ;; '
+        "esac; done ;; "
+    )
     # "sed -n" is a read only as a line range (#158). A bare "sed -n" has no script, so it stays a read of the
     # table. The script is the word after -n: digits, at most one comma,
     # and "p", with "$" as the last address only in single quotes. Each later word is a path: no option, and no
@@ -763,6 +843,7 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         f'"git grep"|"git grep "*) {_git_read_argument_check(grep=True)} ;; '
         f"{_exact_or_prefix(git_reads)}) {_git_read_argument_check(grep=False)} ;; "
         f"{find_rg_branches}"
+        f"{mktemp_file_branches}"
         f"{sed_branch}"
         f"{_exact_or_prefix(other_reads + prefix_gates)}) ;; "
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
@@ -810,6 +891,14 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             RELATIVE_TARGET_RESOLVER,
             f'istmp() {{ rl "$1"; istp "$rp" || return 1; inwt "$rp"; case $? in 0) deny "$seg" "{in_toplevel}" ;; '
             f'3) deny "$seg" "{in_unsearched}" ;; esac; return 0; }}',
+            # A template of mktemp (#161): a temp path, or a name with no "/" that the caller counts in $mn. A name with
+            # an expansion or a pattern character can be a path after the shell expands it.
+            'mtpl() { istmp "$1" && return 0; '
+            "case \"$1\" in */*|''|.|..|'~'*|'='*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) "
+            f'deny "$seg" "{MKTEMP_TEMPLATE_MESSAGE}" ;; esac; mn=$((mn+1)); }}',
+            # The directory of mktemp -p or --tmpdir (#161). mktemp makes a new name in it, so the guard tests that name,
+            # the directory, a "/" and the default template of GNU mktemp: the directory itself may hold a git tree.
+            f'mdir() {{ istmp "${{1%/}}/tmp.XXXXXXXXXX" || deny "$seg" "{MKTEMP_DIRECTORY_MESSAGE}"; }}',
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
@@ -972,8 +1061,17 @@ def verifier_external_directory_permission() -> dict[str, str]:
 #: `git grep` rule. The OpenCode verifier has its grep tool. `env` runs the
 #: command after its options and assignments (#158), and a rule "env *" also
 #: matches "env touch <file>". A glob cannot examine the words after env, so
-#: the map has no `env` rule.
-VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("git grep", "echo", "printf", "env")
+#: the map has no `env` rule. `file -C` writes a compiled magic file, and
+#: `mktemp` makes the file that its template names, also in the directory of
+#: `-p` (#161). A glob cannot examine a cluster of short options, a template or
+#: a directory, so the map has no `file` rule, and it permits `mktemp` only in
+#: the forms of VERIFIER_OPENCODE_EXACT_READS.
+VERIFIER_OPENCODE_LEFT_OUT: tuple[str, ...] = ("git grep", "echo", "printf", "env", "file", "mktemp")
+
+#: Read commands that the OpenCode verifier map permits only as this exact
+#: text, with no argument after it (#161). Each one makes a file only in the
+#: temp directory.
+VERIFIER_OPENCODE_EXACT_READS: tuple[str, ...] = ("mktemp", "mktemp -d")
 
 #: The deny rules that close the OpenCode verifier map (#123). They come after
 #: the read allows, because OpenCode keeps the last matching rule
@@ -1002,7 +1100,8 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     This map is smaller than the Claude Code allow list on purpose. An OpenCode
     pattern cannot examine a path argument or an option, so the temp-write
     commands and the GET-only commands stay out, and so do the commands of
-    VERIFIER_OPENCODE_LEFT_OUT.
+    VERIFIER_OPENCODE_LEFT_OUT. The commands of VERIFIER_OPENCODE_EXACT_READS
+    are permitted only as their exact text.
     """
     perm: dict[str, str] = {"*": "deny"}
     # An exact gate stays out: the map is a glob, and a glob cannot hold a
@@ -1011,6 +1110,8 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     reads = tuple(c for c in VERIFIER_READ_COMMANDS if c not in VERIFIER_OPENCODE_LEFT_OUT)
     for command in reads + plain_gates:
         perm[f"{command} *"] = "allow"
+    for command in VERIFIER_OPENCODE_EXACT_READS:
+        perm[command] = "allow"
     for pattern in VERIFIER_OPENCODE_WRITE_DENIES:
         perm[pattern] = "deny"
     return perm

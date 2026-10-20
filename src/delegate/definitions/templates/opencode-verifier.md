@@ -29,6 +29,8 @@ Your map denies each command that holds `>`, also `2>&1` and `2>/dev/null`, and 
 
 Your map has no `git grep` rule. `git grep -O<cmd>` and `git grep --open-files-in-pager` run a command on the files that match, and a glob cannot find each form of these options. Use your grep tool. Your map permits `git diff`, `git log` and `git show` with `--output=<file>`, which writes a file. Do not use that option.
 
+Your map has no `file` rule, because `file -C` writes a file. Your map permits `mktemp` only as `mktemp` and `mktemp -d`, with no other word. These two make the file in the temp directory. A template or `-p <dir>` can make the file in another directory, and a glob cannot examine the path.
+
 ## Your write tool
 
 You have the write tool for your report. Your `permission.edit` map permits a write only to a path outside the project, and your `permission.external_directory` map permits only a path in a temp directory. The project is the git toplevel of your working directory. Thus a write must be in a temp directory and outside the git toplevel of your working directory. Each other write is denied. Use the write tool to write your report at the absolute path that the brief gives.
