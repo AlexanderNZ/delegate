@@ -8,6 +8,11 @@ The MCP servers of the stack go to the harness in the variable
 `OPENCODE_CONFIG_CONTENT`, an inline configuration that the harness merges
 with its other configuration. The harness has no option that removes the MCP
 servers of the user or of the project, so the agent also gets those.
+
+The adapter does not give the `added_directories` of the request to the
+session: OpenCode 1.15.10 has no option that adds a directory to a session, and
+the `bash` map of a rendered verifier has no `cd` rule (#153).
+
 The prompt goes on standard input, never in argv, so a long brief meets no
 argument limit and shows in no process list. The harness writes one JSON event
 on each line of standard output. The adapter copies that stream to the file

@@ -21,6 +21,7 @@ The engine gives the adapter an `AdapterRequest`. It has these fields:
 - `resume_session`: the [**session**](../glossary.md#session) id of an earlier run to resume, or `None`.
 - `idle_timeout` and `report_valid`: the idle timeout in seconds, and a function that gives true when the file at `report_path` is valid. When the check is true and the harness wrote no event for the idle timeout, the adapter ends the session. The helper `run_harness` does this for you.
 - `mcp_servers`: the MCP servers of the [**stack**](../glossary.md#stack), as `McpServer` values. Each has a `name` and one of `command` (a local server) and `url` (a remote server). Give the agent these servers in the configuration form of your harness. If your harness can ignore the other MCP configuration of the user and of the project, do that, so the agent gets only these servers.
+- `added_directories`: the directories outside `cwd` that the agent can read and change. For a [**verifier**](../glossary.md#verifier), this is the proof copy of a [**red proof**](../glossary.md#red-proof). Add each one to the session if your harness has a way to do that. If it has none, state that limit on the page of your adapter.
 
 The adapter gives back an `AdapterResult`. It has these fields:
 

@@ -470,6 +470,12 @@ writes the index and the branch of the real worktree.
    message. The gates can still run in the worktree as read-only checks.
    The worktree is the work under review, and the engine checks that the
    verifier left it as it was (the worktree invariant) (#152).
+4. In a `delegate run`, the engine makes the proof copy for the verifier
+   before the verifier starts: a copy of the tree with no `.git` entry, beside
+   the temporary copy. The brief names it, and the verifier goes to it with
+   `cd`, so the verifier needs no `cp` and no `rm` (#153). A host in `dontAsk`
+   mode refuses a recursive `cp`, so a verifier that a person spawns there
+   cannot make its own copy. When the proof copy is missing, rule 3 applies.
 
 ## Merge protocol (sequential, coordinator-owned)
 Before each merge and each push, run `git branch --show-current` in the

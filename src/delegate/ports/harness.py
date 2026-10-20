@@ -79,6 +79,10 @@ class AdapterRequest:
     `mcp_servers` holds the MCP servers of the stack of the agent. An empty
     tuple means that the stack names none. An adapter gives the agent these
     servers, and it gives no other server where its harness allows that.
+
+    `added_directories` holds the directories outside `cwd` that the agent can
+    read and change, for example the proof copy of a verifier (#153). An
+    adapter adds them to the session where its harness allows that.
     """
 
     agent: str
@@ -91,6 +95,7 @@ class AdapterRequest:
     idle_timeout: float | None = None
     report_valid: Callable[[], bool] | None = None
     mcp_servers: tuple[McpServer, ...] = ()
+    added_directories: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)

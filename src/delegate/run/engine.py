@@ -29,8 +29,10 @@ the step fails. The run branch moves only on ACCEPT.
 
 The engine records the HEAD and the status of the worktree of the ticket before
 and after each verifier run (see `guards.py`). A difference is an invariant
-violation: the journal records it with the changes, and the run halts. The
-engine removes the temporary copy after every verifier run.
+violation: the journal records it with the changes, and the run halts. Before
+each verifier run, the engine also makes the proof copy beside the temporary
+copy: the tree of the copy with no `.git` entry, where the verifier breaks a
+check for a red proof. The engine removes both copies after every verifier run.
 
 In `economy` mode each ticket branch starts from the tip of the previous built
 ticket, and the engine runs no gate and no verifier for a ticket by itself: a
@@ -1132,13 +1134,33 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
 
 def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
-    report_valid: Callable[[], bool], resume_session: str | None = None,
+    report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
 ) -> AdapterRequest:
     """The request for one agent run of the stack, with the idle timeout of the run, the check of its report, and the MCP servers of the stack."""
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
+        added_directories=added_directories,
     )
+
+
+def _make_proof_copy(copy: Path) -> tuple[Path, ...]:
+    """Make the proof copy of a red proof beside `copy`: the tree of `copy` with no `.git` entry (#153).
+
+    A host can refuse the `cp -R` and the `rm -r` that a verifier needs to make
+    the copy itself, so the engine makes it before the verifier starts. Give the
+    directories to add to the session of the verifier: the proof copy, or none
+    when the copy could not be made. The brief then tells the verifier what to do
+    when the proof copy is missing.
+    """
+    proof = red_proof_copy(copy)
+    try:
+        # A link stays a link, so a link to a path outside the copy copies no file from there.
+        shutil.copytree(copy, proof, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    except OSError:
+        shutil.rmtree(proof, ignore_errors=True)
+        return ()
+    return (proof,)
 
 
 def _journal_idle(journal: Journal, result: AdapterResult, ticket: str, role: str, round_number: int) -> None:
@@ -1684,6 +1706,7 @@ def _verify_round(
                 prompt = fixup_body + verifier_run_sections(copy, report_path, mode)
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
+        added = _make_proof_copy(copy)
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
             commit=verified, copy=str(copy), **step.chain_fields,
@@ -1694,7 +1717,9 @@ def _verify_round(
         # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
         in_scratch = report_path
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
-        result = step.adapter.run(_request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid))
+        result = step.adapter.run(
+            _request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added)
+        )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:

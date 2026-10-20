@@ -536,3 +536,19 @@ def test_the_refusal_block_that_claude_code_wrote_on_the_agent_host_is_found(tmp
     result = adapters.get("claude-code").run(request(tmp_path))
 
     assert result.refused == (("Bash", "don't ask"),)
+
+
+def test_each_added_directory_goes_to_the_command_as_an_add_dir_option(tmp_path, monkeypatch):
+    # The report of #153: the verifier works in the proof copy that the engine made beside its working directory.
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    proof = tmp_path / "proof"
+    proof.mkdir()
+
+    adapters.get("claude-code").run(request(tmp_path, added_directories=(proof,)))
+    adapters.get("claude-code").run(request(tmp_path))
+
+    with_proof, without = fake.calls()
+    argv = with_proof["argv"]
+    assert argv[argv.index("--add-dir") + 1] == str(proof)
+    assert argv.count("--add-dir") == 1
+    assert "--add-dir" not in without["argv"]

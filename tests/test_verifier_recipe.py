@@ -18,6 +18,11 @@ The recipe removes the `.git` entry with `rm -r`, not `rm -rf` (#149). A deny
 rule for `rm -rf` in the user settings of a host refused the old form. `rm -r`
 removes the pointer file of a worktree and the `.git` directory of a checkout.
 
+In a `delegate run`, the engine makes the proof copy beside the temporary copy,
+with no `.git` entry, before the verifier starts (#153). A host in `dontAsk`
+mode refuses each recursive `cp` and `rm -r`, so the brief has no recipe: it
+names the proof copy, and the verifier goes to it with `cd`.
+
 OpenCode has no map rule for the tree under review (measured on OpenCode
 1.15.10 on 2026-10-19), so the rendered OpenCode verifier and the enforcement
 page state that limit.
@@ -206,31 +211,40 @@ def test_each_step_of_the_recipe_of_the_rendered_verifier_passes_the_guard(rende
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_each_step_of_the_recipe_of_the_verifier_brief_passes_the_guard(rendered, base, shell):
-    # The engine clones the branch into <scratch>/copy, and the copy is the working directory of the verifier.
+    # The engine clones the branch into <scratch>/copy, and the copy is the working directory of the verifier. The
+    # engine also makes the proof copy beside it, with no `.git` entry, as `shutil.copytree` does here (#153).
     scratch = base / "delegate-verify-x"
     scratch.mkdir()
     copy = scratch / "copy"
     git(base, "clone", "-q", str(_repository(base)), str(copy))
     brief = verifier_run_sections(copy, scratch / "verdict.json", "full")
-    proof = scratch / "proof"
-    steps = [f"cp -R {copy} {proof} && rm -r {proof}/.git", f"cd {proof}"]
+    proof = red_proof_copy(copy)
+    shutil.copytree(copy, proof, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    steps = [f"cd {proof}"]
     _in_order(brief, steps)
 
     _follow(_bash_hook(rendered), shell, base, copy, proof, steps)
 
 
-def test_the_engine_removes_the_second_copy_of_a_red_proof_and_keeps_the_other_files_of_the_verifier(tmp_path, capsys):
-    # The verifier follows the recipe of its brief: it makes the second copy, breaks it, and writes a note beside its
-    # report. The engine moves the files beside the report into the evidence directory, but not a copy of the tree.
-    seen: dict[str, Path] = {}
+def _files(tree: Path) -> list[str]:
+    """The relative paths of the files of `tree`, outside a `.git` entry at its top."""
+    return sorted(p.relative_to(tree).as_posix() for p in tree.rglob("*") if p.is_file() and p.relative_to(tree).parts[0] != ".git")
+
+
+def test_the_engine_makes_the_proof_copy_adds_it_to_the_session_and_removes_it_when_the_verifier_ends(tmp_path, capsys):
+    # The report of #153: a dontAsk host refuses `cp -R` and `rm -r`, so the verifier could not make its proof copy.
+    # The engine makes it before the verifier starts. The verifier breaks it and writes a note beside its report.
+    seen: dict[str, object] = {}
 
     def red_proof(request):
-        (command,) = re.findall(r"`(cp -R [^`]*)`", request.prompt)
-        subprocess.run(["bash", "-c", command], cwd=request.cwd, check=True, capture_output=True)
-        proof = Path(command.split(" && ", 1)[0].split()[-1])
+        proof = red_proof_copy(request.cwd)
+        seen["proof"] = proof
+        seen["exists"] = proof.is_dir()
+        seen["git_entry"] = (proof / ".git").exists()
+        seen["files"] = (_files(proof), _files(request.cwd))
+        seen["added"] = request.added_directories
         (proof / "feature.txt").write_text("broken by the verifier\n")
         (request.report_path.parent / "notes.txt").write_text("the red proof\n")
-        seen["proof"] = proof
 
     scripted = ScriptedAdapter(during_verifier=red_proof)
     adapters.register("scripted", scripted)
@@ -242,13 +256,30 @@ def test_the_engine_removes_the_second_copy_of_a_red_proof_and_keeps_the_other_f
         adapters.unregister("scripted")
 
     assert (code, err) == (0, "")
+    assert (seen["exists"], seen["git_entry"]) == (True, False)
+    in_proof, in_copy = seen["files"]
+    assert "feature.txt" in in_copy
+    assert in_proof == in_copy
+    assert seen["added"] == (seen["proof"],)
+    assert not seen["proof"].exists()
     journal = [line.removeprefix("journal ") for line in out.splitlines() if line.startswith("journal ")]
     evidence = Path(journal[0]).parent / "verifier" / "a"
     assert (evidence / "notes.txt").read_text() == "the red proof\n"
     kept = sorted(p.relative_to(evidence).as_posix() for p in evidence.rglob("*"))
     assert not [name for name in kept if name.endswith("feature.txt") or name.endswith("workflow.toml")], kept
-    assert not seen["proof"].exists()
     assert read_journal(out)[-1]["event"] == "run-end"
+
+
+def test_the_brief_names_the_proof_copy_and_holds_no_cp_and_no_rm(tmp_path):
+    # The report of #153: the verifier goes to the proof copy that the engine made. It needs no `cp` and no `rm`.
+    copy = tmp_path / "copy"
+    for mode, engine_gates in (("full", False), ("fix-up", False), ("full", True)):
+        brief = verifier_run_sections(copy, tmp_path / "verdict.json", mode, engine_gates=engine_gates)
+
+        assert f"`{red_proof_copy(copy)}`" in brief
+        assert f"`cd {red_proof_copy(copy)}`" in brief
+        assert "no `.git` entry" in brief
+        assert not re.findall(r"\bcp -R\b|\bcp -r\b|\brm -r", brief), brief
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -271,7 +302,8 @@ def test_the_brief_and_the_rendered_verifiers_remove_the_git_entry_with_rm_r_not
     brief = verifier_run_sections(copy, tmp_path / "verdict.json", "full")
     claude_code = _section(_body(rendered, "claude-code"), "Your shell")
 
-    assert f"rm -r {red_proof_copy(copy)}/.git`" in brief
+    # The brief removes nothing: the engine makes the proof copy with no `.git` entry (#153).
+    assert "rm -r" not in brief
     assert "rm -r /tmp/x/.git`" in claude_code
     for text in (brief, *(path.read_text() for path in sorted(rendered.glob("*/*.md")))):
         assert not RM_RF_GIT.findall(text)
@@ -291,10 +323,9 @@ def test_no_page_skill_or_committed_agent_removes_the_git_entry_with_rm_rf():
     assert not {name: hits for name, hits in found.items() if hits}
 
 
-def test_the_brief_and_the_body_tell_the_verifier_not_to_go_to_the_copy_first(rendered, tmp_path):
-    brief = verifier_run_sections(tmp_path / "copy", tmp_path / "verdict.json", "full")
-    for text in (_section(_body(rendered, "claude-code"), "Your shell"), brief):
-        assert "copy before you remove its `.git` entry" in text
+def test_the_body_tells_the_verifier_not_to_go_to_the_copy_first(rendered):
+    # The brief of a run gives a proof copy that the engine made, so only the rendered recipe removes a `.git` entry.
+    assert "copy before you remove its `.git` entry" in _section(_body(rendered, "claude-code"), "Your shell")
 
 
 # --- OpenCode -----------------------------------------------------------------
@@ -352,8 +383,8 @@ def test_the_enforcement_page_and_the_skill_state_the_limit_of_the_walk():
 
 # --- The copy cannot be made (#152) ----------------------------------------------
 
-#: The words that start the rule for a verifier that cannot make the copy of a red proof.
-NO_COPY = re.compile(r"cannot make the (?:second )?copy")
+#: The words that start the rule for a verifier that cannot make the copy of a red proof, or whose proof copy is missing.
+NO_COPY = re.compile(r"cannot make the (?:second )?copy|the proof copy is missing")
 
 #: The parts of the rule (#152), each in the text that follows the words of the case.
 NO_COPY_RULE = (

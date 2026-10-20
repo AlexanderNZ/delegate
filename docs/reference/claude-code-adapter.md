@@ -13,7 +13,7 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --agent <agent> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] --disallowedTools Monitor,TaskStop [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --agent <agent> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] [--add-dir <proof copy>] --disallowedTools Monitor,TaskStop [--resume <session id>]
 ```
 
 The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
@@ -27,6 +27,7 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
 | `--strict-mcp-config` | Ignore every MCP configuration other than `--mcp-config`: the servers of the user, of the project, and of the plugins. See [what the agent gets](#what-the-agent-gets). |
 | `--mcp-config <servers>` | Only when the stack names MCP servers in its `mcp-servers` table. One JSON object, `{"mcpServers": {...}}`: a local server as `command` and `args`, a remote server as `type` `http` and `url`. |
+| `--add-dir <proof copy>` | Only for a verifier: the proof copy that the engine made for a [**red proof**](../glossary.md#red-proof). See [the proof copy of a verifier](#the-proof-copy-of-a-verifier). |
 | `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
 | `--settings <path>` | Only when the host sets `DELEGATE_AGENT_SETTINGS`. See [the settings of a host](#the-settings-of-a-host). |
 | `--permission-mode <mode>` | Only when the host sets `DELEGATE_PERMISSION_MODE`. See [the settings of a host](#the-settings-of-a-host). |
@@ -35,7 +36,7 @@ The environment of the command is the environment of the [**engine**](../glossar
 
 The prompt goes on standard input. It is never in the arguments of the command, so a long brief meets no limit on arguments and shows in no process list.
 
-With no setting of the host, the adapter passes no permission option other than `--disallowedTools`. The option `--mcp-config` takes more than one value, so the adapter puts `--disallowedTools` after it to end its values. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [the settings of a host](#the-settings-of-a-host) and [what the adapter does not set](#what-the-adapter-does-not-set).
+With no setting of the host, the adapter passes no permission option other than `--disallowedTools`. The options `--mcp-config` and `--add-dir` take more than one value, so the adapter puts `--disallowedTools` after them to end their values. The permission rules of the repository and of the user decide which of the other tools the agent can use. See [the settings of a host](#the-settings-of-a-host) and [what the adapter does not set](#what-the-adapter-does-not-set).
 
 ## The settings of a host
 
@@ -51,6 +52,14 @@ With neither variable set, the command is the same as in 1.2.0. The [**verifier 
 A host needs these variables when its user settings refuse each tool that is not read-only. An example is `defaultMode` `"dontAsk"` with an empty allow list. Measured on the agent host on 2026-10-18: with no settings file, each `Bash` call of a specialist gave the tool result `Permission to use Bash has been denied because Claude Code is running in don't ask mode.`, so the run did no work.
 
 The adapter reads each tool result of the stream. An error result (`is_error` true) that says that a permission mode refused a tool goes into the `refused` field of the result of the agent, with the tool and the mode. The engine writes it into the result event of the agent, and `delegate watch` shows it as a problem. See [the problem events](status-and-watch.md#the-problem-events).
+
+## The proof copy of a verifier
+
+To prove a test red, a verifier breaks the check in a copy of the tree with no `.git` entry, because the [**verifier guard**](../glossary.md#verifier-guard) denies a write inside a git tree. In a `delegate run`, the [**engine**](../glossary.md#engine) makes that copy, the proof copy, before the verifier starts. The adapter gives each directory of `added_directories` of the request to the [**session**](../glossary.md#session) with `--add-dir <directory>`. For a verifier, that is the proof copy. See [the verifier step](run.md#the-verifier-step).
+
+The engine makes the copy because a host in `dontAsk` mode refuses the commands that a verifier needs to make it. Measured on the agent host on 2026-10-20 (Claude Code 2.1.283, `claude -p --permission-mode dontAsk`, the unattended settings of the host): Claude Code refused each recursive `cp` (`cp -r`, `cp -R`, `cp --recursive`, `cp -a`) with any settings, the deny list of the host refused `rm -r`, `rm -rf` and `rm -fr`, and a copy outside the working directory could not be read. With `--add-dir <proof>` and a proof directory with no `.git` entry, `ls`, `cat`, `cd <proof> && grep`, a test command after the `cd`, a Write, a Read and an Edit in the proof directory were each permitted, and the `cd` persisted (#153).
+
+A verifier that a person spawns outside a `delegate run` keeps the recipe of the rendered verifier: it makes the copy itself with `cp -R <tree> <copy> && rm -r <copy>/.git`. On a `dontAsk` host, Claude Code refuses the recursive `cp`, so such a verifier cannot make its own proof copy. It then follows the rule for a copy that it cannot make, and puts the red proof in `unverified` (#152). To make a red proof possible there, the person makes the copy with no `.git` entry before the verifier starts, and adds it to the session with `--add-dir`.
 
 ## The foreground rule
 

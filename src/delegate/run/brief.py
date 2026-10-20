@@ -708,11 +708,12 @@ def report_correction_brief(
 
 
 def red_proof_copy(copy: str | Path) -> Path:
-    """The path of the second copy that the verifier brief gives for a red proof: beside `copy`, in the scratch directory.
+    """The path of the proof copy of a red proof: beside `copy`, in the scratch directory.
 
-    The engine removes this path with `copy` when the verifier ends, and it
-    does not move it into the evidence directory with the other files of the
-    scratch directory.
+    The engine makes the proof copy at this path before the verifier starts,
+    and the verifier brief names it. The engine removes this path with `copy`
+    when the verifier ends, and it does not move it into the evidence directory
+    with the other files of the scratch directory.
     """
     return Path(copy).parent / "proof"
 
@@ -725,7 +726,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
     brief gives the output of the gates that the engine ran green, and the
     verifier does not run them.
     """
-    # The second copy goes beside the copy. The engine removes both when the verifier ends, and keeps neither as evidence.
+    # The proof copy goes beside the copy. The engine removes both when the verifier ends, and keeps neither as evidence.
     proof = red_proof_copy(copy)
     working_copy = (
         f"The temporary copy `{copy}` is a copy of the branch under verification. Read the branch and run the gates in this copy. "
@@ -737,15 +738,16 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         "that they could not search to the end: leave a large temp copy in place, because the engine removes both "
         "copies when you end and the system removes temp directories, or first remove the parts that hold no git tree, one directory at a time, each with "
         "fewer than 2000 directories. "
-        "To prove a test red, break a second copy. From this copy, make the second copy and remove its `.git` entry "
-        f"in one command: `cp -R {copy} {proof} && rm -r {proof}/.git`. Then go to it with `cd {proof}`, break it, "
-        "and run the test there. Do not go to the second copy before you remove its `.git` entry, and do not remove the entry "
-        "in a later command. A second copy with a `.git` entry is a git tree, and the guards deny the removal. "
-        # A host can refuse `cp -R` and `rm -r` (#152). Then the verifier must not make the red proof in the tree.
-        "This rule is binding: if you cannot make the second copy, because a step of these steps is refused or fails, "
+        # The engine makes the proof copy before the verifier starts, so the verifier needs no `cp -R` and no `rm -r`,
+        # which a host can refuse (#153).
+        f"To prove a test red, use the proof copy `{proof}`. The engine made it before you started: it is a copy of "
+        "the tree of this copy, with no `.git` entry, so it is not a git tree, and the guards permit a write in it. "
+        f"Go to it with `cd {proof}`, break the check there, and run the test there. Do not make a copy yourself. "
+        # The rule of #152 stays for a proof copy that is missing. Then the verifier must not make the red proof in the tree.
+        "This rule is binding: if the proof copy is missing, or a step in it is refused or fails, "
         "do not break a check, a test or a file in this copy or in the worktree under review, and do not make the red "
-        "proof there. Put the red proof in `unverified`, with the refused command and its message. You can still run "
-        "the gates in this copy as read-only checks. The worktree is the work under review, and the engine checks that "
+        "proof there. Put the red proof in `unverified`, with the refused command and its message, or with the path of "
+        "the missing proof copy. You can still run the gates in this copy as read-only checks. The worktree is the work under review, and the engine checks that "
         "you left it as it was (the worktree invariant). "
         "Never push.\n\n" + _report_rule("copy", report_path)
     )

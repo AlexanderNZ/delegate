@@ -187,7 +187,11 @@ class ClaudeCodeAdapter:
         ]
         if request.mcp_servers:
             command += ["--mcp-config", _mcp_config(request.mcp_servers)]
-        # `--mcp-config` takes more than one value, so this option ends its values.
+        # The proof copy of a verifier is outside its working directory, and a dontAsk host refuses a tool call there
+        # unless the directory is added to the session (#153).
+        for directory in request.added_directories:
+            command += ["--add-dir", str(directory)]
+        # `--mcp-config` and `--add-dir` take more than one value, so this option ends their values.
         command += ["--disallowedTools", ",".join(DISALLOWED_TOOLS)]
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
