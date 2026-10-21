@@ -11,6 +11,21 @@ from . import git_processes
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
+# The `src` of the tree that the tests run in. The `pythonpath` setting of pyproject.toml puts it on the path of the
+# pytest process only (#170).
+SOURCE = Path(__file__).resolve().parents[1] / "src"
+
+
+def pytest_configure(config):
+    """Put the `src` of this tree first on PYTHONPATH, so each Python process that a test starts imports the same code.
+
+    The dev shell sets PYTHONPATH only in a git checkout. A copy with no `.git` entry, as the proof copy of a verifier
+    (#153), has no PYTHONPATH from it, so `python -m delegate...` in a test did not find the package (#170).
+    """
+    entries = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    if entries[:1] != [str(SOURCE)]:
+        os.environ["PYTHONPATH"] = os.pathsep.join([str(SOURCE), *entries])
+
 
 # The identity of every commit that a test makes. It comes from the environment, so no test needs the git
 # configuration of the machine for it.

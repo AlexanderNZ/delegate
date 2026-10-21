@@ -30,4 +30,6 @@ packages = ["delegate", "delegate.adapters", "delegate.cli", "delegate.definitio
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The tests import the package from the src of the tree that they run in, also in a copy with no .git (#170).
+# This setting changes the path of the pytest process only. tests/conftest.py puts the same src on PYTHONPATH for
+# each Python process that a test starts.
 pythonpath = ["src"]
