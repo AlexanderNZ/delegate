@@ -1,6 +1,6 @@
 # How to watch and resume a run
 
-Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, to change its plan, and to go on with a run that stopped. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, to change its plan, to go on with a run that stopped, and to clean up after a run. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
@@ -212,6 +212,30 @@ A process that is killed cannot release the lock of its run branch. Resume the r
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
 A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
+
+## Clean up after a run
+
+A run that ends `built` removes the [**worktree**](../glossary.md#worktree) of each ticket, and deletes each ticket branch that the run branch holds. The run branch stays, because you merge it. A run that ended before that clean-up existed, or with `keep-worktrees = true`, keeps its worktrees and its ticket branches. `delegate clean` removes them. See [`delegate clean`](../reference/commands.md#delegate-clean).
+
+### 1. Merge the run branch
+
+Merge the run branch into the [**base branch**](../glossary.md#base-branch), as the merge steps of the `agent-delegation` [**skill**](../glossary.md#skill) tell.
+
+### 2. See what the command removes
+
+```bash
+delegate clean --ended --merged --dry-run
+```
+
+The command changes nothing. It prints one line for each run: the worktrees and the branches that it would remove, each item that it would keep with the reason, and the space that it would free. `--ended` selects each run that ended `built`. `--merged` adds the run branch of such a run when the base branch holds it. A run that is active, failed, paused or stopped keeps everything, and its line gives the reason. To clean one run, give its run id in place of `--ended`.
+
+### 3. Remove it
+
+```bash
+delegate clean --ended --merged
+```
+
+The command removes what the dry run named, and records a `cleanup` event in the [**journal**](../glossary.md#journal) of each run where something went. A worktree with a change that is not committed stays, and so does its branch. A file that a gate makes, for example in `__pycache__`, is such a change when `.gitignore` does not name it. The command exits 0 when it removed or kept each item by these rules, and 1 on an error.
 
 ## Report a run as a coordinator agent
 

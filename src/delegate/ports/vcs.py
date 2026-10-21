@@ -146,6 +146,10 @@ class VersionControl(Protocol):
         """
         ...
 
+    def prune_worktrees(self, repo: Path) -> None:
+        """Remove the records of the worktrees whose directory does not exist. A worktree whose directory exists stays."""
+        ...
+
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         """Put the commits of the worktree's branch on top of `onto`.
 

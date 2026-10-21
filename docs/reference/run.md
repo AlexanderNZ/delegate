@@ -456,6 +456,8 @@ A plan change can go on with a run that ended `built`. See [the plan change](#th
 
 The workflow field `keep-worktrees = true` turns the clean-up off for the run. The run then writes no `cleanup` event. See [keep worktrees](workflow.md#keep-worktrees).
 
+`delegate clean` does the same clean-up later, for a run that ended `built` and kept its worktrees: a run with `keep-worktrees = true`, or a run from before the clean-up existed. With `--merged`, it also deletes the run branch when the [**base branch**](../glossary.md#base-branch) holds it. It writes its `cleanup` event after `run-end`. See [`delegate clean`](commands.md#delegate-clean).
+
 ## Where the engine writes
 
 All files are in the [**state directory**](../glossary.md#state-directory). By default it is `<git common dir>/delegate/`. The working tree of the repository stays clean.
@@ -700,7 +702,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
-| `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). |
+| `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
 
 ## Limits of this version

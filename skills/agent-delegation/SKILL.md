@@ -549,6 +549,11 @@ scopes each fix-up, and records each step in a journal.
   when you need your own judgement between steps.
 - The engine never merges to the base branch, never pushes, and never closes a
   ticket. Those actions stay with the coordinator.
+- After you merge a run branch into the base branch, run
+  `delegate clean --ended --merged`. It deletes each run branch that the base
+  branch holds, and removes the ticket worktrees and the merged ticket
+  branches that ended runs left. It never touches a run that is active,
+  failed, paused or stopped. Run it with `--dry-run` first to see what goes.
 - A stack that needs installed dependencies (for example `node_modules`) names
   the install commands in the `prepare` field of its stack, not in its gates.
   A tree that git makes holds no ignored file, and the verifier guard permits

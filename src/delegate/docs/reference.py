@@ -34,7 +34,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..cli import agent_definitions, brief, docs_command, pause, run_command, status, watch
+from ..cli import agent_definitions, brief, clean, docs_command, pause, run_command, status, watch
 from ..definitions import render, validate
 from ..run import watch as run_watch
 from . import figures
@@ -226,6 +226,7 @@ SECTIONS: tuple[Section, ...] = (
         COMMANDS_PAGE, "brief-fixup-options", "The `fixup` parser of `verifier-brief`.",
         lambda: options_table(_subparser(brief.build_parser(), "fixup")),
     ),
+    Section(COMMANDS_PAGE, "clean-options", "The argument parser of `delegate clean`.", lambda: options_table(clean.build_parser())),
     Section(COMMANDS_PAGE, "verifier-guard-commands", "The command constants of the renderer.", guard_table),
     Section(SKILL_PAGE, "verifier-guard-commands", "The command constants of the renderer.", guard_table),
     Section(COMMANDS_PAGE, "finding-codes", "The finding codes of the validator.", finding_code_table),

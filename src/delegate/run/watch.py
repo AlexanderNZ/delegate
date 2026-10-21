@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import output
-from .journal import ACTIVITY_FIELDS, JournalError, is_paused, last_change, read_new_events
+from .journal import ACTIVITY_FIELDS, JournalError, before_after_end, is_paused, last_change, read_new_events
 
 # A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
 Part = tuple[str, str]
@@ -164,7 +164,8 @@ def ended_run(journal: Path) -> EndedRun | None:
     `run-end`. The first problem is the first problem that a later event does not supersede (see `_superseded`). The run
     id is the name of the directory of the journal. Raise JournalError when the journal is not valid.
     """
-    events, _ = read_new_events(journal, 0, 1)
+    # A `cleanup` that `delegate clean` wrote after the `run-end` does not continue the run (`AFTER_END`).
+    events = before_after_end(read_new_events(journal, 0, 1)[0])
     if not events or events[-1]["event"] != "run-end":
         return None
     superseded = _superseded(events)
@@ -229,16 +230,18 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
 def _superseded(events: list[dict[str, object]]) -> set[object]:
     """The `seq` of each event of `events` that a later event of `events` makes history.
 
-    A `run-end` or a `paused` that another event follows is history: a retry or a resume continues the run. An event
+    A `run-end` or a `paused` that another event follows is history: a retry or a resume continues the run. An event of
+    `AFTER_END` after a `run-end` continues nothing, so it does not count. An event
     of a ticket that a later `retry` of the same ticket follows is history: the retry continues the step of that ticket,
     so a problem of that ticket before the retry is not a problem of the run. A history event is reported, but it does not end a watch.
     """
     superseded: set[object] = set()
     retried: set[str] = set()
+    last = len(before_after_end(events)) - 1  # an event of `AFTER_END` after a `run-end` does not continue the run
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
         kind, ticket = event["event"], event.get("ticket")
-        if (kind in RUN_STOPS and index < len(events) - 1) or (ticket is not None and str(ticket) in retried):
+        if (kind in RUN_STOPS and index < last) or (ticket is not None and str(ticket) in retried):
             superseded.add(event["seq"])
         if kind == "retry":
             retried.add(str(ticket))
@@ -260,6 +263,7 @@ def _gone_past(replay: list[dict[str, object]]) -> set[object]:
     the end, not an event that goes past a problem. So the watch of an ended run stops at a problem that only the end
     follows, and replays to the end past each other problem.
     """
+    replay = before_after_end(replay)
     if replay and replay[-1]["event"] in RUN_STOPS:
         replay = replay[:-1]
     past: set[object] = set()

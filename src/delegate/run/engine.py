@@ -139,6 +139,7 @@ from .brief import (
     notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
     verifier_run_brief, verifier_run_sections,
 )
+from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree,
@@ -1004,81 +1005,22 @@ def _execute(
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
 
 
-# The most paths of a kept worktree that the reason in `cleanup` names.
-CLEANUP_PATHS_NAMED: int = 10
-
-
 def _clean_up(
     workflow: Workflow, order: list[Ticket], vcs: VersionControl, repo: Path, state_dir: Path, run_id: str, journal: Journal
 ) -> None:
     """Remove the worktree and the push-guard hooks of each ticket, and delete each ticket branch that the run branch holds (#167).
 
-    The engine calls this when the run ends `built`. The port stops the file
-    watcher of a worktree before it removes the worktree. A worktree with a
-    change that is not committed stays, and so does its branch. A ticket
-    branch whose commits the run branch does not hold stays. The run branch,
+    The engine calls this when the run ends `built`. The rules are in
+    `cleanup.clean_tickets`, which `delegate clean` uses too. The run branch,
     the journal, the reports and the gate logs stay: they are the evidence of
     the run. The journal records one `cleanup` event with what went, what
-    stayed, and why. A failure of one item keeps that item, and the clean-up
-    goes on with the others.
+    stayed, and why.
     """
-    removed: list[str] = []
-    deleted: list[str] = []
-    worktrees_kept: list[dict[str, str]] = []
-    branches_kept: list[dict[str, str]] = []
     worktrees_dir, hooks_dir = state_dir / "worktrees" / run_id, state_dir / "hooks" / run_id
-    for ticket in order:
-        worktree, branch = worktrees_dir / ticket.id, _ticket_branch(workflow, ticket)
-        kept: str | None = None
-        # An earlier clean-up of the run removed the worktree of a built ticket: a plan change goes on with a run that ended.
-        if worktree.is_dir():
-            kept = _remove_worktree(vcs, repo, worktree)
-            if kept is None:
-                removed.append(str(worktree))
-                shutil.rmtree(hooks_dir / ticket.id, ignore_errors=True)
-            else:
-                worktrees_kept.append({"worktree": str(worktree), "reason": kept})
-        try:
-            if not vcs.branch_exists(repo, branch):
-                continue
-            if kept is not None:
-                branches_kept.append({"branch": branch, "reason": "its worktree is kept"})
-            elif vcs.delete_branch(repo, branch, workflow.run_branch):
-                deleted.append(branch)
-            else:
-                branches_kept.append({"branch": branch, "reason": f"the run branch {workflow.run_branch!r} does not hold its commits"})
-        except VcsError as error:
-            branches_kept.append({"branch": branch, "reason": str(error)})
-    for directory in (worktrees_dir, hooks_dir):
-        try:
-            directory.rmdir()  # only when it is empty: a kept worktree keeps its directories
-        except OSError:
-            pass
-    journal.append(
-        "cleanup", worktrees_removed=removed, branches_deleted=deleted, worktrees_kept=worktrees_kept, branches_kept=branches_kept
-    )
-
-
-def _remove_worktree(vcs: VersionControl, repo: Path, worktree: Path) -> str | None:
-    """Remove the worktree through the port, and return None. Return the reason when the worktree stays.
-
-    A worktree with a change that is not committed stays. The file watcher of a
-    worktree that stays is stopped too, because nothing else stops it.
-    """
-    try:
-        changes = vcs.uncommitted_changes(worktree)
-        if not changes:
-            vcs.remove_worktree(repo, worktree)
-            return None
-        paths = [change.path for change in changes]
-        named = ", ".join(paths[:CLEANUP_PATHS_NAMED])
-        if len(paths) > CLEANUP_PATHS_NAMED:
-            named += f", and {len(paths) - CLEANUP_PATHS_NAMED} more"
-        reason = f"it holds changes that are not committed: {named}"
-    except VcsError as error:
-        reason = str(error)
-    vcs.stop_file_watcher(worktree)
-    return reason
+    trees = [TicketTree(worktrees_dir / ticket.id, _ticket_branch(workflow, ticket), hooks_dir / ticket.id) for ticket in order]
+    result = clean_tickets(vcs, repo, trees, workflow.run_branch)
+    remove_empty_directories(worktrees_dir, hooks_dir)
+    journal.append("cleanup", **result.fields())
 
 
 def _pause_point(journal: Journal, ticket: str, before: str, where: str, **fields: object) -> None:

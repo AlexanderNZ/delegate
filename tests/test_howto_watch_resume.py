@@ -200,3 +200,24 @@ def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lo
     assert [call.cwd.name for call in adapter.calls] == ["1", "2"]
     status = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0]
     assert state_and_verdict(status.out, "2") == ("built", "ACCEPT")
+
+
+@outside_the_package
+def test_the_page_cleans_up_after_a_merged_run_and_its_dry_run_changes_nothing(tmp_path, monkeypatch, git_identity, registered):
+    registered(ScriptedAdapter(files_by_ticket=FILES))
+    repo = a_repo(tmp_path)
+    run_id = run_id_of(follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml")))
+    git(repo, "merge", "-q", "--ff-only", "run/demo")
+    journal = (repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl").read_text()
+
+    (dry_run,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean --ended --merged --dry-run"))
+    branches_after_dry_run = git(repo, "branch", "--format=%(refname:short)").split()
+    (cleaned,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean"), skip=("delegate clean --ended --merged --dry-run",))
+
+    assert [(step.code, step.err) for step in (dry_run, cleaned)] == [(0, "")] * 2
+    # One line for the run. The gates leave `__pycache__` files that no commit holds, so the run kept its worktrees (#167).
+    assert dry_run.out.startswith(f"run {run_id}: would delete 1 branch (run/demo); would keep worktree ") and dry_run.out.count("\n") == 1
+    assert branches_after_dry_run == ["main", "run/demo", "run/demo-1", "run/demo-2"]
+    assert cleaned.out.startswith(f"run {run_id}: deleted 1 branch (run/demo); kept worktree ") and cleaned.out.count("\n") == 1
+    assert git(repo, "branch", "--format=%(refname:short)").split() == ["main", "run/demo-1", "run/demo-2"]
+    assert (repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl").read_text().startswith(journal)

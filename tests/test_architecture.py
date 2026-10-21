@@ -72,6 +72,7 @@ OS_PROCESS_PREFIXES = ("exec", "spawn", "posix_spawn")
 # The modules of the run context, by their path under the package.
 RUN_MODULES = (
     "engine", "workflow", "journal", "lock", "reports", "brief", "guards", "runs", "status", "watch", "domain", "pause",
+    "cleanup", "clean",
 )
 
 # The modules of the definitions context, by their path under the package.
@@ -84,7 +85,7 @@ SHARED_MODULES = ("tiers",)
 DOCS_MODULES = ("reference", "neutrality")
 
 # The modules of the command-line drivers, by their path under the package.
-CLI_MODULES = ("delegate", "agent_definitions", "brief", "run_command", "pause", "status", "watch", "docs_command")
+CLI_MODULES = ("delegate", "agent_definitions", "brief", "run_command", "pause", "status", "watch", "clean", "docs_command")
 
 # The domain module of the run context: the rules of a run, as functions of plain values.
 DOMAIN_MODULE = "run/domain.py"

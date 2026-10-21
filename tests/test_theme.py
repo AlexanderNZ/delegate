@@ -27,7 +27,7 @@ COMMAND_PAGES: dict[str, list[str]] = {
     "run.md": ["run", "pause"],
     "status-and-watch.md": ["status", "watch"],
     "docs.md": ["docs"],
-    "commands.md": ["render", "validate", "bootstrap", "brief"],
+    "commands.md": ["render", "validate", "bootstrap", "brief", "clean"],
 }
 
 

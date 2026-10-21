@@ -429,6 +429,22 @@ def test_delete_branch_keeps_a_branch_that_the_holder_does_not_hold_and_leaves_n
     assert git_status(repo, "config", "--get-regexp", r"^branch\.run/x-a\.").stdout == ""
 
 
+def test_prune_worktrees_drops_the_record_of_a_worktree_whose_directory_is_gone_and_keeps_the_others(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    gone, kept = tmp_path / "gone", tmp_path / "kept"
+    vcs.ensure_worktree(repo, gone, "run/x-a", "main")
+    vcs.ensure_worktree(repo, kept, "run/x-b", "main")
+    shutil.rmtree(gone)
+
+    vcs.prune_worktrees(repo)
+
+    listed = [line.removeprefix("worktree ") for line in git(repo, "worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
+    assert [Path(p).resolve() for p in listed] == [repo.resolve(), kept.resolve()]
+    # The branch of a pruned worktree is free again: a delete needs no worktree that has it checked out.
+    vcs.create_branch(repo, "run/x", "run/x-a")
+    assert vcs.delete_branch(repo, "run/x-a", "run/x") is True
+
+
 def test_delete_branch_of_a_branch_that_a_worktree_has_checked_out_is_an_error_and_the_branch_stays(tmp_path, vcs):
     repo = make_repo(tmp_path)
     worktree = tmp_path / "wt"

@@ -211,6 +211,9 @@ class GitVersionControl:
             raise
         return True
 
+    def prune_worktrees(self, repo: Path) -> None:
+        _git(repo, "worktree", "prune")
+
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         rebase = _run(worktree, "rebase", onto)
         if rebase.returncode == 0:

@@ -93,6 +93,19 @@ def newest_run_end(events: list[dict[str, object]]) -> dict[str, object] | None:
     return None
 
 
+# The events that a command writes to the journal of a run that ended, after its `run-end`. They do not continue the
+# run: `delegate clean` writes `cleanup` (#168). The engine writes its own `cleanup` before `run-end`.
+AFTER_END: frozenset[str] = frozenset({"cleanup"})
+
+
+def before_after_end(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The events without the events of `AFTER_END` at their end. The newest event of a run that ended is then `run-end`."""
+    end = len(events)
+    while end and events[end - 1]["event"] in AFTER_END:
+        end -= 1
+    return events[:end]
+
+
 def is_paused(events: list[dict[str, object]]) -> bool:
     """True when the run of the events is paused: its newest `paused` comes after its newest `resume`."""
     for event in reversed(events):

@@ -103,6 +103,7 @@ The test suite holds one drift test for each generated section, one for the abbr
 | `docs/reference/commands.md` | `bootstrap-options` | The `bootstrap` parser of `agent-definitions`. |
 | `docs/reference/commands.md` | `brief-full-options` | The `full` parser of `verifier-brief`. |
 | `docs/reference/commands.md` | `brief-fixup-options` | The `fixup` parser of `verifier-brief`. |
+| `docs/reference/commands.md` | `clean-options` | The argument parser of `delegate clean`. |
 | `docs/reference/commands.md` | `verifier-guard-commands` | The command constants of the renderer. |
 | `skills/agent-definitions/SKILL.md` | `verifier-guard-commands` | The command constants of the renderer. |
 | `docs/reference/commands.md` | `finding-codes` | The finding codes of the validator. |
