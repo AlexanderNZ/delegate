@@ -12,7 +12,7 @@ from string import Template
 
 import yaml
 
-from .declaration import GATE_COMMAND, Agent
+from .declaration import GATE_COMMAND, GATE_FLAG_VALUE, Agent
 from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
@@ -502,7 +502,83 @@ IN_TOPLEVEL_CD_CHECK = " ".join(
 )
 
 
-def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] = ()) -> str:
+#: The shell function `gpath` (#163). It returns 0 when its argument, a word
+#: after a gate with no quote, is a path that exists in the git toplevel $wt of
+#: the working directory or in a temp directory. A word after a gate can make
+#: the gate write (a task name, a script name), so only a path that exists
+#: counts as a path. A word that starts with "-", "~" or "=", that holds a
+#: pattern or an expansion character (*, ?, [, { or $), or that has a ".."
+#: component returns 1. A relative path counts from $cdd: the working
+#: directory $wd, or the directory of the last `cd` of the command. The
+#: path must exist, and it must be a temp path (`istp`, after a "/private"
+#: prefix is removed) or in the git toplevel (`incd`). It starts no process.
+GATE_PATH_CHECK = " ".join(
+    [
+        r"""gpath() { gv=$1;""",
+        r"""case "$gv" in ''|-*|'~'*|'='*|*'$'*|*'*'*|*'?'*|*'['*|*'{'*) return 1 ;; esac;""",
+        r"""case "$gv" in ..|../*|*/..|*/../*) return 1 ;; esac;""",
+        r"""case "$gv" in /*) ;; *) gv=${cdd%/}/$gv ;; esac;""",
+        r"""case "$gv" in /*) ;; *) return 1 ;; esac;""",
+        r"""[ -e "$gv" ] || return 1;""",
+        r"""istp "${gv#/private}" || incd "$gv"; }""",
+    ]
+)
+
+
+def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
+    """The shell function `gwords` (#163). It examines the words after a gate.
+
+    Its first argument is the gate, and each other argument is a word after the
+    gate. The shell removes a redirection before it runs the command, so a
+    redirection is no word of the gate: the segment test examined its target.
+    The text before a redirection sign in a word is a word, unless it is a
+    file descriptor number or "&". After the redirections, each word must be
+    "--", a path (`gpath`), or a flag of `extra_flags`, the gateExtraFlags of
+    the declaration. A flag is permitted alone or with "=" and a value in the
+    same word. A flag with " <value>" in its entry also takes the next word
+    as its value. Each other word denies, and the message names the word and
+    the gate. The function removes each quote and backslash from a word
+    before the test, as the shell does.
+    """
+    flags = [e.split(" ", 1)[0] for e in extra_flags]
+    alone = [f'"{f}"' for f, e in zip(flags, extra_flags) if not e.endswith(f" {GATE_FLAG_VALUE}")]
+    alone += [f'"{f}="*' for f in dict.fromkeys(flags)]
+    valued = [f'"{f}"' for f, e in zip(flags, extra_flags) if e.endswith(f" {GATE_FLAG_VALUE}")]
+    flag_cases = (f"{'|'.join(alone)}) continue ;; " if alone else "") + (
+        f"{'|'.join(valued)}) gk=1; continue ;; " if valued else ""
+    )
+    message = (
+        "The word $a after the gate [$gn] is not a path that exists in the git toplevel or in a temp directory, "
+        "and not a flag of gateExtraFlags. A word after a gate can make the gate write, for example --fix or a task name."
+    )
+    return " ".join(
+        [
+            r"""gwords() { gn=$1; shift; gk=0; gr=0; for a in "$@"; do""",
+            r"""if [ "$gr" = 1 ]; then gr=0; continue; fi;""",
+            r"""case "$a" in *'>'*|*'<'*) case "$a" in *'>'|*'<'|*'>&'|*'<&') gr=1 ;; esac;""",
+            r"""a=${a%%'>'*}; a=${a%%'<'*}; case "$a" in ''|'&') continue ;; *[!0-9]*) ;; *) continue ;; esac ;; esac;""",
+            r"""if [ "$gk" = 1 ]; then gk=0; continue; fi;""",
+            r"""gu=${a//\"/}; gu=${gu//\'/}; gu=${gu//\\/};""",
+            f'case "$gu" in --) continue ;; {flag_cases}esac;',
+            r"""case "$gu" in -*) ;; *) gpath "$gu" && continue ;; esac;""",
+            f'deny "$seg" "{message}"; done; }}',
+        ]
+    )
+
+
+def _gate_branches(gates: tuple[str, ...]) -> str:
+    """The case branches of the plain gates (#163). Each gate alone, or with words that `gwords` examines.
+
+    A longer gate comes first, so the words after it are the words after the
+    longest gate that the command starts with.
+    """
+    ordered = sorted(gates, key=lambda g: (-len(g.split(" ")), g))
+    return "".join(f'"{g}"|"{g} "*) shift {len(g.split(" "))}; gwords "{g}" "$@" ;; ' for g in ordered)
+
+
+def _verifier_bash_hook(
+    gates: tuple[str, ...] = (), get_only: tuple[str, ...] = (), extra_flags: tuple[str, ...] = ()
+) -> str:
     """Build the verifier's Bash guard as one bash line from the tables above.
 
     The guard divides the command at &&, ||, ;, |, & and a newline outside
@@ -585,8 +661,16 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
 
     `gates` are the repository's gate commands from its declaration. The
     gates differ in each repository, so the global list holds none of them
-    (ADR 0004). Each plain gate is permitted like a read command, in that
-    verifier only. Each exact gate is permitted only as the full command.
+    (ADR 0004). Each plain gate is permitted in that verifier only, alone or
+    with words after it that cannot make it write (#163, `_gate_word_check`):
+    a path that exists in the git toplevel or in a temp directory
+    (GATE_PATH_CHECK), the separator "--", a redirection, and a flag of
+    `extra_flags`, the gateExtraFlags of the declaration. Each other word
+    denies: "npm run lint -- --fix" rewrites source files, and
+    "./gradlew test spotlessApply" runs a task that formats the source. A
+    relative path counts from the directory of the last "cd" of the command,
+    or else from the working directory. Each exact gate is permitted only as
+    the full command.
 
     `get_only` are the declaration's commands that read only while they stay a
     GET, such as a tracker API client. Each one is permitted alone or with
@@ -863,7 +947,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         f"{find_rg_branches}"
         f"{mktemp_file_branches}"
         f"{sed_branch}"
-        f"{_exact_or_prefix(other_reads + prefix_gates)}) ;; "
+        f"{_exact_or_prefix(other_reads)}) ;; "
+        f"{_gate_branches(prefix_gates)}"
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
         'for a in "$@"; do '
         'if [ "$k" = 1 ]; then k=0; continue; fi; '
@@ -882,7 +967,10 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
         # working directory, so a cd takes one path only.
         f'case "$g" in cd|"cd "*) [ "$m" = 1 ] || deny "$seg" "{cd_one_path}"; '
         f'istp "$d" || incd "$d" || if [ -n "$wt" ]; then deny "$seg" "{cd_outside}"; '
-        f'else deny "$seg" "{cd_outside_no_tree}"; fi; cdx=1 ;; '
+        f'else deny "$seg" "{cd_outside_no_tree}"; fi; cdx=1; '
+        # The directory of the cd, for a relative path after a gate (#163). incd or istp tested the path above.
+        r"""cv=${d//\"/}; cv=${cv//\'/}; cv=${cv//\\/}; case "$cv" in '$TMPDIR'*) cv=$td${cv#'$TMPDIR'} ;; esac; """
+        'case "$cv" in /*) cdd=$cv ;; *) cdd=${cdd%/}/$cv ;; esac ;; '
         '*) istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; esac ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
@@ -918,6 +1006,8 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             # The directory of mktemp -p or --tmpdir (#161). mktemp makes a new name in it, so the guard tests that name,
             # the directory, a "/" and the default template of GNU mktemp: the directory itself may hold a git tree.
             f'mdir() {{ istmp "${{1%/}}/tmp.XXXXXXXXXX" || deny "$seg" "{MKTEMP_DIRECTORY_MESSAGE}"; }}',
+            # The words after a plain gate (#163).
+            *([GATE_PATH_CHECK, _gate_word_check(extra_flags)] if prefix_gates else []),
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
@@ -958,8 +1048,9 @@ def _verifier_bash_hook(gates: tuple[str, ...] = (), get_only: tuple[str, ...] =
             'case "$q" in s|d) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
             'The guard fails closed." >&2; exit 2 ;; esac',
             "set -f",
-            # No cd came before the first segment, so a relative write target counts from the working directory.
-            "cdx=0",
+            # No cd came before the first segment, so a relative write target counts from the working directory, and
+            # so does a path after a gate.
+            "cdx=0; cdd=$wd",
             # The divider keeps the spaces at each end of a segment. The prefix
             # tests match from the first word, so remove them.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
@@ -1121,14 +1212,20 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
     commands and the GET-only commands stay out, and so do the commands of
     VERIFIER_OPENCODE_LEFT_OUT. The commands of VERIFIER_OPENCODE_EXACT_READS
     are permitted only as their exact text.
+
+    Each plain gate is permitted only as its exact text too (#163). A word
+    after a gate can make it write ("npm run lint -- --fix"), and a pattern
+    cannot tell a path from such a word, so the map has no "<gate> *" rule.
     """
     perm: dict[str, str] = {"*": "deny"}
     # An exact gate stays out: the map is a glob, and a glob cannot hold a
     # quote or a substitution as text that only matches itself.
     plain_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
     reads = tuple(c for c in VERIFIER_READ_COMMANDS if c not in VERIFIER_OPENCODE_LEFT_OUT)
-    for command in reads + plain_gates:
+    for command in reads:
         perm[f"{command} *"] = "allow"
+    for command in plain_gates:
+        perm[command] = "allow"
     for command in VERIFIER_OPENCODE_EXACT_READS:
         perm[command] = "allow"
     for pattern in VERIFIER_OPENCODE_WRITE_DENIES:
@@ -1230,7 +1327,9 @@ def render_claude_code(agent: Agent, tiers: Tiers) -> dict[str, str]:
         # keeps only the read commands and the gates: with no shell it cannot
         # run the gates, and with a full shell it can write.
         guard = (
-            _verifier_bash_hook(tuple(agent.gate_commands), tuple(agent.get_only_commands))
+            _verifier_bash_hook(
+                tuple(agent.gate_commands), tuple(agent.get_only_commands), tuple(agent.gate_extra_flags)
+            )
             if read_only
             else GIT_PUSH_HOOK
         )

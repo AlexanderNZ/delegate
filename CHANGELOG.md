@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- Security fix of the verifier guard: a word after a gate cannot make the gate write (#163). Before, the guard matched a gate by its first words and did not examine the words after it, so `cd app && npm run lint -- --fix` (it rewrites source files), `cd app && npm test -- -u` (it updates snapshots), `cd app && npx tsc --outDir /Users/x/o` (it writes outside a temp directory) and `cd api && ./gradlew test spotlessApply` (it runs a task that formats the source) passed the guard (1.8.0 and 1.9.0). Now, after a plain gate, the guard permits only a path that exists in the git toplevel of the working directory or in a temp directory, for example a test file, the separator `--`, a redirection, and a flag of the new declaration key `gateExtraFlags`. Each other word denies, and the message names the word and the gate. A relative path counts from the directory of the last `cd` of the command. A flag of `gateExtraFlags` is permitted alone or with `=` and a value in the same word, and an entry `"<flag> <value>"` also permits the next word as the value of the flag. The declaration parser checks each entry; `bootstrap` has no flag for the key. A gate with no word after it stays permitted. The verdicts are the same in bash, `/bin/sh` and zsh. The OpenCode verifier map now permits each plain gate only as its exact text, with no ` *`, because a pattern cannot tell a path from a word that writes: declare each form of a gate that an OpenCode verifier needs. The example declaration sets `gateExtraFlags = ["--info"]`, and the declaration of this repository names its test gate in full, `nix develop -c python3 -m pytest -rs -n auto`. `docs/reference/opencode-adapter.md`, ADR 0004 and the `agent-definitions` skill describe the rules.
+
 ## [1.9.0] - 2026-10-21
 
 ### Added

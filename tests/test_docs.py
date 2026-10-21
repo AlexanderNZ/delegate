@@ -136,7 +136,7 @@ def test_the_command_writes_the_options_of_render_validate_bootstrap_and_brief_i
 
     text = page.read_text()
     assert (code, err) == (0, "")
-    assert "| `--gate-command <cmd>` | A gate the verifier may run, alone or with arguments; repeat it. |" in text
+    assert "| `--gate-command <cmd>` | A gate the verifier may run, alone or with paths after it; repeat it. |" in text
     assert "| `-o, --out <out>` | " in text  # render
     assert "| `--skills-dir <skills-dir>` | Check that every preloaded skill exists here. |" in text  # validate
     assert "| `--rejected <rejected>` | The commit the first verifier rejected. Required. |" in text  # brief fixup

@@ -93,7 +93,7 @@ delegate bootstrap --repo <dir> --name <name> --domain <text> --tier <tier> --sk
 | `--reference <path>` | A read-first document; repeat it. A note may follow the backticked path. Required. |
 | `--prompt-file <file>` | The domain rules; the file body becomes the prompt. |
 | `--max-turns <n>` | The turn cap for both halves. |
-| `--gate-command <cmd>` | A gate the verifier may run, alone or with arguments; repeat it. |
+| `--gate-command <cmd>` | A gate the verifier may run, alone or with paths after it; repeat it. |
 | `--get-only-command <cmd>` | A command the verifier may run only without -X, alone or with arguments; repeat it. |
 | `--output-language <language>` | The language of agent text: none \| ste (ASD-STE100); default: write no field. |
 | `--tracked-file-build` | The build reads tracked files only, as a flake does; the specialist then stages every new file. |

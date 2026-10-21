@@ -9,9 +9,14 @@ description = "Spring Boot backend work: controllers, services, JPA repositories
 tier = "standard"
 skills = ["clean-ddd-hexagonal", "api-design-principles", "tdd", "test-quality", "oauth2-resource-server"]
 maxTurns = 60
-# The repository's gates: the verifier may run each one, alone or with
-# arguments. The global list holds no build tool.
+# The repository's gates: the verifier may run each one alone, or with a
+# path that exists in the repository or in a temp directory after it. The
+# global list holds no build tool.
 gateCommands = ["./gradlew test", "./gradlew check"]
+# The flags that the verifier may put after a gate. Each one must be a read:
+# --info only adds log lines. A word after a gate that is not a path or one
+# of these flags can make the gate write (./gradlew test spotlessApply).
+gateExtraFlags = ["--info"]
 # A command that reads only while it stays a GET: here a repository script
 # that sends a GET unless -X names another method. The verifier guard denies
 # it with -X, and the OpenCode map leaves it out.

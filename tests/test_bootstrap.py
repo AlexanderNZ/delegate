@@ -276,7 +276,9 @@ def test_gate_commands_reach_the_declaration_and_the_verifier(repo):
     assert 'gateCommands = ["npm test", "npx vitest"]' in declaration
     assert "--gate-command 'npm test'" in declaration, "the rerun command must carry the flag"
     assert '"npm test"' in p["cc-verifier"].read_text()
-    assert "npm test *" in p["oc-verifier"].read_text()
+    # OpenCode permits a gate only as its exact text (#163).
+    assert "npm test: allow" in p["oc-verifier"].read_text()
+    assert "npm test *" not in p["oc-verifier"].read_text()
     assert '"npm test"' not in p["cc-specialist"].read_text()
 
 

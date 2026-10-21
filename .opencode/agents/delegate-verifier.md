@@ -40,11 +40,11 @@ permission:
     date *: allow
     python3 *: allow
     bash -c *: allow
-    nix develop -c python3 -m pytest *: allow
-    nix flake check *: allow
-    uvx *: allow
-    claude plugin validate *: allow
-    claude plugin test *: allow
+    nix develop -c python3 -m pytest -rs -n auto: allow
+    nix flake check: allow
+    uvx: allow
+    claude plugin validate: allow
+    claude plugin test: allow
     mktemp: allow
     mktemp -d: allow
     '*>*': deny

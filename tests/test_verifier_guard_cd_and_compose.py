@@ -45,10 +45,21 @@ SHELLS = (
 
 GATES = ["./gradlew test", "docker compose config"]
 
+#: The flags that the verifier may put after a gate (#163). Each one only changes the output.
+EXTRA_FLAGS = ["--info", "--quiet"]
+
 
 def _hook() -> str:
     [agent] = parse_declaration(
-        {"agents": {"stack": {"description": "A repository with stacks in subdirectories.", "gateCommands": GATES}}}
+        {
+            "agents": {
+                "stack": {
+                    "description": "A repository with stacks in subdirectories.",
+                    "gateCommands": GATES,
+                    "gateExtraFlags": EXTRA_FLAGS,
+                }
+            }
+        }
     )
     fm, _body, err = split_frontmatter(render_claude_code(agent, load_tiers())["stack-verifier.md"])
     assert err is None, err

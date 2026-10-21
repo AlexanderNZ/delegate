@@ -102,11 +102,11 @@ def test_the_verifier_runs_its_repository_gates(web, shell):
     hook = _guard_of(web[0], "web-verifier.md")
     for command in (
         "npm test",
-        "npm test -- --run",
-        "npx vitest run src/cart.test.ts",
-        "dotnet test sim.tests",
+        "npm test --",
+        "npx vitest",
+        "dotnet test",
         "nix develop -c npm test",
-        "direnv exec . npx vitest run",
+        "direnv exec . npx vitest",
         "cp -R /repo /tmp/proof && cd /tmp/proof && npm test",
     ):
         r = _run(hook, command, shell)
@@ -116,7 +116,18 @@ def test_the_verifier_runs_its_repository_gates(web, shell):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_a_gate_command_opens_that_command_and_no_other(web, shell):
     hook = _guard_of(web[0], "web-verifier.md")
-    for command in ("npm install left-pad", "npm", "npx rimraf /Users/x", "npm testx", "dotnet run", "npm test; git push"):
+    for command in (
+        "npm install left-pad",
+        "npm",
+        "npx rimraf /Users/x",
+        "npm testx",
+        "dotnet run",
+        "npm test; git push",
+        # A word after a gate that is not a path that exists, nor a flag of gateExtraFlags (#163).
+        "npm test -- --run",
+        "npx vitest run src/cart.test.ts",
+        "dotnet test sim.tests",
+    ):
         r = _run(hook, command, shell)
         assert r.returncode == 2, (shell, command, r.stdout)
 
@@ -130,7 +141,7 @@ def docs(tiers):
 @pytest.mark.parametrize("shell", SHELLS)
 def test_each_gate_command_of_a_declaration_still_passes(docs, shell):
     hook = _guard_of(docs[0], "docs-verifier.md")
-    for command in ("npm test", "uvx", "uvx zensical build", EXACT_GATE, f"  {EXACT_GATE} "):
+    for command in ("npm test", "uvx", EXACT_GATE, f"  {EXACT_GATE} "):
         r = _run(hook, command, shell)
         assert r.returncode == 0, (shell, command, r.stderr)
 
@@ -195,7 +206,9 @@ def test_the_opencode_verifier_map_allows_the_gate_commands(web):
     bash = perm["bash"]
     assert list(bash)[0] == "*" and bash["*"] == "deny"
     assert opencode_bash_action(perm, "npm test") == "allow"
-    assert opencode_bash_action(perm, "npm test -- --run") == "allow"
-    assert opencode_bash_action(perm, "npx vitest run") == "allow"
+    assert opencode_bash_action(perm, "npx vitest") == "allow"
+    # Each gate is permitted only as its exact text (#163): a pattern cannot tell a path from a word that writes.
+    assert opencode_bash_action(perm, "npm test -- --run") == "deny"
+    assert opencode_bash_action(perm, "npx vitest run") == "deny"
     assert opencode_bash_action(perm, "npm install left-pad") == "deny"
     assert opencode_bash_action(perm, "npx rimraf /x") == "deny"

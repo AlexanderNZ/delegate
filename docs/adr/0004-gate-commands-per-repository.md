@@ -1,8 +1,8 @@
 # ADR 0004: Gate commands are per repository
 
 - Status: accepted
-- Date: 2026-09-26, extended 2026-10-08 and 2026-10-17
-- Applies to: the verifier guard, and the `gateCommands` and `getOnlyCommands` keys of a declaration
+- Date: 2026-09-26, extended 2026-10-08, 2026-10-17 and 2026-10-21
+- Applies to: the verifier guard, and the `gateCommands`, `getOnlyCommands` and `gateExtraFlags` keys of a declaration
 
 ## Context
 
@@ -33,6 +33,8 @@ On 2026-10-08 the decision was extended in two parts:
 - A declaration can name `getOnlyCommands`: a command that reads only while it stays a GET, for example a tracker API client that writes with `-X POST`. The Claude Code guard permits it in that verifier only, and it denies a segment that holds ` -X`. On OpenCode the entry is not permitted, because a pattern cannot examine the arguments.
 
 On 2026-10-17 the decision was extended for issue #75. The guard now denies a command that holds a substitution, because it cannot examine the command in the substitution. A gate such as `uvx "zensical==$(cat .zensical-version)" build --strict` holds one. `gateCommands` therefore also takes an exact gate: plain words, and one or more words in double quotes that hold one `$(...)` of plain words. The first word stays plain, and the command in the `$(...)` must not open a write. The guard permits an exact gate only as the full command, as a literal in single quotes. The OpenCode map does not hold an exact gate.
+
+On 2026-10-21 the decision was extended for issue #163. A gate with any arguments can write: `npm run lint -- --fix` rewrites source files, `npm test -- -u` updates snapshots, `npx tsc --outDir <dir>` writes in that directory, and `./gradlew test spotlessApply` runs a task that formats the source. The Claude Code guard now permits after a plain gate only a path that exists in the git toplevel of the working directory or in a temp directory, the separator `--`, a redirection, and a flag of the new key `gateExtraFlags`. A declaration lists there the flags that cannot make its gates write. An entry `"<flag> <value>"` also permits the next word as the value of the flag. Each other word denies. On OpenCode each plain gate becomes the rule `<command>` with no ` *`, because a pattern cannot tell a path from a word that writes.
 
 ## Rejected alternatives
 

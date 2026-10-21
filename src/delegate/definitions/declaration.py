@@ -12,6 +12,7 @@ KNOWN_KEYS = {
     "description", "tier", "skills", "prompt", "references",
     "maxTurns", "effort", "pair", "readOnly", "gateCommands",
     "getOnlyCommands", "outputLanguage", "trackedFileBuild", "contextLoad",
+    "gateExtraFlags",
 }
 
 #: The languages an agent can be told to write its report in. "none" adds no
@@ -45,6 +46,19 @@ _SUBSTITUTION_WORD = r'"[A-Za-z0-9._/:=@+-]*\$\(' + rf"{_WORD}( {_WORD})*" + r'\
 EXACT_GATE_COMMAND = re.compile(rf"{_WORD}( ({_WORD}|{_SUBSTITUTION_WORD}))*")
 _SUBSTITUTION_BODY = re.compile(r"\$\(([^)]*)\)")
 
+#: The text after a flag of gateExtraFlags that tells that the flag takes a
+#: value word, for example "-k <value>" (#163). The guard cannot tell from the
+#: flag alone whether it takes a value. A flag that takes no value must not
+#: let the next word through: "./gradlew test --info spotlessApply" runs the
+#: task spotlessApply.
+GATE_FLAG_VALUE = "<value>"
+
+#: An entry of gateExtraFlags: one flag of plain characters that starts with
+#: "-" and a letter or a digit, then optionally a space and GATE_FLAG_VALUE.
+#: The guard puts the flag in a bash case pattern, so no quote, shell syntax
+#: or glob character may reach it.
+GATE_EXTRA_FLAG = re.compile(r"(--?[A-Za-z0-9][A-Za-z0-9._/:=@+-]*)( " + re.escape(GATE_FLAG_VALUE) + r")?")
+
 
 @dataclass
 class Agent:
@@ -60,6 +74,7 @@ class Agent:
     read_only: bool = False
     gate_commands: list[str] = field(default_factory=list)
     get_only_commands: list[str] = field(default_factory=list)
+    gate_extra_flags: list[str] = field(default_factory=list)
     output_language: str = "none"
     tracked_file_build: bool = False
     context_load: str = "blocks"
@@ -68,8 +83,9 @@ class Agent:
 def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[str]:
     """The verifier's extra allowed commands: the repository's gates (ADR 0004).
 
-    A gate command opens itself, alone or with arguments, in this repository's
-    verifier guard. It must not open a write: a temp-write or temp-destination
+    A gate command opens itself in this repository's verifier guard, alone or
+    with words after it that cannot make it write (#163): a path, "--", and a
+    flag of gateExtraFlags. It must not open a write: a temp-write or temp-destination
     command (those have their own path rules), or a prefix of a known write.
     An exact gate (EXACT_GATE_COMMAND, gateCommands only) opens itself as the
     full command only, and the command in each of its $(...) obeys the same
@@ -106,6 +122,26 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
             raise ValueError(f"agent {key!r}: {field_name} entry {c!r} opens a write command")
         out.append(c)
     return out
+
+
+def _gate_extra_flags(key: str, values) -> list[str]:
+    """The read-only flags that the guard permits after each gate of the declaration (#163).
+
+    After a gate, the guard permits only a path, the separator "--", and a
+    flag of this list. A flag of the list is permitted alone, or with "=" and
+    a value in the same word. An entry with " <value>" also permits the next
+    word as the value of the flag.
+    """
+    if not isinstance(values, list):
+        raise ValueError(f"agent {key!r}: gateExtraFlags must be a list of flags, not {values!r}")
+    for value in values:
+        if not isinstance(value, str) or not GATE_EXTRA_FLAG.fullmatch(value):
+            raise ValueError(
+                f"agent {key!r}: gateExtraFlags entry {value!r} must be one flag: a - or --, a letter or a digit, "
+                f"then letters, digits and . _ / : = @ + -, optionally with \" {GATE_FLAG_VALUE}\" after it "
+                "when the flag takes a value word"
+            )
+    return list(values)
 
 
 def _output_language(key: str, value) -> str:
@@ -149,6 +185,7 @@ def parse_declaration(data: dict) -> list[Agent]:
                 read_only=spec.get("readOnly", False),
                 gate_commands=_gate_commands(key, spec.get("gateCommands", [])),
                 get_only_commands=_gate_commands(key, spec.get("getOnlyCommands", []), "getOnlyCommands"),
+                gate_extra_flags=_gate_extra_flags(key, spec.get("gateExtraFlags", [])),
                 output_language=_output_language(key, spec.get("outputLanguage", "none")),
                 tracked_file_build=_tracked_file_build(key, spec.get("trackedFileBuild", False)),
                 context_load=_context_load(key, spec.get("contextLoad", "blocks")),
