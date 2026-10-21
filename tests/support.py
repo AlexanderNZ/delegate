@@ -23,11 +23,16 @@ from pathlib import Path
 
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult
 
+# The cases read the worktrees and the ticket branches after a run, so the workflow keeps them: a run that ends built
+# removes them by default (#167). `CLEANED_WORKFLOW` is the same workflow without the field.
+KEEP_WORKTREES: str = "keep-worktrees = true\n"
+
 WORKFLOW = """\
 base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"
 adapter = "scripted"
+keep-worktrees = true
 
 [stacks.python]
 specialist = "python-specialist"
@@ -41,6 +46,8 @@ text = "The export command writes a CSV file."
 stack = "python"
 blocked-by = []
 """
+
+CLEANED_WORKFLOW: str = WORKFLOW.replace(KEEP_WORKTREES, "")
 
 
 # The author and the committer of each commit that a test makes. They go to git in the environment: an argument

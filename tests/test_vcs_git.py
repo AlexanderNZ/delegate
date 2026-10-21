@@ -394,6 +394,55 @@ def test_remove_worktree_of_a_path_that_is_no_worktree_is_an_error(tmp_path, vcs
         vcs.remove_worktree(repo, tmp_path / "never-made")
 
 
+# Delete a branch that another branch holds (#167).
+
+
+def branch_with_work(tmp_path: Path, vcs: VersionControl, branch: str) -> tuple[Path, str]:
+    """A repository on `main` with `branch`, which holds one commit that `main` does not hold. The worktree goes."""
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, branch, "main")
+    work = commit(worktree, "work.txt", "work\n", "work")
+    vcs.remove_worktree(repo, worktree)
+    return repo, work
+
+
+def test_delete_branch_deletes_a_branch_that_the_holder_holds_also_when_the_checkout_does_not_hold_it(tmp_path, vcs):
+    repo, work = branch_with_work(tmp_path, vcs, "run/x-a")
+    vcs.create_branch(repo, "run/x", work)
+
+    assert vcs.delete_branch(repo, "run/x-a", "run/x") is True
+
+    assert not vcs.branch_exists(repo, "run/x-a")
+    assert sha(repo, "run/x") == work
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert git_status(repo, "config", "--get-regexp", r"^branch\.run/x-a\.").stdout == ""
+
+
+def test_delete_branch_keeps_a_branch_that_the_holder_does_not_hold_and_leaves_no_setting(tmp_path, vcs):
+    repo, work = branch_with_work(tmp_path, vcs, "run/x-a")
+    vcs.create_branch(repo, "run/x", "main")
+
+    assert vcs.delete_branch(repo, "run/x-a", "run/x") is False
+
+    assert sha(repo, "run/x-a") == work
+    assert git_status(repo, "config", "--get-regexp", r"^branch\.run/x-a\.").stdout == ""
+
+
+def test_delete_branch_of_a_branch_that_a_worktree_has_checked_out_is_an_error_and_the_branch_stays(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "run/x-a", "main")
+    work = commit(worktree, "work.txt", "work\n", "work")
+    vcs.create_branch(repo, "run/x", work)
+
+    with pytest.raises(VcsError):
+        vcs.delete_branch(repo, "run/x-a", "run/x")
+
+    assert sha(repo, "run/x-a") == work
+    assert git_status(repo, "config", "--get-regexp", r"^branch\.run/x-a\.").stdout == ""
+
+
 # Rebase.
 
 

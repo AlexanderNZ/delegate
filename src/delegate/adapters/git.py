@@ -197,6 +197,20 @@ class GitVersionControl:
         _git(repo, "worktree", "remove", "--force", str(worktree))
         _drop_stale_includes(repo, self.shared_data_directory(repo))
 
+    def delete_branch(self, repo: Path, branch: str, holder: str) -> bool:
+        if not self.is_ancestor(repo, f"refs/heads/{branch}", f"refs/heads/{holder}"):
+            return False
+        # `git branch -d` checks the branch against its upstream, and against HEAD when it has none. HEAD is the
+        # branch of the main checkout, so the holder becomes the upstream: git then checks the holder, and never
+        # deletes a commit that the holder does not hold. The setting goes with the branch.
+        _git(repo, "branch", "--quiet", "--set-upstream-to", holder, branch)
+        try:
+            _git(repo, "branch", "--quiet", "-d", branch)
+        except VcsError:
+            _run(repo, "branch", "--unset-upstream", branch)
+            raise
+        return True
+
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         rebase = _run(worktree, "rebase", onto)
         if rebase.returncode == 0:

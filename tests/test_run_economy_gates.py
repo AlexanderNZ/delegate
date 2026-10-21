@@ -29,6 +29,8 @@ base-branch = "main"
 run-branch = "run/demo"
 mode = "{mode}"
 adapter = "scripted"
+# The cases read the ticket branches after the run, so the run keeps them (#167).
+keep-worktrees = true
 
 [stacks.python]
 specialist = "python-specialist"

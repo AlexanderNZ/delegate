@@ -135,6 +135,17 @@ class VersionControl(Protocol):
         """Remove the worktree, its directory whatever it holds, and the settings that the port made for it. The branch stays."""
         ...
 
+    def delete_branch(self, repo: Path, branch: str, holder: str) -> bool:
+        """Delete the branch `branch` when the branch `holder` holds its newest commit, with the safe delete of the tool.
+
+        Return True when the branch went. Return False, and keep the branch as
+        it was, when `holder` does not hold its newest commit. The commits of a
+        branch that the port deletes are never lost. Raise VcsError when the
+        tool refuses the delete for another cause, for example a branch that a
+        worktree has checked out.
+        """
+        ...
+
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         """Put the commits of the worktree's branch on top of `onto`.
 

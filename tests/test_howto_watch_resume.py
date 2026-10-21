@@ -100,7 +100,8 @@ def test_the_page_shows_the_state_of_a_finished_run_and_its_journal_by_run_id_to
     assert [step.command for step in by_run_id] == [f"delegate watch {run_id} --raw"]
     replayed = by_run_id[0].out.splitlines()
     assert replayed[0].startswith("1 ") and " run-start " in replayed[0]
-    assert replayed[-2].endswith("run-end result=built") and replayed[-1] == "position 32"  # each of the two gate runs adds gate-start
+    assert replayed[-2].endswith("run-end result=built") and replayed[-1] == "position 33"  # each of the two gate runs adds gate-start
+    assert replayed[-3].split()[2] == "cleanup"  # the clean-up of a run that ends built comes just before `run-end` (#167)
     # Going on from position 2 prints the events after it, and no event at or before it.
     printed = [line for line in from_position[0].out.splitlines() if line[:1].isdigit() and " " in line]
     assert printed[0].startswith("3 ") and printed[-1].endswith("run-end result=built")

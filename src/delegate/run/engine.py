@@ -770,7 +770,7 @@ def _check_chain_start(
     ticket = next(ticket for ticket in order if ticket.id == plan.ticket)
     started = str(next(e for e in plan.prior if e["event"] == "step-start")["base_commit"])
     with _vcs_errors():
-        now = vcs.commit_of(repo, _start_ref(workflow, order, built, ticket, run_base))
+        now = vcs.commit_of(repo, _start_ref(workflow, order, built, ticket, run_base, vcs, repo))
     if started != now:
         raise EngineError(
             f"{_refused(plan.ticket, run_id)}: its branch starts at commit {started}, "
@@ -948,7 +948,7 @@ def _execute(
             journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
         prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
-        start = _start_ref(workflow, order, built, ticket, run_base)
+        start = _start_ref(workflow, order, built, ticket, run_base, vcs, repo)
         try:
             _pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
             if plan is not None and ticket.id == plan.ticket:
@@ -994,12 +994,91 @@ def _execute(
         # A paused run has no `run-end`: a resume goes on with it.
         return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused)
     # A skipped ticket is work that the run did not build, so the run fails, as `RunResult.ok` says.
-    journal.append(
-        "run-end", result=BUILT if not failed and not skipped else FAILED, built=built, failed=failed, skipped=list(skipped)
-    )
+    result = BUILT if not failed and not skipped else FAILED
+    if result == BUILT and not workflow.keep_worktrees:
+        # Before `run-end`, so the newest event of a run that ended stays `run-end`.
+        _clean_up(workflow, order, vcs, repo, state_dir, run_id, journal)
+    journal.append("run-end", result=result, built=built, failed=failed, skipped=list(skipped))
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
+
+
+# The most paths of a kept worktree that the reason in `cleanup` names.
+CLEANUP_PATHS_NAMED: int = 10
+
+
+def _clean_up(
+    workflow: Workflow, order: list[Ticket], vcs: VersionControl, repo: Path, state_dir: Path, run_id: str, journal: Journal
+) -> None:
+    """Remove the worktree and the push-guard hooks of each ticket, and delete each ticket branch that the run branch holds (#167).
+
+    The engine calls this when the run ends `built`. The port stops the file
+    watcher of a worktree before it removes the worktree. A worktree with a
+    change that is not committed stays, and so does its branch. A ticket
+    branch whose commits the run branch does not hold stays. The run branch,
+    the journal, the reports and the gate logs stay: they are the evidence of
+    the run. The journal records one `cleanup` event with what went, what
+    stayed, and why. A failure of one item keeps that item, and the clean-up
+    goes on with the others.
+    """
+    removed: list[str] = []
+    deleted: list[str] = []
+    worktrees_kept: list[dict[str, str]] = []
+    branches_kept: list[dict[str, str]] = []
+    worktrees_dir, hooks_dir = state_dir / "worktrees" / run_id, state_dir / "hooks" / run_id
+    for ticket in order:
+        worktree, branch = worktrees_dir / ticket.id, _ticket_branch(workflow, ticket)
+        kept: str | None = None
+        # An earlier clean-up of the run removed the worktree of a built ticket: a plan change goes on with a run that ended.
+        if worktree.is_dir():
+            kept = _remove_worktree(vcs, repo, worktree)
+            if kept is None:
+                removed.append(str(worktree))
+                shutil.rmtree(hooks_dir / ticket.id, ignore_errors=True)
+            else:
+                worktrees_kept.append({"worktree": str(worktree), "reason": kept})
+        try:
+            if not vcs.branch_exists(repo, branch):
+                continue
+            if kept is not None:
+                branches_kept.append({"branch": branch, "reason": "its worktree is kept"})
+            elif vcs.delete_branch(repo, branch, workflow.run_branch):
+                deleted.append(branch)
+            else:
+                branches_kept.append({"branch": branch, "reason": f"the run branch {workflow.run_branch!r} does not hold its commits"})
+        except VcsError as error:
+            branches_kept.append({"branch": branch, "reason": str(error)})
+    for directory in (worktrees_dir, hooks_dir):
+        try:
+            directory.rmdir()  # only when it is empty: a kept worktree keeps its directories
+        except OSError:
+            pass
+    journal.append(
+        "cleanup", worktrees_removed=removed, branches_deleted=deleted, worktrees_kept=worktrees_kept, branches_kept=branches_kept
+    )
+
+
+def _remove_worktree(vcs: VersionControl, repo: Path, worktree: Path) -> str | None:
+    """Remove the worktree through the port, and return None. Return the reason when the worktree stays.
+
+    A worktree with a change that is not committed stays. The file watcher of a
+    worktree that stays is stopped too, because nothing else stops it.
+    """
+    try:
+        changes = vcs.uncommitted_changes(worktree)
+        if not changes:
+            vcs.remove_worktree(repo, worktree)
+            return None
+        paths = [change.path for change in changes]
+        named = ", ".join(paths[:CLEANUP_PATHS_NAMED])
+        if len(paths) > CLEANUP_PATHS_NAMED:
+            named += f", and {len(paths) - CLEANUP_PATHS_NAMED} more"
+        reason = f"it holds changes that are not committed: {named}"
+    except VcsError as error:
+        reason = str(error)
+    vcs.stop_file_watcher(worktree)
+    return reason
 
 
 def _pause_point(journal: Journal, ticket: str, before: str, where: str, **fields: object) -> None:
@@ -1091,20 +1170,28 @@ def _run_base(vcs: VersionControl, repo: Path, workflow: Workflow, events: list[
     return _tip(vcs, repo, workflow.run_branch)
 
 
-def _start_ref(workflow: Workflow, order: list[Ticket], built: list[str], ticket: Ticket, run_base: str) -> str:
+def _start_ref(
+    workflow: Workflow, order: list[Ticket], built: list[str], ticket: Ticket, run_base: str, vcs: VersionControl, repo: Path
+) -> str:
     """The branch or the commit that `ticket` starts from.
 
     It is the branch of its predecessor in a chain (see `domain.chain_predecessor`),
     the run branch when the ticket has blockers or the workflow says so (see
     `domain.starts_from_run_branch`), or else `run_base`, the base of the run. It
     is never the base branch, which can move while the run goes on.
+
+    The clean-up of a run that ended `built` deletes a ticket branch only when the
+    run branch holds it (see `_clean_up`). The chain then ends at the tip of the
+    run branch, so a ticket that a plan change added starts from the run branch.
     """
     predecessor = domain.chain_predecessor(workflow.mode, [ticket.id for ticket in order], built)
     if predecessor is None:
         if domain.starts_from_run_branch(workflow.mode, workflow.ticket_start, ticket.blocked_by):
             return workflow.run_branch
         return run_base
-    return _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
+    branch = _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
+    with _vcs_errors():
+        return branch if vcs.branch_exists(repo, branch) else workflow.run_branch
 
 
 def _stream_path(report_path: Path) -> Path:
@@ -2006,9 +2093,11 @@ class _ChainRun:
         """Verify every stack of the chain and move the run branch. Return the findings that map to no ticket."""
         try:
             run_branch = f"refs/heads/{self.workflow.run_branch}"
+            # The clean-up of a run that ended `built` deletes only a ticket branch that the run branch holds (see `_clean_up`).
             self.chain = [
                 ticket for ticket in self.chain
-                if not _holds(self.vcs, self.repo, f"refs/heads/{_ticket_branch(self.workflow, ticket)}", run_branch)
+                if self.vcs.branch_exists(self.repo, _ticket_branch(self.workflow, ticket))
+                and not _holds(self.vcs, self.repo, f"refs/heads/{_ticket_branch(self.workflow, ticket)}", run_branch)
             ]
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket

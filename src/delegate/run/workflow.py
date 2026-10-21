@@ -64,6 +64,7 @@ class Workflow:
     tickets: list[Ticket]
     tier_overrides: dict[str, str]
     ticket_start: str = START_BASE_BRANCH
+    keep_worktrees: bool = False
 
 
 class WorkflowError(Exception):
@@ -203,7 +204,7 @@ class _Reader:
 
 
 TOP_LEVEL_FIELDS: tuple[str, ...] = (
-    "base-branch", "run-branch", "mode", "adapter", "ticket-start", "tier-overrides", "stacks", "tickets",
+    "base-branch", "run-branch", "mode", "adapter", "ticket-start", "keep-worktrees", "tier-overrides", "stacks", "tickets",
 )
 STACK_FIELDS: tuple[str, ...] = (
     "specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare",
@@ -369,6 +370,9 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
         reader.problems.append(
             f"ticket-start: {ticket_start!r} works only in assure mode; in economy mode each ticket starts from the previous ticket"
         )
+    keep_worktrees = data.get("keep-worktrees", False)
+    if not isinstance(keep_worktrees, bool):
+        reader.problems.append(f"keep-worktrees: must be true or false, not {keep_worktrees!r}")
     known_adapters = sorted({*ADAPTERS, *registered_adapters})
     if adapter is not None and adapter not in known_adapters:
         reader.problems.append(f"adapter: {adapter!r} is not an adapter; known adapters: {', '.join(known_adapters)}")
@@ -393,7 +397,9 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
         reader.problems.append("dependency cycle among tickets " + ", ".join(repr(i) for i in cycle))
     if reader.problems:
         raise WorkflowError(reader.problems)
-    return Workflow(base_branch, run_branch, mode, adapter, stacks, tickets, overrides, ticket_start)  # type: ignore[arg-type]
+    return Workflow(
+        base_branch, run_branch, mode, adapter, stacks, tickets, overrides, ticket_start, keep_worktrees,  # type: ignore[arg-type]
+    )
 
 
 def plan_order(workflow: Workflow) -> list[Ticket]:

@@ -53,7 +53,9 @@ AGENT_OF_RESULT: dict[str, str] = {"adapter-result": "specialist", "fixup-result
 RESULT_OF_REPORT: dict[str, str] = {"report-validation": "adapter-result", "fixup-report": "fixup-result", "verify-report": "verify-result"}
 
 # The events that add no line of their own: their facts are in the line of another event, or in the table.
-SILENT: frozenset[str] = frozenset({"agent-start", "gate-start", "idle-timeout", "run-branch-advance", "lock-broken", "pause-requested"})
+SILENT: frozenset[str] = frozenset(
+    {"agent-start", "gate-start", "idle-timeout", "run-branch-advance", "lock-broken", "pause-requested", "cleanup"}
+)
 
 # The kinds of a line that waits for the next event of its ticket, to join it.
 AGENT, GATES, VERDICT = "agent", "gates", "verdict"

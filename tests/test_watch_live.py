@@ -336,6 +336,25 @@ def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its
     ]
 
 
+def test_the_cleanup_event_of_a_built_run_adds_no_line_and_the_run_still_ends_built(tmp_path, monkeypatch, local_zone):
+    # The engine writes `cleanup` just before `run-end` when the run ends built (#167).
+    local_zone("NZT-13")
+    outputs = []
+    for name, cleanup in (("plain", False), ("cleaned", True)):
+        repo = bare_repo(tmp_path / name)
+        run = Run(repo, "a")
+        ticket_a_is_built(run)
+        if cleanup:
+            run.add(3600, "cleanup", worktrees_removed=["/w/a"], branches_deleted=["run/demo-a"], worktrees_kept=[], branches_kept=[])
+        run.add(3600, "run-end", result="built", built=["a"], failed=[], skipped=[])
+        outputs.append(watch(repo, monkeypatch))
+
+    (plain_code, plain), (code, out) = outputs
+    assert (code, plain_code) == (0, 0)
+    assert frames(out) == frames(plain)
+    assert "cleanup" not in out
+
+
 def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_the_second_continuation_is_a_problem(
     tmp_path, monkeypatch, local_zone
 ):

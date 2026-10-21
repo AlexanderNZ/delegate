@@ -68,11 +68,12 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 | [**`mode`**](../glossary.md#mode) | string | [**`assure`**](../glossary.md#assure) or [**`economy`**](../glossary.md#economy). |
 | [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. A run with `cursor` exits 1 until an implementation registers under that name. See [the run reference](run.md#the-adapter-interface). |
 | `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode with no `blocked-by` starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
+| `keep-worktrees` | boolean | Optional. `true` keeps the worktrees and the ticket branches of a run that ends `built`. The default is `false`. See [Keep worktrees](#keep-worktrees). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
 | `stacks` | table | One sub-table for each stack. See [Stacks](#stacks). |
 | `tickets` | array of tables | At least one `[[tickets]]` table. See [Tickets](#tickets). |
 
-All fields except `ticket-start` and `tier-overrides` are required. A field that this reference does not list is an error. This catches a misspelled field.
+All fields except `ticket-start`, `keep-worktrees` and `tier-overrides` are required. A field that this reference does not list is an error. This catches a misspelled field.
 
 ## Modes
 
@@ -103,6 +104,14 @@ A ticket that failed or was skipped did not move the run branch, so the next tic
 In `economy` mode, each ticket branch starts from the previous ticket. `ticket-start = "run-branch"` in `economy` mode is an error. `ticket-start = "base-branch"` is permitted in every mode.
 
 `delegate run --dry-run` prints the line `each ticket starts from the run branch <run-branch>` when the value is `run-branch`.
+
+## Keep worktrees
+
+When a run ends with the result `built`, the engine removes the worktree of each ticket and deletes each ticket branch that the run branch holds. It keeps the run branch, the journal, the [**reports**](../glossary.md#report) and the gate logs. See [the clean-up](run.md#the-clean-up).
+
+`keep-worktrees = true` turns the clean-up off for the run. The worktrees and the ticket branches then stay, as after a failed run. Use it when you want to examine the worktree of a ticket after the run. A run that ends `failed`, a paused run and a stopped run keep everything with each value.
+
+The field can change between two resumes of a run. The value of the workflow at the `run-end` decides.
 
 ## Adapters
 
@@ -239,6 +248,7 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 | `mode` or `adapter` has an unknown name. | The field, the value, and the valid names. |
 | `ticket-start` has an unknown value. | The field, the value, and the valid values. |
 | `ticket-start` is `run-branch` in `economy` mode. | The field and the value. |
+| `keep-worktrees` is not `true` or `false`. | The field and the value. |
 | A tier override is not a tier name. | The field `tier-overrides.<role>`, the value, and the valid tier names. |
 | A ticket names a stack that does not exist. | The ticket and the stack. |
 | A ticket is blocked by an id that no ticket has. | The ticket and the blocker. |

@@ -93,7 +93,7 @@ The composition point is the command-line driver. `delegate run` reads the name 
 
 ## The version-control port
 
-Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The run context keeps the work of a run through the port. The engine makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), keeps the file watcher off in them, rebases a ticket branch onto the run branch, reads the commit ranges, makes the [**verifier copy**](../glossary.md#verifier-copy), and moves the run branch. The run context starts no process itself, and a test checks that.
+Git is an outside system, so it belongs behind a driven port, an interface that the engine drives and an adapter implements. The port is `ports/vcs.py`, and the git backend is `adapters/git.py`. The command-line driver makes the backend and gives it to the engine, as it gives the harness adapter. The run context keeps the work of a run through the port. The engine makes the [**run branch**](../glossary.md#run-branch) and the [**worktrees**](../glossary.md#worktree), keeps the file watcher off in them, rebases a ticket branch onto the run branch, reads the commit ranges, makes the [**verifier copy**](../glossary.md#verifier-copy), and moves the run branch. When a run ends `built`, the engine removes the worktrees and deletes the ticket branches that the run branch holds (see [the clean-up](run.md#the-clean-up)). The run context starts no process itself, and a test checks that.
 
 The port speaks the language of the domain. It names no git command and no flag, and a test checks that. Each operation has a test in `tests/test_vcs_git.py`, which runs the git backend on a real temporary repository and calls the port only.
 
@@ -101,6 +101,7 @@ The port speaks the language of the domain. It names no git command and no flag,
 | --- | --- |
 | `repository_root`, `shared_data_directory` | Find the top of the checkout, and the directory that the checkout and all its worktrees share, where the engine keeps its state. |
 | `branch_exists`, `create_branch`, `branch_tip` | Look for a branch, make the [**run branch**](../glossary.md#run-branch) or a ticket branch, and read its newest commit. |
+| `delete_branch` | Delete a ticket branch when the run branch holds its newest commit, with the safe delete of git, and keep it when the run branch does not hold it. The clean-up of a run uses it. |
 | `commit_of`, `head_commit`, `commits_since` | Name a commit, and list the commits that a branch holds beyond another. |
 | `ensure_worktree`, `remove_worktree` | Make the [**worktree**](../glossary.md#worktree) of a ticket, or reuse one that a killed run left, and remove it. |
 | `rebase_onto` | Put the commits of a ticket branch on top of the run branch. A conflict or a refusal gives a result, and the worktree keeps the state from before. |

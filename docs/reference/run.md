@@ -48,7 +48,8 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 5. The engine creates the run branch at the commit of `base-branch`, and writes `run-start` to a new journal. That commit is the base of the run. See [the base of the run](#the-base-of-the-run).
 6. For each ticket in dependency order, the engine does the [**step**](../glossary.md#step) below, or skips the ticket. See [the skip rule](#the-skip-rule). A failed step does not end the run.
 7. In `economy` mode, the engine verifies the chain. See [the chain verification](#the-chain-verification).
-8. The engine writes `run-end`, and releases the lock.
+8. When the run ends with the result `built`, the engine removes the worktrees of the tickets and the ticket branches that the run branch holds. See [the clean-up](#the-clean-up).
+9. The engine writes `run-end`, and releases the lock.
 
 A step has these parts:
 
@@ -63,9 +64,9 @@ A step has these parts:
 
 The engine does not trust the report for the gates. A gate that is red is recorded red when the report says `gates_green` is true.
 
-The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step.
+The engine never merges to `base-branch`, never pushes, and never closes a ticket. A worktree and a branch stay after a failed step. A run that ends `built` removes them. See [the clean-up](#the-clean-up).
 
-The engine sets `core.fsmonitor` to false for each worktree (see [the push guard](#the-push-guard)) and in the configuration of each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, so a run leaves no daemon behind, whatever the global git configuration of the user is.
+The engine sets `core.fsmonitor` to false for each worktree (see [the push guard](#the-push-guard)) and in the configuration of each verifier copy that it makes, and it stops the fsmonitor daemon of a copy before it removes the copy, and of a worktree before the clean-up removes the worktree, so a run leaves no daemon behind, whatever the global git configuration of the user is.
 
 ### The environment of an agent and a gate
 
@@ -438,6 +439,23 @@ A REJECT starts a fix-up round. The limit is 2 rounds for each ticket in `assure
 
 Each round spawns a new verifier with a new session. The engine never resumes a verifier session. After the second round, a REJECT fails the step with the reason `the verifier rejected the branch after 2 fix-up rounds: <findings>`. The independent tickets go on.
 
+## The clean-up
+
+When a run ends with the result `built`, the engine removes what it made for the tickets, before it writes `run-end`. A run that ends `failed`, a paused run, and a stopped run keep everything, because `--retry` and a resume use the worktrees again.
+
+For each ticket of the run, in plan order:
+
+1. The engine stops the fsmonitor daemon of the worktree (`git fsmonitor--daemon stop`; a failure is ignored), and removes the worktree with `git worktree remove`. It also removes the hooks directory of the worktree. See [the push guard](#the-push-guard). A worktree with a change that is not committed stays, and the event names it with the changed paths. The engine also stops the fsmonitor daemon of a worktree that stays. A file that git ignores is not a change, and it goes with the worktree. A file that no commit holds and that git does not ignore is a change, also when a gate made it: for example `__pycache__/` after `python3 -m unittest` in a repository with no `.gitignore` entry for it. Add such files to `.gitignore`, so that the clean-up can remove the worktree.
+2. The engine deletes the ticket branch with `git branch -d`, never with `-D`, when the run branch holds its commits. For the delete, the run branch is the upstream of the ticket branch, so git checks the run branch and not the branch of the main checkout. A ticket branch that the run branch does not hold stays, and so does the branch of a worktree that stays. The event names each one with its reason.
+
+The engine keeps the run branch, because the coordinator merges it. It keeps the journal, the reports and the gate logs in `runs/<run id>/`, because they are the evidence of the run. The engine removes the temporary copy and the proof copy of each verifier after each verifier run, as before. When no worktree of the run stays, the engine also removes the empty directories `worktrees/<run id>/` and `hooks/<run id>/`.
+
+The journal records one `cleanup` event, just before `run-end`: the worktrees that the engine removed, the branches that it deleted, and each worktree and branch that stayed, with its reason. When the engine cannot remove one worktree or delete one branch, that item stays, and the engine goes on with the others. `delegate status` and `watch` show no line for the event, and the newest event of the run is still `run-end`.
+
+A plan change can go on with a run that ended `built`. See [the plan change](#the-plan-change). The new tickets get new worktrees and branches, as before. In `economy` mode, a new ticket after the chain starts from the run branch when the clean-up deleted the branch of the ticket before it: the run branch holds the tip of the chain. The clean-up runs again at the next `run-end` with the result `built`.
+
+The workflow field `keep-worktrees = true` turns the clean-up off for the run. The run then writes no `cleanup` event. See [keep worktrees](workflow.md#keep-worktrees).
+
 ## Where the engine writes
 
 All files are in the [**state directory**](../glossary.md#state-directory). By default it is `<git common dir>/delegate/`. The working tree of the repository stays clean.
@@ -462,8 +480,8 @@ The paths below are relative to the state directory.
 | `runs/<run id>/verifier/<ticket id>/fixup-<round>/` | The same files for the verifier of a fix-up round. |
 | `runs/<run id>/gates/<ticket id>/<phase>-<round>.log` | The output of one gate run, which the gate runner writes while the gate runs. The next gate run of the same phase and round writes `<phase>-<round>-2.log`, then `-3`, and so on. `gate-start` names the file. |
 | `runs/<run id>/gates/<ticket id>/prepare-<tree>-<round>.log` | The output of one `prepare` command, in the same way. `<tree>` is `worktree` or `verify-copy`. The next command of the same tree and round writes `prepare-<tree>-<round>-2.log`, and so on. `prepare-start` names the file. |
-| `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. |
-| `hooks/<run id>/<ticket id>/` | The hooks directory of the worktree. See [the push guard](#the-push-guard). |
+| `worktrees/<run id>/<ticket id>/` | The worktree of the ticket. A run that ends `built` removes it. See [the clean-up](#the-clean-up). |
+| `hooks/<run id>/<ticket id>/` | The hooks directory of the worktree. See [the push guard](#the-push-guard). It goes with the worktree. |
 | `locks/<run branch>.lock` | The lock of a run branch while a run holds it. The branch name is percent-encoded. |
 | `runs/<run id>/pause-request` | The request of `delegate pause`. The engine removes it at the next step boundary, at the end of the run, or at the start of a resume. See [the pause](#the-pause). |
 
@@ -682,6 +700,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit` |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
+| `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
 
 ## Limits of this version

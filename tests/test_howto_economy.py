@@ -4,7 +4,7 @@ The scripted adapter stands in for the live harness. It is the adapter
 interface that the page itself describes.
 """
 
-import subprocess
+import json
 
 import pytest
 
@@ -49,9 +49,13 @@ def test_following_the_economy_page_builds_a_chain_from_one_ticket_to_the_next_a
     assert len(scripted.verifier_calls) == 1  # one verifier for the one stack, at the end of the chain
     for text in ("reads the data set", "writes a header row", "quotes a comma"):
         assert text in scripted.verifier_calls[0].prompt
-    # Each ticket branch starts from the previous ticket.
-    assert subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", "run/chain-1", "run/chain-2"]).returncode == 0
-    assert subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", "run/chain-2", "run/chain-3"]).returncode == 0
+    # Each ticket branch starts from the previous ticket: the start commit of a step holds the file of the ticket before it.
+    # The journal gives the start commits, because a run that ends built deletes the ticket branches that the run branch holds (#167).
+    (journal,) = (repo / ".git" / "delegate" / "runs").glob("*/journal.jsonl")
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    starts = {e["ticket"]: e["base_commit"] for e in events if e["event"] == "step-start"}
+    assert "test_read.py" in git(repo, "ls-tree", "-r", "--name-only", starts["2"]).split()
+    assert "test_header.py" in git(repo, "ls-tree", "-r", "--name-only", starts["3"]).split()
     assert [state_and_verdict(delegate_steps["status"].out, ticket) for ticket in "123"] == [("built", "ACCEPT")] * 3
     # The last step of the page merged the run branch into main.
     assert {"test_read.py", "test_header.py", "test_quote.py"} <= set(git(repo, "ls-tree", "-r", "--name-only", "main").split())

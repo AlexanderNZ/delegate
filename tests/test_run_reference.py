@@ -16,7 +16,7 @@ from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 
-from .support import ScriptedAdapter, make_repo, read_journal, valid_report
+from .support import CLEANED_WORKFLOW, ScriptedAdapter, make_repo, read_journal, valid_report
 from .pages import repository_root
 
 ROOT = repository_root(Path(__file__))
@@ -47,13 +47,15 @@ def test_the_reference_names_each_report_field_and_adapter_field(name):
 def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, verdicts):
     adapters.register("scripted", ScriptedAdapter(verdict_sequence=verdicts, verdict_findings=["feature.txt is not a CSV file."] if verdicts else None))
     try:
-        repo = make_repo(tmp_path)
+        # The workflow with no `keep-worktrees`, so the run ends with the clean-up of a built run (#167).
+        repo = make_repo(tmp_path, CLEANED_WORKFLOW)
         code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
     finally:
         adapters.unregister("scripted")
     events = read_journal(capsys.readouterr().out)
     assert code == 0
     assert ("fixup-start" in [e["event"] for e in events]) == bool(verdicts)
+    assert "cleanup" in [e["event"] for e in events]
     rows = {line.split("|")[1].strip(): line for line in REFERENCE.read_text().splitlines() if line.startswith("| `")}
     for event in events:
         row = rows[f"`{event['event']}`"]
