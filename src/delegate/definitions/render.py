@@ -272,10 +272,11 @@ def _prefixes(option: str, shortest: int) -> list[str]:
 
 
 #: The long output option of a GET-only command, and each of its prefixes
-#: with at least three characters after "--" (#141). A command built on
-#: argparse accepts a unique prefix of a long option, so "--out <path>" is
-#: the same option as "--output <path>".
-GET_ONLY_OUTPUT_OPTIONS = _prefixes("--output", 5)
+#: down to "--o" (#141, #165). A command built on argparse accepts a unique
+#: prefix of a long option, so "--out <path>" is the same option as
+#: "--output <path>", and "agent-definitions render --ou <path>" writes to
+#: <path>.
+GET_ONLY_OUTPUT_OPTIONS = _prefixes("--output", 3)
 
 #: The shell text that examines the arguments of a GET-only command. It reads
 #: "$@", strips quote and backslash characters from each word, and denies a
@@ -306,10 +307,11 @@ GET_ONLY_ARGUMENT_CHECK = (
 
 
 #: The long option of `git diff`, `git log` and `git show` that writes a file
-#: (#140). The guard denies each prefix down to "--ou" as this option, whether
-#: or not git accepts that prefix (#160): git 2.54.0 rejects "--outp=" for
-#: `git log`, `git show` and `git diff`. "--o" is with the run options
-#: below: it is also a prefix of --open-files-in-pager.
+#: (#140). The guard denies each prefix down to "--o" as this option, whether
+#: or not git accepts that prefix (#160, #165): git 2.54.0 rejects "--outp="
+#: and "--o=" for `git log`, `git show` and `git diff`. After `git grep`,
+#: "--o" is with the run options below: it is also a prefix of
+#: --open-files-in-pager, and the guard denies it with each path.
 GIT_OUTPUT_OPTION = "--output"
 
 #: The long option of `git grep` that runs a command on the files that match
@@ -337,7 +339,8 @@ def _git_read_argument_check(grep: bool) -> str:
     message names the option. A "--" does not end the test: a pathspec that
     looks like an option gives a deny, never a hole.
     """
-    output = "|".join(_prefixes(GIT_OUTPUT_OPTION, 4))
+    # After `git grep`, the run options below hold "--o".
+    output = "|".join(_prefixes(GIT_OUTPUT_OPTION, 4 if grep else 3))
     run = "The option $a runs a command on the files that match, so it is not permitted."
     pager = (
         f'{"|".join(["--o", *_prefixes(GIT_PAGER_OPTION, 4)])}) deny "$seg" "{run}" ;; '
@@ -764,6 +767,12 @@ def _verifier_bash_hook(
     """
     quote = '\'"\'*|"\'"*'  # a leading double quote or a leading single quote
     redirect = "A redirection writes outside a temp directory."
+    # The guard reads a path as text and does not resolve a ".." component, so it denies each write target with one,
+    # also when the path stays in a temp directory (#165). The message names the component, not a temp directory.
+    dotdot = (
+        "The write target [$1] has a .. component. The guard reads a path as text and does not resolve .., "
+        "so it does not permit a write target with a .. component. Give the path with no .. component."
+    )
     in_toplevel = (
         "A write target is in the git toplevel [$wr], or holds it. A verifier is read-only on each git tree: "
         "copy the tree to another temp directory and remove the .git entry of the copy in the same command, "
@@ -1028,10 +1037,10 @@ def _verifier_bash_hook(
         # The directory of the cd, for a relative path after a gate (#163). incd or istp tested the path above.
         r"""cv=${d//\"/}; cv=${cv//\'/}; cv=${cv//\\/}; case "$cv" in '$TMPDIR'*) cv=$td${cv#'$TMPDIR'} ;; esac; """
         'case "$cv" in /*) cdd=$cv ;; *) cdd=${cdd%/}/$cv ;; esac ;; '
-        '*) istmp "$d" || deny "$seg" "The last path argument is outside a temp directory." ;; esac ;; '
+        '*) istmp "$d" || tdeny "$d" "The last path argument is outside a temp directory." ;; esac ;; '
         f"{_exact_or_prefix(VERIFIER_TEMP_WRITE_COMMANDS)}) shift; n=0; "
         'for a in "$@"; do case "$a" in -*) continue ;; esac; '
-        'if istmp "$a"; then n=$((n+1)); else deny "$seg" "A path argument is outside a temp directory."; fi; '
+        'if istmp "$a"; then n=$((n+1)); else tdeny "$a" "A path argument is outside a temp directory."; fi; '
         "done; "
         '[ "$n" -gt 0 ] || deny "$seg" "A write command needs a temp path argument." ;; '
         '*) deny "$seg" "Only read commands and temp-directory writes are permitted." ;; '
@@ -1054,6 +1063,12 @@ def _verifier_bash_hook(
             RELATIVE_TARGET_RESOLVER,
             f'istmp() {{ rl "$1"; istp "$rp" || return 1; inwt "$rp"; case $? in 0) deny "$seg" "{in_toplevel}" ;; '
             f'3) deny "$seg" "{in_unsearched}" ;; esac; return 0; }}',
+            # The deny of a write target that is not a temp path, its first argument (#165). A target with a ".."
+            # component gets the message that names the component; each other target gets the message of the caller.
+            # A leading and a trailing quote do not hide the component.
+            f'tdeny() {{ tq=$1; case "$tq" in {quote}) tq=${{tq#?}};; esac; '
+            'case "$tq" in *"\'"|*\'"\') tq=${tq%?};; esac; '
+            f'case "$tq" in ..|../*|*/..|*/../*) deny "$seg" "{dotdot}" ;; esac; deny "$seg" "$2"; }}',
             # A template of mktemp (#161): a temp path, or a name with no "/" that the caller counts in $mn. A name with
             # an expansion or a pattern character can be a path after the shell expands it. $ms records a "/" in a
             # template, for the test of -p, --tmpdir and -t.
@@ -1069,7 +1084,7 @@ def _verifier_bash_hook(
             *([_read_word_check()] if any(not g.endswith(READ_PREFIX_MARK) for g in get_only) else []),
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
-            'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
+            f'isout() {{ [ "$1" = /dev/null ] || istmp "$1" || tdeny "$1" "{redirect}"; }}',
             # The text after a redirection sign: each piece between two signs is a target. An empty piece between two
             # signs is `>>`; an empty last piece is a sign with no target. The word after a lone sign is checked the
             # same way, so in `> /tmp/y>x` the target x counts too.

@@ -466,7 +466,7 @@ OLD_SENTENCES = (
 )
 
 #: The rule of the git output option, as the rendered Claude Code verifier states it.
-GIT_OUTPUT_RULE = "the hook denies `--output` and each prefix of it, such as `--outp`, whether or not git accepts that prefix"
+GIT_OUTPUT_RULE = "the hook denies `--output` and each prefix of it down to `--o`, whether or not git accepts that prefix"
 
 
 def _holds_no_old_sentence(text: str) -> None:
@@ -505,4 +505,4 @@ def test_the_enforcement_page_the_skills_and_the_committed_verifiers_hold_none_o
 def test_the_skill_states_that_the_git_output_rule_is_stricter_than_git():
     flat = " ".join(SKILL.read_text().split())
 
-    assert "each prefix of it down to `--ou`, alone or with `=<path>`, whether or not git accepts that prefix" in flat
+    assert "each prefix of it down to `--o`, alone or with `=<path>`, whether or not git accepts that prefix" in flat
