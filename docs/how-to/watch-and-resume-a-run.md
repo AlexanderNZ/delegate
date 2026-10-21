@@ -1,6 +1,6 @@
 # How to watch and resume a run
 
-Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, to change its plan, to go on with a run that stopped, and to clean up after a run. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, and to change its plan. It also shows how to go on with a run that stopped, and how to clean up after a run. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
