@@ -67,6 +67,15 @@ def ticket_worktree(repo: Path, run_id: str, ticket: str = "a") -> Path:
     return Path(str(next(e["worktree"] for e in events if e["event"] == "step-start" and e["ticket"] == ticket))).resolve()
 
 
+def other_work(scripted) -> None:
+    """Make the next run commit other work than the run before it.
+
+    Two runs of the same work from the same base, with the same identity, in the same second, make the same commit (#171).
+    The base branch that holds the one then holds the other, so `--merged` deletes both run branches by right.
+    """
+    scripted.files = {"feature.txt": "other feature\n"}
+
+
 def line_of(out: str, run_id: str) -> str:
     (line,) = [line for line in out.splitlines() if line.startswith(f"run {run_id}:")]
     return line
@@ -119,6 +128,7 @@ def test_merged_deletes_the_run_branch_only_when_the_base_branch_holds_it(tmp_pa
     repo = make_repo(tmp_path)
     code, merged = run(repo, workflow_on(tmp_path, "run/merged"), capsys)
     assert code == 0
+    other_work(scripted)
     code, open_run = run(repo, workflow_on(tmp_path, "run/open"), capsys)
     assert code == 0
     git(repo, "merge", "-q", "--ff-only", "run/merged")
@@ -228,6 +238,7 @@ def test_a_journal_line_after_the_cleanup_keeps_the_run_built_for_watch_and_stat
 def test_a_second_clean_finds_nothing_to_remove_and_writes_no_event(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path)
     code, cleaned = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    other_work(scripted)
     code, unmerged = run(repo, workflow_on(tmp_path, "run/open"), capsys)
     git(repo, "merge", "-q", "--ff-only", "run/built")
     assert clean(repo, capsys, "--ended", "--merged")[0] == 0
@@ -271,3 +282,30 @@ def test_tiers_before_clean_is_refused_and_changes_nothing(tmp_path, capsys, scr
     assert (code, captured.out) == (2, "")
     assert "not of clean" in captured.err
     assert branches(repo) == before
+
+
+def test_two_runs_of_the_same_second_each_keep_their_own_run_branch_and_line(tmp_path, capsys, scripted, monkeypatch):
+    # The two run ids and all the commits share one second (#171), as two runs that a fast machine makes in one second.
+    repo = make_repo(tmp_path)
+    for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
+        monkeypatch.setenv(name, "2026-10-21T09:00:58Z")
+    merged, open_run = "20261021T090058Z-3ec8", "20261021T090058Z-4968"
+    for run_id, run_branch in ((merged, "run/merged"), (open_run, "run/open")):
+        code = delegate.main(["run", str(workflow_on(tmp_path, run_branch)), "--repo", str(repo), "--detached-run-id", run_id])
+        assert code == 0
+        assert str(read_journal(capsys.readouterr().out)[0]["run_id"]) == run_id
+        other_work(scripted)
+    git(repo, "merge", "-q", "--ff-only", "run/merged")
+    open_tip = branches(repo)["run/open"]
+
+    code, out, err = clean(repo, capsys, "--ended", "--merged")
+
+    assert (code, err) == (0, "")
+    assert set(branches(repo)) == {"main", "run/open"}
+    assert branches(repo)["run/open"] == open_tip
+    assert worktrees(repo) == {repo.resolve()}
+    assert "run/merged-a" in line_of(out, merged) and "run/open" not in line_of(out, merged)
+    assert "run/open-a" in line_of(out, open_run) and "run/merged" not in line_of(out, open_run)
+    assert "branch run/open: the base branch 'main' does not hold its commits" in line_of(out, open_run)
+    assert read_journal_file(repo, merged)[-1]["branches_deleted"] == ["run/merged-a", "run/merged"]
+    assert read_journal_file(repo, open_run)[-1]["branches_deleted"] == ["run/open-a"]
