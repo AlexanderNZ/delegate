@@ -209,13 +209,34 @@ TOPLEVEL_FINDER = (
     ') if r),"")'
 )
 
+#: The python3 text that reads $TMPDIR from the environment of the hook (#166).
+#: It needs `u` and `up` of TOPLEVEL_FINDER. `t` is the value without a trailing
+#: "/". `ts` is the same value when it is a safe temp directory, and it is empty
+#: otherwise. The Bash guard and the Write guard use `ts` as one more temp
+#: prefix, with a "/" after it, so the two guards accept the same paths. A
+#: value is safe when it is an absolute path with at least two components, has
+#: no empty, "." or ".." component, is not the home directory or a parent of
+#: it, and is not inside a git tree (`up`). The guards compare a path with the
+#: value as text, so a value with a "." or an empty component could hide a
+#: parent of the home directory from that test. The home directory is the
+#: value of `~` (`$HOME`, or else the password database). The two sides of the
+#: home test have no "/private" prefix. A value that is not safe adds no
+#: prefix, and only the fixed prefixes count.
+SAFE_TEMP_DIRECTORY = (
+    't=os.environ.get("TMPDIR","").rstrip("/"); '
+    'hm=u(os.path.expanduser("~").rstrip("/")); '
+    'ts=t if t.startswith("/") and len(t.split("/"))>2 and not {"",".",".."}&set(t.split("/")[1:]) '
+    'and not (hm+"/").startswith(u(t)+"/") and not up(pathlib.Path(t)) else ""'
+)
+
 #: The python3 text that finds the git trees of the write targets of a
 #: command `c` (#125). The Bash guard reads the targets later, in the shell, so
 #: this text takes each word that can be a temp write target, and more. It
 #: removes each quote and backslash, as the shell check does, and divides the
 #: text at each space. It also divides each word at each separator and
 #: redirection sign. In each word and each part, each text from a temp prefix
-#: (`/tmp/`, `/var/folders/` or `$TMPDIR`) to the end is a path. A path gets the
+#: (`/tmp/`, `/var/folders/`, the safe value `ts` of $TMPDIR with a "/" after
+#: it, or `$TMPDIR`) to the end is a path (#166). A path gets the
 #: value of $TMPDIR (`t`) in place of a leading `$TMPDIR`, loses a `/private`
 #: prefix, and each `//` and `/./` in it becomes one `/`, as in
 #: IN_TOPLEVEL_CHECK. A path with a pattern or an expansion character (`*`,
@@ -228,19 +249,19 @@ TOPLEVEL_FINDER = (
 #: working directory is in no git tree (`r` is empty), each word and each part
 #: that does not start with `/`, `$`, `~` or `=` is also a path: the working
 #: directory, a "/" and the part, with no `/private` prefix, and each `//` and
-#: `/./` made one `/`. Only such a path that starts with `/tmp/` or
-#: `/var/folders/` counts, because the shell check denies each other relative
-#: target by the temp rule. The test is on the full path, not on the working
+#: `/./` made one `/`. Only such a path that starts with `/tmp/`,
+#: `/var/folders/` or `ts` and a "/" (the prefixes `F`) counts, because the
+#: shell check denies each other relative target by the temp rule. The test is on the full path, not on the working
 #: directory: from `/`, the part `tmp/x` is the temp path `/tmp/x`. When the
 #: working directory is in a git tree, the shell check denies each relative
 #: target by the toplevel `r`, so the finder reads no more directories there.
 TARGET_TREE_FINDER = (
     's=(c if isinstance(c,str) else "").replace(chr(34),"").replace(chr(39),"").replace(chr(92),""); '
-    'K=("/tmp/","/var/folders/","$TMPDIR"); '
+    'F=("/tmp/","/var/folders/")+((ts+"/",) if ts else ()); K=F+("$TMPDIR",); '
     'X={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) for i in range(len(p)) if p.startswith(K,i) '
     'for x in (re.sub("/(?:[.]/|/)+","/",u(t+p[i+7:] if p.startswith("$TMPDIR",i) else p[i:])),) if x.startswith("/")}; '
     'X|={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) if p and p[0] not in "/$~=" '
-    'for x in (re.sub("/(?:[.]/|/)+","/",u(cw()+"/"+p)),) if x.startswith(K[:2])} if not r else set(); '
+    'for x in (re.sub("/(?:[.]/|/)+","/",u(cw()+"/"+p)),) if x.startswith(F)} if not r else set(); '
     'G=lambda x: min([i for i in map(x.find,"*?[{$") if i>=0] or [-1]); '
     'A=lambda x,g: (pathlib.Path(x[:g]),x[:g],x[:x[:g].rfind("/")] or "/") if g>=0 '
     'else (lambda P: (P,str(P).rstrip("/")+"/",str(P)))(pathlib.Path(x)); '
@@ -250,7 +271,8 @@ TARGET_TREE_FINDER = (
 #: The shell text that reads a hook input from stdin for the verifier guard. It
 #: prints these lines: the git toplevel of the working directory (`top()`),
 #: the value of $TMPDIR without a trailing "/", the working directory
-#: (`cw()`) without a "/private" prefix, one line for each git tree of
+#: (`cw()`) without a "/private" prefix, the safe value of $TMPDIR (`ts` of
+#: SAFE_TEMP_DIRECTORY, or an empty line), one line for each git tree of
 #: TARGET_TREE_FINDER and of the toplevel, one line with "+" for each directory
 #: that a walk could not search, and ":" with the command. The guard then fails
 #: closed when the command is empty: no command string, or a key that is
@@ -259,9 +281,9 @@ TARGET_TREE_FINDER = (
 HOOK_COMMAND_READER = (
     "python3 -c 'import json,os,pathlib,re,sys; j=json.load(sys.stdin); c=j[\"tool_input\"][\"command\"]; "
     f"{TOPLEVEL_FINDER}; r=top(); "
-    "t=os.environ.get(\"TMPDIR\",\"\").rstrip(\"/\"); "
+    f"{SAFE_TEMP_DIRECTORY}; "
     f"{TARGET_TREE_FINDER}; "
-    "L=[r,t,u(cw()),*sorted(V|{r}-{\"\"})]; "
+    "L=[r,t,u(cw()),ts,*sorted(V|{r}-{\"\"})]; "
     "(\"\\n\" in \"\".join(L)) and sys.exit(5); "
     "sys.stdout.write(\"\\n\".join(L)+\"\\n:\"+(c if isinstance(c, str) else \"\"))'"
 )
@@ -1054,7 +1076,9 @@ def _verifier_bash_hook(
             'deny() { echo "verifier guard: the command segment [$1] is not permitted. $2" >&2; exit 2; }',
             f'istp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
-            f'case "$p" in {_temp_path_pattern()}) return 0;; esac; return 1; }}',
+            f'case "$p" in {_temp_path_pattern()}) return 0;; esac; '
+            # A path under the safe value of $TMPDIR ($ts) in the environment of the hook, as the Write guard (#166).
+            '[ -n "$ts" ] || return 1; case "$p" in "$ts"/*) return 0;; esac; return 1; }',
             IN_TOPLEVEL_CHECK,
             IN_TOPLEVEL_CD_CHECK,
             # A write target: a temp path that is not in a git tree and holds none (#106, #125). A temp path in a
@@ -1094,12 +1118,12 @@ def _verifier_bash_hook(
             # A file descriptor number, or "-", which closes a descriptor.
             "isfd() { case \"$1\" in -) return 0;; ''|*[!0-9]*) return 1;; esac; return 0; }",
             # The reader gives the git toplevel of the working directory ($wt), the value of $TMPDIR ($td), the
-            # working directory ($wd), the git trees of the targets ($gt), the directories that a walk could not search
-            # ($gb) and the command, in that order. A line goes in an array only when a newline comes after it, so the
-            # loop always ends.
+            # working directory ($wd), the safe value of $TMPDIR or an empty line ($ts), the git trees of the targets
+            # ($gt), the directories that a walk could not search ($gb) and the command, in that order. A line goes in
+            # an array only when a newline comes after it, so the loop always ends.
             f"hi=$({HOOK_COMMAND_READER} 2>/dev/null)",
             "wt=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; td=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; "
-            "wd=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; gt=(); gb=()",
+            "wd=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; ts=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; gt=(); gb=()",
             "while :; do case \"$hi\" in /*$'\\n'*) gt+=(\"${hi%%$'\\n'*}\") ;; "
             "+/*$'\\n'*) wr=${hi%%$'\\n'*}; gb+=(\"${wr#+}\") ;; *) break ;; esac; hi=${hi#*$'\\n'}; done; cmd=$hi",
             'case "$cmd" in :*) cmd=${cmd#:} ;; *) cmd= ;; esac',
@@ -1163,8 +1187,9 @@ def _verifier_write_hook() -> str:
     The hook reads `tool_input.file_path` with python3. It permits the Write
     only when the path is absolute, has no ".." component, and starts with a
     fixed temp prefix or with the value of $TMPDIR in the environment of the
-    hook. A $TMPDIR that is not absolute, or that is "/", adds no prefix. The
-    guard reads the path as text, as the Bash guard does: it does not resolve a
+    hook and a "/". Only a safe $TMPDIR adds a prefix, by the rule of
+    SAFE_TEMP_DIRECTORY, which the Bash guard also uses (#166). The guard
+    reads the path as text, as the Bash guard does: it does not resolve a
     symbolic link.
 
     python3 prints the reason of a deny and exits 3. Any other status that is
@@ -1180,8 +1205,9 @@ def _verifier_write_hook() -> str:
         "j=json.load(sys.stdin); "
         'p=j["tool_input"]["file_path"]; '
         "isinstance(p,str) or sys.exit(4); "
-        't=os.environ.get("TMPDIR","").rstrip("/"); '
-        f'q=({prefixes})+((t+"/",) if t.startswith("/") else ()); '
+        f"{TOPLEVEL_FINDER}; "
+        f"{SAFE_TEMP_DIRECTORY}; "
+        f'q=({prefixes})+((ts+"/",) if ts else ()); '
         'ok=p.startswith("/") and ".." not in p.split("/") and p.startswith(q); '
         'm="" if ok else "the file path ["+p+"] is not permitted. '
         'A verifier writes only to an absolute path in a temp directory, with no .. component."; '
@@ -1189,7 +1215,6 @@ def _verifier_write_hook() -> str:
         # pattern and no variable, so the path is compared as it is. The path
         # must not be in the git toplevel of the working directory (#106) or in
         # the git tree above the path, and it must hold no git tree (#125).
-        f"{TOPLEVEL_FINDER}; "
         'n=u(os.path.normpath(p)) if ok else ""; '
         'r=next((x for x in (top(),up(pathlib.Path(n))) if x and (n==x or n.startswith(x+"/") or x.startswith(n+"/"))),"") '
         'if ok else ""; '

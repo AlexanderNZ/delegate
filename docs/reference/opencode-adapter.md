@@ -46,6 +46,8 @@ The `bash` map of a rendered verifier permits each plain [**gate**](../glossary.
 
 The `bash` map of a rendered verifier has no `file` rule, and it permits `mktemp` only as `mktemp` and `mktemp -d` (#161). `file -C` writes a compiled magic file, and `mktemp` makes the file that its template names, or a file in the directory of `-p`. A pattern cannot examine a cluster of short options, a template or a directory, so the map denies each other form of `mktemp` and each `file` command. The Claude Code guard examines their words, and it also permits `file` without `-C`, `mktemp -t <name>`, and a template or a `-p` directory that is a temp path.
 
+The maps of a rendered verifier cannot follow the runtime value of `$TMPDIR` (#166). The `external_directory` map allows only the fixed temp prefixes `/tmp/*`, `/private/tmp/*` and `/var/folders/*`, and the `bash` map has no rule for a temp write. An OpenCode pattern holds no environment variable. The [**renderer**](../glossary.md#renderer) does not write the `$TMPDIR` of the host that renders into the map, because the rendered file goes to other hosts. The Claude Code guards accept a path under a safe runtime `$TMPDIR`, for example `/home/agent/.tmp/tmp.X` from `mktemp -d`. On a host whose `$TMPDIR` is not under a fixed prefix, an OpenCode verifier cannot write there. The write of the [**verdict**](../glossary.md#verdict) is then a deny, and the engine reads the verdict from the final text of the verifier.
+
 ## What the agent gets
 
 The agent gets:

@@ -147,7 +147,13 @@ def guard_table() -> str:
         "and it may also go to a directory in the git toplevel of the working directory, with no `..` component: "
         "`cd api && ./gradlew test`. |",
         f"| Write tool | `Write` — only when `file_path` is an absolute path that starts with {write_paths}, "
-        "or with the value of `$TMPDIR` in the environment of the hook, and has no `..` component. |",
+        "or with the safe value of `$TMPDIR` in the environment of the hook and a `/`, and has no `..` component. |",
+        "| runtime `$TMPDIR` | The Bash guard and the Write guard also accept a path that starts with the value of "
+        "`$TMPDIR` in the environment of the hook and a `/`, for example a directory from `mktemp -d`. The two guards "
+        "use the same rule. The value counts only when it is safe: an absolute path with at least two components, with "
+        "no empty, `.` or `..` component, that is not the home directory or a parent of it, and that is not inside a git "
+        "tree. Otherwise only the fixed prefixes count. A path under the value obeys each other rule of a temp path. "
+        "The OpenCode maps cannot follow this value. |",
         "| git trees | No temp write, no `cp` destination, no redirection target, no output path and no `Write` "
         "may be inside a git tree, or hold one. A git tree is a directory that holds a `.git` entry: the git toplevel of "
         "the working directory of the hook, and each directory with a `.git` entry above a write target or in it. The "
