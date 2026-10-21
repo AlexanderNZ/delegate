@@ -19,7 +19,9 @@ gateCommands = ["./gradlew test", "./gradlew check"]
 gateExtraFlags = ["--info"]
 # A command that reads only while it stays a GET: here a repository script
 # that sends a GET unless -X names another method. The verifier guard denies
-# it with -X, and the OpenCode map leaves it out.
+# it with -X, and with a word after it that can be a subcommand: only
+# options, option values, numbers and paths (/health) are permitted. An
+# entry with a trailing " *" permits each word. The OpenCode map leaves it out.
 getOnlyCommands = ["./scripts/api"]
 # The example sets both options to show them. The default is no language
 # rule and no flake reason.

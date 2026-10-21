@@ -46,6 +46,14 @@ _SUBSTITUTION_WORD = r'"[A-Za-z0-9._/:=@+-]*\$\(' + rf"{_WORD}( {_WORD})*" + r'\
 EXACT_GATE_COMMAND = re.compile(rf"{_WORD}( ({_WORD}|{_SUBSTITUTION_WORD}))*")
 _SUBSTITUTION_BODY = re.compile(r"\$\(([^)]*)\)")
 
+#: The text at the end of a getOnlyCommands entry that makes the entry a
+#: prefix on purpose (#164), for example "tea issues list *". Without it, the
+#: guard permits after the words of the entry only options, option values,
+#: numbers and paths, because another word can be a subcommand that writes
+#: ("tea issues create"). With it, the guard permits each word after the
+#: entry, as it did for each entry before #164.
+READ_PREFIX_MARK = " *"
+
 #: The text after a flag of gateExtraFlags that tells that the flag takes a
 #: value word, for example "-k <value>" (#163). The guard cannot tell from the
 #: flag alone whether it takes a value. A flag that takes no value must not
@@ -92,6 +100,8 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
     write rule.
     A getOnlyCommands entry obeys the same rules, because the guard permits it
     in the same way while its arguments hold no method, body or output flag.
+    A getOnlyCommands entry can also end with READ_PREFIX_MARK (#164): the
+    words before the mark obey the rules, and the entry keeps the mark.
     """
     from .render import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
     from .validate import VERIFIER_BASH_WRITE_PROBES
@@ -103,22 +113,24 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
         )
 
     exact_allowed = field_name == "gateCommands"
+    prefix_allowed = field_name == "getOnlyCommands"
     out = []
     for c in values:
-        plain = isinstance(c, str) and GATE_COMMAND.fullmatch(c)
+        words = c[: -len(READ_PREFIX_MARK)] if prefix_allowed and isinstance(c, str) and c.endswith(READ_PREFIX_MARK) else c
+        plain = isinstance(words, str) and GATE_COMMAND.fullmatch(words)
         exact = not plain and exact_allowed and isinstance(c, str) and EXACT_GATE_COMMAND.fullmatch(c)
         if not plain and not exact:
             extra = (
                 ", or such words with words in double quotes that each hold one $(...) of plain words"
                 if exact_allowed
-                else ""
+                else f", optionally with {READ_PREFIX_MARK!r} at the end to make the entry a prefix"
             )
             raise ValueError(
                 f"agent {key!r}: {field_name} entry {c!r} must be plain words "
                 f"(letters, digits, . _ / : = @ + -) separated by single spaces{extra}"
             )
         bodies = _SUBSTITUTION_BODY.findall(c) if exact else []
-        if opens_write(c) or any(opens_write(b) for b in bodies):
+        if opens_write(words) or any(opens_write(b) for b in bodies):
             raise ValueError(f"agent {key!r}: {field_name} entry {c!r} opens a write command")
         out.append(c)
     return out

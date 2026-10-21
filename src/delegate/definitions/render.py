@@ -12,7 +12,7 @@ from string import Template
 
 import yaml
 
-from .declaration import GATE_COMMAND, GATE_FLAG_VALUE, Agent
+from .declaration import GATE_COMMAND, GATE_FLAG_VALUE, READ_PREFIX_MARK, Agent
 from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
@@ -576,6 +576,59 @@ def _gate_branches(gates: tuple[str, ...]) -> str:
     return "".join(f'"{g}"|"{g} "*) shift {len(g.split(" "))}; gwords "{g}" "$@" ;; ' for g in ordered)
 
 
+def _read_word_check() -> str:
+    """The shell function `rwords` (#164). It examines the words after a read command of the declaration.
+
+    Its first argument is the read command, and each other argument is a word
+    after it. A redirection is no word of the command, by the rule of
+    `_gate_word_check`. After the redirections, the function permits an option
+    (a word that starts with "-"), the word after an option that has no "=",
+    which can be the value of the option, a number, and a word with a "/",
+    which is a path and no subcommand. "--" and "-" take no value. Each other
+    word can be a subcommand that writes ("tea issues create"), and it denies,
+    with a message that names the word and the read command. The function
+    removes each quote and backslash from a word before the test, as the shell
+    does. The function cannot tell an option that takes a value from one that
+    takes none, so the word after each option counts as a value.
+    """
+    message = (
+        "The word $ru after the read command [$rn] is not an option, the value of an option, a number or a path. "
+        "Such a word can be a subcommand that writes, for example create or close. "
+        f"A getOnlyCommands entry that ends with{READ_PREFIX_MARK} permits each word after it."
+    )
+    return " ".join(
+        [
+            r"""rwords() { rn=$1; shift; rv=0; rr=0; for a in "$@"; do""",
+            r"""if [ "$rr" = 1 ]; then rr=0; continue; fi;""",
+            r"""case "$a" in *'>'*|*'<'*) case "$a" in *'>'|*'<'|*'>&'|*'<&') rr=1 ;; esac;""",
+            r"""a=${a%%'>'*}; a=${a%%'<'*}; case "$a" in ''|'&') continue ;; *[!0-9]*) ;; *) continue ;; esac ;; esac;""",
+            r"""ru=${a//\"/}; ru=${ru//\'/}; ru=${ru//\\/};""",
+            r"""case "$ru" in --|-|-*=*) rv=0; continue ;; -*) rv=1; continue ;; esac;""",
+            r"""if [ "$rv" = 1 ]; then rv=0; continue; fi;""",
+            r"""case "$ru" in */*) continue ;; ''|*[!0-9]*) ;; *) continue ;; esac;""",
+            f'deny "$seg" "{message}"; done; }}',
+        ]
+    )
+
+
+def _get_only_branches(get_only: tuple[str, ...]) -> str:
+    """The case branches of the GET-only commands. Each one examines the flags with GET_ONLY_ARGUMENT_CHECK.
+
+    An entry that ends with READ_PREFIX_MARK is a prefix: its branch permits
+    each other word. Each other entry is a read command, and `rwords` examines
+    the words after it (#164). A longer entry comes first, so the words after
+    it are the words after the longest entry that the command starts with.
+    """
+    entries = [(e[: -len(READ_PREFIX_MARK)], True) if e.endswith(READ_PREFIX_MARK) else (e, False) for e in get_only]
+    ordered = sorted(entries, key=lambda e: (-len(e[0].split(" ")), e[0], not e[1]))
+    return "".join(
+        f'"{w}"|"{w} "*) {GET_ONLY_ARGUMENT_CHECK}'
+        + ("" if prefix else f'; shift {len(w.split(" "))}; rwords "{w}" "$@"')
+        + " ;; "
+        for w, prefix in ordered
+    )
+
+
 def _verifier_bash_hook(
     gates: tuple[str, ...] = (), get_only: tuple[str, ...] = (), extra_flags: tuple[str, ...] = ()
 ) -> str:
@@ -676,8 +729,12 @@ def _verifier_bash_hook(
     GET, such as a tracker API client. Each one is permitted alone or with
     arguments, in that verifier only. The guard examines each argument and
     denies a method flag, a body flag, and an output flag whose path is not in
-    a temp directory (GET_ONLY_ARGUMENT_CHECK). With no such command the
-    branch is absent.
+    a temp directory (GET_ONLY_ARGUMENT_CHECK). After the words of an entry,
+    the guard then permits only options, option values, numbers and paths
+    (#164, `_read_word_check`): another word can be a subcommand that writes,
+    so "tea issues create" denies with the entry "tea issues". An entry that
+    ends with READ_PREFIX_MARK is a prefix on purpose, and the guard permits
+    each word after it. With no such command the branch is absent.
 
     A "cd" takes one path argument: a temp path, or a directory in the git
     toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A relative
@@ -898,7 +955,7 @@ def _verifier_bash_hook(
         r"""case "$a" in -*|*\'*|*\"*|*\\*|*\$*|*\**|*\?*|*\[*|*\{*|*\~*) """
         f'deny "$seg" "{sed_only_range}" ;; esac; done ;; '
     )
-    get_only_branch = f"{_exact_or_prefix(get_only)}) {GET_ONLY_ARGUMENT_CHECK} ;; " if get_only else ""
+    get_only_branch = _get_only_branches(get_only)
     git_reads = tuple(c for c in VERIFIER_READ_COMMANDS if c.startswith("git ") and c != "git grep")
     other_reads = tuple(c for c in VERIFIER_READ_COMMANDS if not c.startswith("git "))
     segment = (
@@ -1008,6 +1065,8 @@ def _verifier_bash_hook(
             f'mdir() {{ istmp "${{1%/}}/tmp.XXXXXXXXXX" || deny "$seg" "{MKTEMP_DIRECTORY_MESSAGE}"; }}',
             # The words after a plain gate (#163).
             *([GATE_PATH_CHECK, _gate_word_check(extra_flags)] if prefix_gates else []),
+            # The words after a read command of the declaration (#164).
+            *([_read_word_check()] if any(not g.endswith(READ_PREFIX_MARK) for g in get_only) else []),
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             'isout() { [ "$1" = /dev/null ] || istmp "$1"; }',
@@ -1274,6 +1333,23 @@ def _bullets(items: list[str], empty: str) -> str:
     return "\n".join(f"- {i}" for i in items) if items else f"- {empty}"
 
 
+def _read_prefixes(agent: Agent) -> str:
+    """The paragraph of the Claude Code verifier that states each prefix entry of getOnlyCommands (#164).
+
+    It is empty when the declaration has no such entry.
+    """
+    prefixes = [e[: -len(READ_PREFIX_MARK)] for e in agent.get_only_commands if e.endswith(READ_PREFIX_MARK)]
+    if not prefixes:
+        return ""
+    stated = " ".join(f"The read command `{p}` is a prefix." for p in prefixes)
+    return (
+        f"\n\n{stated} The declaration marks each such command with a trailing `{READ_PREFIX_MARK.strip()}`, so the "
+        "hook permits each word after it, except a method flag, a body flag, and an output flag with a path outside a temp "
+        "directory. After each other read command of the declaration, the hook permits only options, option "
+        "values, numbers and paths, because another word can be a subcommand that writes."
+    )
+
+
 def _body(template: str, agent: Agent, name: str, twin: str) -> str:
     return _template(template).substitute(
         name=name,
@@ -1285,6 +1361,7 @@ def _body(template: str, agent: Agent, name: str, twin: str) -> str:
         prompt=agent.prompt or "(no domain notes declared)",
         output_language=OUTPUT_LANGUAGE_RULES[agent.output_language],
         tracked_file_reason=TRACKED_FILE_REASON if agent.tracked_file_build else "",
+        read_prefixes=_read_prefixes(agent),
     )
 
 
