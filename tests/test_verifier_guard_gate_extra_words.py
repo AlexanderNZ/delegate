@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from delegate.cli.agent_definitions import main as agent_definitions_main
 from delegate.definitions.declaration import parse_declaration
 from delegate.definitions.render import render_claude_code, render_opencode
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
@@ -289,3 +290,144 @@ def test_the_opencode_map_permits_each_gate_only_as_its_exact_text():
         "npm test -- src/a.test.ts",
     ):
         assert opencode_bash_action(perm, command) == "deny", command
+
+
+# --- A gate that ends with " *" takes free arguments (#169) ---------------------
+#
+# After #163, real gate commands failed, and a declaration had no way to permit
+# them: a flake ref is not a path (`nix eval --raw .#x`), and a task name is a
+# bare word (`./gradlew test jacocoTestReport -x processTestAot`). A gate that
+# ends with " *" now permits each word after it, as each gate did before #163.
+# The segment rules for redirections, temp writes and git trees still apply.
+
+FREE_GATES = ["./gradlew *", "nix eval *", "npm test"]
+
+
+def _free_declaration() -> dict[str, object]:
+    return {"agents": {"web": {"description": "A web app.", "gateCommands": list(FREE_GATES)}}}
+
+
+@pytest.fixture(scope="module")
+def free_hook() -> str:
+    return _hook(_free_declaration())
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "./gradlew test jacocoTestReport -x processTestAot",
+        "./gradlew test jacocoTestReport jacocoTestCoverageVerification -x processTestAot",
+        "cd api && ./gradlew test spotlessCheck --info",
+        "nix eval --raw .#x",
+        "nix eval --raw .#packages.x86_64-linux.default.passthru.contentKey",
+        "nix develop -c ./gradlew test -x processTestAot",
+        "./gradlew test -x processTestAot 2>&1",
+        "./gradlew test -x processTestAot > /dev/null",
+    ],
+)
+def test_a_gate_that_ends_with_a_star_permits_each_word_after_it(free_hook, repo, shell, command):
+    _assert_permitted(_guard(free_hook, repo, command, shell, repo.main), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command", ["./gradlew", "nix eval", "npm test", "npm test 3", "npm test -- 12 app/src/a.test.ts"]
+)
+def test_a_gate_alone_and_a_number_after_a_gate_are_permitted(free_hook, repo, shell, command):
+    _assert_permitted(_guard(free_hook, repo, command, shell, repo.main), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [("npm test -- -u", "-u"), ("npm test 3a", "3a"), ("npm test -- 3 --fix", "--fix")],
+)
+def test_a_gate_with_no_star_keeps_the_word_check(free_hook, repo, shell, command, word):
+    result = _guard(free_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert f"The word {word} after the gate [npm test]" in result.stderr, (shell, command, result.stderr)
+
+
+#: A push after a gate. The text is in two parts, so that the push guard of the specialist that edits this file does
+#: not read it as a push.
+PUSH_AFTER_GATE = "./gradlew test; git " + "push"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "./gradlew test > /Users/x/out.txt",
+        "./gradlew test >> api/build.gradle",
+        "nix eval --raw .#x > app/out.txt",
+        "./gradlew test 2> /etc/out",
+        "./gradlew test | tee /Users/x/out.txt",
+        PUSH_AFTER_GATE,
+        "./gradlewx test",
+        "nix evaluate --raw .#x",
+        "nix build .#x",
+        "npm testx",
+    ],
+)
+def test_a_gate_that_ends_with_a_star_keeps_the_segment_rules(free_hook, repo, shell, command):
+    _assert_denied(_guard(free_hook, repo, command, shell, repo.main), command, shell)
+
+
+def test_the_opencode_map_permits_a_star_gate_with_its_star_and_a_plain_gate_exactly():
+    perm = _opencode_permission(_free_declaration())
+    bash = perm["bash"]
+    assert bash["./gradlew *"] == "allow"
+    assert bash["nix eval *"] == "allow"
+    assert bash["npm test"] == "allow"
+    assert "npm test *" not in bash
+
+    for command in ("./gradlew", "./gradlew test -x processTestAot", "nix eval --raw .#x", "npm test"):
+        assert opencode_bash_action(perm, command) == "allow", command
+    for command in ("npm test -- --run", "./gradlew test > /Users/x/o", "./gradlewx test", "nix build .#x"):
+        assert opencode_bash_action(perm, command) == "deny", command
+
+
+def test_the_declaration_carries_a_gate_that_ends_with_a_star():
+    [agent] = parse_declaration(_free_declaration())
+    assert agent.gate_commands == FREE_GATES
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["*", " *", "npm test  *", "npm test **", "npm *test", 'uvx "zensical==$(cat .zensical-version)" build *'],
+)
+def test_the_declaration_refuses_a_star_gate_that_is_not_plain_words(bad):
+    with pytest.raises(ValueError, match="gateCommands"):
+        parse_declaration({"agents": {"web": {"description": "A web app.", "gateCommands": [bad]}}})
+
+
+@pytest.mark.parametrize("bad", ["git *", "git " + "push *", "rm *", "cp *"])
+def test_the_declaration_refuses_a_star_gate_that_opens_a_write(bad):
+    with pytest.raises(ValueError, match="opens a write command"):
+        parse_declaration({"agents": {"web": {"description": "A web app.", "gateCommands": [bad]}}})
+
+
+def test_the_rendered_verifier_names_each_star_gate_and_says_that_its_words_are_not_checked():
+    claude_code, opencode = _files(_free_declaration())
+    for files in (claude_code, opencode):
+        body = split_frontmatter(files["web-verifier.md"])[1]
+        assert "The gate `./gradlew` takes free arguments." in body
+        assert "The gate `nix eval` takes free arguments." in body
+        assert "`npm test` takes free arguments" not in body
+        assert "does not check the words after such a gate" in body
+        assert "Do not put a word after such a gate that can make the gate write" in body
+
+    for files in _files(_declaration()):
+        assert "takes free arguments" not in split_frontmatter(files["web-verifier.md"])[1]
+
+
+def test_the_validator_accepts_a_rendered_pair_with_a_star_gate(tmp_path):
+    declaration = tmp_path / "agents.toml"
+    declaration.write_text(
+        '[agents.web]\ndescription = "A web app."\ngateCommands = ["./gradlew *", "nix eval *", "npm test"]\n'
+    )
+    out = tmp_path / "rendered"
+    assert agent_definitions_main(["render", str(declaration), "-o", str(out)]) == 0
+    assert agent_definitions_main(["validate", str(out)]) == 0

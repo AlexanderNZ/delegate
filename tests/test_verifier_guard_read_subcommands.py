@@ -192,6 +192,10 @@ def test_an_entry_with_a_star_in_another_form_or_on_a_write_is_refused(bad):
         parse_declaration(_declaration(bad))
 
 
-def test_a_gate_command_takes_no_star():
-    with pytest.raises(ValueError, match="gateCommands"):
-        parse_declaration({"agents": {"web": {"description": "d", "gateCommands": ["npm test *"]}}})
+def test_a_gate_command_takes_a_star_only_at_the_end():
+    # A gate that ends with " *" takes free arguments (#169). The star in another form stays refused.
+    [agent] = parse_declaration({"agents": {"web": {"description": "d", "gateCommands": ["npm test *"]}}})
+    assert agent.gate_commands == ["npm test *"]
+    for bad in ("npm test*", "npm * test", "npm test * *"):
+        with pytest.raises(ValueError, match="gateCommands"):
+            parse_declaration({"agents": {"web": {"description": "d", "gateCommands": [bad]}}})

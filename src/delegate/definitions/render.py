@@ -558,8 +558,9 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
     redirection is no word of the gate: the segment test examined its target.
     The text before a redirection sign in a word is a word, unless it is a
     file descriptor number or "&". After the redirections, each word must be
-    "--", a path (`gpath`), or a flag of `extra_flags`, the gateExtraFlags of
-    the declaration. A flag is permitted alone or with "=" and a value in the
+    "--", a number (all digits, #169), a path (`gpath`), or a flag of
+    `extra_flags`, the gateExtraFlags of the declaration. A number cannot
+    make a gate write. A flag is permitted alone or with "=" and a value in the
     same word. A flag with " <value>" in its entry also takes the next word
     as its value. Each other word denies, and the message names the word and
     the gate. The function removes each quote and backslash from a word
@@ -573,8 +574,9 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
         f"{'|'.join(valued)}) gk=1; continue ;; " if valued else ""
     )
     message = (
-        "The word $a after the gate [$gn] is not a path that exists in the git toplevel or in a temp directory, "
-        "and not a flag of gateExtraFlags. A word after a gate can make the gate write, for example --fix or a task name."
+        "The word $a after the gate [$gn] is not a number, not a path that exists in the git toplevel or in a temp "
+        "directory, and not a flag of gateExtraFlags. A word after a gate can make the gate write, for example --fix "
+        f"or a task name. A gateCommands entry that ends with{READ_PREFIX_MARK} permits each word after the gate."
     )
     return " ".join(
         [
@@ -585,20 +587,37 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
             r"""if [ "$gk" = 1 ]; then gk=0; continue; fi;""",
             r"""gu=${a//\"/}; gu=${gu//\'/}; gu=${gu//\\/};""",
             f'case "$gu" in --) continue ;; {flag_cases}esac;',
+            r"""case "$gu" in ''|*[!0-9]*) ;; *) continue ;; esac;""",
             r"""case "$gu" in -*) ;; *) gpath "$gu" && continue ;; esac;""",
             f'deny "$seg" "{message}"; done; }}',
         ]
     )
 
 
-def _gate_branches(gates: tuple[str, ...]) -> str:
+def _gate_branches(gates: tuple[str, ...], free_gates: tuple[str, ...] = ()) -> str:
     """The case branches of the plain gates (#163). Each gate alone, or with words that `gwords` examines.
 
-    A longer gate comes first, so the words after it are the words after the
-    longest gate that the command starts with.
+    `free_gates` are the words of each gate that ends with READ_PREFIX_MARK
+    (#169). Such a gate takes free arguments: its branch permits each word
+    after it, as each gate before #163. The segment test still examined each
+    redirection target. The free gates come first, because a command that
+    starts with a free gate is permitted whatever words follow it. Among the
+    other gates, a longer gate comes first, so the words after it are the
+    words after the longest gate that the command starts with.
     """
     ordered = sorted(gates, key=lambda g: (-len(g.split(" ")), g))
-    return "".join(f'"{g}"|"{g} "*) shift {len(g.split(" "))}; gwords "{g}" "$@" ;; ' for g in ordered)
+    free = "".join(f'"{g}"|"{g} "*) ;; ' for g in sorted(free_gates, key=lambda g: (-len(g.split(" ")), g)))
+    return free + "".join(f'"{g}"|"{g} "*) shift {len(g.split(" "))}; gwords "{g}" "$@" ;; ' for g in ordered)
+
+
+def _is_free_gate(gate: str) -> bool:
+    """True when `gate` is plain words with READ_PREFIX_MARK at the end: the gate takes free arguments (#169)."""
+    return gate.endswith(READ_PREFIX_MARK) and GATE_COMMAND.fullmatch(gate[: -len(READ_PREFIX_MARK)]) is not None
+
+
+def _free_gates(gates: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """The words of each gate that takes free arguments (#169), with no READ_PREFIX_MARK."""
+    return tuple(g[: -len(READ_PREFIX_MARK)] for g in gates if _is_free_gate(g))
 
 
 def _read_word_check() -> str:
@@ -747,8 +766,11 @@ def _verifier_bash_hook(
     denies: "npm run lint -- --fix" rewrites source files, and
     "./gradlew test spotlessApply" runs a task that formats the source. A
     relative path counts from the directory of the last "cd" of the command,
-    or else from the working directory. Each exact gate is permitted only as
-    the full command.
+    or else from the working directory. A number is permitted too (#169). A
+    plain gate that ends with READ_PREFIX_MARK takes free arguments (#169):
+    the guard permits each word after it, and the rendered verifier states
+    that the guard does not check those words. Each exact gate is permitted
+    only as the full command.
 
     `get_only` are the declaration's commands that read only while they stay a
     GET, such as a tracker API client. Each one is permitted alone or with
@@ -852,9 +874,11 @@ def _verifier_bash_hook(
         "The working directory [$wd] is in no git tree, so a cd can go only to a temp path."
     )
     prefix_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
+    # A gate that ends with READ_PREFIX_MARK takes free arguments (#169). The tuple holds its words, with no mark.
+    free_gates = _free_gates(gates)
     # An exact gate holds a double quote and a $( but never a single quote, so
     # a single-quoted case pattern holds it as a literal.
-    exact_gates = tuple(g for g in gates if not GATE_COMMAND.fullmatch(g))
+    exact_gates = tuple(g for g in gates if not GATE_COMMAND.fullmatch(g) and not _is_free_gate(g))
     exact_gate_test = (
         ["case \"$x\" in " + "|".join(f"'{g}'" for g in exact_gates) + ") exit 0 ;; esac"] if exact_gates else []
     )
@@ -1036,7 +1060,7 @@ def _verifier_bash_hook(
         f"{mktemp_file_branches}"
         f"{sed_branch}"
         f"{_exact_or_prefix(other_reads)}) ;; "
-        f"{_gate_branches(prefix_gates)}"
+        f"{_gate_branches(prefix_gates, free_gates)}"
         f"{_exact_or_prefix(VERIFIER_TEMP_DEST_COMMANDS)}) shift; d=; m=0; q=0; k=0; "
         'for a in "$@"; do '
         'if [ "$k" = 1 ]; then k=0; continue; fi; '
@@ -1314,12 +1338,14 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 
     Each plain gate is permitted only as its exact text too (#163). A word
     after a gate can make it write ("npm run lint -- --fix"), and a pattern
-    cannot tell a path from such a word, so the map has no "<gate> *" rule.
+    cannot tell a path from such a word, so the map has no "<gate> *" rule
+    for it. A gate that ends with READ_PREFIX_MARK takes free arguments
+    (#169), so its rule is "<gate> *", the entry as it is.
     """
     perm: dict[str, str] = {"*": "deny"}
     # An exact gate stays out: the map is a glob, and a glob cannot hold a
     # quote or a substitution as text that only matches itself.
-    plain_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g))
+    plain_gates = tuple(g for g in gates if GATE_COMMAND.fullmatch(g) or _is_free_gate(g))
     reads = tuple(c for c in VERIFIER_READ_COMMANDS if c not in VERIFIER_OPENCODE_LEFT_OUT)
     for command in reads:
         perm[f"{command} *"] = "allow"
@@ -1390,6 +1416,26 @@ def _read_prefixes(agent: Agent) -> str:
     )
 
 
+def _free_gate_rule(agent: Agent) -> str:
+    """The paragraph of the verifier that names each gate that takes free arguments (#169).
+
+    The guard and the OpenCode map do not check the words after such a gate,
+    so the rule of #124 and #163 is in the text that the verifier reads. It is
+    empty when the declaration has no such gate.
+    """
+    free = _free_gates(agent.gate_commands)
+    if not free:
+        return ""
+    stated = " ".join(f"The gate `{g}` takes free arguments." for g in free)
+    return (
+        f"\n\n{stated} The declaration marks each such gate with a trailing `{READ_PREFIX_MARK.strip()}`, so the "
+        "guard of your shell permits each word after it. The guard does not check the words after such a gate. "
+        "This rule is binding. Do not put a word after such a gate that can make the gate write, for example "
+        "`--fix`, `-u`, `--outDir` or a task that formats the source. If you must run such a form, report it under "
+        "What you could not verify (the `unverified` list of a JSON verdict), so the coordinator runs it."
+    )
+
+
 def _body(template: str, agent: Agent, name: str, twin: str) -> str:
     return _template(template).substitute(
         name=name,
@@ -1402,6 +1448,7 @@ def _body(template: str, agent: Agent, name: str, twin: str) -> str:
         output_language=OUTPUT_LANGUAGE_RULES[agent.output_language],
         tracked_file_reason=TRACKED_FILE_REASON if agent.tracked_file_build else "",
         read_prefixes=_read_prefixes(agent),
+        free_gates=_free_gate_rule(agent),
     )
 
 

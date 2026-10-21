@@ -184,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--gate-command",
         action="append",
         metavar="CMD",
-        help="a gate the verifier may run, alone or with paths after it; repeat it",
+        help="a gate the verifier may run, alone or with paths after it; end it with ' *' to permit each word after it; repeat it",
     )
     b.add_argument(
         "--get-only-command",

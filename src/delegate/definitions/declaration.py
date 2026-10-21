@@ -52,6 +52,12 @@ _SUBSTITUTION_BODY = re.compile(r"\$\(([^)]*)\)")
 #: numbers and paths, because another word can be a subcommand that writes
 #: ("tea issues create"). With it, the guard permits each word after the
 #: entry, as it did for each entry before #164.
+#:
+#: A gateCommands entry takes the same mark (#169), for example "./gradlew *":
+#: the gate then takes free arguments. Without it, the guard permits after the
+#: gate only "--", a number, a path that exists and a flag of gateExtraFlags
+#: (#163). With it, the guard permits each word after the gate, as it did for
+#: each gate before #163, and the OpenCode map permits "<gate> *".
 READ_PREFIX_MARK = " *"
 
 #: The text after a flag of gateExtraFlags that tells that the flag takes a
@@ -101,7 +107,10 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
     A getOnlyCommands entry obeys the same rules, because the guard permits it
     in the same way while its arguments hold no method, body or output flag.
     A getOnlyCommands entry can also end with READ_PREFIX_MARK (#164): the
-    words before the mark obey the rules, and the entry keeps the mark.
+    words before the mark obey the rules, and the entry keeps the mark. A
+    plain gate can end with the mark too (#169): it then takes free
+    arguments, and the guard does not examine the words after it. An exact
+    gate cannot take the mark.
     """
     from .render import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
     from .validate import VERIFIER_BASH_WRITE_PROBES
@@ -113,15 +122,15 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
         )
 
     exact_allowed = field_name == "gateCommands"
-    prefix_allowed = field_name == "getOnlyCommands"
     out = []
     for c in values:
-        words = c[: -len(READ_PREFIX_MARK)] if prefix_allowed and isinstance(c, str) and c.endswith(READ_PREFIX_MARK) else c
+        words = c[: -len(READ_PREFIX_MARK)] if isinstance(c, str) and c.endswith(READ_PREFIX_MARK) else c
         plain = isinstance(words, str) and GATE_COMMAND.fullmatch(words)
         exact = not plain and exact_allowed and isinstance(c, str) and EXACT_GATE_COMMAND.fullmatch(c)
         if not plain and not exact:
             extra = (
-                ", or such words with words in double quotes that each hold one $(...) of plain words"
+                f", optionally with {READ_PREFIX_MARK!r} at the end to permit each word after the gate, "
+                "or such words with words in double quotes that each hold one $(...) of plain words"
                 if exact_allowed
                 else f", optionally with {READ_PREFIX_MARK!r} at the end to make the entry a prefix"
             )
