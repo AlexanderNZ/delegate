@@ -98,7 +98,9 @@ def options_table(parser: argparse.ArgumentParser) -> str:
         if action.help is None:
             raise DocsError(f"argument {_invocation(action)} of {parser.prog} has no help text")
         meaning = _sentence(action.help.replace("|", "\\|").replace("<", "\\<"))  # a bare `<name>` would be read as a tag
-        if action.required or (not action.option_strings and action.nargs not in ("?", "*")):
+        # A positional argument is required by its `nargs` alone. Before Python 3.13, argparse also sets `required` on a
+        # positional argument with `nargs="*"` and no default, which the reader can leave out all the same (#171).
+        if (action.required and action.option_strings) or (not action.option_strings and action.nargs not in ("?", "*")):
             meaning += " Required."
         rows.append(f"| `{_invocation(action)}` | {meaning} |")
     return "\n".join(rows)
