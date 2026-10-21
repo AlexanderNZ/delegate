@@ -562,7 +562,9 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
     `extra_flags`, the gateExtraFlags of the declaration. A number cannot
     make a gate write. A flag is permitted alone or with "=" and a value in the
     same word. A flag with " <value>" in its entry also takes the next word
-    as its value. Each other word denies, and the message names the word and
+    as its value, unless that word starts with "-": a parser such as yargs
+    (Jest) takes no such word as a value, so the function tests it as a word
+    of its own. Each other word denies, and the message names the word and
     the gate. The function removes each quote and backslash from a word
     before the test, as the shell does.
     """
@@ -584,8 +586,8 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
             r"""if [ "$gr" = 1 ]; then gr=0; continue; fi;""",
             r"""case "$a" in *'>'*|*'<'*) case "$a" in *'>'|*'<'|*'>&'|*'<&') gr=1 ;; esac;""",
             r"""a=${a%%'>'*}; a=${a%%'<'*}; case "$a" in ''|'&') continue ;; *[!0-9]*) ;; *) continue ;; esac ;; esac;""",
-            r"""if [ "$gk" = 1 ]; then gk=0; continue; fi;""",
             r"""gu=${a//\"/}; gu=${gu//\'/}; gu=${gu//\\/};""",
+            r"""if [ "$gk" = 1 ]; then gk=0; case "$gu" in -*) ;; *) continue ;; esac; fi;""",
             f'case "$gu" in --) continue ;; {flag_cases}esac;',
             r"""case "$gu" in ''|*[!0-9]*) ;; *) continue ;; esac;""",
             r"""case "$gu" in -*) ;; *) gpath "$gu" && continue ;; esac;""",

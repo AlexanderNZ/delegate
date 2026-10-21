@@ -258,6 +258,34 @@ def test_a_flag_of_gate_extra_flags_gives_no_other_word(flags_hook, repo, shell,
     _assert_denied(_guard(flags_hook, repo, command, shell, repo.main), command, shell)
 
 
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [
+        ("npm test -- -k -u", "-u"),
+        ("npm test -- -k --updateSnapshot", "--updateSnapshot"),
+        ("npm test -- -k '-u'", "'-u'"),
+        ('cd app && npm test -- -k "--fix"', '"--fix"'),
+    ],
+)
+def test_a_word_that_starts_with_a_dash_is_no_value_of_a_flag(flags_hook, repo, shell, command, word):
+    """A parser such as yargs (Jest) takes no next word that starts with "-" as the value of a flag.
+
+    So `-k -u` gives `-k` no value, and `-u` updates the snapshots. The guard
+    tests such a word as a word of its own.
+    """
+    result = _guard(flags_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert f"The word {word} after the gate [npm test]" in result.stderr, (shell, command, result.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_flag_of_gate_extra_flags_after_a_valued_flag_is_permitted(flags_hook, repo, shell):
+    command = "npm test -- -k -q app/src/a.test.ts"
+    _assert_permitted(_guard(flags_hook, repo, command, shell, repo.main), command, shell)
+
+
 @pytest.mark.parametrize(
     "bad",
     ["-k", ["fix"], [""], ["--fix *"], ["-k; rm -rf /"], ["--"], ["-"], ["-k <value> <value>"], ["-k <path>"], [3]],
