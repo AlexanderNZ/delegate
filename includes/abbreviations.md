@@ -140,10 +140,10 @@
 *[git backend]: The git backend is the code that implements the version-control port with real git commands.
 *[git backends]: The git backend is the code that implements the version-control port with real git commands.
 *[grilling]: grilling is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made.
-*[Harness]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
-*[Harnesses]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
-*[harness]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
-*[harnesses]: A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the agent CLI of Cursor.
+*[Harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
+*[Harnesses]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
+*[harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
+*[harnesses]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
 *[Harness hook]: A harness hook is a guard in an agent file that the harness runs before a tool call: a push guard for the specialist, and the verifier guard.
 *[Harness hooks]: A harness hook is a guard in an agent file that the harness runs before a tool call: a push guard for the specialist, and the verifier guard.
 *[harness hook]: A harness hook is a guard in an agent file that the harness runs before a tool call: a push guard for the specialist, and the verifier guard.

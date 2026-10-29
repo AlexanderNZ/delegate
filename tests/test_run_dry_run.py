@@ -282,11 +282,19 @@ def test_an_unknown_adapter_exits_1_and_names_the_field_and_the_adapters(tmp_pat
     assert out == ""
     assert "adapter" in err
     assert "'codex'" in err
-    assert "claude-code, cursor, opencode" in err
+    assert "claude-code, opencode" in err
+
+
+def test_the_adapter_cursor_is_refused_as_any_adapter_that_is_not_registered(tmp_path, capsys):
+    code, out, err = invalid(tmp_path, capsys, VALID.replace('adapter = "claude-code"', 'adapter = "cursor"'))
+
+    assert code == 1
+    assert out == ""
+    assert "adapter: 'cursor' is not an adapter; known adapters: claude-code, opencode" in err
 
 
 @pytest.mark.parametrize("mode", ["assure", "economy"])
-@pytest.mark.parametrize("adapter", ["claude-code", "opencode", "cursor"])
+@pytest.mark.parametrize("adapter", ["claude-code", "opencode"])
 def test_each_mode_and_each_built_in_adapter_is_accepted(tmp_path, capsys, mode, adapter):
     repo = make_repo(tmp_path, VALID.replace('mode = "assure"', f'mode = "{mode}"').replace('adapter = "claude-code"', f'adapter = "{adapter}"'))
     write_project_agents(repo)

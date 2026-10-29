@@ -11,7 +11,6 @@ from .pages import ROOT, outside_the_package
 
 PAGE = ROOT / "docs" / "future-ideas.md"
 ENTRY_PARTS = ["The idea.", "Why it matters.", "Open questions."]
-CURSOR_ISSUE = "/delegate/issues/18"  # the Cursor issue; the owner name stays out of the kit
 
 
 def entries() -> dict[str, str]:
@@ -29,8 +28,8 @@ def test_the_page_says_at_the_top_that_its_entries_are_ideas_and_not_promises():
 
 
 @outside_the_package
-def test_the_page_has_its_four_entries():
-    assert list(entries()) == ["A benchmark from real tickets", "Fixing the coordinator role", "Further up the ladder", "The Cursor adapter"]
+def test_the_page_has_its_three_entries():
+    assert list(entries()) == ["A benchmark from real tickets", "Fixing the coordinator role", "Further up the ladder"]
 
 
 @outside_the_package
@@ -41,8 +40,11 @@ def test_each_entry_gives_the_idea_why_it_matters_and_the_open_questions_in_that
 
 
 @outside_the_package
-def test_the_cursor_entry_links_the_issue():
-    assert CURSOR_ISSUE in entries()["The Cursor adapter"]
+def test_no_page_and_no_abbreviation_names_cursor_as_a_harness():
+    # The kit names only the harnesses that it supports. The word "cursor" in lower case is the text cursor of a terminal.
+    files = [*(ROOT / "docs").rglob("*.md"), ROOT / "includes" / "abbreviations.md"]
+
+    assert [str(f.relative_to(ROOT)) for f in files if "Cursor" in f.read_text()] == []
 
 
 @outside_the_package

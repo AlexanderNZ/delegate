@@ -20,7 +20,7 @@ from .domain import ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_
 
 # The built-in harness adapters. A workflow can name these, and any adapter
 # that the caller of `load_workflow` reports as registered (a test registers a scripted one).
-ADAPTERS: tuple[str, ...] = ("claude-code", "cursor", "opencode")
+ADAPTERS: tuple[str, ...] = ("claude-code", "opencode")
 
 # The roles whose tier a workflow can override.
 ROLES: tuple[str, ...] = ("specialist", "verifier")

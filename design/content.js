@@ -33,7 +33,7 @@ MERGE    engine: run branch moves forward
         p("Handing work to a coding agent is easy. Trusting what comes back is the hard part, and this kit exists for that part."),
         p("This page is the kit at a glance: the problem, the idea, and a picture of how one piece of work moves from start to merge. It is not a tutorial and it is not a reference. It links both at the end. Each term is in bold where it first appears, and it links its entry in the [glossary](glossary.md)."),
         h2('The problem'),
-        p("You delegate implementation work to coding agents. Each agent runs in a [**harness**](glossary.md#harness): Claude Code, OpenCode, or the `agent` CLI of Cursor. In every harness you meet the same four problems, and each one costs you something."),
+        p("You delegate implementation work to coding agents. Each agent runs in a [**harness**](glossary.md#harness): Claude Code or OpenCode. In every harness you meet the same four problems, and each one costs you something."),
         h3('Trust arrives too late'),
         p("The common pattern runs many implementer agents in one [**session**](glossary.md#session) of a harness and reviews the result once, at the end. The reviewer reads one large diff. It takes the implementer's word that the tests pass, and only its prompt keeps it from changing the code. \"The tests pass\" is a claim, not evidence. The agent may have run a different command, or run the tests before its last edit."),
         p("The review has a quieter flaw. A reviewer that reads the implementer's account first looks where the account points. If the account says \"I fixed the empty-list case\", the reviewer checks the empty-list case. The case that nobody thought of gets no attention at all."),

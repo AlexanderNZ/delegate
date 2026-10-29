@@ -628,7 +628,7 @@ SIGKILL to the engine cannot be handled. The engine then writes no `interrupted`
 
 ## The adapter interface
 
-An adapter is a Python object that follows the interface in `delegate.ports.harness`. It registers by name with `delegate.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code`, `opencode`, and `cursor` are valid workflow values. The adapters `claude-code` and `opencode` have implementations: see [the `claude-code` adapter](claude-code-adapter.md) and [the `opencode` adapter](opencode-adapter.md). A run with `cursor` exits 1 until an implementation registers under that name.
+An adapter is a Python object that follows the interface in `delegate.ports.harness`. It registers by name with `delegate.adapters.register(name, adapter)`. The workflow field `adapter` names it. The built-in names `claude-code` and `opencode` are valid workflow values, and each one has an implementation: see [the `claude-code` adapter](claude-code-adapter.md) and [the `opencode` adapter](opencode-adapter.md).
 
 The adapter has the attribute `supports_resume`. It is true when the harness can resume a session. See [the continuation](#the-continuation).
 

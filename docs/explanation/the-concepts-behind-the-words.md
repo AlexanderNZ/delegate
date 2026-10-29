@@ -6,7 +6,7 @@ The terms are in the order in which a run meets them: the tools, the plan, the r
 
 ## Harness
 
-A [**harness**](../glossary.md#harness) is the program that runs a coding agent. It sends the prompt to a model, gives the model tools, and runs the tool calls that the model asks for. Claude Code, OpenCode and the `agent` CLI of Cursor are harnesses. A harness is not a model, and it is not the kit.
+A [**harness**](../glossary.md#harness) is the program that runs a coding agent. It sends the prompt to a model, gives the model tools, and runs the tool calls that the model asks for. Claude Code and OpenCode are harnesses. A harness is not a model, and it is not the kit.
 
 I keep the harness outside the [**engine**](../glossary.md#engine) on purpose. Harnesses change fast, and each one starts, selects an agent, and reports its end in its own way. The engine drives a harness through its [**headless**](../glossary.md#headless) command line, and an [**adapter**](../glossary.md#adapter) holds each detail that belongs to one harness. A new harness is a new adapter, and the [**protocol**](../glossary.md#protocol) does not change.
 

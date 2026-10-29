@@ -224,7 +224,7 @@ The git backend is the code that implements the version-control port with real g
 
 ## Harness
 
-A harness is the tool that runs a coding agent, for example Claude Code, OpenCode or the `agent` CLI of Cursor. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [what a harness is](explanation/the-concepts-behind-the-words.md#harness) and [the adapters](reference/workflow.md#adapters).
+A harness is the tool that runs a coding agent, for example Claude Code or OpenCode. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [what a harness is](explanation/the-concepts-behind-the-words.md#harness) and [the adapters](reference/workflow.md#adapters).
 
 ## Harness hook
 

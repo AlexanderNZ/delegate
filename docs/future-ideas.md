@@ -31,11 +31,3 @@ Each entry gives the idea, why it matters, and the open questions.
 **Why it matters.** Each step so far took a job that I did by hand and gave it to a contract or to the engine. The coordinator role is the largest job left, and level 8 is where Eledath puts agent teams that coordinate themselves.
 
 **Open questions.** Eledath advises against level 8 for now. Which parts of a factory need it, and which parts are levels 6 and 7 done more thoroughly? What evidence would show that a step up keeps the quality, and doesn't only add speed?
-
-## The Cursor adapter
-
-**The idea.** An [**adapter**](glossary.md#adapter) for the `agent` CLI of Cursor, so that the engine drives a third [**harness**](glossary.md#harness). [Issue 18](https://github.com/AlexanderNZ/delegate/issues/18) holds the draft.
-
-**Why it matters.** The engine is the same for each harness, so the kit should reach the tools that teams already use.
-
-**Open questions.** It is undecided. The CLI cannot select a named agent, so the adapter would have to put the agent body in the prompt, and it is not clear that this keeps the contract of a rendered agent.

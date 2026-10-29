@@ -79,7 +79,7 @@ The plan for this example lists ticket `1` first, and ticket `2` second, because
 | `base-branch` | string | The branch that the run starts from. The run takes the commit of this branch at its start, and records it as the base of the run. A commit that lands on `base-branch` later is not part of the run. See [the base of the run](run.md#the-base-of-the-run). |
 | `run-branch` | string | The branch that the engine owns and accepted work lands on. It must differ from `base-branch`. |
 | [**`mode`**](../glossary.md#mode) | string | [**`assure`**](../glossary.md#assure) or [**`economy`**](../glossary.md#economy). |
-| [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code`, `opencode`, or `cursor`, or the name of an adapter that is registered. A run with `cursor` exits 1 until an implementation registers under that name. See [the run reference](run.md#the-adapter-interface). |
+| [**`adapter`**](../glossary.md#adapter) | string | The name of the [**harness**](../glossary.md#harness) adapter: `claude-code` or `opencode`, or the name of an adapter that is registered. See [the run reference](run.md#the-adapter-interface). |
 | `ticket-start` | string | Optional. The branch that each ticket branch of `assure` mode with no `blocked-by` starts from: `base-branch` (the default) or `run-branch`. See [Ticket start](#ticket-start). |
 | `keep-worktrees` | boolean | Optional. `true` keeps the worktrees and the ticket branches of a run that ends `built`. The default is `false`. See [Keep worktrees](#keep-worktrees). |
 | `tier-overrides` | table | Optional. The tier of a role, by tier name. See [Tier overrides](#tier-overrides). |
@@ -132,7 +132,6 @@ The field can change between two resumes of a run. The value of the workflow at 
 |---|---|
 | `claude-code` | Claude Code. See [the adapter reference](claude-code-adapter.md). |
 | `opencode` | OpenCode. See [the adapter reference](opencode-adapter.md). |
-| `cursor` | Cursor `agent` CLI. The name is valid, and `--dry-run` accepts it, but no adapter implements it yet: a run with `cursor` exits 1. |
 
 ## Tier overrides
 
