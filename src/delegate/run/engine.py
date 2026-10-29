@@ -122,7 +122,7 @@ import os
 import secrets
 import shutil
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -184,6 +184,9 @@ TRIGGER_REJECT: str = "reject"
 # The report file is there but not valid, or there is no report file.
 TRIGGER_REPORT_INVALID: str = "report-invalid"
 TRIGGER_REPORT_MISSING: str = "report-missing"
+
+# The `trigger` of a `continuation` whose worktree holds a change that is not committed when a gate must run (#176).
+TRIGGER_UNCOMMITTED: str = "uncommitted"
 
 # The `phase` of a `retry` event: the first phase of the failed step that did not complete.
 # `specialist` is only in `economy` mode, where the specialist of the step continues.
@@ -1419,6 +1422,7 @@ def _build_with_continuations(
                 notes=stack.specialist_notes,
             )
     resume_session: str | None = None
+    leftovers: frozenset[str] = frozenset()  # the paths that red gates left in the worktree (see `_uncommitted_before_gates`)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     while True:
         if spawned:
@@ -1433,6 +1437,7 @@ def _build_with_continuations(
             )
         gate_output: str | None = None
         problems: tuple[str, ...] = ()
+        uncommitted_paths: tuple[str, ...] = ()
         if result is not None and not _session_done(result, report_valid):
             trigger = harness.CAPPED if result.end_state == harness.CAPPED else harness.FAILED
             reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
@@ -1462,15 +1467,23 @@ def _build_with_continuations(
                 stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
                 if stop:
                     return stop
-                if not each_ticket:
+                # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
+                # something else than the commit. `economy` mode runs no gate here, but its chain gates run on this tree later.
+                uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers)
+                if uncommitted:
+                    trigger, reason, uncommitted_paths = TRIGGER_UNCOMMITTED, _uncommitted_reason(uncommitted), tuple(uncommitted)
+                elif not each_ticket:
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `_ChainRun`)
-                outcomes = [(gate, *_run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
-                red = [(gate, output) for gate, green, output in outcomes if not green]
-                if not red:
-                    return None
-                trigger = "gates-red"
-                reason = "gates red: " + "; ".join(gate for gate, _ in red)
-                gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
+                else:
+                    outcomes = [(gate, *_run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
+                    red = [(gate, output) for gate, green, output in outcomes if not green]
+                    if not red:
+                        return None
+                    trigger = "gates-red"
+                    # The gates ran in a tree with no change that is not committed, so what the tree holds now is theirs.
+                    leftovers = frozenset(_uncommitted_paths(vcs, worktree))
+                    reason = "gates red: " + "; ".join(gate for gate, _ in red)
+                    gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
         if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -1488,8 +1501,40 @@ def _build_with_continuations(
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
-                plan_change=plan_change, notes=stack.specialist_notes,
+                plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths,
             )
+
+
+def _uncommitted_paths(vcs: VersionControl, worktree: Path) -> list[str]:
+    """The paths of the worktree that differ from its commit, in the order of the paths. A path that git ignores is not one."""
+    with _vcs_errors():
+        return [change.path for change in vcs.uncommitted_changes(worktree)]
+
+
+def _uncommitted_before_gates(
+    journal: Journal, vcs: VersionControl, worktree: Path, gates: Sequence[str] | None, leftovers: frozenset[str] = frozenset()
+) -> list[str]:
+    """The paths that a change not committed holds in the worktree, when a gate is about to run in it. Else an empty list.
+
+    A gate result is a fact about the commit that it names, so a gate must not
+    run in a worktree that holds something else (#176). `gates` is the list of
+    gates of the phase: when each one has a clean green result on the commit
+    already, the phase runs no gate, and what the worktree holds does not
+    matter. `gates` is None when the caller runs no gate itself but the tree is
+    the tree of a later gate, so the answer does not depend on the journal.
+    A path in `leftovers` is a file that an earlier gate run of this process
+    left in a tree that was clean before it: it is no work of the specialist.
+    """
+    if gates is not None:
+        commit = _head(vcs, worktree)
+        if all(_green_result(journal, gate, commit) is not None for gate in gates):
+            return []
+    return [path for path in _uncommitted_paths(vcs, worktree) if path not in leftovers]
+
+
+def _uncommitted_reason(paths: Sequence[str]) -> str:
+    """The reason that no gate ran: the paths with a change that is not committed."""
+    return "the worktree holds changes that are not committed: " + ", ".join(f"`{path}`" for path in paths)
 
 
 def _hotspot_stop(
@@ -1707,6 +1752,8 @@ def _run_fixup(
         agent=step.stack.specialist, tier=tier, model=model, **(fields or {}),
     )
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
+    # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
+    leftovers = frozenset(_uncommitted_paths(step.vcs, step.worktree))
     prompt = specialist_brief(
         ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes,
@@ -1736,6 +1783,11 @@ def _run_fixup(
     unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the fix-up specialist")
     if unfinished:
         raise _StepFailed(unfinished)
+    # The gates run next, and a gate runs in the worktree as it is (#176). A fix-up with no new commit is refused
+    # by the brief generator (see `_checked_fixup_brief`), with a message of its own.
+    uncommitted = [path for path in _uncommitted_paths(step.vcs, step.worktree) if path not in leftovers]
+    if uncommitted and _head(step.vcs, step.worktree) != rejected:
+        raise _StepFailed(_uncommitted_reason(uncommitted) + f"; no gate ran (after the fix-up of round {round_number})")
     return findings_text
 
 
@@ -2254,7 +2306,7 @@ def _run_gate_with_output(
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
-        exit_status=result.exit_status, green=result.green, output_tail=output,
+        exit_status=result.exit_status, green=result.green, output_tail=output, clean=True,
     )
     return result.green, output
 
@@ -2286,8 +2338,16 @@ def _refused_fields(result: AdapterResult) -> dict[str, object]:
 
 
 def _green_result(journal: Journal, command: str, commit: str) -> dict[str, object] | None:
-    """The first green `gate-result` of `command` on `commit` in the journal, or None when it holds none."""
+    """The first green `gate-result` of `command` on `commit` in the journal, or None when it holds none.
+
+    Only a result with `clean: true` counts: the worktree had no change that was
+    not committed when the gate ran (#176). A result of an older journal has no
+    such field, so it skips no gate.
+    """
     for event in read_events(journal.path):
-        if event["event"] == "gate-result" and event["green"] and event["command"] == command and event.get("commit") == commit:
+        if (
+            event["event"] == "gate-result" and event["green"] and event.get("clean") is True
+            and event["command"] == command and event.get("commit") == commit
+        ):
             return event
     return None

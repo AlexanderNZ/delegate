@@ -115,7 +115,7 @@ def test_gate_result_keeps_its_fields(tmp_path, scripted_adapter):
     result = start_run(repo, ShellGateRunner(), scripted_adapter)
 
     (gate,) = [e for e in read_journal_file(repo, result.run_id) if e["event"] == "gate-result"]
-    assert set(gate) == {"seq", "time", "event", "ticket", "round", "phase", "command", "commit", "exit_status", "green", "output_tail"}
+    assert set(gate) == {"seq", "time", "event", "ticket", "round", "phase", "command", "commit", "exit_status", "green", "output_tail", "clean"}
 
 
 def test_each_gate_run_has_its_own_log_with_its_own_output(tmp_path, scripted_adapter):

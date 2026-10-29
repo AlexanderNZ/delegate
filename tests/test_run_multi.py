@@ -169,8 +169,9 @@ def test_a_rebase_conflict_fails_that_step_leaves_the_branch_and_worktree_clean_
     assert "rebase" not in git(worktree, "status")
 
 
-def test_a_rebase_that_cannot_start_because_a_tracked_file_is_dirty_fails_only_that_step_and_independent_tickets_continue(tmp_path, capsys, scripted):
-    # The specialist of ticket b leaves a tracked file changed and uncommitted, so git refuses to start the rebase.
+def test_a_tracked_file_that_the_specialist_leaves_changed_fails_only_that_step_before_any_gate_and_independent_tickets_continue(tmp_path, capsys, scripted):
+    # The specialist of ticket b leaves a tracked file changed and uncommitted. The engine reads the worktree before the
+    # gates (#176), continues the specialist, and fails the step at the limit. Before, git refused to start the rebase.
     def report(request, head):
         own = "b" if "Ticket b" in request.prompt else ("c" if "Ticket c" in request.prompt else "a")
         if own == "b":
@@ -185,11 +186,10 @@ def test_a_rebase_that_cannot_start_because_a_tracked_file_is_dirty_fails_only_t
     assert code == 1
     assert "Traceback" not in err and "crashed" not in err
     events = read_journal(out)
-    refused = next(e for e in events if e["event"] == "rebase" and e["ticket"] == "b")
-    assert (refused["result"], refused["files"], refused["to_commit"]) == ("failed", [], None)
+    assert [e["trigger"] for e in of_ticket(events, "b") if e["event"] == "continuation"] == ["uncommitted", "uncommitted"]
+    assert "gate-result" not in [e["event"] for e in of_ticket(events, "b")]
     step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "b")
-    assert step_end["state"] == "failed" and step_end["reason"].startswith("rebase onto run/demo failed:")
-    assert "seed.txt" in step_end["reason"] or "unstaged" in step_end["reason"]
+    assert step_end["state"] == "failed" and "seed.txt" in step_end["reason"] and "continuation limit" in step_end["reason"]
     assert "ticket b:" in err
     assert [e["ticket"] for e in events if e["event"] == "verify-start"] == ["a", "c"]
     run_end = events[-1]

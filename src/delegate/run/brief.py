@@ -665,6 +665,7 @@ def continuation_brief(
     gates_at_chain_end: bool = False,
     plan_change: str | None = None,
     notes: str | None = None,
+    uncommitted: Sequence[str] = (),
 ) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
@@ -676,6 +677,10 @@ def continuation_brief(
     a gate command must be near the output of red gates. A new agent has no
     context, so its brief is the full specialist brief with the continuation added, and with the sections "Plan
     change" and "Notes of this stack" when `plan_change` and `notes` are set.
+
+    `uncommitted` names the paths of the worktree that hold a change that is not
+    committed (#176). The engine ran no gate because of them. The brief names
+    each path, and tells the specialist to commit it or remove it.
     """
     lines = [
         f"Ticket {ticket}",
@@ -689,6 +694,17 @@ def continuation_brief(
         lines += ["The branch holds these commits so far:", "", *(f"- {commit}" for commit in commits)]
     else:
         lines += ["The branch holds no commit yet."]
+    if uncommitted:
+        lines += [
+            "",
+            "The engine ran no gate, because these paths of the worktree hold a change that is not committed:",
+            "",
+            *(f"- `{path}`" for path in uncommitted),
+            "",
+            "A gate must run on a commit, not on a worktree with other files. For each path, commit it if it is part of the work, "
+            "or remove it if it is not. Add each commit as a new commit. When the worktree holds no change that is not committed, "
+            "the engine runs the gates.",
+        ]
     if gate_output:
         lines += ["", "The engine ran the gates after the last run. This is the output of the red gates:", "", "```", gate_output.rstrip("\n"), "```"]
     lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]

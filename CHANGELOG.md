@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- A gate does not run in a worktree that holds a change that is not committed (#176). Before, the engine recorded a green gate on the HEAD commit, but ran the gate in the worktree as it was. A file that the specialist did not commit, for example a `feature.txt` that it wrote and did not add, could make a gate green that was red on the commit. The rebase that kept the commit then skipped the gate, and the verifier brief said that the gates were green, so the run branch got a commit that was red on its own, and no event showed it. Now, before the gates of the build phase, the engine reads the changes of the worktree that are not committed; a file that git ignores does not count, and neither does a file that red gates of the same run left. When there is one, the engine runs no gate and continues the specialist with the new trigger `uncommitted`: the prompt names each path and tells the specialist to commit or remove it, the continuation counts against the continuation limit, and at the limit the step fails with a reason that names the paths. In `economy` mode the engine reads the worktree at the end of the specialist run too, because the chain gates run on that tree. After a fix-up (also in a chain), a path that the fix-up specialist left uncommitted fails the step with a reason that names the paths, and no gate runs. The rebase needs no check: no agent runs between the build gates and the rebase. The event `gate-result` now has the field `clean`, which is `true`, and only a green result with `clean: true` makes a later gate a `gate-skip`, so a result from a journal of an earlier version does not skip a gate. To upgrade: a gate that makes files that git does not ignore, for example `__pycache__/`, needs an entry in `.gitignore`, or the engine counts those files as a change that is not committed after a restart of the step. `docs/reference/run.md` describes the trigger and the field.
+
 ## [1.10.0] - 2026-10-22
 
 ### Added
