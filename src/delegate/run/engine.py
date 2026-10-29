@@ -99,6 +99,13 @@ step starts, before a gate runs, and before a verifier starts (see
 records `pause-requested` and `paused`, the run writes no `run-end`, and a
 resume goes on from the boundary as from a stop.
 
+A failure of the harness halts the run. An `AdapterError` from `Adapter.run` is a
+failure of the harness, not of the work: a harness that is not logged in, a CLI
+that is gone, a rate limit. The engine writes `halted` (the ticket, the role,
+the round and the message), and no `step-end` and no `run-end`. The run process
+ends and releases the lock, and a resume goes on at the open step, as after a
+pause. Each other exception is a crash.
+
 Ctrl-C (SIGINT) stops a run at once, and does not wait for a step boundary. The
 engine releases the lock, records `interrupted` in the journal, and raises
 `RunInterrupted`. The run writes no `run-end`, so a resume goes on as after a
@@ -130,7 +137,7 @@ from pathlib import Path
 
 from ..ports import harness
 from ..ports.gates import GateRunner
-from ..ports.harness import Adapter, AdapterRequest, AdapterResult
+from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
@@ -228,6 +235,14 @@ class _Paused(Exception):
     """A pause request stopped the run at a step boundary. The journal holds `paused`. The message tells where."""
 
 
+class _Halted(Exception):
+    """The harness failed: `Adapter.run` raised an `AdapterError`. The journal holds `halted`. The message is the error."""
+
+    def __init__(self, ticket: str, role: str, round_number: int, message: str) -> None:
+        super().__init__(message)
+        self.ticket, self.role, self.round_number = ticket, role, round_number
+
+
 class _Rejected(_StepFailed):
     """The verifier rejected the branch after the last fix-up round. `findings` holds the findings of the last verdict."""
 
@@ -249,6 +264,9 @@ class RunResult:
     taken_over: LockHolder | None = None
     # Where a pause request stopped the run, for example `before the verifier of ticket a`, or None when it did not pause.
     paused: str | None = None
+    # The message of the `AdapterError` that halted the run, or None when it did not halt. `halted_at` says where.
+    halted: str | None = None
+    halted_at: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -943,6 +961,7 @@ def _execute(
     complete = {*built, *failed, *skipped}
     ended_early = False
     paused: str | None = None
+    stopped_by: _Halted | None = None
     for position, ticket in enumerate(order):
         if ticket.id in complete:
             continue
@@ -964,6 +983,10 @@ def _execute(
         except _Paused as stop:
             # The step stays open, or does not start: a resume goes on with it.
             paused = str(stop)
+            break
+        except _Halted as halt:
+            # The harness failed, not the work. The step stays open: a resume goes on with it.
+            stopped_by = halt
             break
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             # An exception that the engine did not plan for leaves the state of the
@@ -988,12 +1011,20 @@ def _execute(
         else:
             built.append(ticket.id)
     unmapped: list[str] = []
-    if workflow.mode == "economy" and built and not ended_early and paused is None:
+    if workflow.mode == "economy" and built and not ended_early and paused is None and stopped_by is None:
         chain = _ChainRun(workflow, order, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, built, failed, failures)
         try:
             unmapped = chain.verify()
         except _Paused as stop:
             paused = str(stop)
+        except _Halted as halt:
+            stopped_by = halt
+    if stopped_by is not None:
+        # A halted run has no `run-end` either: a resume goes on with it.
+        where = f"the {stopped_by.role} of ticket {stopped_by.ticket}"
+        return RunResult(
+            run_id, journal.path, built, failed, failures, skipped, unmapped, halted=str(stopped_by), halted_at=where,
+        )
     if paused is not None:
         # A paused run has no `run-end`: a resume goes on with it.
         return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused)
@@ -1155,6 +1186,19 @@ def _start_agent(journal: Journal, ticket: str, role: str, round_number: int, re
     stream = _stream_path(report_path)
     journal.append("agent-start", ticket=ticket, role=role, round=round_number, event_stream=str(stream))
     return stream
+
+
+def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round_number: int, request: AdapterRequest) -> AdapterResult:
+    """Run the agent through the adapter. An `AdapterError` is a failure of the harness: journal `halted`, and raise `_Halted`.
+
+    The event is `halted` with the ticket, the role, the round and the message. It is not a failure of the step, so
+    no `step-end` follows, and the run process ends with no `run-end`. Each other exception goes up as a crash.
+    """
+    try:
+        return adapter.run(request)
+    except AdapterError as error:
+        journal.append("halted", ticket=ticket, role=role, round=round_number, message=str(error))
+        raise _Halted(ticket, role, round_number, str(error)) from None
 
 
 def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
@@ -1429,7 +1473,10 @@ def _build_with_continuations(
             spawned, result = False, None
         else:
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
-            result = adapter.run(_request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session))
+            result = _run_agent(
+                adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
+                _request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session),
+            )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
@@ -1760,7 +1807,10 @@ def _run_fixup(
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
-    result = step.adapter.run(_request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid))
+    result = _run_agent(
+        step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
+        _request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid),
+    )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
@@ -1892,8 +1942,9 @@ def _verify_round(
         # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
         in_scratch = report_path
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
-        result = step.adapter.run(
-            _request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added)
+        result = _run_agent(
+            step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
+            _request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added),
         )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
@@ -2096,8 +2147,8 @@ class _ChainRun:
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket
             return self._verify_stacks()
-        except _Paused:
-            raise  # a pause is no failure of the chain: `_execute` ends the run process with no `run-end`
+        except (_Paused, _Halted):
+            raise  # a pause and a halt are no failure of the chain: `_execute` ends the run process with no `run-end`
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             halted = isinstance(error, InvariantViolation)
             reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"

@@ -372,7 +372,7 @@ class LiveView:
         elif kind == "step-end":
             for key in [key for key in self._agents if key[0] == ticket]:
                 del self._agents[key]  # a crash ends the step with no result event
-        elif kind in ("run-end", "paused"):
+        elif kind in ("run-end", "paused", "halted"):
             self._agents.clear()
         if problem is not None:
             self._flush(ticket)
@@ -425,6 +425,9 @@ class LiveView:
         self._flush(ticket)
         if kind == "paused":
             self._add(when, "", [("", self._paused(event))], role="warn")
+            return
+        if kind == "halted":
+            self._add(when, "", [("", self._halted(event))], role="bad")
             return
         chain = kind in ("verify-start", "fixup-start", "fixup-refused")
         self._add(when, self._chain_subject(ticket, subject) if chain else subject, self._spans(kind, event), started=kind == "step-start")
@@ -484,6 +487,12 @@ class LiveView:
             where = f"ticket {ticket}"
         run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
         return f"paused{SEPARATOR}before {where}{SEPARATOR}go on with delegate run --resume {run_id}"
+
+    def _halted(self, event: dict[str, object]) -> str:
+        """The line of a halt: where the harness failed, its message, and the command that goes on with the run."""
+        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
+        where = f"the {event['role']} of ticket {event['ticket']}"
+        return f"halted{SEPARATOR}{where}{SEPARATOR}{event['message']}{SEPARATOR}go on with delegate run --resume {run_id}"
 
     def _spans(self, kind: str, event: dict[str, object]) -> list[Span]:
         """The parts of the line of an event that has a line of its own. An event that this version does not know shows its name."""

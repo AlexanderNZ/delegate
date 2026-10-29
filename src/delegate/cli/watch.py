@@ -157,6 +157,8 @@ class _Titled:
             self._result = str(event["result"])
         elif event["event"] == "paused":
             self._result = "paused"
+        elif event["event"] == "halted":
+            self._result = "halted"
         elif problem is not None:
             self._result = "problem"
         self._sink.event(event, reported, problem)
@@ -214,10 +216,10 @@ def _newest_run(newest: watch.EndedRun | watch.StoppedRun, raw: bool) -> int:
     The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set. With
     `--raw` (`raw`), the line is plain also on a terminal, as before #114.
     """
-    if isinstance(newest, watch.StoppedRun) and not newest.paused:
+    if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None:
         _error(newest.line(), raw)
         return newest.code
-    result = newest.result if isinstance(newest, watch.EndedRun) else "paused"
+    result = newest.result if isinstance(newest, watch.EndedRun) else "halted" if newest.halted is not None else "paused"
     Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(newest.run_id)}{SEPARATOR}{result}")
     print(newest.line() if raw else newest.painted())
     return newest.code

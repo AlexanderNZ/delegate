@@ -5,7 +5,8 @@ creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
 with a run that stopped or paused, from its journal. `--retry <ticket>` with it goes on
 with one failed step of that run, also when the run ended. A run that `delegate
-pause` stopped at a step boundary exits with `EXIT_PAUSED`.
+pause` stopped at a step boundary exits with `EXIT_PAUSED`. A run that a failure of the harness (an `AdapterError`)
+halted exits with `EXIT_HALTED`: it has no `run-end`, and `--resume` goes on at the open step.
 
 A resume with a workflow whose tickets differ from the newest plan of the run is
 a plan change. `--reviewed <ids>` names the later tickets that the coordinator
@@ -63,8 +64,11 @@ from .title import SEPARATOR, Title
 # The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
 EXIT_PAUSED: int = 3
 
+# The exit status of a run that a failure of the harness halted: an `AdapterError` (#177).
+EXIT_HALTED: int = 4
+
 # The paint role of the result of a run in its summary line (tokens.md): the result word is bold.
-RESULT_ROLES: dict[str, str] = {status.BUILT: "ok bold", status.FAILED: "bad bold", status.PAUSED: "warn bold"}
+RESULT_ROLES: dict[str, str] = {status.BUILT: "ok bold", status.FAILED: "bad bold", status.PAUSED: "warn bold", status.HALTED: "bad bold"}
 
 # The program of a detached run process: it imports the package from the import path of the command that started it
 # (argv[1]), then runs `delegate` with the rest of its arguments. A Nix wrapper puts the package on the import path of
@@ -342,6 +346,10 @@ def main(argv: list[str] | None = None) -> int:
         if result.paused is not None:
             print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
             return EXIT_PAUSED
+        if result.halted is not None:
+            print(f"delegate run: halted at {result.halted_at}: {result.halted}", file=sys.stderr)
+            print(f"halted at {result.halted_at}; go on with delegate run --resume {result.run_id}")
+            return EXIT_HALTED
         return 0 if result.ok else 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")

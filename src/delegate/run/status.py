@@ -50,7 +50,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output
-from .journal import JournalError, activity_files, is_paused, last_change, newest_run_end, plan_ids, read_new_events
+from .journal import JournalError, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
 from .pause import pause_requested
 from .runs import RunsError, is_active, journal_of
 
@@ -67,6 +67,8 @@ SKIPPED: str = "skipped"
 # reads it at a step boundary, and `paused` from its `paused` event until a resume (see `delegate.run.pause`).
 PAUSING: str = "pausing"
 PAUSED: str = "paused"
+# A failure of the harness stopped the run, and the run wrote no `run-end`: a resume goes on (#177).
+HALTED: str = "halted"
 
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
 PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
@@ -197,7 +199,7 @@ class TicketSnapshot:
 @dataclass(frozen=True)
 class Snapshot:
     """One snapshot of a run. `time` is the time of the snapshot: now, the time of `run-end` for a run that ended, or the
-    time of `paused` for a run that is paused. `state` is the result of a run that ended, `paused`, `pausing`, or `running`.
+    time of `paused` for a run that is paused. `state` is the result of a run that ended, `paused`, `halted`, `pausing`, or `running`.
 
     `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
 
@@ -452,13 +454,16 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     start = events[0]
     end = newest_run_end(events)
     paused = end is None and is_paused(events)
+    halt = halt_of(events) if end is None and not paused else None
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
         now = _time(next(e for e in reversed(events) if e["event"] == "paused"))  # and the clock of a paused run at its pause
+    elif halt is not None:
+        now = _time(halt)  # and the clock of a halted run at its halt
     now = now.replace(microsecond=0)
-    # No agent and no gate works in a run that ended or paused.
-    stopped = end is not None or paused
+    # No agent and no gate works in a run that ended, paused or halted.
+    stopped = end is not None or paused or halt is not None
     activity = reader_of(str(start["adapter"]))
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
@@ -477,13 +482,13 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     chain_phase, chain_seconds = _chain(events, now) if chain and not stopped else (None, 0)
     units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
-    state, note = _state(end, paused, journal)
+    state, note = _state(end, paused, journal, halt)
     pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
-        eta=None if to_end is None or paused else now + timedelta(seconds=to_end),
+        eta=None if to_end is None or paused or halt is not None else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase, note=note, mode=str(start["mode"]),
@@ -491,14 +496,17 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     )
 
 
-def _state(end: dict[str, object] | None, paused: bool, journal: Path) -> tuple[str, str | None]:
+def _state(end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None) -> tuple[str, str | None]:
     """The state of a run and its note.
 
-    The state is the result of its `run-end`, `paused`, `pausing` while a pause request waits and the run is active, or
-    `running`. The note is `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
+    The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
+    request waits and the run is active, or `running`. The note of a halted run is `halt_note`. Otherwise it is
+    `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
     A lock file that cannot be read does not show that the process stopped, so the run is then `pausing`.
     """
     requested = pause_requested(journal)
+    if halt is not None:
+        return HALTED, halt_note(halt)
     if end is None and not paused and requested:
         try:
             active = is_active(journal)
@@ -510,6 +518,11 @@ def _state(end: dict[str, object] | None, paused: bool, journal: Path) -> tuple[
     if end is not None:
         return str(end["result"]), note
     return (PAUSED if paused else RUNNING), note
+
+
+def halt_note(halt: dict[str, object]) -> str:
+    """The note of a halted run: where the harness failed, and the message of the failure."""
+    return f"halted at the {halt['role']} of ticket {halt['ticket']}: {halt['message']}"
 
 
 def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> Snapshot:
@@ -659,7 +672,7 @@ def _run_line(snap: Snapshot, width: int, glyph: output.Glyphs) -> str:
     ETA while the run runs, and the two token counts when the snapshot has them."""
     dot = f" {glyph.pending} "  # the separator of tokens.md, which has an ASCII form
     state = snap.state + (f"{dot}{snap.phase}" if snap.phase else "")
-    role = {PAUSED: "warn", PAUSING: "warn", BUILT: "ok bold", FAILED: "bad bold"}.get(snap.state, "")
+    role = {PAUSED: "warn", PAUSING: "warn", HALTED: "bad bold", BUILT: "ok bold", FAILED: "bad bold"}.get(snap.state, "")
     progress = f"{snap.percent}%"
     if width >= BAR_COLUMNS:
         filled = snap.percent * BAR_CELLS // 100

@@ -116,6 +116,19 @@ def is_paused(events: list[dict[str, object]]) -> bool:
     return False
 
 
+def halt_of(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The newest `halted` event of the run of the events, or None: the run is halted when it comes after the newest `resume`.
+
+    A failure of the harness halts a run (#177). The run process ends with no `run-end`, and a resume goes on.
+    """
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return None
+        if event["event"] == "halted":
+            return event
+    return None
+
+
 # The fields of an event that name a file whose change is activity: the event stream of an agent, the log of a gate,
 # and the log of a `prepare` command.
 ACTIVITY_FIELDS: tuple[str, ...] = ("event_stream", "gate_log", "prepare_log")

@@ -126,7 +126,7 @@ The idle timeout is longer than the ten minutes that a harness gives one foregro
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped or paused. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A run [**pauses**](../glossary.md#pause) at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the [**short run id**](../glossary.md#short-run-id): the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
+`delegate run --resume <run-id>` goes on with a run that stopped, paused or halted. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A failure of the harness halts a run. See [a failure of the harness](#a-failure-of-the-harness). A run [**pauses**](../glossary.md#pause) at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the [**short run id**](../glossary.md#short-run-id): the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
 
 The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a [**plan change**](../glossary.md#plan-change), and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
@@ -276,7 +276,7 @@ The command exits 1, names the ticket, and changes nothing, when the step cannot
 
 ## The run lock
 
-A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, when a pause request stops the run, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
+A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, when a pause request stops the run, when a failure of the harness halts the run, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
 
 - If another run holds the lock, and its process exists, the command exits 1. The message names the run branch, the run id, and the process id of the holder: `run branch <name> is in use by run <run id> (process <pid>)`. The run in progress is not changed. `--break-lock` does not remove the lock of a process that exists.
 - A process that is killed cannot release its lock. The next run finds a lock whose process no longer exists.
@@ -289,7 +289,7 @@ The lock is a file for each run branch in `locks/`, and it holds the run id and 
 
 ## A crash in a step
 
-An exception that the engine did not plan for is a crash. Examples are an exception from the adapter, and a failure of git in the middle of a step. A crash leaves the state of the step unknown, so it ends the run. The engine does these things in order:
+An exception that the engine did not plan for is a crash. Examples are an exception from the adapter that is not an `AdapterError`, and a failure of git in the middle of a step. An `AdapterError` is not a crash. See [a failure of the harness](#a-failure-of-the-harness). A crash leaves the state of the step unknown, so it ends the run. The engine does these things in order:
 
 1. It writes `step-end` with the state `failed`. The `reason` is `crashed: <exception type>: <message>`.
 2. It writes `skip` for each ticket that it did not reach. The `blockers` list is empty, and the reason is `the run ended after ticket <id> crashed`.
@@ -297,6 +297,21 @@ An exception that the engine did not plan for is a crash. Examples are an except
 4. The command prints `delegate run: ticket <id>: crashed: ...` on stderr, and `delegate run: ticket <id>: skipped: the run ended after ticket <id> crashed` for each ticket that it did not reach. Then it prints [the summary and the retry line](#output-and-exit-codes) on stdout, and exits 1.
 
 The branch and the worktree of the ticket stay as the crash left them.
+
+## A failure of the harness
+
+An `AdapterError` from the adapter is a failure of the harness, not of the work. Examples are a harness that is not logged in, a CLI that is missing or changed, and a rate-limit exit. The same cause stops each later agent, so the engine does not fail the step. It halts the run, as Ctrl-C stops it. The engine does these things in order:
+
+1. It writes `halted` with the ticket, the role, the round and the message of the error. It writes no `step-end`, no `skip` and no `run-end`.
+2. It releases the [**run lock**](../glossary.md#run-lock).
+3. The command prints `delegate run: halted at the <role> of ticket <id>: <message>` on stderr. Then it prints [the summary](#output-and-exit-codes) on stdout, and the line `halted at the <role> of ticket <id>; go on with delegate run --resume <run id>`.
+4. The command exits with the code 4.
+
+The role is `specialist`, `fix-up` or `verifier`. The step stays open, with its branch and its worktree. After the cause is gone, for example after a new login, `delegate run --resume <run-id>` goes on at the open step as after Ctrl-C. See [the resume](#the-resume). The run needs no `--retry`.
+
+`delegate status` shows the run as `halted`, with the message in its note. `delegate watch` ends on `halted` with the code 8. See [the exit codes of `watch`](status-and-watch.md#exit-codes).
+
+A `halted` that a `resume` follows is history. A halt during a `--retry` leaves the failed step as the retry found it: go on with `--retry` again.
 
 ## The skip rule
 
@@ -524,9 +539,9 @@ run failed · 1h06m · 1 built · 1 failed · 1 skipped · 50k new · 1.3M cache
 retry with delegate run --resume e9dc --retry a
 ```
 
-The summary gives the result of the run (`built`, `failed` or `paused`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The follow line and the retry lines give the short run id: the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it. The `paused` line gives the full run id.
+The summary gives the result of the run (`built`, `failed`, `paused` or `halted`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The follow line and the retry lines give the short run id: the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it. The `paused` line gives the full run id.
 
-On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
+On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, `run halted` is red, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
 
 With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. A check that fails before the start prints its error on stderr, exits 1, and starts no run process. See [the detached run](#the-detached-run).
 
@@ -538,6 +553,7 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 | 1 | The workflow or the [**tier file**](../glossary.md#tier-file) is not valid, the run cannot start, a step failed, a verifier rejected a ticket, or the run ended with a skipped ticket. The message names the input. No traceback is shown. |
 | 2 | A usage error. |
 | 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
+| 4 | A failure of the harness halted the run: the adapter raised an `AdapterError`. The journal holds `halted`, and no `run-end`. Go on with `--resume <run-id>`. See [a failure of the harness](#a-failure-of-the-harness). |
 | 130 | Ctrl-C stopped the run in the foreground. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c). |
 
 ### Ctrl-C
@@ -566,7 +582,7 @@ delegate run: interrupted; the run <run id> stopped. Go on with delegate run --r
 | `branch ... holds no commit beyond ...` | The report says `committed`, but the branch has no new commit. |
 | `hotspot finding: <path> matches the hotspot '<pattern>'` | A changed path matches a hotspot pattern. See [the hotspot guard](#the-hotspot-guard). |
 | `gates red: <commands>` | At least one gate command exited with a status other than 0. After the rebase, the reason ends with `(after the rebase onto <run branch>)`. |
-| `crashed: <exception type>: <message>` | An exception from the adapter or from git ended the step. See [a crash in a step](#a-crash-in-a-step). |
+| `crashed: <exception type>: <message>` | An exception from the adapter that is not an `AdapterError`, or from git, ended the step. See [a crash in a step](#a-crash-in-a-step). |
 | `<reason>; the continuation limit of <n> is reached` | The specialist was continued `<n>` times, and it still ended `failed` or `capped`, its gates were still red, or its report was still missing or not valid. `<reason>` is the reason of the last run. |
 | `rebase onto <run branch> stopped with a conflict in <files>` | The rebase of the ticket branch onto the run branch had a conflict. The engine aborted the rebase. |
 | `rebase onto <run branch> failed: ...` | The rebase failed with no conflict. The message holds the cause from git. |
@@ -691,6 +707,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `lock-broken` | `run_id`, `pid` (the run id and the process id of the old holder, whose lock the resume took over or `--break-lock` removed) |
 | `pause-requested` | `ticket` (the ticket of the step boundary), `requested_at` (the time that `delegate pause` wrote in the request, or `null` when the request file cannot be read). The engine writes it at the step boundary where it reads the request. See [the pause](#the-pause). |
 | `paused` | `ticket`, `before` (the work that did not start: `step`, `gate`, or `verifier`). Before a gate also `command` and `phase`, as in `gate-start`. Before a verifier also `round`, and in a chain verification `stack` and `tickets`. The run process then ends with no `run-end`. |
+| `halted` | `ticket`, `role` (`specialist`, `fix-up` or `verifier`), `round` (the verifier or fix-up round; 0 for the specialist), `message` (the message of the `AdapterError`). The harness failed, not the work. The run process then ends with no `step-end` and no `run-end`, and a resume goes on at the open step. See [a failure of the harness](#a-failure-of-the-harness). |
 | `interrupted` | `run_id`. Ctrl-C stopped the run in the foreground. The run process then ends with no `run-end`, and a resume goes on as after a kill. See [Ctrl-C](#ctrl-c). |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |

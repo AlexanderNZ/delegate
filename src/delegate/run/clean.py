@@ -41,7 +41,7 @@ from pathlib import Path
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
 from .engine import EngineError, state_directory
-from .journal import Journal, JournalError, is_paused, newest_run_end, read_events
+from .journal import Journal, JournalError, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
 
@@ -236,6 +236,8 @@ def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
     if end is None:
         if is_paused(events):
             return f"the run is paused; go on with delegate run --resume {run_id}"
+        if halt_of(events) is not None:
+            return f"the run is halted; go on with delegate run --resume {run_id}"
         return f"the run stopped with no run-end, and no process works on it; go on with delegate run --resume {run_id}"
     if end["result"] != BUILT:
         return f"the run ended {end['result']}; its worktrees and branches stay for a retry"

@@ -35,7 +35,7 @@ With no run id, `status` shows the one active run, or the newest run when no run
 
 <!-- generated:end status-options -->
 
-The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A run can stop before the [**engine**](../glossary.md#engine) reads the request: for example, after Ctrl-C, a kill or a crash. The request then stays until the next resume, and the run has no live process. Such a run is not `pausing`: the result is the state of its journal, for example `running`. A second line then gives the note `note: a pause request waits; delegate run --resume removes it`. The next line gives the progress of the run, and the line after it gives the path of the journal. Under these lines and a blank line, a table has one row for each [**ticket**](../glossary.md#ticket) of the run, in plan order. It is the ticket table of the [live view](#the-live-view) of `watch`, on the same tracks, with three more columns: [**`verdict`**](../glossary.md#verdict) and `branch` after `after`, and `last event` at the end. Each further phase of a running ticket is on a sub-row, as in the live view. `status` prints one snapshot, so the table has no live tail. The example below is the output for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold the glyphs of the live view:
+The first line gives the run id, the result, the [**mode**](../glossary.md#mode), and the adapter. The result is `running` until the journal holds `run-end`, and then `built` or `failed`. A run that ended and was [**resumed**](../glossary.md#resume) is `running` again: a `run-end` that a `resume` follows does not end the run. After `delegate pause`, the result is `pausing` while the request waits in the directory of the run and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A run that a failure of the [**harness**](../glossary.md#harness) stopped is `halted` from the `halted` event until a `resume`, and a note gives where and why: `note: halted at the specialist of ticket b: claude: not logged in`. See [a failure of the harness](run.md#a-failure-of-the-harness). A run can stop before the [**engine**](../glossary.md#engine) reads the request: for example, after Ctrl-C, a kill or a crash. The request then stays until the next resume, and the run has no live process. Such a run is not `pausing`: the result is the state of its journal, for example `running`. A second line then gives the note `note: a pause request waits; delegate run --resume removes it`. The next line gives the progress of the run, and the line after it gives the path of the journal. Under these lines and a blank line, a table has one row for each [**ticket**](../glossary.md#ticket) of the run, in plan order. It is the ticket table of the [live view](#the-live-view) of `watch`, on the same tracks, with three more columns: [**`verdict`**](../glossary.md#verdict) and `branch` after `after`, and `last event` at the end. Each further phase of a running ticket is on a sub-row, as in the live view. `status` prints one snapshot, so the table has no live tail. The example below is the output for a locale that is not UTF-8, with the ASCII glyphs. With a UTF-8 locale, the same cells hold the glyphs of the live view:
 
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
@@ -108,13 +108,13 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | Field | Type | Meaning |
 |---|---|---|
 | `run_id` | string | The id of the run. |
-| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. `pausing` while a pause request waits and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. See [the pause](run.md#the-pause). A pause request of a run with no live process does not make the run `pausing`: see `note`. |
-| `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. For a paused run, it is the time of `paused`. |
+| `state` | string | `running` until the journal holds `run-end`, then the result of the run: `built` or `failed`. `pausing` while a pause request waits and the run is [active](#the-run-with-no-run-id), and `paused` from the `paused` event until a `resume`. `halted` from the `halted` event until a `resume`: a failure of the harness stopped the run, and `note` gives the role, the ticket and the message. See [the pause](run.md#the-pause) and [a failure of the harness](run.md#a-failure-of-the-harness). A pause request of a run with no live process does not make the run `pausing`: see `note`. |
+| `time` | string | The time of the snapshot (ISO 8601, UTC, whole seconds). For a run that ended, it is the time of `run-end`: the clock of the run stops there. For a paused run, it is the time of `paused`, and for a halted run, the time of `halted`. |
 | `elapsed_seconds` | integer | The time that the run used: from `run-start` to `time`. |
 | `tickets_total` | integer | The number of [**tickets**](../glossary.md#ticket) of the run. |
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends and while the run is paused. See [the progress and the ETA](#the-progress-and-the-eta). |
+| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends and while the run is paused or halted. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens_new` | integer or `null` | The new tokens of the run: the sum of `tokens_new` of all tickets. A ticket whose `tokens_new` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). See [the token counts](#the-token-counts). |
 | `tokens_cache` | integer or `null` | The cache tokens of the run: the sum of `tokens_cache` of all tickets. A ticket whose `tokens_cache` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, while the run is paused, and in [**`assure`**](../glossary.md#assure) mode. |
@@ -348,10 +348,12 @@ To see the events of a run that ended, give its run id or `--from`. `watch` then
 When `watch` gets no run id and no `--from`, no run is active, and the newest event of the journal of the newest run is not `run-end`, the process of that run stopped. `watch` shows no event of that run, and it prints no line `position <seq>`. It prints one line that tells how to go on with the run:
 
 - When the run is paused, the line goes to stdout, and `watch` exits 7. A run is paused when its newest `paused` event comes after its newest `resume`, as for `status`.
+- When the run is halted, the line goes to stdout, and `watch` exits 8. A run is halted when its newest `halted` event comes after its newest `resume`. The line gives the message of the failure of the harness.
 - When the run stopped in a different way, for example after a crash or a kill, the line goes to stderr, and `watch` exits 2: there is no run to follow.
 
 ```
 no run is active; the newest run 20261016T030000Z-abcd paused at 2026-10-16 17:06; go on with delegate run --resume 20261016T030000Z-abcd
+no run is active; the newest run 20261016T030000Z-abcd halted at 2026-10-16 17:06: claude: not logged in; go on with delegate run --resume 20261016T030000Z-abcd
 delegate watch: no run is active; the newest run 20261016T030000Z-abcd stopped at 2026-10-16 17:06 with no run-end, and no process works on it; go on with delegate run --resume 20261016T030000Z-abcd
 ```
 
@@ -443,6 +445,7 @@ The feed holds only the lines of the ticket that runs now. The `step-start` of a
 | `stack python ✓ ACCEPT · run built · 16m · tokens 39k new, 1.1M cache` | The verdict of the chain of a stack in `economy` mode, with the `run-end` that follows it. |
 | `run built · 1h06m · tokens 50k new, 1.3M cache` | The `run-end`: the result, the time of the run, and its two token counts. |
 | `paused · before ticket d · go on with delegate run --resume ab12` | The `paused` event: where the run stopped, and the command that goes on with it, with the short run id. |
+| `halted · the specialist of ticket d · claude: not logged in · go on with delegate run --resume ab12` | The `halted` event: where the harness failed, the message, and the command that goes on with the run, with the short run id. |
 
 The events `agent-start`, `gate-start`, `idle-timeout`, `run-branch-advance`, `lock-broken` and `pause-requested` have no line of their own. Each other event has a short line. While an agent runs, the last line of a frame tells it, as `16:58  #70  verifier running · 2m · 43k new · 1.1M cache · quiet 2m20s`. The line gives the role, the time from its `agent-start`, the two token counts of its stream in faint text, and the [liveness](#the-liveness-of-an-agent) of the agent. A stream that the harness has not opened yet has 0 tokens. For [a run with no stream reader](#a-run-with-no-stream-reader), and for a stream that cannot be read, the line has no token counts. The last frame has no such line.
 
@@ -601,6 +604,7 @@ When standard output is not a terminal, or with `--raw`, `watch` prints one line
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
 | 6 | time limit | `--max-minutes` is set and the time is used. |
 | 7 | run paused | The journal holds `paused`: a pause request stopped the run at a step boundary. |
+| 8 | run halted | The journal holds `halted`: a failure of the harness stopped the run. See [the halt](run.md#a-failure-of-the-harness). |
 | 130 | interrupted | Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c). |
 
 <!-- generated:end watch-exit-codes -->
@@ -613,7 +617,7 @@ A run that ended and was resumed has a `resume` event after its old `run-end`. T
 
 The replay is the events that the journal holds when `watch` starts. A problem in the replay ends the watch only when the run did not go past it. The run went past a problem when a later event of the replay handles it: a `continuation` or a `retry` of the ticket of the problem, or a `step-start`, a `step-end` or a `run-end`. `watch` shows a problem that the run went past as history: the feed gives the line of its event, and the watch goes on. The raw lines are the same, and `watch` prints no line `watch: problem`. For example, the specialist of a ticket ends `failed` with the exit status 143, a `continuation` follows, and the step ends `built`: `watch` follows the run that goes on, and does not exit 3. The rule is the same when the last event of the replay is a `run-end` or a `paused`, and the run is at its end. That last event is the end of the run, and it does not go past a problem. So `watch` replays a run that ended to its end, past each problem that a later event went past, and exits with the code of the end: 0 for a `run-end` with the result `built`, 1 for `failed`, and 7 for a `paused`. A problem that only the end follows ends the watch with the code 3. For example, when a step fails, its `step-end` goes past each earlier problem of the step, so `watch` stops at that `step-end`, and its reason gives the cause. A problem that arrives after `watch` starts ends the watch, also when a later event handles it.
 
-A `paused` event ends the watch with the code 7: a pause request stopped the run process at a step boundary. See [the pause](run.md#the-pause). A `paused` that another event follows, for example the `resume` of the run, is history, and it does not end the watch.
+A `paused` event ends the watch with the code 7: a pause request stopped the run process at a step boundary. See [the pause](run.md#the-pause). A `halted` event ends the watch with the code 8: a failure of the harness stopped the run process. See [a failure of the harness](run.md#a-failure-of-the-harness). A `paused` or a `halted` that another event follows, for example the `resume` of the run, is history, and it does not end the watch.
 
 ### The problem events
 
@@ -649,7 +653,7 @@ The journal names the [**event stream**](../glossary.md#event-stream) of an agen
 
 - It prints no event with a position of `<seq>` or less, so no event is reported twice.
 - It reads the earlier events for the problem rules. A step-end after the position still finds the red gate before the position.
-- If the journal ended or paused at or before the position, it exits with the result of the run, or with 7 for a pause.
+- If the journal ended or paused at or before the position, it exits with the result of the run, with 7 for a pause, or with 8 for a halt.
 - If the journal holds fewer events than `<seq>`, it exits 2.
 
 ### Ctrl-C
@@ -672,7 +676,7 @@ When standard output is a terminal, each `delegate` command sets the title of th
 
 - `status` sets the title `delegate status`.
 - `watch` sets the title `delegate watch · <short run id> · <percent>% · ETA <HH:MM>` at each poll. It writes the title again only when the title changes. The percentage is the percentage of [the snapshot](#the-snapshot). The ETA is the local time of the estimated end of the run, or `-` before the first ticket ends. See [the progress and the ETA](#the-progress-and-the-eta).
-- When `watch` exits, the title is `delegate watch · <short run id> · <result>`. At the end of the run, the result is `built` or `failed`. At a pause, it is `paused`. When the watch ends before the run, the result is the reason: `problem`, `verdict`, `stall`, `time limit` or `interrupted`.
+- When `watch` exits, the title is `delegate watch · <short run id> · <result>`. At the end of the run, the result is `built` or `failed`. At a pause, it is `paused`, and at a halt, `halted`. When the watch ends before the run, the result is the reason: `problem`, `verdict`, `stall`, `time limit` or `interrupted`.
 - `delegate run` sets the title `delegate run · <short run id>`. See [the output of `delegate run`](run.md#output-and-exit-codes).
 - Each other subcommand of `delegate` sets the title `delegate <subcommand>`, for example `delegate render`.
 

@@ -36,8 +36,10 @@ class AdapterError(RuntimeError):
     """The harness could not run the agent at all, so no end state can describe the run.
 
     An unknown agent, an unknown flag, or a missing login does this. The same
-    cause stops every later agent, so the engine records the error as a crash and
-    ends the run.
+    cause stops every later agent, and the work is not at fault. So the engine
+    halts the run: it records `halted` (the ticket, the role, the round and the
+    message), writes no `step-end` and no `run-end`, and a resume goes on at the
+    open step.
     """
 
 
