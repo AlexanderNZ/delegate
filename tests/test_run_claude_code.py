@@ -12,6 +12,8 @@ from importlib import resources
 
 import pytest
 
+from delegate.cli.run_command import EXIT_HALTED
+
 from . import claude_fake
 from .support import WORKFLOW, make_repo, read_journal, run_main
 
@@ -54,6 +56,6 @@ def test_a_harness_that_cannot_start_the_agent_ends_the_run_with_its_message_and
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
-    assert code == 1
+    assert code == EXIT_HALTED
     assert "--agent 'python-specialist' not found" in err
     assert "Traceback" not in err

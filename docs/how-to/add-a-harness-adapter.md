@@ -31,7 +31,7 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `session_id`: the session id that the harness gave, or `None`.
 - `event_stream`: the path of the captured stream, which is the `event_stream` of the request.
 - `ended_idle`: true when the adapter ended the session at the idle timeout. `run_harness` tells you.
-- `ended_timeout`: true when the adapter ended the session at the `agent_timeout`. `run_harness` tells you. Give it as `ended_timeout=process.ended_timeout`. A session that the helper ended at the limit can have written no event, so do not treat an empty stream as a failure to start in that case.
+- `ended_timeout`: true when the adapter ended the session at the `agent_timeout`. `run_harness` tells you. Give it as `ended_timeout=process.ended_timeout`. The helper can end a session at the limit before the session writes an event. In that case, do not treat an empty stream as a failure to start.
 - `refused`: one pair for each tool call that the permission settings of the harness refused, in the order of the stream: the tool, and the name that the harness gives that setting (for example `don't ask`). Leave it empty when your harness does not write such a refusal. The engine copies it into the result event, and `delegate watch` shows it as a problem.
 - `final_text`: the last text of the agent in the stream, or `None`. The engine reads the [**verdict**](../glossary.md#verdict) from it when a [**verifier**](../glossary.md#verifier) writes no [**report**](../glossary.md#report) file. Leave it `None` when your harness stream has no such text.
 
