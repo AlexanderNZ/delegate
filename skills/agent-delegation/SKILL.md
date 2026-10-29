@@ -684,6 +684,8 @@ end.
    The run process prints
    `paused <where>; go on with delegate run --resume <run-id>`, and exits 3.
    A run with no live process cannot be paused: `delegate pause` exits 1.
+   To stop a run now, run `delegate stop <run-id>`. Unlike `pause`, it does
+   not wait for a step boundary, and it can cut off an agent.
    Ctrl-C stops a run in the foreground with no wait. The run then writes
    `interrupted` in its journal, prints one line that tells how to resume,
    and exits 130.

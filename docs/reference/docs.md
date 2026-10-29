@@ -93,6 +93,7 @@ The test suite holds one drift test for each generated section, one for the abbr
 | Page | Section | Built from |
 |---|---|---|
 | `docs/reference/run.md` | `run-options` | The argument parser of `delegate run`. |
+| `docs/reference/commands.md` | `stop-options` | The argument parser of `delegate stop`. |
 | `docs/reference/run.md` | `pause-options` | The argument parser of `delegate pause`. |
 | `docs/reference/status-and-watch.md` | `status-options` | The argument parser of `delegate status`. |
 | `docs/reference/status-and-watch.md` | `watch-options` | The argument parser of `delegate watch`. |

@@ -1,6 +1,6 @@
 # How to watch and resume a run
 
-Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, and to change its plan. It also shows how to go on with a run that stopped, and how to clean up after a run. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
+Use this page to follow a [**run**](../glossary.md#run), to [**pause**](../glossary.md#pause) it, to stop it now, and to change its plan. It also shows how to go on with a run that stopped, and how to clean up after a run. The state of a run is in its [**journal**](../glossary.md#journal). A stop loses no finished work.
 
 ## Before you start
 
@@ -117,13 +117,38 @@ A run that stops before it reads the request does not show `pausing`. For exampl
 
 Resume the paused run with the same command as after Ctrl-C. See [resume after Ctrl-C](#1-resume-after-ctrl-c). Before you resume, you can add a ticket, or change a ticket that has not started. See [change the plan of a run](#change-the-plan-of-a-run).
 
+## Stop a run now
+
+A pause waits for the next [**step**](../glossary.md#step) boundary, and that can be many minutes away. To stop a run now, use `delegate stop`. It can cut off an agent or a [**gate**](../glossary.md#gate), but it loses no finished work.
+
+### 1. Stop the run
+
+In a second terminal, in the same repository, give the run id or the short id.
+
+```bash
+delegate stop <run-id>
+```
+
+The command sends SIGTERM to the process that holds the lock of the run. The run ends the process group of its running child, writes `interrupted` in the [**journal**](../glossary.md#journal), and releases the lock. The command waits up to 30 seconds for the lock to be free. Then it prints two lines and exits 0:
+
+```text
+run <run id>: stopped
+go on with delegate run --resume <run id>
+```
+
+When a process still holds the lock at the end of the wait, the command says so on stderr and exits 1. A run with no live process cannot be stopped: a run that ended, a run that is paused and a run that stopped already. For these runs `delegate stop` exits 1 and gives the reason. See [`delegate stop`](../reference/commands.md#delegate-stop).
+
+### 2. Go on after the stop
+
+Resume the run with the command that `stop` printed. See [resume a run](#resume-a-run).
+
 ## Change the plan of a run
 
 A [**resume**](../glossary.md#resume) can add a ticket to a run. It can also change or remove a ticket that has not started. The built part of the run stays as it is. See [the plan change](../reference/run.md#the-plan-change) for each rule.
 
 ### 1. Stop the run
 
-Pause the run, as in [pause a run](#pause-a-run). You can also change a run that stopped, or a run that ended.
+Pause the run, as in [pause a run](#pause-a-run), or stop it, as in [stop a run now](#stop-a-run-now). You can also change a run that stopped, or a run that ended.
 
 ### 2. Edit the workflow
 
@@ -207,7 +232,7 @@ A ticket with a recorded commit is not built again. A step that was open continu
 
 ### 2. Resume after a kill
 
-A process that SIGKILL ends cannot release the lock of its run branch, and it cannot end its children. Before you resume, check that no process of the harness still works in the worktree of the open step. To stop a run, send SIGTERM instead (`kill <pid>`): the run then ends its children and releases the lock. Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the resume takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
+A process that SIGKILL ends cannot release the lock of its run branch, and it cannot end its children. Before you resume, check that no process of the harness still works in the worktree of the open step. To stop a run, use `delegate stop <run-id>` instead: the run then ends its children and releases the lock. Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the resume takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
