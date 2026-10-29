@@ -54,7 +54,7 @@ RESULT_OF_REPORT: dict[str, str] = {"report-validation": "adapter-result", "fixu
 
 # The events that add no line of their own: their facts are in the line of another event, or in the table.
 SILENT: frozenset[str] = frozenset(
-    {"agent-start", "gate-start", "idle-timeout", "run-branch-advance", "lock-broken", "pause-requested", "cleanup"}
+    {"agent-start", "gate-start", "idle-timeout", "agent-timeout", "run-branch-advance", "lock-broken", "pause-requested", "cleanup"}
 )
 
 # The kinds of a line that waits for the next event of its ticket, to join it.
@@ -160,6 +160,7 @@ class LiveView:
         self._waiting: dict[str, _Waiting] = {}  # by ticket id, in the order the lines started
         # The start and the event stream of the agent that runs, by ticket and role.
         self._agents: dict[tuple[str, str], tuple[datetime, object]] = {}
+        self._timed_out: set[tuple[str, str]] = set()  # the (ticket, role) of an agent that the engine ended at the agent timeout
         self._gates: dict[tuple[str, str], datetime] = {}  # the start of the gate that runs, by ticket and command
         self._chain: dict[str, str] = {}  # the stack of the chain verification, by the ticket that its events name
         self._reader: status.StreamReader | None = None
@@ -365,6 +366,8 @@ class LiveView:
             # The newest agent of a ticket is the one that runs, as in the snapshot: the one before it ended.
             self._agents = {key: start for key, start in self._agents.items() if key[0] != ticket}
             self._agents[(ticket, str(event["role"]))] = (when, event.get("event_stream"))
+        elif kind == "agent-timeout":
+            self._timed_out.add((ticket, str(event["role"])))  # the result line of this agent says so (#179)
         elif kind == "gate-start":
             self._gates[(ticket, str(event["command"]))] = when
         elif kind == "verify-start" and "stack" in event:
@@ -383,7 +386,9 @@ class LiveView:
         if kind in AGENT_OF_RESULT:
             role = AGENT_OF_RESULT[kind]
             agent = self._agents.pop((ticket, role), None)
-            spans: list[Span] = [("", f"{role} {event['end_state']}")]
+            ended = "timed out" if (ticket, role) in self._timed_out else str(event["end_state"])
+            self._timed_out.discard((ticket, role))
+            spans: list[Span] = [("", f"{role} {ended}")]
             if agent is not None:
                 spans += [JOIN, ("", duration((when - agent[0]).total_seconds()))]
             tokens = self._tokens(event.get("event_stream"))
@@ -441,7 +446,7 @@ class LiveView:
             item = f"{output.gate_name(command)} skipped"
         else:
             item = output.gate_name(command) + (f" {duration((when - started).total_seconds())}" if started is not None else "")
-            item += " red" if red else ""
+            item += (" timed out" if event.get("timed_out") else " red") if red else ""
         waiting = self._waiting.get(ticket)
         if waiting is None or waiting.kind != GATES:
             waiting = _Waiting(GATES, when, subject, [])

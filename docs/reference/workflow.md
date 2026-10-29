@@ -138,7 +138,7 @@ The verifier tier never goes down, in any mode. The `verifier` entry must name a
 
 ## Stacks
 
-Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
+Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `gate-timeout`, `agent-timeout`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -148,10 +148,30 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
+| `gate-timeout` | number | The time limit of one gate run, in minutes. A fraction is permitted: `0.5` is 30 seconds. The number must be greater than 0. With no field, the engine waits for a gate without a limit. See [Time limits](#time-limits). |
+| `agent-timeout` | number | The time limit of one run of an agent of this stack, in minutes, with the same rules as `gate-timeout`. With no field, the engine waits for an agent without a limit. See [Time limits](#time-limits). |
 | `specialist-notes` | string | The text that the engine adds to each specialist brief of this stack. Give at most one of `specialist-notes` and `specialist-notes-file`. See [Notes](#notes). |
 | `specialist-notes-file` | string | The path of a local file that holds the specialist notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
 | `verifier-notes` | string | The text that the engine adds to each verifier brief of this stack. Give at most one of `verifier-notes` and `verifier-notes-file`. See [Notes](#notes). |
 | `verifier-notes-file` | string | The path of a local file that holds the verifier notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
+
+### Time limits
+
+A gate or an agent that hangs stops a run for ever. A stack can set a time limit for each of the two. Each limit is optional, and each stack sets its own.
+
+```toml
+[stacks.python]
+specialist = "python-specialist"
+verifier = "python-verifier"
+gates = ["pytest -q"]
+hotspots = []
+gate-timeout = 30     # minutes for one gate run
+agent-timeout = 90    # minutes for one run of an agent
+```
+
+- `gate-timeout` is the time limit of each run of a gate of the stack. When a gate runs longer, the engine ends the process group of the gate. The journal gets `gate-result` with `green` false and `timed_out` true. The step goes on as for a red gate: the specialist continues with the trigger `gates-red`, and the output that it gets ends with a line that names the limit. The reason of a failed step names the gate, as `gates red: pytest -q (timed out)`. The limit does not apply to the [`prepare`](#prepare) commands.
+- `agent-timeout` is the time limit of each run of the specialist, the fix-up specialist and the verifier of the stack. The time counts from the start of the run of the agent. When it runs longer, whatever it does, the adapter ends its process group. The journal gets `agent-timeout`, just before the result event of the agent. The engine takes the run as one with no valid report. The [continuation rules](run.md#the-continuation) then apply: the specialist continues, and the fix-up specialist and the verifier fail the step. The idle timeout of 900 seconds is a different rule, and it applies only after a valid report.
+- Each limit is a number of minutes. The number is greater than 0, and it can be a fraction. The check refuses zero, a negative number, text, `true`, and `nan` or `inf`.
 
 ### Prepare
 
@@ -258,3 +278,4 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 | A stack gives both `specialist-notes` and `specialist-notes-file`, or both `verifier-notes` and `verifier-notes-file`. | The stack and the two fields, for example `stacks.web: give at most one of verifier-notes and verifier-notes-file`. |
 | A `specialist-notes-file` or a `verifier-notes-file` does not exist, or it is empty. | The stack, the field and the path. |
 | An MCP server has both `command` and `url`, or neither. | The server, for example `stacks.web.mcp-servers.browser`. |
+| `gate-timeout` or `agent-timeout` is zero, a negative number, text, or not a finite number. | The field, for example `stacks.python.gate-timeout: must be greater than 0 minutes, not 0`. |

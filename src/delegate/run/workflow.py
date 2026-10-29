@@ -6,6 +6,7 @@ dependency order. Nothing here touches git or the harness.
 
 from __future__ import annotations
 
+import math
 import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -44,6 +45,9 @@ class Stack:
     # The text that the engine adds to each brief of a role of this stack (#156). None: no notes.
     specialist_notes: str | None = None
     verifier_notes: str | None = None
+    # The time limit of one gate run and of one agent session of this stack, in minutes (#179). None: no limit.
+    gate_timeout: float | None = None
+    agent_timeout: float | None = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +193,19 @@ class _Reader:
             return None
         return value
 
+    def minutes(self, table: dict[str, object], key: str, field: str) -> float | None:
+        """An optional time limit in minutes: a finite number greater than 0, a fraction included. None when the field is absent or not valid."""
+        if key not in table:
+            return None
+        value = table[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            self.problems.append(f"{field}: must be a number of minutes, not {value!r}")
+            return None
+        if value <= 0:
+            self.problems.append(f"{field}: must be greater than 0 minutes, not {value!r}")
+            return None
+        return float(value)
+
     def string_list(self, table: dict[str, object], key: str, field: str, *, at_least_one: bool) -> list[str] | None:
         if key not in table:
             self.problems.append(f"{field}: field is missing")
@@ -208,7 +225,7 @@ TOP_LEVEL_FIELDS: tuple[str, ...] = (
 )
 STACK_FIELDS: tuple[str, ...] = (
     "specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare",
-    "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file",
+    "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file", "gate-timeout", "agent-timeout",
 )
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
@@ -232,12 +249,15 @@ def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]
         servers = _read_mcp_servers(reader, stack.get("mcp-servers", {}), f"{field}.mcp-servers")
         # `prepare` is optional. When it is there, the check is the check of `gates`.
         prepare = reader.string_list(stack, "prepare", f"{field}.prepare", at_least_one=True) if "prepare" in stack else []
+        gate_timeout = reader.minutes(stack, "gate-timeout", f"{field}.gate-timeout")
+        agent_timeout = reader.minutes(stack, "agent-timeout", f"{field}.agent-timeout")
         problems = len(reader.problems)
         notes = {role: _read_notes(reader, stack, role, field, root) for role in ROLES}
         if None not in (specialist, verifier, gates, hotspots, servers, prepare) and len(reader.problems) == problems:
             stacks[name] = Stack(
                 name, specialist, verifier, gates, hotspots, servers, tuple(prepare),  # type: ignore[arg-type]
                 specialist_notes=notes["specialist"], verifier_notes=notes["verifier"],
+                gate_timeout=gate_timeout, agent_timeout=agent_timeout,
             )
     return stacks
 

@@ -14,6 +14,9 @@ for the terminal of the engine (#178). It starts in a session of its own, so it 
 process it starts. When an interrupt or an error leaves the wait, the backend ends the whole group before it lets the
 exception go on (see `process.end_group`).
 
+A caller can give a time limit (#179). When the command runs longer, the backend ends the whole group in the same way, keeps
+the output up to that point, and returns a result with `timed_out` set. That result is not green.
+
 The command gets the process environment of `delegate.adapters.environment`,
 the same environment that each agent gets.
 """
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import IO, BinaryIO
 
@@ -31,6 +35,9 @@ from .environment import process_environment
 
 # The most bytes that one read from a pipe of the command takes.
 READ_SIZE: int = 65536
+
+# The most seconds that the backend waits for the output of a command that it ended at the time limit.
+READER_GRACE_SECONDS: float = 5.0
 
 
 def _copy(pipe: IO[bytes], parts: list[bytes], log: BinaryIO | None, lock: threading.Lock) -> None:
@@ -51,7 +58,7 @@ def _text(parts: list[bytes]) -> str:
 class ShellGateRunner:
     """Runs a gate command through `bash -c`."""
 
-    def run(self, command: str, worktree: Path, log: Path | None = None) -> GateResult:
+    def run(self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None) -> GateResult:
         out: list[bytes] = []
         err: list[bytes] = []
         lock = threading.Lock()
@@ -68,13 +75,28 @@ class ShellGateRunner:
                 ]
                 for reader in readers:
                     reader.start()
-                for reader in readers:
-                    reader.join()
-                status = process.wait()
+                deadline = None if timeout is None else time.monotonic() + timeout
+
+                def remaining() -> float | None:
+                    return None if deadline is None else max(deadline - time.monotonic(), 0)
+
+                timed_out = False
+                try:
+                    for reader in readers:
+                        reader.join(remaining())
+                    if any(reader.is_alive() for reader in readers):
+                        raise subprocess.TimeoutExpired(command, timeout)  # type: ignore[arg-type]
+                    status = process.wait(timeout=remaining())
+                except subprocess.TimeoutExpired:
+                    # The command, or a process that holds its pipes, ran past the limit. Ending the group closes the pipes.
+                    end_group(process)
+                    for reader in readers:
+                        reader.join(READER_GRACE_SECONDS)  # a process that left the group can still hold a pipe
+                    status, timed_out = process.returncode, True
             except BaseException:
                 end_group(process)  # an interrupt or an error: no process of the gate stays alive after the backend
                 raise
         finally:
             if handle is not None:
                 handle.close()
-        return GateResult(exit_status=status, output=_text(out) + _text(err))
+        return GateResult(exit_status=status, output=_text(out) + _text(err), timed_out=timed_out)

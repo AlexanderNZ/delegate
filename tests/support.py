@@ -233,7 +233,9 @@ class ScriptedAdapter:
     idle session that the adapter ends at the idle timeout: when the check says
     that the report is valid, the result has `ended_idle` set, the exit status
     -15 (SIGTERM) and the end state `failed`, because the session wrote no
-    `result` event.
+    `result` event. A request of a role in `timeout_roles` that has an
+    `agent_timeout` plays a session that runs past it: the result has
+    `ended_timeout` set, the exit status -15 and the end state `failed`.
     """
 
     tier_column: str = "claude-code"
@@ -276,6 +278,7 @@ class ScriptedAdapter:
     session_ids: list[str] = field(default_factory=list)
     on_specialist: Callable[[AdapterRequest], None] | None = None
     idle_roles: set[str] = field(default_factory=set)
+    timeout_roles: set[str] = field(default_factory=set)
     report_checks: list[tuple[str, float | None, bool | None, bool | None]] = field(default_factory=list)
     refusals: dict[str, tuple[tuple[str, str], ...]] = field(default_factory=dict)
 
@@ -288,6 +291,8 @@ class ScriptedAdapter:
         self.report_checks.append((role, request.idle_timeout, before, after))
         if role in self.idle_roles and after:
             return AdapterResult(-15, "failed", result.session_id, result.event_stream, ended_idle=True)
+        if role in self.timeout_roles and request.agent_timeout is not None:
+            return AdapterResult(-15, "failed", result.session_id, result.event_stream, ended_timeout=True)
         if role in self.refusals:
             return dataclasses.replace(result, refused=self.refusals[role])
         return result

@@ -593,3 +593,50 @@ def test_the_agent_does_not_get_the_pythonpath_entry_of_the_engine_package_and_k
 
     (call,) = fake.calls()
     assert call["env"].get("PYTHONPATH") == expected
+
+
+def test_a_session_that_runs_past_the_agent_timeout_ends_with_ended_timeout_set_and_keeps_its_session_id(tmp_path, monkeypatch):
+    # The harness wrote its events and stays open, with no valid report, so the idle timeout does not apply.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)
+    started = time.monotonic()
+
+    result = adapters.get("claude-code").run(request(tmp_path, agent_timeout=1.0, idle_timeout=900, report_valid=lambda: False))
+
+    assert time.monotonic() - started < 60
+    assert (result.ended_timeout, result.ended_idle) == (True, False)
+    assert result.exit_status != 0
+    assert result.session_id == "af2a3741-3f76-4944-91f5-3d5102c79b6b"
+
+
+def test_a_session_that_hangs_before_its_first_event_ends_at_the_agent_timeout_and_is_no_error(tmp_path, monkeypatch):
+    # No event in the stream: with no time limit, this would be a harness that could not start, and an error.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=300)
+    started = time.monotonic()
+
+    result = adapters.get("claude-code").run(request(tmp_path, agent_timeout=1.0))
+
+    assert time.monotonic() - started < 60
+    assert (result.ended_timeout, result.end_state, result.session_id) == (True, "failed", None)
+
+
+def test_the_agent_timeout_also_ends_the_child_processes_of_the_session(tmp_path, monkeypatch):
+    child_pid = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=120)
+
+    result = adapters.get("claude-code").run(request(tmp_path, agent_timeout=2.0))
+
+    child = int(child_pid.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the session left its child alive
+    assert result.ended_timeout
+    assert gone, "a child process of the session stayed alive"
+
+
+def test_a_session_that_ends_before_the_agent_timeout_is_not_timed_out(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path, agent_timeout=60))
+
+    assert (result.ended_timeout, result.exit_status, result.end_state) == (False, 0, "finished")

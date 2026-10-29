@@ -151,3 +151,47 @@ def test_a_gate_that_reads_standard_input_gets_end_of_file_at_once(tmp_path):
 
     assert result.output == "status=1\n"  # 1 is end of file; a read that timed out gives more than 128
     assert elapsed < 10
+
+
+def test_a_gate_that_runs_past_its_time_limit_ends_with_timed_out_set_and_is_not_green(tmp_path):
+    started = time.monotonic()
+
+    result = ShellGateRunner().run("echo before; sleep 30", tmp_path, timeout=1.0)
+
+    assert time.monotonic() - started < 20
+    assert result.timed_out
+    assert not result.green
+    assert result.output == "before\n"  # the output up to the end of the gate is kept
+
+
+def test_a_gate_that_ends_before_its_time_limit_is_not_timed_out(tmp_path):
+    result = ShellGateRunner().run("echo done", tmp_path, timeout=30)
+
+    assert (result.exit_status, result.green, result.timed_out) == (0, True, False)
+
+
+def test_a_gate_that_exits_zero_when_the_runner_ends_it_is_still_not_green(tmp_path):
+    # A trap turns the SIGTERM of the runner into a clean exit. The gate did not finish, so it is red.
+    result = ShellGateRunner().run("trap 'exit 0' TERM; sleep 30 & wait", tmp_path, timeout=1.0)
+
+    assert result.timed_out
+    assert not result.green
+
+
+def test_the_time_limit_also_ends_the_children_of_the_gate(tmp_path):
+    pid_file = tmp_path / "child.pid"
+
+    result = ShellGateRunner().run(f"sleep 300 & echo $! > '{pid_file}'; wait", tmp_path, timeout=1.0)
+
+    child = int(pid_file.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the gate left its child alive
+    assert result.timed_out
+    assert gone, "a background child of the gate stayed alive after the time limit"
+
+
+def test_a_gate_with_no_time_limit_waits_for_the_gate(tmp_path):
+    result = ShellGateRunner().run("sleep 1; echo late", tmp_path, timeout=None)
+
+    assert (result.green, result.timed_out, result.output) == (True, False, "late\n")

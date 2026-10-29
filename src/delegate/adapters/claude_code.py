@@ -18,7 +18,7 @@ copies that stream to the file that the request names, and reads the final
 `result` event from it. The end state comes from that event only: the exit
 status does not change it (see `AdapterResult`). After a valid report, the
 adapter ends a session that writes no event for the idle timeout of the request
-(see `process.py`).
+(see `process.py`). It also ends a session that runs past the agent timeout of the request, and sets `ended_timeout`.
 
 The activity of a stream comes from the `result` events, the `assistant`
 events, and the `timestamp` field. Some events of an agent that works have no
@@ -198,7 +198,8 @@ class ClaudeCodeAdapter:
             command += ["--resume", request.resume_session]
         stream = request.event_stream
         process = run_harness(command, request, env={**process_environment(), **FOREGROUND_ENVIRONMENT})
-        if not stream.read_text().strip():
+        # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
+        if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
@@ -210,7 +211,8 @@ class ClaudeCodeAdapter:
                 final_text = event["result"] if isinstance(event.get("result"), str) else final_text
             refused += _refusals(event)
         return AdapterResult(
-            process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text
+            process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
+            ended_timeout=process.ended_timeout,
         )
 
     def activity(self, stream: Path) -> Activity:

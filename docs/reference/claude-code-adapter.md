@@ -115,6 +115,7 @@ Two more rules apply:
 
 - The exit status does not change the end state. A `finished` stream with the exit status 143 (SIGTERM) stays `finished`, and the engine reads the report. See [the end of an agent session](run.md#the-end-of-an-agent-session).
 - After a valid report, the adapter ends a session that writes no event for the `idle_timeout` of the request. It sends SIGTERM to the process group of the session, and SIGKILL to the group after 10 seconds more. The result then has `ended_idle` set, and the end state comes from the stream as before.
+- The adapter ends a session that runs longer than the `agent_timeout` of the request, whatever the session does. It ends the session in the same way. The result then has `ended_timeout` set. A session that wrote no event gives the end state `failed` and no session id, and the adapter raises no error for its empty stream. See [the end of an agent session](run.md#the-end-of-an-agent-session).
 - A harness that is killed can leave half a line at the end of the stream. The adapter ignores that line. Any other line that is not JSON raises an `AdapterError` that names the stream and the line number.
 
 An API error (for example, a model that does not exist) gives `is_error` true with `subtype` `success`. The `is_error` field decides, not `subtype`.

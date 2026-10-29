@@ -327,20 +327,32 @@ class _Tracker:
     It keeps the last result of each gate command of each ticket, because the
     gates of a step are not green only when the step ends with a red gate. It
     also keeps each ticket whose agent the engine ended at the idle timeout, so
-    the result event that follows is no problem.
+    the result event that follows is no problem. A session that the engine ended
+    at the agent timeout (#179) is a problem at its `agent-timeout` event, and the
+    result event that follows adds none. A gate that the engine ended at its time
+    limit is named as timed out when its step ends with it red.
     """
 
     def __init__(self) -> None:
-        self._gates: dict[str, dict[str, bool]] = {}
+        self._gates: dict[str, dict[str, str | None]] = {}  # the label of a red gate, or None for a green one
         self._idle: set[str] = set()
+        self._timed_out: set[str] = set()
 
     def problem(self, event: dict[str, object]) -> str | None:
         """The reason that the event is a problem, or `None`. Call it for every event, in order."""
         kind, ticket = str(event["event"]), str(event.get("ticket"))
         if kind == "gate-result":
-            self._gates.setdefault(ticket, {})[str(event["command"])] = bool(event["green"])
+            command = str(event["command"])
+            label = command + (" (timed out)" if event.get("timed_out") else "")  # a journal of an earlier version has no `timed_out`
+            self._gates.setdefault(ticket, {})[command] = None if event["green"] else label
         elif kind == "idle-timeout":
             self._idle.add(ticket)
+        elif kind == "agent-timeout":
+            self._timed_out.add(ticket)
+            minutes = float(event["seconds"]) / 60  # type: ignore[arg-type]
+            return f"the {event['role']} session ran past the agent-timeout of {minutes:g} minutes"
+        elif kind in AGENT_RESULT_ROLES and ticket in self._timed_out:
+            self._timed_out.discard(ticket)  # the agent-timeout was the problem; this result event is its end
         elif kind in AGENT_RESULT_ROLES and event.get("refused"):
             self._idle.discard(ticket)  # the idle timeout belongs to this result event, as in the branch below
             refused = event["refused"]  # a list of {"tool", "mode"}, from `_refused_fields` of the engine
@@ -369,7 +381,7 @@ class _Tracker:
         elif kind == "continuation" and int(event["count"]) >= 2:  # type: ignore[call-overload]
             return f"the step continued {event['count']} times (limit {event['limit']}, trigger {event['trigger']})"
         elif kind == "step-end" and event["state"] == "failed":
-            red = [command for command, green in self._gates.get(ticket, {}).items() if not green]
+            red = [label for label in self._gates.get(ticket, {}).values() if label is not None]
             if red:
                 return f"the gates are not green: {'; '.join(red)}"
             return f"the step failed: {event['reason']}" if event.get("reason") else "the step failed"

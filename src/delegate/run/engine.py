@@ -134,6 +134,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from ..ports import harness
 from ..ports.gates import GateRunner
@@ -1218,11 +1219,11 @@ def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
     report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
 ) -> AdapterRequest:
-    """The request for one agent run of the stack, with the idle timeout of the run, the check of its report, and the MCP servers of the stack."""
+    """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack."""
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
-        added_directories=added_directories,
+        added_directories=added_directories, agent_timeout=_seconds(stack.agent_timeout),
     )
 
 
@@ -1245,6 +1246,29 @@ def _make_proof_copy(copy: Path) -> tuple[Path, ...]:
     return (proof,)
 
 
+def _seconds(minutes: float | None) -> float | None:
+    """A time limit of a stack, given in minutes, in seconds. None stays None: no limit."""
+    return None if minutes is None else minutes * 60
+
+
+def _minutes_text(minutes: float | None) -> str:
+    """A time limit in minutes as the reasons and the notes write it: `10` for 10.0, `0.05` for 0.05."""
+    return f"{minutes:g}"
+
+
+def _journal_timeout(journal: Journal, result: AdapterResult, stack: Stack, ticket: str, role: str, round_number: int) -> None:
+    """Record that the adapter ended the session of the agent at the agent timeout of the stack, if it did, before its result event."""
+    if result.ended_timeout:
+        journal.append("agent-timeout", ticket=ticket, role=role, round=round_number, seconds=_seconds(stack.agent_timeout))
+
+
+def _ended_reason(result: AdapterResult, who: str, stack: Stack) -> str:
+    """The reason that an agent run is no done session: the time limit when the adapter ended it there, else its end state and exit status."""
+    if result.ended_timeout:
+        return f"{who} session ran past the agent-timeout of {_minutes_text(stack.agent_timeout)} minutes"
+    return f"{who} ended {result.end_state} with exit status {result.exit_status}"
+
+
 def _journal_idle(journal: Journal, result: AdapterResult, ticket: str, role: str, round_number: int) -> None:
     """Record that the adapter ended the session of the agent at the idle timeout, if it did, before its result event."""
     if result.ended_idle:
@@ -1254,11 +1278,15 @@ def _journal_idle(journal: Journal, result: AdapterResult, ticket: str, role: st
 def _session_done(result: AdapterResult, report_valid: Callable[[], bool]) -> bool:
     """Tell whether the engine takes the report of an agent run.
 
-    A session that the adapter ended at the idle timeout had a valid report. A
+    A session that the adapter ended at the agent timeout (`ended_timeout`) is
+    never done: the engine takes it as a session with no valid report, whatever
+    its stream and its exit status say. A session that the adapter ended at the idle timeout had a valid report. A
     session whose stream ends in a success (`finished`) counts with exit status
     0, and with any other exit status when its report is valid: a coordinator
     or the adapter can stop an idle session after its work, with SIGTERM.
     """
+    if result.ended_timeout:
+        return False
     if result.ended_idle:
         return True
     if result.end_state != harness.FINISHED:
@@ -1478,6 +1506,7 @@ def _build_with_continuations(
                 _request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
+            _journal_timeout(journal, result, stack, ticket.id, ROLE_SPECIALIST, 0)
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
@@ -1487,7 +1516,7 @@ def _build_with_continuations(
         uncommitted_paths: tuple[str, ...] = ()
         if result is not None and not _session_done(result, report_valid):
             trigger = harness.CAPPED if result.end_state == harness.CAPPED else harness.FAILED
-            reason = f"the specialist ended {result.end_state} with exit status {result.exit_status}"
+            reason = _ended_reason(result, "the specialist", stack)
         else:
             try:
                 report = read_specialist_report(report_path, ticket.id)
@@ -1522,15 +1551,18 @@ def _build_with_continuations(
                 elif not each_ticket:
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `_ChainRun`)
                 else:
-                    outcomes = [(gate, *_run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD)) for gate in stack.gates]
-                    red = [(gate, output) for gate, green, output in outcomes if not green]
+                    outcomes = [
+                        _run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD, stack.gate_timeout)
+                        for gate in stack.gates
+                    ]
+                    red = [outcome for outcome in outcomes if not outcome.green]
                     if not red:
                         return None
                     trigger = "gates-red"
                     # The gates ran in a tree with no change that is not committed, so what the tree holds now is theirs.
                     leftovers = frozenset(_uncommitted_paths(vcs, worktree))
-                    reason = "gates red: " + "; ".join(gate for gate, _ in red)
-                    gate_output = "\n".join(f"$ {gate}\n{output.rstrip(chr(10))}" for gate, output in red)
+                    reason = "gates red: " + "; ".join(outcome.label for outcome in red)
+                    gate_output = "\n".join(f"$ {outcome.command}\n{outcome.output.rstrip(chr(10))}" for outcome in red)
         if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -1683,8 +1715,8 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
             f"{run_branch} holds its work already"
         )
     red = [
-        gate for gate in step.stack.gates
-        if not _run_gate(step.gates, step.vcs, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE)
+        label for gate in step.stack.gates
+        if (label := _run_gate(step.gates, step.vcs, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE, step.stack.gate_timeout))
     ]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
@@ -1812,12 +1844,13 @@ def _run_fixup(
         _request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid),
     )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
+    _journal_timeout(step.journal, result, step.stack, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
     )
     if not _session_done(result, report_valid):
-        raise _StepFailed(f"the fix-up specialist ended {result.end_state} with exit status {result.exit_status}")
+        raise _StepFailed(_ended_reason(result, "the fix-up specialist", step.stack))
     try:
         report = read_specialist_report(report_path, ticket.id)
     except ReportError as error:
@@ -1870,8 +1903,10 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
 def _fixup_gates(step: _Step, round_number: int) -> None:
     """Run the gates after the fix-up of a round. Raise `_StepFailed` when one is red."""
     red = [
-        gate for gate in step.stack.gates
-        if not _run_gate(step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP)
+        label for gate in step.stack.gates
+        if (label := _run_gate(
+            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_timeout
+        ))
     ]
     if red:
         raise _StepFailed("gates red: " + "; ".join(red))
@@ -1966,6 +2001,7 @@ def _verify_round(
     if stream.is_relative_to(scratch):
         stream = evidence / stream.relative_to(scratch)
     _journal_idle(step.journal, result, ticket.id, ROLE_VERIFIER, round_number)
+    _journal_timeout(step.journal, result, step.stack, ticket.id, ROLE_VERIFIER, round_number)
     step.journal.append(
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(stream), **_refused_fields(result),
@@ -1986,7 +2022,7 @@ def _verify_round(
         report_path.write_text(json.dumps(recovered, indent=2) + "\n")
         source = {"source": "final-text"}
     if not _session_done(result, _report_check(lambda: read_verifier_report(report_path, mode))):
-        raise _StepFailed(f"the verifier ended {result.end_state} with exit status {result.exit_status}")
+        raise _StepFailed(_ended_reason(result, "the verifier", step.stack))
     try:
         report = read_verifier_report(report_path, mode)
     except ReportError as error:
@@ -2248,17 +2284,19 @@ class _ChainRun:
         while True:
             tip = _tip(self.vcs, self.repo, step.branch)
             outcomes = [
-                (gate, *_run_gate_with_output(step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN))
+                _run_gate_with_output(
+                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN, step.stack.gate_timeout
+                )
                 for gate in step.stack.gates
             ]
-            red = [(gate, output) for gate, green, output in outcomes if not green]
+            red = [outcome for outcome in outcomes if not outcome.green]
             if red:
                 if round_number >= limit:
-                    raise _StepFailed(domain.chain_gates_reason(mode, [gate for gate, _ in red]))
+                    raise _StepFailed(domain.chain_gates_reason(mode, [outcome.label for outcome in red]))
                 round_number += 1
-                self._fixup(step, round_number, tip, _red_gates_text(tip, red), True)
+                self._fixup(step, round_number, tip, _red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red]), True)
                 continue
-            gates_text = green_gates_text(tip, [(gate, output) for gate, _, output in outcomes])
+            gates_text = green_gates_text(tip, [(outcome.command, outcome.output) for outcome in outcomes])
             if rejected is None:
                 report = _verify_round(step, round_number, None, gates_text, (start, tip) if start != tip else None, earlier)
             else:
@@ -2311,23 +2349,44 @@ def _chain_text(tickets: list[Ticket]) -> str:
     return "\n\n".join(f"Ticket {ticket.id}: {ticket.text.rstrip(chr(10))}" for ticket in tickets)
 
 
+class _GateRun(NamedTuple):
+    """The outcome of one gate for the engine: whether it is green, its output, and the name that a reason gives it.
+
+    `label` is the gate command, and a gate that the runner ended at its time limit has `(timed out)` after it.
+    """
+
+    command: str
+    green: bool
+    output: str
+    label: str
+
+
 def _run_gate(
-    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
-) -> bool:
-    """Run one gate command in the worktree through `gates`, record the result, and return True when it is green.
+    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
+    gate_timeout: float | None = None,
+) -> str | None:
+    """Run one gate command in the worktree through `gates`, and record the result. Return None when it is green, else its label.
 
     `round_number` is 0 for the first build and the fix-up round for a later run.
     `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
+    `gate_timeout` is the time limit of the gate in minutes, or None (see `_run_gate_with_output`).
     """
-    return _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase)[0]
+    outcome = _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase, gate_timeout)
+    return None if outcome.green else outcome.label
 
 
 def _run_gate_with_output(
-    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str
-) -> tuple[bool, str]:
-    """Run one gate command as `_run_gate` does. Return whether it is green, and the tail of its output.
+    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
+    gate_timeout: float | None = None,
+) -> _GateRun:
+    """Run one gate command as `_run_gate` does. Return its outcome: whether it is green, and the tail of its output.
 
     `phase` can also be PHASE_CHAIN: the gates on the tip of an `economy` chain.
+
+    `gate_timeout` is the time limit of the gate in minutes (#179). A gate that runs longer gets its process group ended by
+    the runner. The result then has `timed_out`, and it is red. The engine writes `gate-result` with `green` false and
+    `timed_out` true, and ends the output with a line that names the limit, so the specialist and a reader see the cause.
+    The step goes on as for any red gate.
 
     A gate runs at most once green on one commit. When the journal holds a green
     `gate-result` of the same command on the commit that the worktree has
@@ -2349,17 +2408,19 @@ def _run_gate_with_output(
             "gate-skip", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit, green_seq=green_seq,
             reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})",
         )
-        return True, str(green.get("output_tail", ""))
+        return _GateRun(command, True, str(green.get("output_tail", "")), command)
     _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{command}` of ticket {ticket}", command=command, phase=phase)
     log = _gate_log_path(journal, ticket, phase, round_number)
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
-    result = gates.run(command, worktree, log=log)
+    result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout))
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
+    if result.timed_out:
+        output += f"\n[delegate: the gate ran past the gate-timeout of {_minutes_text(gate_timeout)} minutes, and the engine ended it]\n"
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
-        exit_status=result.exit_status, green=result.green, output_tail=output, clean=True,
+        exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True,
     )
-    return result.green, output
+    return _GateRun(command, result.green, output, f"{command} (timed out)" if result.timed_out else command)
 
 
 def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int) -> Path:

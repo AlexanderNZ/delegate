@@ -19,7 +19,8 @@ on each line of standard output. The adapter copies that stream to the file
 that the request names, and reads the end state and the session id from it.
 The exit status does not change the end state (see `AdapterResult`). After a
 valid report, the adapter ends a session that writes no event for the idle
-timeout of the request (see `process.py`).
+timeout of the request (see `process.py`). It also ends a session that runs past the agent timeout of the request, and
+sets `ended_timeout`.
 
 The activity of a stream comes from the `step_finish` events and the
 `timestamp` field (epoch milliseconds). Each `step_finish` event carries
@@ -146,7 +147,8 @@ class OpenCodeAdapter:
             command += ["--session", request.resume_session]
         stream = request.event_stream
         process = run_harness(command, request, env=_environment(request.mcp_servers))
-        if not stream.read_text().strip():
+        # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
+        if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
@@ -165,7 +167,10 @@ class OpenCodeAdapter:
             if event.get("type") == "text" and isinstance(event.get("part"), dict) and "text" in event["part"]  # type: ignore[operator]
         ]
         final_text = texts[-1] if texts else None
-        return AdapterResult(process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle, final_text=final_text)
+        return AdapterResult(
+            process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle, final_text=final_text,
+            ended_timeout=process.ended_timeout,
+        )
 
     def activity(self, stream: Path) -> Activity:
         new = cache = 0

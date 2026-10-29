@@ -29,9 +29,9 @@ class SpyGates:
         self._answer = answer
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, command, worktree, log=None):
+    def run(self, command, worktree, log=None, timeout=None):
         self.calls.append((command, worktree.name))
-        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log)
+        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log, timeout=timeout)
 
 
 @pytest.fixture
@@ -115,7 +115,7 @@ def test_gate_result_keeps_its_fields(tmp_path, scripted_adapter):
     result = start_run(repo, ShellGateRunner(), scripted_adapter)
 
     (gate,) = [e for e in read_journal_file(repo, result.run_id) if e["event"] == "gate-result"]
-    assert set(gate) == {"seq", "time", "event", "ticket", "round", "phase", "command", "commit", "exit_status", "green", "output_tail", "clean"}
+    assert set(gate) == {"seq", "time", "event", "ticket", "round", "phase", "command", "commit", "exit_status", "green", "timed_out", "output_tail", "clean"}
 
 
 def test_each_gate_run_has_its_own_log_with_its_own_output(tmp_path, scripted_adapter):

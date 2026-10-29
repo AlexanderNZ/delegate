@@ -22,24 +22,33 @@ class GateResult:
     """The outcome of one gate command.
 
     `exit_status` is the exit status of the command. `output` is its standard
-    output followed by its standard error, as text.
+    output followed by its standard error, as text. `timed_out` is true when the
+    runner ended the command because it ran past the time limit of the call
+    (see `GateRunner.run`).
     """
 
     exit_status: int
     output: str
+    timed_out: bool = False
 
     @property
     def green(self) -> bool:
-        """True when the command exited with status 0."""
-        return self.exit_status == 0
+        """True when the command exited with status 0 and the runner did not end it at a time limit."""
+        return self.exit_status == 0 and not self.timed_out
 
 
 @runtime_checkable
 class GateRunner(Protocol):
     """Runs a gate command in a directory."""
 
-    def run(self, command: str, worktree: Path, log: Path | None = None) -> GateResult:
+    def run(self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None) -> GateResult:
         """Run `command` with `worktree` as its working directory, wait for it, and return the result.
+
+        `timeout` (seconds) is the time limit of the command. When the command
+        runs longer, the runner ends the process group of the command, keeps
+        the output up to that point, and returns a result with `timed_out`
+        set. That result is not green, whatever the exit status is. With
+        `timeout` None, the runner waits for the command without a limit.
 
         When `log` is not None, the runner appends the output of the command
         to that file while the command runs, so a reader of the file sees the

@@ -20,6 +20,7 @@ The engine gives the adapter an `AdapterRequest`. It has these fields:
 - `event_stream`: the file where the adapter writes the event stream of the harness. The engine chooses it, and writes it to the [**journal**](../glossary.md#journal) before the agent starts, so `delegate status` can read the stream while the agent runs. Its directory exists.
 - `resume_session`: the [**session**](../glossary.md#session) id of an earlier run to resume, or `None`.
 - `idle_timeout` and `report_valid`: the idle timeout in seconds, and a function that gives true when the file at `report_path` is valid. When the check is true and the harness wrote no event for the idle timeout, the adapter ends the session. The helper `run_harness` does this for you.
+- `agent_timeout`: the time limit of the session in seconds, or `None`. When the session runs longer, the adapter ends it. `run_harness` does this for you too.
 - `mcp_servers`: the MCP servers of the [**stack**](../glossary.md#stack), as `McpServer` values. Each has a `name` and one of `command` (a local server) and `url` (a remote server). Give the agent these servers in the configuration form of your harness. If your harness can ignore the other MCP configuration of the user and of the project, do that, so the agent gets only these servers.
 - `added_directories`: the directories outside `cwd` that the agent can read and change. For a [**verifier**](../glossary.md#verifier), this is the proof copy of a [**red proof**](../glossary.md#red-proof). Add each one to the session if your harness has a way to do that. If it has none, state that limit on the page of your adapter.
 
@@ -30,6 +31,7 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `session_id`: the session id that the harness gave, or `None`.
 - `event_stream`: the path of the captured stream, which is the `event_stream` of the request.
 - `ended_idle`: true when the adapter ended the session at the idle timeout. `run_harness` tells you.
+- `ended_timeout`: true when the adapter ended the session at the `agent_timeout`. `run_harness` tells you. Give it as `ended_timeout=process.ended_timeout`. A session that the helper ended at the limit can have written no event, so do not treat an empty stream as a failure to start in that case.
 - `refused`: one pair for each tool call that the permission settings of the harness refused, in the order of the stream: the tool, and the name that the harness gives that setting (for example `don't ask`). Leave it empty when your harness does not write such a refusal. The engine copies it into the result event, and `delegate watch` shows it as a problem.
 - `final_text`: the last text of the agent in the stream, or `None`. The engine reads the [**verdict**](../glossary.md#verdict) from it when a [**verifier**](../glossary.md#verifier) writes no [**report**](../glossary.md#report) file. Leave it `None` when your harness stream has no such text.
 

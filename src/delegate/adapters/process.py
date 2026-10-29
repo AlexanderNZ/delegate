@@ -11,6 +11,9 @@ true, the session has done its work and only stays open, so the helper ends it:
 it sends SIGTERM, and SIGKILL when the process has not exited after
 `TERMINATE_GRACE_SECONDS`.
 
+A request can also set an agent timeout (#179). When the process runs longer than that, whatever it does and whatever
+the report is, the helper ends it in the same way and tells the caller that it ended the session at the time limit.
+
 The process starts in a session of its own, so it is the leader of a process group that holds each process it starts
 (#178). `end_group` sends the signals to the group, not to the leader only: no child of the harness stays alive after
 the helper ended it. An interrupt, as Ctrl-C or SIGTERM to the engine raises it, or any other exception while the helper
@@ -63,11 +66,12 @@ def end_group(process: subprocess.Popen, grace: float | None = None) -> None:
 
 @dataclass(frozen=True)
 class HarnessExit:
-    """How the harness process ended: its exit status, its standard error, and whether the helper ended it idle."""
+    """How the harness process ended: its exit status, its standard error, and whether the helper ended it idle or at the agent timeout."""
 
     returncode: int
     stderr: str
     ended_idle: bool
+    ended_timeout: bool = False
 
 
 def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[str, str] | None = None) -> HarnessExit:
@@ -80,32 +84,51 @@ def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[st
             env=dict(env) if env is not None else None, start_new_session=True,
         )
         try:
-            ended_idle = _wait(process, request)
+            ended_idle, ended_timeout = _wait(process, request)
         except BaseException:
             end_group(process)  # an interrupt or an error: no process of the harness stays alive after the helper
             raise
         stderr.seek(0)
-        return HarnessExit(process.returncode, stderr.read(), ended_idle)
+        return HarnessExit(process.returncode, stderr.read(), ended_idle, ended_timeout)
 
 
-def _wait(process: subprocess.Popen[str], request: AdapterRequest) -> bool:
-    """Wait for the process to exit. End it when it is idle after a valid report, and return True then."""
-    if request.idle_timeout is None or request.report_valid is None:
+def _wait(process: subprocess.Popen[str], request: AdapterRequest) -> tuple[bool, bool]:
+    """Wait for the process to exit. Return whether the helper ended it idle after a valid report, and whether it ended it at the agent timeout.
+
+    The agent timeout comes first: a session that runs past it ends, also when its stream still grows.
+    """
+    idle = request.idle_timeout is not None and request.report_valid is not None
+    if not idle and request.agent_timeout is None:
         process.wait()
-        return False
-    poll = min(POLL_SECONDS, request.idle_timeout / 5)
-    size, changed = -1, time.monotonic()
+        return False, False
+    started = time.monotonic()
+    poll = POLL_SECONDS
+    if idle:
+        poll = min(poll, request.idle_timeout / 5)  # type: ignore[operator]
+    if request.agent_timeout is not None:
+        poll = min(poll, request.agent_timeout / 5)
+    size, changed = -1, started
     while True:
+        wait = poll
+        if request.agent_timeout is not None:
+            wait = min(poll, max(started + request.agent_timeout - time.monotonic(), 0.01))
         try:
-            process.wait(timeout=poll)
-            return False
+            process.wait(timeout=wait)
+            return False, False
         except subprocess.TimeoutExpired:
             pass
+        if request.agent_timeout is not None and time.monotonic() - started >= request.agent_timeout:
+            if process.poll() is not None:  # it exited by itself at the limit
+                return False, False
+            end_group(process)
+            return False, True
+        if not idle:
+            continue
         now_size = request.event_stream.stat().st_size
         if now_size != size:
             size, changed = now_size, time.monotonic()
-        elif time.monotonic() - changed >= request.idle_timeout and request.report_valid():
+        elif time.monotonic() - changed >= request.idle_timeout and request.report_valid():  # type: ignore[operator]
             if process.poll() is not None:  # it exited by itself during the check
-                return False
+                return False, False
             end_group(process)
-            return True
+            return True, False
