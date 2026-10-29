@@ -14,7 +14,7 @@ import pytest
 
 from delegate import adapters
 
-from .support import TEMPLATE_GIT, WORKFLOW, ScriptedAdapter, copy_of, git, run_main
+from .support import TEMPLATE_GIT, WORKFLOW, ScriptedAdapter, copy_of, git, run_main, write_project_agents
 
 HEADING = "## Notes of this stack"
 SPECIALIST_NOTES = "Run `make setup` once before the tests. This host has no visual gate."
@@ -171,7 +171,8 @@ def test_the_file_form_reads_each_file_relative_to_the_workflow_file(tmp_path, c
 def dry_run(tmp_path: Path, capsys, text: str, files: dict[str, str] | None = None) -> tuple[int, str, str]:
     """`delegate run --dry-run` on `text` with a built-in adapter, which the check knows without a registration."""
     repo = make_repo(tmp_path, text.replace('adapter = "scripted"', 'adapter = "claude-code"'), files)
-    return run_main(capsys, str(repo / "workflow.toml"), "--dry-run")
+    write_project_agents(repo)
+    return run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--dry-run")
 
 
 @pytest.mark.parametrize("role", ["specialist", "verifier"])

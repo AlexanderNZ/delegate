@@ -17,7 +17,7 @@ from delegate.cli import delegate
 from delegate.ports.harness import McpServer
 
 from . import claude_fake
-from .support import WORKFLOW, ScriptedAdapter, make_repo, run_main
+from .support import WORKFLOW, ScriptedAdapter, make_repo, run_main, write_project_agents
 
 BROWSER = McpServer("browser", command=("npx", "@playwright/mcp@latest"))
 TRACKER = McpServer("tracker", url="https://mcp.example.invalid/mcp")
@@ -98,6 +98,7 @@ def dry_run(tmp_path, capsys, servers: str, stack_field: str = "") -> tuple[int,
     """`delegate run --dry-run` of a workflow with `servers` before the tickets and `stack_field` in the stack `python`."""
     workflow = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"').replace(HOTSPOTS, HOTSPOTS + stack_field)
     repo = make_repo(tmp_path, workflow.replace("\n[[tickets]]", servers + "\n[[tickets]]"))
+    write_project_agents(repo)
     try:
         code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo), "--dry-run"])
     except SystemExit as stop:

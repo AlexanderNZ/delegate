@@ -1,6 +1,7 @@
 """The `delegate run` command: check a workflow file and print its plan, or build its tickets.
 
-`--dry-run` validates the file and prints the plan in dependency order. It
+`--dry-run` validates the file and prints the plan in dependency order. Then it checks the setup (#182, `setup_check.py`):
+for each stack, the agent files exist for the adapter, and the verifier permits each gate; it exits 1 on a problem. It
 creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
 with a run that stopped or paused, from its journal. `--retry <ticket>` with it goes on
@@ -67,6 +68,7 @@ from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
+from .setup_check import check_setup
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
 
@@ -128,8 +130,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="validate the workflow and print the plan; with --resume, print the old order, the new order and the verdict of "
-        "each rule of a plan change; create nothing",
+        help="validate the workflow and print the plan, then check that each stack has its agent files and that its verifier "
+        "permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; "
+        "create nothing",
     )
     parser.add_argument(
         "--resume", metavar="RUN_ID",
@@ -408,4 +411,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(f"  {line}" if line.strip() else "" for line in notes.strip().splitlines()))
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
-    return 0
+    setup = check_setup(workflow, args.repo, Path.home())
+    for line in setup.lines:
+        print(line)
+    for problem in setup.problems:
+        print(f"delegate run: {problem}", file=sys.stderr)
+    return 1 if setup.problems else 0

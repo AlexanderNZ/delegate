@@ -17,12 +17,25 @@ The command validates the file and prints the plan in dependency order. With `--
 
 The options of `delegate run` are in [the options of the run reference](run.md#options). Without `--dry-run`, the command builds the [**tickets**](../glossary.md#ticket). A [**tier file**](../glossary.md#tier-file) from `--tiers` sets the valid [**tier**](../glossary.md#tier) names. The options `--opencode-model` and `--opencode-allow` change the `opencode` column of the [**tier table**](../glossary.md#tier-table). See [the adapter reference](opencode-adapter.md#the-model).
 
+## The setup check of the dry run
+
+Two errors of setup show late in a [**run**](../glossary.md#run). An agent file that is missing fails the first agent of its [**stack**](../glossary.md#stack). A [**gate**](../glossary.md#gate) that the [**verifier guard**](../glossary.md#verifier-guard) does not permit shows only when the [**verifier**](../glossary.md#verifier) tries to run it, for example on a [**red proof**](../glossary.md#red-proof), on a single-test probe or in a [**fix-up**](../glossary.md#fix-up) round, and that can be an hour into the run. The gates of a stack come from two places: the workflow (`gates`, which the engine runs) and the [**declaration**](../glossary.md#declaration) of the agents (`gateCommands`, which became the allow list of the verifier guard). Nothing else compares them.
+
+`delegate run <workflow> --dry-run` makes this check after it prints the plan. It uses the [**adapter**](../glossary.md#adapter) of the workflow:
+
+1. For each stack, the [**specialist**](../glossary.md#specialist) and the verifier must have an agent file, named `<agent>.md`. The check looks in the project directory (the `--repo` directory) first, and then in the user directory, where the [**harness**](../glossary.md#harness) looks. For `claude-code` the two directories are `<repo>/.claude/agents/` and `~/.claude/agents/`. For `opencode` they are `<repo>/.opencode/agents/` and `~/.config/opencode/agents/`. For each missing file, the message names the stack, the agent and the paths that the check looked in.
+2. For each gate of each stack, the verifier file must permit the gate. For `claude-code`, the check runs the Bash hook of the verifier file with the gate as the command, as the harness does, in `bash`. A hook that exits 0 permits the gate. A hook that exits with another status denies it, and the message gives the text that the hook wrote on stderr. For `opencode`, the check resolves the gate against the `permission.bash` map of the verifier file with the matcher of `delegate validate`. Only the action `allow` permits the gate. The map leaves out a gate with a command substitution, so the check refuses such a gate for `opencode`. For each gate that the verifier denies, the message names the gate, the stack and the agent file.
+
+The check prints `stack <name>: checked` on stdout for each stack with no problem. It prints each problem on stderr, one for each line, and the command exits 1. A stack with a missing agent file gets no gate check for that file.
+
+An adapter with no check prints one line on stdout: `setup check skipped: ...`, with the reason. Only `claude-code` and `opencode` have a check. The check starts the hook of the verifier only, and it changes nothing on disk. `--resume <run-id> --dry-run` makes no setup check.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | The workflow is valid. The plan is on stdout. |
-| 1 | The workflow or the tier file is not valid, or it cannot be read. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
+| 0 | The workflow is valid, and the setup check found no problem. The plan is on stdout. |
+| 1 | The workflow or the tier file is not valid, or it cannot be read, or the [setup check](#the-setup-check-of-the-dry-run) found a missing agent file or a gate that the verifier denies. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
 | 2 | A usage error. |
 
 The command reports the problems of a file in one run, not only the first. A ticket or a stack with a problem is left out of the later checks, so correct the problems and check the file again.

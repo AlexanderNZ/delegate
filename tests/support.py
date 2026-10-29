@@ -640,3 +640,38 @@ def without_titles(out: str) -> str:
 def frames(out: str) -> list[list[str]]:
     """The frames that the live view of `watch` drew, in order, each as its lines with no control sequence."""
     return [CONTROL.sub("", chunk.split(FRAME_END)[0]).splitlines() for chunk in out.split(FRAME_START)[1:]]
+
+
+def write_project_agents(repo: Path) -> None:
+    """Write the agent files of the stacks of `repo/workflow.toml` into the project directory of its adapter (#182).
+
+    `delegate run --dry-run` checks that each stack has its agent files and that the verifier permits the gates of the
+    stack. A test whose subject is another part of the check calls this, and passes `--repo <repo>`. The files are
+    rendered from a declaration with the gates of the stack, so the check finds nothing wrong. An adapter with no check
+    gets no file. The function reads the TOML as it is and validates nothing, so it also serves a workflow that the
+    test makes invalid on purpose.
+    """
+    import tomllib
+
+    from delegate.definitions.declaration import Agent
+    from delegate.definitions.render import render
+    from delegate.shared.tiers import load_tiers
+
+    data = tomllib.loads((repo / "workflow.toml").read_text())
+    directories = {"claude-code": Path(".claude/agents"), "opencode": Path(".opencode/agents")}
+    adapter = data["adapter"]
+    if adapter not in directories:
+        return
+    agents = []
+    for name, stack in data.get("stacks", {}).items():
+        specialist, verifier = stack.get("specialist"), stack.get("verifier")
+        key = specialist.removesuffix("-specialist") if isinstance(specialist, str) else None
+        # The check reads the file of each agent name, so a pair is declared under the key that both names share.
+        # A stack that the test made invalid on purpose gets no file.
+        if key is not None and verifier == f"{key}-verifier":
+            agents.append(Agent(key=key, description=f"The {name} stack.", gate_commands=list(stack.get("gates", []))))
+    tiers = load_tiers()
+    target = repo / directories[adapter]
+    target.mkdir(parents=True, exist_ok=True)
+    for name, content in render(agents, tiers)[adapter].items():
+        (target / name).write_text(content)

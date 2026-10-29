@@ -14,7 +14,7 @@ A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary
 
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
-To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md).
+To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md). The dry run also checks the setup of the stacks: the agent files, and the gates that the verifier permits. See [the setup check of the dry run](workflow.md#the-setup-check-of-the-dry-run).
 
 To start a run that the shell or the harness cannot stop, add `--detach`. See [the detached run](#the-detached-run).
 
@@ -26,7 +26,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | Option | Meaning |
 |---|---|
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
-| `--dry-run` | Validate the workflow and print the plan; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
+| `--dry-run` | Validate the workflow and print the plan, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets differ from the newest plan of the run is a plan change. |
 | `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |

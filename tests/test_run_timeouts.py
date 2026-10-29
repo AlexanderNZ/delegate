@@ -13,7 +13,7 @@ from delegate import adapters
 from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 
 from . import claude_fake
-from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main
+from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main, write_project_agents
 
 GATE = 'gates = ["test -f feature.txt"]'
 
@@ -39,7 +39,8 @@ def run(repo, capsys, *extra):
 def dry_run(tmp_path, capsys, text):
     """`delegate run --dry-run` with a built-in adapter, which the check knows without a registration."""
     repo = make_repo(tmp_path, text.replace('adapter = "scripted"', 'adapter = "claude-code"'))
-    return run_main(capsys, str(repo / "workflow.toml"), "--dry-run")
+    write_project_agents(repo)
+    return run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--dry-run")
 
 
 @pytest.mark.parametrize("field", ["gate-timeout", "agent-timeout"])

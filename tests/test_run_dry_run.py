@@ -11,7 +11,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TEMPLATE_GIT, copy_of, git
+from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
 
 VALID = """\
 base-branch = "main"
@@ -82,9 +82,10 @@ def run(repo: Path, capsys, *extra: str) -> tuple[int, str, str]:
 
 def test_a_valid_workflow_prints_the_plan_in_dependency_order_and_creates_nothing(tmp_path, capsys):
     repo = make_repo(tmp_path, VALID)
+    write_project_agents(repo)
     before = state(repo)
 
-    code, out, err = run(repo, capsys, "--dry-run")
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
 
     assert (code, err) == (0, "")
     plan_ids = [line.split()[1] for line in out.splitlines() if line.startswith("ticket ")]
@@ -202,8 +203,9 @@ def test_a_run_without_dry_run_refuses_a_verifier_override_below_the_verifier_ti
 @pytest.mark.parametrize("tier", ["strong", "verifier"])
 def test_a_verifier_override_at_or_above_the_verifier_tier_is_accepted(tmp_path, capsys, tier):
     repo = make_repo(tmp_path, with_overrides(verifier=tier))
+    write_project_agents(repo)
 
-    code, out, err = run(repo, capsys, "--dry-run")
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
 
     assert (code, err) == (0, "")
     assert f"tier override verifier: {tier}" in out
@@ -227,8 +229,9 @@ def test_an_override_for_an_unknown_role_is_refused_by_field(tmp_path, capsys):
 
 def test_a_tier_name_override_is_accepted_and_shown_in_the_plan(tmp_path, capsys):
     repo = make_repo(tmp_path, with_overrides(specialist="cheap"))
+    write_project_agents(repo)
 
-    code, out, err = run(repo, capsys, "--dry-run")
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
 
     assert (code, err) == (0, "")
     assert "tier override specialist: cheap" in out
@@ -254,8 +257,10 @@ claude-code-description-chars = 1000
 """
     )
 
-    assert run(repo, capsys, "--dry-run", "--tiers", str(tiers))[0] == 0
-    code, _out, err = run(repo, capsys, "--dry-run")  # the bundled table has no such tier
+    write_project_agents(repo)
+
+    assert run(repo, capsys, "--dry-run", "--repo", str(repo), "--tiers", str(tiers))[0] == 0
+    code, _out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))  # the bundled table has no such tier
     assert code == 1
     assert "'gateway-fast'" in err
 
@@ -284,8 +289,9 @@ def test_an_unknown_adapter_exits_1_and_names_the_field_and_the_adapters(tmp_pat
 @pytest.mark.parametrize("adapter", ["claude-code", "opencode", "cursor"])
 def test_each_mode_and_each_built_in_adapter_is_accepted(tmp_path, capsys, mode, adapter):
     repo = make_repo(tmp_path, VALID.replace('mode = "assure"', f'mode = "{mode}"').replace('adapter = "claude-code"', f'adapter = "{adapter}"'))
+    write_project_agents(repo)
 
-    code, out, err = run(repo, capsys, "--dry-run")
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
 
     assert (code, err) == (0, "")
     assert f"mode {mode}, adapter {adapter}" in out

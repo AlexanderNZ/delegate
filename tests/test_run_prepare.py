@@ -20,7 +20,7 @@ from delegate.run.brief import red_proof_copy
 
 from .support import (
     TEMPLATE_GIT, WORKFLOW, ScriptedAdapter, bare_repo, copy_of, event_names, git, read_journal, read_journal_file, resume_main,
-    run_main, run_start, step_start, write_journal,
+    run_main, run_start, step_start, write_journal, write_project_agents,
 )
 
 # The marker is an ignored file, as `node_modules` is: git does not put it in a tree, and the scripted specialist does not commit it.
@@ -239,7 +239,8 @@ def test_a_retry_in_the_worktree_that_prepare_made_runs_prepare_only_in_the_veri
 def dry_run(tmp_path: Path, capsys, text: str) -> tuple[int, str, str]:
     """`delegate run --dry-run` on `text` with a built-in adapter, which the check knows without a registration."""
     repo = make_repo(tmp_path, text.replace('adapter = "scripted"', 'adapter = "claude-code"'))
-    return run_main(capsys, str(repo / "workflow.toml"), "--dry-run")
+    write_project_agents(repo)
+    return run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--dry-run")
 
 
 def test_the_dry_run_prints_the_prepare_commands_of_each_stack(tmp_path, capsys):
