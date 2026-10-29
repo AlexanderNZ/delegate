@@ -24,10 +24,14 @@ from pathlib import Path
 
 SCRIPT = """\
 #!{python}
-import json, os, sys, time
+import json, os, subprocess, sys, time
 time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
-    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0)}}) + "\\n")
+    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0), "pid": os.getpid()}}) + "\\n")
+if os.environ.get("FAKE_HARNESS_CHILD"):
+    # A child of the harness, as a tool process of a real harness is: it stays alive until something ends its group.
+    with open(os.environ["FAKE_HARNESS_CHILD"], "w") as child_pid:
+        child_pid.write(str(subprocess.Popen(["sleep", "300"]).pid))
 drip = float(os.environ.get("FAKE_HARNESS_DRIP", "0"))
 with open(os.environ["FAKE_HARNESS_STREAM"]) as stream:
     for line in stream:

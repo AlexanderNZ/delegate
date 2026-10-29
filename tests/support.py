@@ -440,6 +440,21 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     return run_dir.name, child.pid
 
 
+def is_gone(pid: int, seconds: float = 10.0) -> bool:
+    """True when no process has the id `pid`, also after a wait of `seconds` for the end of a process that got a signal."""
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
 def journal_path(repo: Path, run_id: str) -> Path:
     return repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl"
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpSe
 
 from . import claude_fake, harness_fake
 from .harness_fake import wrote
+from .support import is_gone
 
 
 def request(tmp_path: Path, **changes) -> AdapterRequest:
@@ -104,6 +106,24 @@ def test_after_a_valid_report_a_session_that_writes_no_event_for_the_idle_timeou
     assert result.exit_status != 0
     assert result.session_id == "af2a3741-3f76-4944-91f5-3d5102c79b6b"
     assert result.event_stream.read_text() == (claude_fake.FIXTURES / "finished.jsonl").read_text()
+
+
+def test_the_idle_end_also_ends_the_child_processes_of_the_session(tmp_path, monkeypatch):
+    # A harness starts tool processes. They are in the process group of the session, so the end of the session ends them (#178).
+    child_pid = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=1.0, hold_seconds=120)
+    stream = tmp_path / "streams" / "a.stream.jsonl"
+    req = request(tmp_path, idle_timeout=0.5, event_stream=stream, report_valid=wrote(stream, (claude_fake.FIXTURES / "finished.jsonl").read_text()))
+
+    result = adapters.get("claude-code").run(req)
+
+    child = int(child_pid.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the session left its child alive
+    assert result.ended_idle
+    assert gone, "a child process of the session stayed alive"
 
 
 def test_a_session_whose_report_is_not_valid_is_not_ended_at_the_idle_timeout(tmp_path, monkeypatch):

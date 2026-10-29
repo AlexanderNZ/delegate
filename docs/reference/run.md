@@ -120,13 +120,13 @@ Two rules decide how the engine reads the end of an agent session. They apply to
 
 **A valid report and a success continue the step, whatever the exit status.** The end state of the adapter result comes from the last result event of the session. The exit status does not change it. When the end state is `finished` and the exit status is not 0, the engine reads the report. A valid report continues the step, as with the exit status 0. For example, a coordinator stops an idle session with SIGTERM after its valid report. The exit status is 143, and the step continues. When the report is missing or not valid, the run counts as `failed`, as before. The specialist then continues, and the fix-up specialist and the verifier fail the step. The end states `capped` and `failed` are never a success, also with a valid report.
 
-**After a valid report, an idle session ends.** The engine gives each agent run an idle timeout of 900 seconds and a check of its report. While the agent runs, the adapter watches the stream of the session. The report can be valid, and the agent can write no event to the stream for 900 seconds. Then the adapter ends the session: it sends SIGTERM, and SIGKILL after 10 seconds more. The adapter result has `ended_idle` set. The journal records `idle-timeout` just before the result event of that agent. The step continues with the report, whatever the end state and the exit status. A session that ends at the idle timeout is not a failure, so it does not start a continuation.
+**After a valid report, an idle session ends.** The engine gives each agent run an idle timeout of 900 seconds and a check of its report. While the agent runs, the adapter watches the stream of the session. The report can be valid, and the agent can write no event to the stream for 900 seconds. Then the adapter ends the session: it sends SIGTERM to the process group of the session, and SIGKILL to the group after 10 seconds more, so no child process of the session stays alive. The adapter result has `ended_idle` set. The journal records `idle-timeout` just before the result event of that agent. The step continues with the report, whatever the end state and the exit status. A session that ends at the idle timeout is not a failure, so it does not start a continuation.
 
 The idle timeout is longer than the ten minutes that a harness gives one foreground command at most. A foreground command writes no event while it runs. So the engine does not stop an agent that waits for one.
 
 ## The resume
 
-`delegate run --resume <run-id>` goes on with a run that stopped, paused or halted. A run stops when its process is killed, or is interrupted with Ctrl-C. See [Ctrl-C](#ctrl-c). A failure of the harness halts a run. See [a failure of the harness](#a-failure-of-the-harness). A run [**pauses**](../glossary.md#pause) at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the [**short run id**](../glossary.md#short-run-id): the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
+`delegate run --resume <run-id>` goes on with a run that stopped, paused or halted. A run stops when its process is killed, or is interrupted with Ctrl-C, SIGTERM or SIGHUP. See [Ctrl-C](#ctrl-c) and [SIGTERM and SIGHUP](#sigterm-and-sighup). A failure of the harness halts a run. See [a failure of the harness](#a-failure-of-the-harness). A run [**pauses**](../glossary.md#pause) at a step boundary after `delegate pause`. See [the pause](#the-pause). Such a run has no `run-end` in its journal. The run id is on the line `run <run id>` that the command printed, and it is the name of the directory in `runs/`. `--resume` also takes the [**short run id**](../glossary.md#short-run-id): the part after the last `-`, for example `e9dc`. A short id that more than one run has is an error. The command names each match, changes nothing, and exits 1.
 
 The engine rebuilds the state of the run from its journal, and starts at the first step that is not complete. It appends to the journal and never rewrites a line. It writes `resume` first, and `seq` goes on from the last line. The workflow must be the one that the run started from: `mode`, `adapter`, `base-branch` and `run-branch` must be the same. If one differs, the command exits 1 and names the field. The tickets can differ from the newest plan of the run: that is a [**plan change**](../glossary.md#plan-change), and its rules decide. See [the plan change](#the-plan-change). A run that has a `run-end` cannot be resumed, unless the resume has a plan change or `--retry`.
 
@@ -276,7 +276,7 @@ The command exits 1, names the ticket, and changes nothing, when the step cannot
 
 ## The run lock
 
-A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, when a pause request stops the run, when a failure of the harness halts the run, and when the process is interrupted with Ctrl-C. A resume takes the same lock.
+A lock prevents a second run on one run branch. A run takes the lock of its run branch before it changes anything, and releases it when it ends: when the run ends, when a step crashes, when a pause request stops the run, when a failure of the harness halts the run, and when the process is interrupted with Ctrl-C, SIGTERM or SIGHUP. A resume takes the same lock.
 
 - If another run holds the lock, and its process exists, the command exits 1. The message names the run branch, the run id, and the process id of the holder: `run branch <name> is in use by run <run id> (process <pid>)`. The run in progress is not changed. `--break-lock` does not remove the lock of a process that exists.
 - A process that is killed cannot release its lock. The next run finds a lock whose process no longer exists.
@@ -554,7 +554,7 @@ When stdout is a terminal, the command also sets the title of the terminal. The 
 | 2 | A usage error. |
 | 3 | A pause request stopped the run at a step boundary. The run has no `run-end`. Go on with `--resume <run-id>`. See [the pause](#the-pause). |
 | 4 | A failure of the harness halted the run: the adapter raised an `AdapterError`. The journal holds `halted`, and no `run-end`. Go on with `--resume <run-id>`. See [a failure of the harness](#a-failure-of-the-harness). |
-| 130 | Ctrl-C stopped the run in the foreground. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c). |
+| 130 | Ctrl-C, SIGTERM or SIGHUP stopped the run. The journal holds `interrupted`, and no `run-end`. Go on with `--resume <run-id>`. See [Ctrl-C](#ctrl-c) and [SIGTERM and SIGHUP](#sigterm-and-sighup). |
 
 ### Ctrl-C
 
@@ -569,7 +569,17 @@ Ctrl-C stops a run in the foreground at once. It does not wait for a step bounda
 delegate run: interrupted; the run <run id> stopped. Go on with delegate run --resume <run id>
 ```
 
-`delegate run --resume <run-id>` then goes on as after a kill. An open step continues in its worktree. See [the resume](#the-resume). When Ctrl-C comes before the run writes its journal, there is nothing to resume: the command prints `delegate: interrupted` on stderr and exits 130. A detached run has no terminal, so Ctrl-C in the shell does not stop it.
+`delegate run --resume <run-id>` then goes on as after a kill. An open step continues in its worktree. See [the resume](#the-resume). When Ctrl-C comes before the run writes its journal, there is nothing to resume: the command prints `delegate: interrupted` on stderr and exits 130. A detached run has no terminal, so Ctrl-C in the shell does not stop it. To stop a detached run, send it SIGTERM. See [SIGTERM and SIGHUP](#sigterm-and-sighup).
+
+### SIGTERM and SIGHUP
+
+SIGTERM and SIGHUP stop a run as Ctrl-C does. `kill <pid>` sends SIGTERM, and it is the usual way to stop a [detached](#the-detached-run) run, which has no terminal. The command does the same steps as after Ctrl-C: it writes `interrupted` in the journal, releases the run lock, prints the same line on stderr, and exits 130. The first signal decides. A signal that comes while the command ends the run does nothing.
+
+The engine ends the child processes of the run before it releases the lock. The harness process and each gate process start in a session of their own, so each is the leader of a process group that holds every process it starts. When the engine ends a child, it sends SIGTERM to the whole group, waits up to 10 seconds for the leader to exit, and then sends SIGKILL to the whole group. This happens at the end of an idle session, after an interrupt (Ctrl-C, SIGTERM or SIGHUP), and after an error. No child process of the engine stays alive after the engine stops, so `--resume` never starts a second agent next to a first agent that still works in the worktree.
+
+A gate gets its standard input from `/dev/null`. A gate that reads standard input gets end of file at once, and it does not wait for the terminal of the engine.
+
+SIGKILL to the engine cannot be handled. The engine then writes no `interrupted` and leaves the lock, and the children of the run stay alive. Send SIGTERM, not SIGKILL, to stop a run. See [resume after a kill](../how-to/watch-and-resume-a-run.md#2-resume-after-a-kill).
 
 ## Why a step fails
 
@@ -708,7 +718,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `pause-requested` | `ticket` (the ticket of the step boundary), `requested_at` (the time that `delegate pause` wrote in the request, or `null` when the request file cannot be read). The engine writes it at the step boundary where it reads the request. See [the pause](#the-pause). |
 | `paused` | `ticket`, `before` (the work that did not start: `step`, `gate`, or `verifier`). Before a gate also `command` and `phase`, as in `gate-start`. Before a verifier also `round`, and in a chain verification `stack` and `tickets`. The run process then ends with no `run-end`. |
 | `halted` | `ticket`, `role` (`specialist`, `fix-up` or `verifier`), `round` (the verifier or fix-up round; 0 for the specialist), `message` (the message of the `AdapterError`). The harness failed, not the work. The run process then ends with no `step-end` and no `run-end`, and a resume goes on at the open step. See [a failure of the harness](#a-failure-of-the-harness). |
-| `interrupted` | `run_id`. Ctrl-C stopped the run in the foreground. The run process then ends with no `run-end`, and a resume goes on as after a kill. See [Ctrl-C](#ctrl-c). |
+| `interrupted` | `run_id`. Ctrl-C, SIGTERM or SIGHUP stopped the run. The run process then ends with no `run-end`, and a resume goes on as after a kill. See [Ctrl-C](#ctrl-c) and [SIGTERM and SIGHUP](#sigterm-and-sighup). |
 | `skip` | `ticket`, `blockers` (the ids of the blockers that are not built; empty for a ticket that a crash left unreached), `reason` |
 | `rebase` | `ticket`, `result` (`rebased`, `conflict`, or `failed`), `onto_commit` (the run branch tip), `from_commit`, `to_commit` (`null` when the rebase stopped), `files` (the conflicting files) |
 | `verify-start` | `ticket`, `round`, `agent`, `tier`, `model`, `commit` (the tip of the branch that the verifier sees), `copy` (the path of the temporary copy). In a chain verification also `stack` and `tickets`. |

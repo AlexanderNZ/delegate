@@ -193,7 +193,7 @@ delegate run --resume <run-id> --reviewed 2
 
 ## Resume a run
 
-A run stops when you press Ctrl-C, or when its process is killed. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`. After Ctrl-C, `delegate run` writes `interrupted` in the journal, prints the command that goes on with the run, and exits 130. See [Ctrl-C](../reference/run.md#ctrl-c). A paused run has no `run-end` too, and `delegate status` shows `paused`.
+A run stops when you press Ctrl-C, when you send its process SIGTERM or SIGHUP, or when its process is killed with SIGKILL. Such a run has no `run-end` in its journal, and `delegate status` shows the result `running`. After Ctrl-C, `delegate run` writes `interrupted` in the journal, prints the command that goes on with the run, and exits 130. See [Ctrl-C](../reference/run.md#ctrl-c). SIGTERM and SIGHUP do the same, so `kill <pid>` is the way to stop a detached run. The run first ends its harness and its gates with all their child processes, so no agent keeps working after the run stopped. See [SIGTERM and SIGHUP](../reference/run.md#sigterm-and-sighup). A paused run has no `run-end` too, and `delegate status` shows `paused`.
 
 ### 1. Resume after Ctrl-C
 
@@ -207,7 +207,7 @@ A ticket with a recorded commit is not built again. A step that was open continu
 
 ### 2. Resume after a kill
 
-A process that is killed cannot release the lock of its run branch. Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the resume takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
+A process that SIGKILL ends cannot release the lock of its run branch, and it cannot end its children. Before you resume, check that no process of the harness still works in the worktree of the open step. To stop a run, send SIGTERM instead (`kill <pid>`): the run then ends its children and releases the lock. Resume the run with the same command as after Ctrl-C. The lock names the same run id and a process that no longer exists, so the resume takes it over and needs no flag. When the run ends, the command prints a note on stderr that names the old process.
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 

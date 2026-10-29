@@ -5,12 +5,17 @@ of the backend.
 """
 
 import os
+import signal
+import threading
+import time
 from pathlib import Path
 
 import delegate
 import pytest
 from delegate.adapters.shell import ShellGateRunner
 from delegate.ports.gates import GateResult, GateRunner
+
+from .support import is_gone
 
 
 def test_the_shell_backend_is_a_gate_runner():
@@ -104,3 +109,45 @@ def test_a_gate_command_keeps_the_other_variables_of_the_engine(tmp_path, monkey
     monkeypatch.setenv("DELEGATE_TEST_MARKER", "kept")
 
     assert ShellGateRunner().run('echo "$DELEGATE_TEST_MARKER"', tmp_path).output == "kept\n"
+
+
+def test_an_interrupt_during_a_gate_ends_every_process_of_the_gate_including_a_background_child(tmp_path):
+    # The gate starts a child in the background and waits. The interrupt comes as Ctrl-C does (#178).
+    pid_file = tmp_path / "child.pid"
+    command = f"sleep 300 & echo $! > '{pid_file}'; wait"
+
+    def interrupt_when_the_child_runs():
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (pid_file.is_file() and pid_file.read_text().endswith("\n")):
+            time.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGINT)  # a real signal, which cuts a blocked wait of the main thread
+
+    watcher = threading.Thread(target=interrupt_when_the_child_runs, daemon=True)
+    watcher.start()
+    with pytest.raises(KeyboardInterrupt):
+        ShellGateRunner().run(command, tmp_path)
+    watcher.join()
+
+    child = int(pid_file.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the gate left its child alive
+    assert gone, "a background child of the gate stayed alive after the interrupt"
+
+
+def test_a_gate_that_reads_standard_input_gets_end_of_file_at_once(tmp_path):
+    # The process of the test has a standard input that never ends, as a terminal has. The gate must not wait for it.
+    read_end, write_end = os.pipe()
+    saved = os.dup(0)
+    os.dup2(read_end, 0)
+    try:
+        started = time.monotonic()
+        result = ShellGateRunner().run('read -t 20 -r line; echo "status=$?"', tmp_path)
+        elapsed = time.monotonic() - started
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, read_end, write_end):
+            os.close(fd)
+
+    assert result.output == "status=1\n"  # 1 is end of file; a read that timed out gives more than 128
+    assert elapsed < 10

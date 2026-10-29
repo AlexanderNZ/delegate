@@ -22,6 +22,11 @@ Ctrl-C stops a run in the foreground at once. The engine releases the lock and r
 journal. The command prints one line on stderr that tells how to resume, and exits `EXIT_INTERRUPTED` (130). The
 start lines are on stdout already. `delegate pause` stays the way to stop a run at a step boundary.
 
+SIGTERM and SIGHUP stop a run as Ctrl-C does (#178): the same interrupt, the same journal event, the same line on
+stderr, and the same exit status. `kill <pid>` is the way to stop a detached run, which has no terminal. Before the
+engine releases the lock, it ends the process group of the harness or the gate that runs, so no child process of the
+run stays alive. A signal that comes while the engine ends the run is ignored: the first one decides.
+
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
@@ -36,10 +41,14 @@ does.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import signal
 import subprocess
 import sys
+import threading
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 
 from .. import adapters
@@ -78,6 +87,37 @@ DETACHED_PROGRAM: str = (
     "import json, sys; sys.path[:0] = json.loads(sys.argv[1]); "
     "from delegate.cli.delegate import main; sys.exit(main(sys.argv[2:]))"
 )
+
+
+# The signals that stop a run as Ctrl-C does.
+STOP_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGHUP)
+
+
+@contextlib.contextmanager
+def _stop_signals_as_ctrl_c() -> Iterator[None]:
+    """For the block, SIGTERM and SIGHUP raise `KeyboardInterrupt` in the main thread, as SIGINT does. Restore the old handlers after.
+
+    Only the first signal raises: the engine ends the child process group and releases the lock while it handles the
+    interrupt, and a second exception would cut that off. A thread other than the main thread cannot set a handler,
+    and then the block runs with the handlers as they are.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    raised = False
+
+    def handler(signum: int, frame: object) -> None:
+        nonlocal raised
+        if not raised:
+            raised = True
+            raise KeyboardInterrupt
+
+    old = {signum: signal.signal(signum, handler) for signum in STOP_SIGNALS}
+    try:
+        yield
+    finally:
+        for signum, previous in old.items():
+            signal.signal(signum, previous)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -314,10 +354,11 @@ def main(argv: list[str] | None = None) -> int:
             started.append(run_id)
 
         try:
-            result = run_workflow(
-                workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
-                break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
-            )
+            with _stop_signals_as_ctrl_c():
+                result = run_workflow(
+                    workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
+                    break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
+                )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

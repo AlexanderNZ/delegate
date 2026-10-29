@@ -10,10 +10,17 @@ runs. When the stream did not grow for the idle timeout and the report check is
 true, the session has done its work and only stays open, so the helper ends it:
 it sends SIGTERM, and SIGKILL when the process has not exited after
 `TERMINATE_GRACE_SECONDS`.
+
+The process starts in a session of its own, so it is the leader of a process group that holds each process it starts
+(#178). `end_group` sends the signals to the group, not to the leader only: no child of the harness stays alive after
+the helper ended it. An interrupt, as Ctrl-C or SIGTERM to the engine raises it, or any other exception while the helper
+waits, ends the group before the exception leaves the helper, so the engine releases its lock after the group is gone.
 """
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -27,6 +34,31 @@ TERMINATE_GRACE_SECONDS: float = 10.0
 
 # The longest time between two looks at the stream while the process runs.
 POLL_SECONDS: float = 1.0
+
+
+def _signal_group(process: subprocess.Popen, signum: int) -> None:
+    """Send `signum` to the process group of `process`, which is its own group. No group left is not an error."""
+    try:
+        os.killpg(process.pid, signum)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def end_group(process: subprocess.Popen, grace: float | None = None) -> None:
+    """End the process group of `process`: SIGTERM to the group, a wait for the process, then SIGKILL to the group.
+
+    `process` must be the leader of its group (it started with `start_new_session`). The SIGKILL goes to the group also
+    when the leader exited, so a child that ignored SIGTERM does not stay alive. The wait for the leader is `grace` seconds,
+    `TERMINATE_GRACE_SECONDS` by default. An interrupt in the wait does not leave a member of the group alive.
+    """
+    _signal_group(process, signal.SIGTERM)
+    try:
+        process.wait(timeout=TERMINATE_GRACE_SECONDS if grace is None else grace)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        _signal_group(process, signal.SIGKILL)
+    process.wait()
 
 
 @dataclass(frozen=True)
@@ -45,9 +77,13 @@ def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[st
         prompt.seek(0)
         process = subprocess.Popen(
             list(command), stdin=prompt, stdout=out, stderr=stderr, text=True, cwd=request.cwd,
-            env=dict(env) if env is not None else None,
+            env=dict(env) if env is not None else None, start_new_session=True,
         )
-        ended_idle = _wait(process, request)
+        try:
+            ended_idle = _wait(process, request)
+        except BaseException:
+            end_group(process)  # an interrupt or an error: no process of the harness stays alive after the helper
+            raise
         stderr.seek(0)
         return HarnessExit(process.returncode, stderr.read(), ended_idle)
 
@@ -71,10 +107,5 @@ def _wait(process: subprocess.Popen[str], request: AdapterRequest) -> bool:
         elif time.monotonic() - changed >= request.idle_timeout and request.report_valid():
             if process.poll() is not None:  # it exited by itself during the check
                 return False
-            process.terminate()
-            try:
-                process.wait(timeout=TERMINATE_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+            end_group(process)
             return True

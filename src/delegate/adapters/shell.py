@@ -9,6 +9,11 @@ as they come. When the caller gives a log file, the backend appends each part
 to that file at once, so the file grows while the command runs. The result
 holds the standard output, then the standard error, as before.
 
+The command gets its standard input from `/dev/null`, so a gate that reads it gets end of file at once and does not wait
+for the terminal of the engine (#178). It starts in a session of its own, so it leads a process group that holds each
+process it starts. When an interrupt or an error leaves the wait, the backend ends the whole group before it lets the
+exception go on (see `process.end_group`).
+
 The command gets the process environment of `delegate.adapters.environment`,
 the same environment that each agent gets.
 """
@@ -21,6 +26,7 @@ from pathlib import Path
 from typing import IO, BinaryIO
 
 from ..ports.gates import GateResult
+from .process import end_group
 from .environment import process_environment
 
 # The most bytes that one read from a pipe of the command takes.
@@ -52,18 +58,22 @@ class ShellGateRunner:
         handle = log.open("ab") if log is not None else None
         try:
             process = subprocess.Popen(
-                ["bash", "-c", command], cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                env=process_environment(),
+                ["bash", "-c", command], cwd=worktree, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=process_environment(), start_new_session=True,
             )
-            readers = [
-                threading.Thread(target=_copy, args=(pipe, parts, handle, lock), daemon=True)
-                for pipe, parts in ((process.stdout, out), (process.stderr, err))
-            ]
-            for reader in readers:
-                reader.start()
-            for reader in readers:
-                reader.join()
-            status = process.wait()
+            try:
+                readers = [
+                    threading.Thread(target=_copy, args=(pipe, parts, handle, lock), daemon=True)
+                    for pipe, parts in ((process.stdout, out), (process.stderr, err))
+                ]
+                for reader in readers:
+                    reader.start()
+                for reader in readers:
+                    reader.join()
+                status = process.wait()
+            except BaseException:
+                end_group(process)  # an interrupt or an error: no process of the gate stays alive after the backend
+                raise
         finally:
             if handle is not None:
                 handle.close()

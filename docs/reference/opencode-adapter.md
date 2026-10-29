@@ -111,7 +111,7 @@ Four more rules apply:
 
 - An API error gives an `error` event and exit status 0. The `error` event decides, not the exit status.
 - The exit status does not change the end state. A `finished` stream with the exit status 143 (SIGTERM) stays `finished`, and the engine reads the report. See [the end of an agent session](run.md#the-end-of-an-agent-session).
-- After a valid report, the adapter ends a session that writes no event for the `idle_timeout` of the request. It sends SIGTERM, and SIGKILL after 10 seconds more. The result then has `ended_idle` set, and the end state comes from the stream as before.
+- After a valid report, the adapter ends a session that writes no event for the `idle_timeout` of the request. It sends SIGTERM to the process group of the session, and SIGKILL to the group after 10 seconds more. The result then has `ended_idle` set, and the end state comes from the stream as before.
 - A harness that is killed can leave half a line at the end of the stream. The adapter ignores that line. Any other line that is not JSON raises an `AdapterError` that names the stream and the line number. A last `step_finish` event with no `part.reason` field also raises an `AdapterError`.
 
 The end state `capped` means that the model reached its output limit (`reason` `length`). Measured with the limit set to 30 tokens in the project configuration. The cap on the steps of an agent is different: see [the step cap](#the-step-cap).
