@@ -7,6 +7,7 @@ dependency order. Nothing here touches git or the harness.
 from __future__ import annotations
 
 import math
+import re
 import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -30,6 +31,44 @@ TIER_RANK: dict[str, int] = {"cheap": 0, "standard": 1, "strong": 2, "verifier":
 
 # The verifier tier never goes down, in any mode. A verifier override must rank at least this high.
 VERIFIER_TIER_FLOOR: str = "verifier"
+
+
+# A ticket id is a path segment of the worktree and a part of the ticket branch name (#181).
+TICKET_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+_REF_FORBIDDEN_CHARS = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+def ref_name_problem(name: str) -> str | None:
+    """Why git would refuse `name` as a branch name, or None. The rules of `git check-ref-format --branch`.
+
+    The check is in Python, because `run/` starts no process.
+    """
+    if _REF_FORBIDDEN_CHARS.search(name):
+        return "holds a space, a control character, or one of ~ ^ : ? * [ \\"
+    for part, reason in (("..", "holds '..'"), ("@{", "holds '@{'"), ("//", "holds '//'")):
+        if part in name:
+            return reason
+    if name == "@":
+        return "is '@'"
+    if name.startswith(("-", "/")):
+        return f"starts with {name[0]!r}"
+    if name.endswith(("/", ".")):
+        return f"ends with {name[-1]!r}"
+    for component in name.split("/"):
+        if component.startswith("."):
+            return "has a part that starts with '.'"
+        if component.endswith(".lock"):
+            return "has a part that ends with '.lock'"
+    return None
+
+
+def _ticket_id_problem(ticket_id: str) -> str | None:
+    if not TICKET_ID_PATTERN.fullmatch(ticket_id):
+        return "must start with a letter or a digit and hold only letters, digits, '.', '_' and '-'"
+    if ".." in ticket_id:
+        return "must not hold '..'"
+    return None
 
 
 @dataclass(frozen=True)
@@ -337,6 +376,9 @@ def _read_tickets(reader: _Reader, value: object, root: Path) -> list[Ticket]:
             reader.problems.append(f"{label}: id appears twice")
         if ticket_id is not None:
             seen.add(ticket_id)
+            id_problem = _ticket_id_problem(ticket_id)
+            if id_problem is not None:
+                reader.problems.append(f"{label}: id {id_problem}")
         text = _read_ticket_text(reader, raw, label, root)
         stack = reader.string(raw, "stack", f"{label}: stack")
         blocked_by = reader.string_list(raw, "blocked-by", f"{label}: blocked-by", at_least_one=False)
@@ -379,6 +421,10 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
     adapter = reader.string(data, "adapter", "adapter")
     if base_branch is not None and base_branch == run_branch:
         reader.problems.append(f"run-branch: {run_branch!r} is the base-branch; the run needs its own branch")
+    for field, branch in (("base-branch", base_branch), ("run-branch", run_branch)):
+        problem = ref_name_problem(branch) if branch is not None else None
+        if problem is not None:
+            reader.problems.append(f"{field}: {branch!r} is not a branch name that git takes: it {problem}")
     if mode is not None and mode not in MODES:
         reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
     ticket_start = reader.string(data, "ticket-start", "ticket-start") if "ticket-start" in data else START_BASE_BRANCH
@@ -406,7 +452,13 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
     stacks = _read_stacks(reader, data.get("stacks"), Path(path).parent)
     tickets = _read_tickets(reader, data.get("tickets"), Path(path).parent)
     known_ids = {t.id for t in tickets}
+    run_branch_valid = run_branch is not None and ref_name_problem(run_branch) is None
     for ticket in tickets:
+        # The ticket branch is `<run-branch>-<id>` (the engine names it so). A bad id or a bad run branch is reported above.
+        branch = f"{run_branch}-{ticket.id}"
+        branch_problem = ref_name_problem(branch) if run_branch_valid and _ticket_id_problem(ticket.id) is None else None
+        if branch_problem is not None:
+            reader.problems.append(f"ticket {ticket.id!r}: the ticket branch {branch!r} is not a branch name that git takes: it {branch_problem}")
         if ticket.stack not in stacks:
             known = ", ".join(sorted(stacks))
             reader.problems.append(f"ticket {ticket.id!r}: unknown stack {ticket.stack!r}; known stacks: {known}")

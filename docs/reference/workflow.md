@@ -239,7 +239,7 @@ Each `[[tickets]]` table describes one ticket. The tickets can be in any order i
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | string | The identifier of the ticket. It must be unique in the file. |
+| `id` | string | The identifier of the ticket. It must be unique in the file. The engine uses it as a directory name and as a part of the ticket branch name, so it must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and must not hold `..`. See [Names that git and the file system take](#names-that-git-and-the-file-system-take). |
 | `text` | string | The ticket text, inline. Give exactly one of `text` and `text-file`. |
 | `text-file` | string | The path of a local file that holds the ticket text. The path is relative to the directory of the workflow file. The file must exist. |
 | `stack` | string | The name of a stack in `stacks`. |
@@ -259,6 +259,19 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 
 `delegate run --resume <run-id> --dry-run` prints the old order, the new order, the [**verdict**](../glossary.md#verdict) of each rule and the tickets to review, and changes nothing. See [the plan change](run.md#the-plan-change).
 
+## Names that git and the file system take
+
+The check refuses a name that the engine cannot use. It runs before the run starts, so a bad name makes no branch and no `run-start`. `delegate run --dry-run` lists each problem.
+
+- A ticket `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and must not hold `..`. An absolute path, a space, a leading `-` or `.`, and `/` are refused.
+- `base-branch`, `run-branch` and each ticket branch must follow the ref-name rules of git. The ticket branch is `<run-branch>-<id>`. A name is refused when it:
+    - holds a space, a control character, or one of `~ ^ : ? * [ \`;
+    - holds `..`, `@{` or `//`, or is `@`;
+    - starts with `-` or `/`, or ends with `/` or `.`;
+    - has a part (between `/`) that starts with `.` or ends with `.lock`.
+
+The check is in Python and starts no process. For example, the id `a.lock` is a valid path segment, but the ticket branch `run/demo-a.lock` ends with `.lock`, so the check refuses the ticket and names the branch.
+
 ## Problems that the check reports
 
 | Problem | What the message names |
@@ -274,6 +287,9 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 | A ticket is blocked by an id that no ticket has. | The ticket and the blocker. |
 | Tickets wait on each other. | Every ticket in the cycle. A ticket that blocks itself is a cycle. |
 | Two tickets have one id. | The id. |
+| A ticket `id` is not a safe path segment, for example `/tmp/x`, `a b`, `-a` or `a..b`. | The ticket and the rule. |
+| `base-branch` or `run-branch` is not a branch name that git takes. | The field and the value. |
+| A ticket branch (`<run-branch>-<id>`) is not a branch name that git takes, for example `run/demo-a.lock`. | The ticket and the branch. |
 | A `text-file` does not exist. | The ticket and the path. |
 | A stack gives both `specialist-notes` and `specialist-notes-file`, or both `verifier-notes` and `verifier-notes-file`. | The stack and the two fields, for example `stacks.web: give at most one of verifier-notes and verifier-notes-file`. |
 | A `specialist-notes-file` or a `verifier-notes-file` does not exist, or it is empty. | The stack, the field and the path. |
