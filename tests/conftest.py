@@ -77,6 +77,18 @@ def isolated_git_config(monkeypatch, empty_git_config):
     monkeypatch.setenv("GIT_CONFIG_COUNT", str(count))
 
 
+@pytest.fixture
+def home(tmp_path_factory, monkeypatch) -> Path:
+    """A user directory that holds nothing, so no agent file of the machine takes part in a case (#182).
+
+    `delegate run --dry-run` looks for the agent files of each stack in the user directory too. A test that calls it
+    uses this fixture, so the result does not depend on the machine that runs the test.
+    """
+    path = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(path))
+    return path
+
+
 @pytest.fixture(scope="session")
 def tiers():
     return load_tiers()

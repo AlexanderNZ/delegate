@@ -6,6 +6,7 @@ that copies only the package skips these cases with a reason.
 
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter
+from .support import ScriptedAdapter, write_project_agents
 from .pages import repository_root
 
 ROOT = repository_root(Path(__file__))
@@ -109,8 +110,11 @@ def test_an_agent_that_follows_the_tutorial_word_for_word_reaches_an_accept_verd
 
 
 @outside_the_package
-def test_the_sample_workflow_passes_the_dry_run(capsys):
-    code = delegate.main(["run", str(SAMPLE / "workflow.toml"), "--dry-run"])
+def test_the_sample_workflow_passes_the_dry_run(tmp_path, home, capsys):
+    sample = tmp_path / "sample"
+    shutil.copytree(SAMPLE, sample)
+    write_project_agents(sample)  # the tutorial writes these files with `delegate bootstrap`; the home of the machine takes no part
+    code = delegate.main(["run", str(sample / "workflow.toml"), "--repo", str(sample), "--dry-run"])
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")

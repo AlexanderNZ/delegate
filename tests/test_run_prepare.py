@@ -23,6 +23,8 @@ from .support import (
     run_main, run_start, step_start, write_journal, write_project_agents,
 )
 
+pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+
 # The marker is an ignored file, as `node_modules` is: git does not put it in a tree, and the scripted specialist does not commit it.
 MARKER = "prepared.marker"
 PREPARE = f"printf prepared > {MARKER}"

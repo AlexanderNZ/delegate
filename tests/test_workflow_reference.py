@@ -14,6 +14,7 @@ from delegate.run.domain import MODES
 from delegate.run.workflow import ADAPTERS, ROLES, STACK_FIELDS, TICKET_FIELDS, TOP_LEVEL_FIELDS
 
 from .pages import repository_root
+from .support import write_project_agents
 
 ROOT = repository_root(Path(__file__))
 REFERENCE = ROOT / "docs" / "reference" / "workflow.md"
@@ -33,13 +34,15 @@ def test_the_reference_names_each_workflow_field_mode_role_and_adapter(name):
 
 
 @outside_the_package
-def test_the_reference_example_workflow_passes_the_dry_run(tmp_path, capsys):
+def test_the_reference_example_workflow_passes_the_dry_run(tmp_path, home, capsys):
     blocks = re.findall(r"```toml\n(.*?)```", REFERENCE.read_text(), flags=re.DOTALL)
     assert blocks, "the reference must hold a toml example"
     workflow = tmp_path / "workflow.toml"
     workflow.write_text(blocks[0])
 
-    code = delegate.main(["run", str(workflow), "--dry-run"])
+    write_project_agents(tmp_path)  # the check looks for the agent files of each stack; the home of the machine takes no part
+
+    code = delegate.main(["run", str(workflow), "--repo", str(tmp_path), "--dry-run"])
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")

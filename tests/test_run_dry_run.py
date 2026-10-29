@@ -13,6 +13,8 @@ from delegate.cli import delegate
 
 from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
 
+pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+
 VALID = """\
 base-branch = "main"
 run-branch = "run/demo"

@@ -11,7 +11,9 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TEMPLATE_GIT, copy_of, git
+from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
+
+pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
 
 WORKFLOW = """\
 base-branch = "main"
@@ -36,6 +38,7 @@ blocked-by = []
 def make_repo(tmp_path: Path, workflow: str) -> Path:
     def build(repo: Path) -> None:
         (repo / "workflow.toml").write_text(workflow)
+        write_project_agents(repo)
         git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
         git(repo, *TEMPLATE_GIT, "add", "-A")
         git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", "seed")
@@ -45,7 +48,7 @@ def make_repo(tmp_path: Path, workflow: str) -> Path:
 
 def run(repo: Path, capsys, *extra: str) -> tuple[int, str, str]:
     try:
-        code = delegate.main(["run", str(repo / "workflow.toml"), *extra])
+        code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo), *extra])
     except SystemExit as stop:
         code = stop.code
     captured = capsys.readouterr()

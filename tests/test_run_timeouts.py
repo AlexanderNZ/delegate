@@ -15,6 +15,8 @@ from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 from . import claude_fake
 from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main, write_project_agents
 
+pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+
 GATE = 'gates = ["test -f feature.txt"]'
 
 

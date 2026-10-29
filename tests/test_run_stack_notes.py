@@ -16,6 +16,8 @@ from delegate import adapters
 
 from .support import TEMPLATE_GIT, WORKFLOW, ScriptedAdapter, copy_of, git, run_main, write_project_agents
 
+pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+
 HEADING = "## Notes of this stack"
 SPECIALIST_NOTES = "Run `make setup` once before the tests. This host has no visual gate."
 VERIFIER_NOTES = "Check each screenshot claim against the test output. This host has no visual gate."

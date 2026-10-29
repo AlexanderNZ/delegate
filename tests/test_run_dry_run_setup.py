@@ -58,15 +58,6 @@ CLAUDE_CODE_DIR = Path(".claude") / "agents"
 OPENCODE_DIR = Path(".opencode") / "agents"
 
 
-@pytest.fixture
-def home(tmp_path, monkeypatch) -> Path:
-    """A user directory that holds nothing, so no agent file of the machine takes part in a case."""
-    path = tmp_path / "home"
-    path.mkdir()
-    monkeypatch.setenv("HOME", str(path))
-    return path
-
-
 def make_repo(tmp_path: Path, adapter: str = "claude-code") -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
