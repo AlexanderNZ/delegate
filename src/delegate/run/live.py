@@ -151,7 +151,8 @@ class LiveView:
         self, journal: Path, reader_of: status.ReaderOf, now: Callable[[], datetime],
         size: Callable[[], tuple[int, int]], draw: Callable[[list[str]], None], stall_minutes: float | None = None,
     ) -> None:
-        self._journal, self._reader_of, self._now, self._size, self._draw = journal, reader_of, now, size, draw
+        self._journal, self._now, self._size, self._draw = journal, now, size, draw
+        self._reader_of = status.caching(reader_of)  # a stream that did not change is not parsed again (#183)
         self._idle_limit = int((IDLE_WARNING_MINUTES if stall_minutes is None else stall_minutes) * 60)
         self._events: list[dict[str, object]] = []
         self._feed: list[_Line] = []  # the lines of the group of the ticket that runs now
@@ -335,6 +336,13 @@ class LiveView:
         self._flush(ticket)
         self._waiting[ticket] = waiting
 
+    def _result_tokens(self, event: dict[str, object]) -> str | None:
+        """The tokens of the agent that a result event ends: the totals of the event, or else the tokens of its stream."""
+        totals = status.journal_totals(event)
+        if totals is not None:
+            return status.format_token_counts(totals.tokens_new, totals.tokens_cache)
+        return self._tokens(event.get("event_stream"))
+
     def _tokens(self, stream: object) -> str | None:
         """The tokens of an event stream in the short form, or None when the run has no reader or the stream cannot be read."""
         if self._reader is None or stream is None:
@@ -391,7 +399,7 @@ class LiveView:
             spans: list[Span] = [("", f"{role} {ended}")]
             if agent is not None:
                 spans += [JOIN, ("", duration((when - agent[0]).total_seconds()))]
-            tokens = self._tokens(event.get("event_stream"))
+            tokens = self._result_tokens(event)
             if tokens is not None:
                 spans += [JOIN, ("dim", tokens)]
             self._wait(ticket, _Waiting(AGENT, when, self._chain_subject(ticket, subject), spans))

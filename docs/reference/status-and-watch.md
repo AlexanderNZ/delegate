@@ -161,6 +161,12 @@ Each adapter splits the counts of its stream:
 | `claude-code` | `input_tokens`, `cache_creation_input_tokens`, and `output_tokens` of a `usage` object | `cache_read_input_tokens` of a `usage` object |
 | `opencode` | `input`, `output`, `reasoning`, and `cache.write` of the `part.tokens` of a `step_finish` event | `cache.read` of the `part.tokens` of a `step_finish` event. A step with no `cache` field gives 0. |
 
+Where the counts come from:
+
+- **An agent that ended.** The engine wrote the counts of its stream into its result event (`adapter-result`, `fixup-result` or `verify-result`) when its session ended. `status` and `watch` take the counts from the journal. They do not read the stream, so they show the same counts after the stream file is deleted. See [the totals of an agent that ended](run.md#the-totals-of-an-agent-that-ended).
+- **An agent that runs now.** `status` and `watch` read its stream. The live view of `watch` keeps the last result for each stream, with the size and the modification time of the file, and it parses the stream again only when one of the two changes. A frame costs no parse for a stream that did not change.
+- **A journal from an earlier version.** Its result events have no counts. `status` and `watch` then read the stream, as they did before.
+
 The token counts of a `claude-code` stream:
 
 - The counts of one turn or one session come from its `usage` object, as the table above gives.

@@ -266,7 +266,8 @@ def _ticket(
 ) -> tuple[TicketSnapshot, int | None]:
     """The snapshot of one ticket from its own events, and the seconds of its step when it ended after one.
 
-    With no reader (`activity` is None), the ticket has no tokens and no idle time, and its streams are not read.
+    With no reader (`activity` is None), the ticket has no tokens and no idle time, and its streams are not read. A
+    result event that holds the totals of its agent (`journal_totals`) gives them, and its stream is not read (#183).
 
     An agent runs from its `agent-start` until its result event, a `step-end` (a crash), or the end of the run. The
     verifier of an `economy` chain starts after its ticket ended, so a ticket that ended can have an agent that runs.
@@ -275,6 +276,7 @@ def _ticket(
     state, phase = PENDING, None
     started = ended = None
     streams: list[str] = []
+    totals: dict[str, Activity] = {}  # the totals that the result events hold, by event stream (#183)
     live: dict[str, object] | None = None  # the `agent-start` of the agent that runs now
     gate: dict[str, object] | None = None  # the `gate-start` of the gate that runs now
     reason: str | None = None
@@ -301,6 +303,9 @@ def _ticket(
             phase, live = PHASE_OF_ROLE[str(event["role"])], event
         elif kind in AGENT_RESULTS:
             live = None
+            ended_totals = journal_totals(event)
+            if ended_totals is not None:
+                totals[str(event["event_stream"])] = ended_totals
         elif kind in PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
             phase = PHASE_OF_EVENT[kind]
         elif kind in ("gate-start", "gate-result", "gate-skip") and event["phase"] != "fixup":
@@ -326,7 +331,8 @@ def _ticket(
     idle = None
     for stream in streams:
         is_live = live is not None and stream == str(live["event_stream"])
-        found = read_stream(activity, Path(stream), is_live)
+        # An agent that ended has its totals in the journal; only an agent that runs, or an earlier journal, needs the stream.
+        found = totals[stream] if stream in totals and not is_live else read_stream(activity, Path(stream), is_live)
         if found is None:
             tokens = None  # a count without this agent is not the count of the ticket
             continue
@@ -422,6 +428,60 @@ def _log_idle_seconds(log: Path, now: datetime) -> int | None:
     except OSError:
         return None
     return _seconds(datetime.fromtimestamp(changed, now.tzinfo), now)
+
+
+def journal_totals(event: dict[str, object]) -> Activity | None:
+    """The totals that a result event of an agent holds, or None for a journal of an earlier version that has none (#183).
+
+    The engine reads the stream of an agent once, when the session ends, and writes the new tokens (`tokens_new`), the
+    cache reads (`tokens_cache`) and the time of the last activity (`last_event`) into the result event. The stream of
+    an agent that ended never changes, so the views take these facts from the journal.
+    """
+    try:
+        new, cache = event["tokens_new"], event["tokens_cache"]
+        if not isinstance(new, int) or not isinstance(cache, int) or isinstance(new, bool) or isinstance(cache, bool):
+            return None
+        last = event.get("last_event")
+        return Activity(new, cache, None if last is None else datetime.fromisoformat(str(last)))
+    except (KeyError, ValueError):
+        return None  # a result event with no totals, or with totals that the view cannot use: the stream is the source
+
+
+class CachedReader:
+    """A reader of event streams that parses a stream again only when the stream changed (#183).
+
+    It keeps the last `Activity` of each path, with the size and the modification time of the file at that time. The live
+    view asks for the same stream many times in a second; the stream of an agent that works changes, the others do not.
+    A stream that cannot be read is not kept: the error goes up, and the next call tries again. The file is looked at
+    before it is parsed, so a write during the parse makes the key old, and the next call parses the stream again.
+    """
+
+    def __init__(self, reader: StreamReader) -> None:
+        self._reader = reader
+        self._kept: dict[Path, tuple[tuple[int, int], Activity]] = {}
+
+    def __call__(self, stream: Path) -> Activity:
+        info = stream.stat()
+        key = (info.st_size, info.st_mtime_ns)
+        kept = self._kept.get(stream)
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        found = self._reader(stream)
+        self._kept[stream] = (key, found)
+        return found
+
+
+def caching(reader_of: ReaderOf) -> ReaderOf:
+    """`reader_of` with a `CachedReader` for each adapter name, so that all calls of a live view share one cache."""
+    readers: dict[str, StreamReader | None] = {}
+
+    def cached(adapter: str) -> StreamReader | None:
+        if adapter not in readers:
+            found = reader_of(adapter)
+            readers[adapter] = None if found is None else CachedReader(found)
+        return readers[adapter]
+
+    return cached
 
 
 def read_stream(activity: StreamReader, stream: Path, is_live: bool) -> Activity | None:

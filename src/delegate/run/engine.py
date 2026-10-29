@@ -1271,6 +1271,21 @@ def _ended_reason(result: AdapterResult, who: str, stack: Stack) -> str:
     return f"{who} ended {result.end_state} with exit status {result.exit_status}"
 
 
+def _totals_fields(adapter: Adapter, stream: Path) -> dict[str, object]:
+    """The token totals and the time of the last activity of the stream of an agent that ended, for its result event (#183).
+
+    The engine reads the stream once, here, so the views read the journal and not the stream of an agent that ended. A
+    stream that the adapter cannot read gives no field: the result event then has no totals, and a view reads the stream
+    as it did before. The run does not fail for a missing total.
+    """
+    try:
+        found = adapter.activity(stream)
+    except Exception:  # noqa: BLE001 - the totals are for the views; the result of the agent does not depend on them
+        return {}
+    last = None if found.last_event is None else found.last_event.isoformat()
+    return {"tokens_new": found.tokens_new, "tokens_cache": found.tokens_cache, "last_event": last}
+
+
 def _journal_idle(journal: Journal, result: AdapterResult, ticket: str, role: str, round_number: int) -> None:
     """Record that the adapter ended the session of the agent at the idle timeout, if it did, before its result event."""
     if result.ended_idle:
@@ -1541,6 +1556,7 @@ def _build_with_continuations(
             journal.append(
                 "adapter-result", ticket=ticket.id, exit_status=result.exit_status, end_state=result.end_state,
                 session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
+                **_totals_fields(adapter, result.event_stream),
             )
         gate_output: str | None = None
         problems: tuple[str, ...] = ()
@@ -1879,6 +1895,7 @@ def _run_fixup(
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
+        **_totals_fields(step.adapter, result.event_stream),
     )
     if not _session_done(result, report_valid):
         raise _StepFailed(_ended_reason(result, "the fix-up specialist", step.stack))
@@ -2036,6 +2053,7 @@ def _verify_round(
     step.journal.append(
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(stream), **_refused_fields(result),
+        **_totals_fields(step.adapter, stream),
     )
     if violation is not None:
         step.journal.append(
