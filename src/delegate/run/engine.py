@@ -62,7 +62,9 @@ earlier run, rebuilds the state from it, and goes on at the first step that is
 not complete. It appends to the journal and never rewrites a line. A step with
 a `step-end` is complete, and the engine never builds it again. A step with a
 `run-branch-advance` has its commit on the run branch already, so the engine
-only closes it. Any other open step restarts in its own worktree, which the
+only closes it. In `assure` mode, a step whose newest verdict is ACCEPT, and whose accepted commit the run branch
+holds, is closed the same way: the process stopped after it moved the run branch and before it wrote
+`run-branch-advance`, so the resume writes that event with `recovered: true` (see `_recover_advance`). Any other open step restarts in its own worktree, which the
 engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again. A verifier run that ended with no verdict does not
 count against the fix-up limit: the resume runs that round again.
@@ -1415,6 +1417,8 @@ def _build_ticket(
             if not _holds(vcs, repo, landed, f"refs/heads/{workflow.run_branch}"):
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
+        if retried is None and workflow.mode == domain.ASSURE and _recover_advance(workflow, ticket, vcs, repo, journal, prior):
+            return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
         made = _prepare_worktree(vcs, repo, worktree, branch, start_ref, hooks_dir)
         if retried is None:
@@ -1447,6 +1451,33 @@ def _build_ticket(
         reason = _rebase_onto_run_branch(step)
         return reason if reason else _verify_ticket(step, verify_rounds)
     return None
+
+
+def _recover_advance(workflow: Workflow, ticket: Ticket, vcs: VersionControl, repo: Path, journal: Journal, prior: list[dict[str, object]]) -> bool:
+    """Write the `run-branch-advance` that a stop left out, and tell whether the step is closed.
+
+    The engine moves the run branch first and writes `run-branch-advance` after it. A stop between the two leaves an
+    open step whose commit is on the run branch already. Git is the record of the work that landed, so the step is
+    recovered when the newest verdict of the step is ACCEPT and the run branch holds the commit of the `verify-start`
+    of that verdict. The event has `recovered: true`. Return False, and write nothing, in any other case.
+    """
+    verdicts = [index for index, e in enumerate(prior) if e["event"] == "verdict"]
+    if not verdicts or not domain.is_accepted(str(prior[verdicts[-1]]["verdict"])):
+        return False
+    starts = [e for e in prior[: verdicts[-1]] if e["event"] == "verify-start"]
+    if not starts:
+        return False
+    accepted = str(starts[-1]["commit"])
+    run_branch = workflow.run_branch
+    if not _holds(vcs, repo, accepted, f"refs/heads/{run_branch}"):
+        return False
+    # The step fast-forwarded from the commit that it rebased onto, or from its own base when it did not rebase.
+    rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
+    from_commit = str(rebases[-1]["onto_commit"]) if rebases else str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
+    journal.append(
+        "run-branch-advance", ticket=ticket.id, run_branch=run_branch, from_commit=from_commit, to_commit=accepted, recovered=True
+    )
+    return True
 
 
 def _build_with_continuations(
