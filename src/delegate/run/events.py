@@ -317,6 +317,7 @@ class VerifyStart(TypedDict):
     model: str
     commit: str
     copy: str
+    snapshot: NotRequired[dict[str, object]]
     stack: NotRequired[str]
     tickets: NotRequired[list[str]]
 

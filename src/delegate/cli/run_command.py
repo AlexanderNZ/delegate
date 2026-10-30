@@ -237,7 +237,9 @@ def _print_review(review: PlanReview) -> int:
     if review.check is None:
         print(f"run {review.run_id}: no plan change")
         print(f"order: {', '.join(review.new_order)}")
-        return 0
+        for problem in review.problems():
+            print(f"delegate run: {problem}", file=sys.stderr)
+        return 1 if review.problems() else 0
     check = review.check
     print(f"run {review.run_id}: plan change")
     print(f"old order: {', '.join(review.old_order)}")

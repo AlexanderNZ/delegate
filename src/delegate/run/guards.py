@@ -68,6 +68,17 @@ class WorktreeSnapshot:
     head: str
     paths: dict[str, str]
 
+    def to_record(self) -> dict[str, object]:
+        """The snapshot as the journal holds it in `verify-start`: the HEAD and the state of each path."""
+        return {"head": self.head, "paths": dict(self.paths)}
+
+    @classmethod
+    def from_record(cls, worktree: Path, record: dict[str, object]) -> WorktreeSnapshot:
+        """The snapshot that `to_record` made, for `worktree`."""
+        paths = record["paths"]
+        assert isinstance(paths, dict)
+        return cls(worktree, str(record["head"]), {str(path): str(state) for path, state in paths.items()})
+
 
 @dataclass(frozen=True)
 class HotspotMatch:

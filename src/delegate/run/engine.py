@@ -158,7 +158,7 @@ from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .events import RUN_START, SCHEMA_VERSION
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
-    snapshot_worktree,
+    snapshot_worktree, WorktreeSnapshot,
 )
 from .journal import Journal, JournalError, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
@@ -672,6 +672,16 @@ class PlanReview:
         ]
 
 
+def _violation_text(violation: dict[str, object]) -> str:
+    """The text that refuses a resume of a run that an invariant violation halted: the ticket, the worktree and each change."""
+    changes = "; ".join(str(change) for change in violation["changes"])  # type: ignore[union-attr]
+    return (
+        f"an invariant violation halted the run at ticket {violation['ticket']!r}: "
+        f"the verifier changed the real worktree {violation['worktree']}: {changes}; "
+        "a halted run cannot be resumed: start a new run"
+    )
+
+
 def _review(
     workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, reviewed: tuple[str, ...],
     branch_exists: Callable[[str], bool],
@@ -686,6 +696,8 @@ def _review(
     _check_same_run(workflow, workflow_path, events[0], run_id)
     old_order, new_plan = plan_ids(events), _plan_of(workflow)
     new_order = [t.id for t in new_plan]
+    violations = [event for event in events if event["event"] == "invariant-violation"]
+    halted = [_violation_text(violations[-1])] if violations else []
     old = _recorded_plan(events)
     if old is None:
         if old_order != new_order:
@@ -694,17 +706,16 @@ def _review(
                 "the journal of the run records no plan, because an earlier version of delegate started it, "
                 "so a plan change cannot be checked: start a new run"
             )
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None)
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted)
     if old == new_plan:
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None)
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted)
     started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
     check = domain.check_plan_change(old, new_plan, started)
     other = [
         f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
         for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
     ]
-    if any(event["event"] == "invariant-violation" for event in events):
-        other.append(f"an invariant violation halted run {run_id}, and a halted run cannot be resumed: start a new run")
+    other.extend(halted)
     for ticket in workflow.tickets:
         branch = _ticket_branch(workflow, ticket)
         if ticket.id in check.added and branch_exists(branch):
@@ -736,6 +747,8 @@ def review_plan_change(
 def _refuse_plan_change(review: PlanReview, workflow_path: Path, run_id: str) -> None:
     """Raise EngineError, which names each problem, when the rules of a plan change refuse the resume."""
     problems = review.problems()
+    if problems and not review.changed:
+        raise EngineError(f"run {run_id!r} cannot be resumed: " + "; ".join(problems))
     if problems:
         raise EngineError(f"workflow {workflow_path} changes the plan of run {run_id}, and the rules refuse it: " + "; ".join(problems))
 
@@ -781,13 +794,7 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     refused = _refused(ticket_id, run_id)
     violations = [e for e in progress.events if e["event"] == "invariant-violation"]
     if violations:
-        violation = violations[-1]
-        changes = "; ".join(str(change) for change in violation["changes"])  # type: ignore[union-attr]
-        raise EngineError(
-            f"{refused}: an invariant violation halted the run at ticket {violation['ticket']!r}: "
-            f"the verifier changed the real worktree {violation['worktree']}: {changes}; "
-            "a halted run cannot be resumed: start a new run"
-        )
+        raise EngineError(f"{refused}: {_violation_text(violations[-1])}")
     if ticket_id not in {ticket.id for ticket in workflow.tickets}:
         raise EngineError(f"{refused}: it is not a ticket of the run")
     if ticket_id in progress.built:
@@ -1532,6 +1539,8 @@ def _build_ticket(
             if not _holds(vcs, repo, landed, f"refs/heads/{workflow.run_branch}"):
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
+        # Before anything else: a verifier that a stop cut off can have changed the real worktree (#192).
+        _check_verifier_stop(journal, vcs, worktree, ticket.id, prior)
         if retried is None and workflow.mode == domain.ASSURE and _recover_advance(workflow, ticket, vcs, repo, journal, prior):
             return None
         base_commit = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
@@ -2061,6 +2070,36 @@ def _fixup_gates(step: _Step, round_number: int) -> None:
         raise _StepFailed("gates red: " + "; ".join(red))
 
 
+def _journal_violation(journal: Journal, ticket: str, round_number: int, violation: InvariantViolation) -> None:
+    """Write `invariant-violation` for the change that `violation` names."""
+    journal.append(
+        "invariant-violation", ticket=ticket, round=round_number, worktree=str(violation.worktree),
+        head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
+    )
+
+
+def _check_verifier_stop(journal: Journal, vcs: VersionControl, worktree: Path, ticket: str, events: list[dict[str, object]]) -> None:
+    """Halt a resume when a verifier that a stop cut off changed the real worktree (#192).
+
+    `events` are the journal events of the step. Do nothing unless the newest `verify-start` has no `verify-result` after
+    it, and records a snapshot. The session then did not end, so the engine did not make its check after the session.
+    Compare the worktree with the snapshot of the `verify-start`. On a difference write `invariant-violation` and raise
+    `InvariantViolation`, as the check after a session does. A journal of an earlier version has no snapshot: do nothing.
+    """
+    starts = [index for index, e in enumerate(events) if e["event"] == "verify-start"]
+    if not starts or not worktree.is_dir():
+        return
+    start = events[starts[-1]]
+    record = start.get("snapshot")
+    if record is None or any(e["event"] == "verify-result" for e in events[starts[-1] + 1 :]):
+        return
+    try:
+        check_worktree_unchanged(vcs, WorktreeSnapshot.from_record(worktree, record))  # type: ignore[arg-type]
+    except InvariantViolation as violation:
+        _journal_violation(journal, ticket, int(start["round"]), violation)  # type: ignore[call-overload]
+        raise
+
+
 def _verify_round(
     step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None,
     earlier_fixups: tuple[str, str] | None = None,
@@ -2116,11 +2155,12 @@ def _verify_round(
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
         _run_prepare(step.gates, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
         added = _make_proof_copy(copy)
+        # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
+        before = snapshot_worktree(step.vcs, step.worktree)
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
-            commit=verified, copy=str(copy), **step.chain_fields,
+            commit=verified, copy=str(copy), snapshot=before.to_record(), **step.chain_fields,
         )
-        before = snapshot_worktree(step.vcs, step.worktree)
         # The stream goes in the evidence directory from the start, outside the copy, so it stays when the copy goes.
         stream = _start_agent(step.journal, ticket.id, ROLE_VERIFIER, round_number, evidence / report_path.name)
         # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
@@ -2157,10 +2197,7 @@ def _verify_round(
         **_totals_fields(step.adapter, stream),
     )
     if violation is not None:
-        step.journal.append(
-            "invariant-violation", ticket=ticket.id, round=round_number, worktree=str(violation.worktree),
-            head_before=violation.head_before, head_after=violation.head_after, changes=violation.changes,
-        )
+        _journal_violation(step.journal, ticket.id, round_number, violation)
         raise violation
     # A verifier that could not write its verdict file (a permission mode that refuses a shell redirect, for example)
     # ends its final message with the verdict object, as the brief asks. The engine writes that object to the report
@@ -2377,6 +2414,9 @@ class _ChainRun:
         if any(e["event"] == "run-branch-advance" for e in events):
             return []  # a resume after the run branch moved: nothing is left to verify
         tip_ticket = self.chain[-1]
+        _check_verifier_stop(
+            self.journal, self.vcs, self.state_dir / "worktrees" / self.run_id / tip_ticket.id, tip_ticket.id, events
+        )
         segments = self._segments(every_event, events)
         # The chain tip before the first fix-up of any stack. The fix-ups from here to the start of a stack are the
         # fix-ups of the stacks before it, and its full verifier sees those that change a file of its tickets (#93).
