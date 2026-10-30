@@ -60,6 +60,7 @@ Use them where the provider is not the one `tiers.toml` names. OpenCode resolves
 
 The same package ships a second command, `verifier-brief`. It prints a verifier's brief on stdout. A third subcommand, `bootstrap`, writes a whole repository's agent set; the next section documents it.
 
+<!-- not-a-command -->
 ```bash
 verifier-brief full  --repo PATH --branch NAME [--base main] --task 'TEXT or @FILE' [--stack HEADING ...]
 verifier-brief fixup --repo PATH --branch NAME --rejected SHA --findings FILE [--authorised TEXT] [--stack HEADING ...]
@@ -92,6 +93,7 @@ rendered pair from arguments. It replaces the six manual steps in the
 each other and from the worked example, and a later fix to their shape reaches
 none of them.
 
+<!-- not-a-command -->
 ```bash
 agent-definitions bootstrap --repo PATH --name NAME --domain TEXT --tier TIER \
   --skill NAME [--skill NAME ...] --reference PATH [--reference PATH ...] \
@@ -140,7 +142,7 @@ In fix-up mode the verifier does not read the full diff again. It does not repea
 
 The first line of every verifier report names the mode.
 
-A rendered specialist carries the matching rule: a fix-up after a rejection is a new commit on top of the rejected commit, never an amend. An amend destroys the delta, and `verifier-brief fixup` then refuses to build a brief.
+A rendered specialist carries the matching rule: a fix-up after a rejection is a new commit on top of the rejected commit, never an amend. An amend destroys the delta, and the fix-up mode of `verifier-brief` then refuses to build a brief.
 
 The mode is in the template and in a generated brief because a rule in each brief did not stop fix-up verifiers from verifying the whole diff again. The coordinator's side of the protocol is in the `agent-delegation` skill, § Fix-up protocol.
 

@@ -72,10 +72,10 @@ rendered pair. It validates the pair before it copies an agent file.
 ```bash
 agent-definitions bootstrap --repo . --name <repo> --tier strong \
   --domain '<the domain, in one sentence>' \
-  --skill <library-skill> [--skill <library-skill> ...] \
+  --skill <library-skill> --skill <another-library-skill> \
   --reference '`docs/agents/delegation.md` — the gates and the hotspots' \
-  [--reference ... ] \
-  --gate-command '<a gate command>' [--gate-command ...] \
+  --reference '<another read-first document>' \
+  --gate-command '<a gate command>' --gate-command '<another gate command>' \
   --prompt-file <the file with the repo domain rules> --max-turns 80
 ```
 
@@ -516,8 +516,10 @@ When a verifier REJECTs:
    brief:
    ```bash
    verifier-brief fixup --repo <worktree> --branch <name> \
-     --rejected <sha> --findings <file> [--authorised <text>] [--stack <heading>]
+     --rejected <sha> --findings <file>
    ```
+   Add `--authorised <text>` for the additions that you authorised beyond the
+   findings, and `--stack <heading>` to select a gate block.
    It exits non-zero when the rejected commit is not an ancestor of the branch
    tip, and when the delta is empty. Both states mean the specialist rewrote
    history. Send it back; do not hand-build a brief around the loss.
@@ -538,8 +540,9 @@ package puts both commands on PATH.
 ## The workflow engine and its modes
 
 ### When to use the engine
-`delegate run <workflow> --mode assure|economy` runs a chain of tickets for the
-coordinator. The engine makes the worktrees, spawns the specialists, runs the
+`delegate run <workflow>` runs a chain of tickets for the
+coordinator. The mode, `assure` or `economy`, is the field `mode` of the
+workflow file, not an option of the command. The engine makes the worktrees, spawns the specialists, runs the
 gates itself, generates every verifier brief, spawns the blind verifiers,
 scopes each fix-up, and records each step in a journal.
 
@@ -652,8 +655,9 @@ end.
    `nohup` and `&` can stay in the process group of your shell.
    Name the run by its id. The run id is on the line `run <run id>`. The
    short run id is the part of the run id after the last `-`, for example
-   `e9dc`. `delegate status`, `delegate watch`, `delegate pause` and
-   `--resume` take the run id or the short run id. A short id that more than
+   `e9dc`. `delegate status <run-id>`, `delegate watch <run-id>`,
+   `delegate pause <run-id>` and `delegate run --resume <run-id>` take the run
+   id or the short run id. A short id that more than
    one run has is an error: the command names each match and changes nothing.
 2. **Follow the run with `delegate watch`.** Start `delegate watch` as a
    background task, with `--stall-minutes` and `--max-minutes`. The harness
@@ -683,7 +687,7 @@ end.
    the run is active, and `paused` after the stop. `delegate watch` exits 7.
    The run process prints
    `paused <where>; go on with delegate run --resume <run-id>`, and exits 3.
-   A run with no live process cannot be paused: `delegate pause` exits 1.
+   A run with no live process cannot be paused: `delegate pause <run-id>` exits 1.
    To stop a run now, run `delegate stop <run-id>`. Unlike `pause`, it does
    not wait for a step boundary, and it can cut off an agent.
    Ctrl-C stops a run in the foreground with no wait. The run then writes
