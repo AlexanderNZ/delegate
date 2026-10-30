@@ -163,7 +163,7 @@ from .guards import (
 )
 from .journal import Journal, JournalError, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .reports import ReportError, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
+from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order
 
 # The journal keeps this many characters of the end of a gate's output.
@@ -1332,6 +1332,11 @@ def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round
         raise _Halted(ticket, role, round_number, str(error)) from None
 
 
+def _lenient_fields(report: SpecialistReport | VerifierReport) -> dict[str, object]:
+    """`lenient_parse: true` for a report that the strict parse refused (#197), else no field."""
+    return {"lenient_parse": True} if report.lenient_parse else {}
+
+
 def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
     """The check of a report that an adapter calls: true when `read` gives a report, false when it raises ReportError."""
 
@@ -1710,7 +1715,7 @@ def _build_with_continuations(
             else:
                 journal.append(
                     "report-validation", ticket=ticket.id, valid=True, path=str(report_path), reason=None,
-                    status=report.status, blocked_reason=report.blocked_reason,
+                    status=report.status, blocked_reason=report.blocked_reason, **_lenient_fields(report),
                 )
                 unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the specialist")
                 if unfinished:
@@ -2040,7 +2045,7 @@ def _run_fixup(
         raise _StepFailed(str(error)) from None
     step.journal.append(
         "fixup-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None,
-        status=report.status, blocked_reason=report.blocked_reason,
+        status=report.status, blocked_reason=report.blocked_reason, **_lenient_fields(report),
     )
     unfinished = domain.unfinished_reason(report.status, report.blocked_reason, "the fix-up specialist")
     if unfinished:
@@ -2240,7 +2245,8 @@ def _verify_round(
         )
         raise _StepFailed(str(error)) from None
     step.journal.append(
-        "verify-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None, **source
+        "verify-report", ticket=ticket.id, round=round_number, valid=True, path=str(report_path), reason=None, **source,
+        **_lenient_fields(report),
     )
     chain_fields = step.chain_fields
     if step.segments is not None:

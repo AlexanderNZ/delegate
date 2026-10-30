@@ -116,6 +116,7 @@ class SpecialistReport:
     summary: str
     blocked_reason: str | None
     judgement_calls: str | None
+    lenient_parse: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,7 @@ class VerifierReport:
     gate_output: str
     findings: list[str]
     unverified: list[str]
+    lenient_parse: bool = False
 
 
 def _has_type(value: object, kind: str) -> bool:
@@ -143,26 +145,37 @@ def _has_type(value: object, kind: str) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _read_json_object(path: Path, who: str) -> dict[str, object]:
-    """The JSON object in the file at `path`. Raise ReportError when there is none."""
+def _read_json_object(path: Path, who: str) -> tuple[dict[str, object], bool]:
+    """The JSON object in the file at `path`, and whether the parse needed `strict=False`. Raise ReportError when there is none.
+
+    A raw control character inside a string, a tab or a newline for example, is no fault of the report (#197): the
+    strict parse refuses it, and the lenient parse takes it. The second value is true only when the strict parse
+    refused the text and the lenient parse took it. A text that is not JSON for another cause fails both parses,
+    and the message is the one of the strict parse.
+    """
     try:
         text = path.read_text()
     except FileNotFoundError:
         raise ReportError(f"report missing: the {who} wrote no file at {path}") from None
     except OSError as error:
         raise ReportError(f"report cannot be read at {path}: {error}") from None
+    lenient = False
     try:
         data = json.loads(text)
     except json.JSONDecodeError as error:
-        raise ReportError(f"report at {path} is not valid JSON: {error}") from None
+        try:
+            data = json.loads(text, strict=False)
+        except json.JSONDecodeError:
+            raise ReportError(f"report at {path} is not valid JSON: {error}") from None
+        lenient = True
     if not isinstance(data, dict):
         raise ReportError(f"report at {path} must be a JSON object, not {type(data).__name__}")
-    return data
+    return data, lenient
 
 
 def read_specialist_report(path: Path, ticket: str) -> SpecialistReport:
     """Read and check the report of a specialist for `ticket`. Raise ReportError."""
-    data = _read_json_object(path, "specialist")
+    data, lenient = _read_json_object(path, "specialist")
     problems: list[str] = []
     for name, kind in SPECIALIST_REQUIRED.items():
         if name not in data:
@@ -181,7 +194,7 @@ def read_specialist_report(path: Path, ticket: str) -> SpecialistReport:
         raise ReportError(f"report at {path} is invalid: " + "; ".join(problems), problems)
     return SpecialistReport(
         data["ticket"], data["status"], data["branch"], data["head_sha"], data["commits"], data["gates_green"],
-        data["summary"], data.get("blocked_reason"), data.get("judgement_calls"),
+        data["summary"], data.get("blocked_reason"), data.get("judgement_calls"), lenient,
     )
 
 
@@ -213,7 +226,7 @@ def read_verifier_report(path: Path, mode: str) -> VerifierReport:
     The report must name the mode of the run, and a REJECT must hold at least
     one finding. An ACCEPT must hold evidence for at least one criterion.
     """
-    data = _read_json_object(path, "verifier")
+    data, lenient = _read_json_object(path, "verifier")
     problems: list[str] = []
     for name, kind in VERIFIER_REQUIRED.items():
         if name not in data:
@@ -232,7 +245,7 @@ def read_verifier_report(path: Path, mode: str) -> VerifierReport:
     if problems:
         raise ReportError(f"report at {path} is invalid: " + "; ".join(problems), problems)
     return VerifierReport(
-        data["mode"], data["verdict"], data["criteria"], data["gate_output"], data["findings"], data["unverified"]
+        data["mode"], data["verdict"], data["criteria"], data["gate_output"], data["findings"], data["unverified"], lenient
     )
 
 

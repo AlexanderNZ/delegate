@@ -161,6 +161,7 @@ class ReportValidation(TypedDict):
     reason: str | None
     status: str | None
     blocked_reason: str | None
+    lenient_parse: NotRequired[bool]
 
 
 class HotspotFinding(TypedDict):
@@ -351,6 +352,7 @@ class VerifyReport(TypedDict):
     path: str
     reason: str | None
     source: NotRequired[str]
+    lenient_parse: NotRequired[bool]
 
 
 class Verdict(TypedDict):
@@ -401,6 +403,7 @@ class FixupReport(TypedDict):
     reason: str | None
     status: str | None
     blocked_reason: str | None
+    lenient_parse: NotRequired[bool]
 
 
 class FixupRefused(TypedDict):
