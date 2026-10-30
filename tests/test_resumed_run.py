@@ -11,7 +11,7 @@ import time
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, run_end, run_start, state_and_verdict, step_end, step_start, write_journal
+from .support import append_events, bare_repo, hold_lock, run_end, run_start, state_and_verdict, step_end, step_start, write_journal
 
 POLL = ["--poll-seconds", "0.02"]
 
@@ -41,7 +41,7 @@ def main(capsys, *argv: str) -> tuple[int, str]:
 
 def test_status_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retried_ticket_as_running(tmp_path, capsys):
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", *ENDED_THEN_RESUMED)
+    hold_lock(write_journal(repo, "r1", *ENDED_THEN_RESUMED))  # the resumed run works now: a process holds its lock
 
     code, out = main(capsys, "status", "--repo", str(repo), "r1")
 
@@ -52,7 +52,7 @@ def test_status_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retried_ti
 
 def test_status_json_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retried_ticket_as_running(tmp_path, capsys):
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", *ENDED_THEN_RESUMED)
+    hold_lock(write_journal(repo, "r1", *ENDED_THEN_RESUMED))  # the resumed run works now: a process holds its lock
 
     code, out = main(capsys, "status", "--repo", str(repo), "--json", "r1")
 

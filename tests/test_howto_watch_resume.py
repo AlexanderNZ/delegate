@@ -123,7 +123,8 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
     state = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))
     resumed = follow(PAGE, repo, monkeypatch, only=containing("--resume"), replace={"<run-id>": run_id})
 
-    assert "running" in state[0].out.splitlines()[0]  # the run has no end, so it is still "running"
+    assert "stopped" in state[0].out.splitlines()[0]  # the run has no end and no process works on it (#193)
+    assert f"delegate run --resume {run_id}" in state[0].out
     assert [(step.code, step.err) for step in resumed] == [(0, "")]
     assert [call.cwd.name for call in adapter.calls] == ["1", "2"]  # ticket 1 once before the stop; ticket 2 once after it
     status = follow(PAGE, repo, monkeypatch, only=containing("delegate status"), skip=("delegate watch",))[0]

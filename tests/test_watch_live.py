@@ -30,7 +30,7 @@ import pytest
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import CONTROL, TITLE, Terminal, bare_repo, frames, journal_path, without_titles
+from .support import CONTROL, TITLE, Terminal, bare_repo, frames, hold_lock, journal_path, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 PYTEST = "nix develop -c python3 -m pytest -q"
@@ -57,6 +57,7 @@ class Run:
         ]}
         self.add(0, "run-start", run_id=run_id, workflow="/w/workflow.toml", mode=mode, adapter="claude-code",
                  base_branch="main", run_branch="run/demo", tickets=list(tickets), **plan)
+        hold_lock(self.path)  # the run works now: a process holds its lock (#193)
 
     def add(self, seconds: float, event: str, **fields: object) -> None:
         self.seq += 1

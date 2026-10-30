@@ -191,13 +191,14 @@ class Runs:
         return self.active[0] if self.active else self.newest
 
 
-def is_active(journal: Path) -> bool:
-    """True when the run of `journal` is active. Raise RunsError when its lock file cannot be read.
+def has_live_process(journal: Path) -> bool:
+    """True when the lock of the run branch of `journal` names the run and a process that exists.
 
-    Raise JournalError when its first line is not JSON, or when a complete line is not an event.
+    Raise RunsError when its lock file cannot be read. Raise JournalError when the first line of the journal is not JSON,
+    or when it is not an event.
 
     The journal is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory that holds the lock.
-    `delegate status` uses the rule also for the state of a run with a pause request.
+    `delegate status` uses the rule for the state of a run with no `run-end`: with no live process, the run is `stopped`.
     """
     state = journal.parents[2]
     with journal.open() as handle:
@@ -216,7 +217,17 @@ def is_active(journal: Path) -> bool:
         holder = live_holder(state, str(branch))
     except LockError as error:
         raise RunsError(str(error)) from None
-    if holder is None or holder.run_id != journal.parent.name:
+    return holder is not None and holder.run_id == journal.parent.name
+
+
+def is_active(journal: Path) -> bool:
+    """True when the run of `journal` is active: it has a live process (`has_live_process`) and no `run-end` after its newest `resume`.
+
+    Raise RunsError when its lock file cannot be read.
+    Raise JournalError when its first line is not JSON, or when a complete line is not an event.
+    `delegate status` uses the rule also for the state of a run with a pause request.
+    """
+    if not has_live_process(journal):
         return False
     events, _ = read_new_events(journal, 0, 1)
     return newest_run_end(events) is None

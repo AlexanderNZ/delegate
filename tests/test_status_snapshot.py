@@ -24,7 +24,7 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
-from .support import Terminal, bare_repo, frames, journal_path, status_row
+from .support import Terminal, bare_repo, frames, hold_lock, journal_path, status_row
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -44,6 +44,7 @@ class Run:
         self.seq = 0
         self.add(0, "run-start", run_id=run_id, workflow="/w/workflow.toml", mode=mode, adapter=adapter,
                  base_branch="main", run_branch="run/demo", tickets=list(tickets))
+        hold_lock(self.path)  # the run works now: a process holds its lock (#193)
 
     def add(self, seconds: float, event: str, **fields: object) -> None:
         self.seq += 1

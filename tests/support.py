@@ -551,6 +551,21 @@ def live_lock(journal: Path, run_branch: str = "run/demo") -> Iterator[None]:
         yield
 
 
+# The locks that `hold_lock` took, kept so that the lock of a test stays until the process of the tests ends.
+_HELD_LOCKS: list[contextlib.AbstractContextManager[None]] = []
+
+
+def hold_lock(journal: Path, run_branch: str = "run/demo") -> None:
+    """Hold the lock of `run_branch` for the run of `journal` for the rest of the test process: the run has a live process.
+
+    `delegate status` shows a run with no `run-end`, no pause and no live process as `stopped` (#193). A helper that writes
+    the journal of a run that works now takes the lock with it. The lock is in the temporary directory of the test.
+    """
+    lock = live_lock(journal, run_branch)
+    lock.__enter__()
+    _HELD_LOCKS.append(lock)
+
+
 # A child process that takes the lock of a run branch with the lock class of the engine, and ends with no release.
 STALE_LOCK_SCRIPT = """\
 import os, sys

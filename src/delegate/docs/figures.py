@@ -8,7 +8,9 @@ A figure is the frame that the code renders from the journals in `SOURCE/<figure
 width and a fixed height. The render copies the journals into the state directory of a temporary repository, and
 replaces `$RUN` in them with the directory of the run. A journal names its event streams in `$RUN/reports/`: the render
 copies them there from `SOURCE/streams/`. It writes each gate log that a journal names as an empty file, and gives each
-file of a run the time of the newest event of its journal. It then calls the code of the command, with the SGR codes
+file of a run the time of the newest event of its journal. It holds the lock of each run that has no `run-end`, no
+pause and no halt, as the process of a run that works does: `status` shows such a run as `stopped` without the lock
+(#193). It then calls the code of the command, with the SGR codes
 on, a UTF-8 locale and the UTC time zone:
 
 * `watch`: `delegate.run.watch.follow` with the live view of `delegate.run.live`, and the stream reader of the
@@ -44,7 +46,8 @@ from xml.sax.saxutils import escape
 from ..cli.status import stream_reader_of
 from ..cli.watch import PROMPT
 from ..run import live, output, status, watch
-from ..run.journal import ACTIVITY_FIELDS, read_new_events
+from ..run.journal import ACTIVITY_FIELDS, halt_of, is_paused, newest_run_end, read_new_events
+from ..run.lock import run_lock
 
 # The journals and the event streams of the figures, in the package source, so a Nix build can read them.
 SOURCE: Path = Path(__file__).parent / "figures"
@@ -197,9 +200,9 @@ def _tzset() -> None:
         time.tzset()
 
 
-def _stage(figure: Figure, repo: Path) -> list[Path]:
+def _stage(figure: Figure, repo: Path, locks: contextlib.ExitStack) -> list[Path]:
     """Copy the journals of a figure into the state directory of `repo`, with the files that they name. Return the
-    journals, in the order of their names."""
+    journals, in the order of their names. `locks` holds the lock of each run that works."""
     journals = []
     for source in figure.journals:
         run = repo / ".git" / "delegate" / "runs" / source.stem
@@ -215,6 +218,8 @@ def _stage(figure: Figure, repo: Path) -> list[Path]:
                 shutil.copyfile(stream, path)
             else:
                 path.write_text("")  # a gate log: the code reads only its time
+        if newest_run_end(events) is None and not is_paused(events) and halt_of(events) is None:
+            locks.enter_context(run_lock(repo / ".git" / "delegate", str(events[0]["run_branch"]), source.stem))
         newest = datetime.fromisoformat(str(events[-1]["time"])).timestamp()
         for path in [journal, *files]:
             os.utime(path, (newest, newest))
@@ -248,9 +253,9 @@ def frame_lines(figure: Figure, colour: bool = True) -> list[str]:
     """The lines of the frame of a figure as the command prints them: with the SGR codes of the roles, or with
     `NO_COLOR` set when `colour` is false. The path of the temporary repository shows as `REPOSITORY`."""
     now = datetime.fromisoformat(figure.now)
-    with tempfile.TemporaryDirectory() as temporary, _terminal(colour):
+    with tempfile.TemporaryDirectory() as temporary, _terminal(colour), contextlib.ExitStack() as locks:
         repo = Path(temporary).resolve() / "project"
-        journals = _stage(figure, repo)
+        journals = _stage(figure, repo, locks)
         if figure.command == "watch":
             lines = _watch(figure, journals[0], now)
         elif figure.command == "status":

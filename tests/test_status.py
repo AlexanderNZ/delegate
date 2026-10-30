@@ -72,7 +72,8 @@ def test_status_without_a_run_id_selects_the_newest_run_of_the_repository(tmp_pa
     code, out, err = status(repo, capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[0] == "run 20250101T000000Z-aaaa: running (mode assure, adapter scripted)"
+    # No run is active, so the newest run is the one that status shows. It has no run-end and no live process.
+    assert out.splitlines()[0] == "run 20250101T000000Z-aaaa: stopped (mode assure, adapter scripted)"
     x = status_row(out, "x")
     assert x[:3] == ["1", "▶ x", "running"] and x[-3] == "run/demo-x" and re.fullmatch(TIME, x[-1])
     assert status_row(out, "y") == ["2", "· y", "pending"]

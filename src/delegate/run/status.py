@@ -16,7 +16,7 @@ newest plan of the run (see `journal.plan_ids`), so the progress and the ETA
 count a ticket that a plan change added. The state of the run is `running`,
 `pausing` while a pause request waits in the directory of the run and the run
 is active (see `delegate.run.runs`), `paused` from its `paused` event until a
-resume, or the result of its `run-end`. A pause request of a run that is not
+resume, `stopped` when it has no `run-end`, no pause, no halt and no live process (#193), or the result of its `run-end`. A pause request of a run that is not
 active stays until the next resume: the run then keeps the state of its
 journal, and the snapshot has the note `PAUSE_REQUEST_NOTE`.
 
@@ -52,7 +52,7 @@ from ..ports.vcs import VersionControl
 from . import domain, output
 from .journal import JournalError, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
 from .pause import pause_requested
-from .runs import RunsError, is_active, journal_of
+from .runs import RunsError, has_live_process, journal_of
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
 # with `step-start` and no `step-end` is running, and the rest follow `step-end`
@@ -69,6 +69,8 @@ PAUSING: str = "pausing"
 PAUSED: str = "paused"
 # A failure of the harness stopped the run, and the run wrote no `run-end`: a resume goes on (#177).
 HALTED: str = "halted"
+# A run with no `run-end`, no pause, no halt and no live process: a crash, a kill, Ctrl-C, or a stop of the machine. A resume goes on (#193).
+STOPPED: str = "stopped"
 
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
 PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
@@ -515,15 +517,18 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     end = newest_run_end(events)
     paused = end is None and is_paused(events)
     halt = halt_of(events) if end is None and not paused else None
+    live = end is not None or paused or halt is not None or _has_live_process(journal)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
         now = _time(next(e for e in reversed(events) if e["event"] == "paused"))  # and the clock of a paused run at its pause
     elif halt is not None:
         now = _time(halt)  # and the clock of a halted run at its halt
+    elif not live:
+        now = _time(events[-1])  # and the clock of a stopped run at its newest event
     now = now.replace(microsecond=0)
-    # No agent and no gate works in a run that ended, paused or halted.
-    stopped = end is not None or paused or halt is not None
+    # No agent and no gate works in a run that ended, paused, halted or stopped.
+    stopped = end is not None or paused or halt is not None or not live
     activity = reader_of(str(start["adapter"]))
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
@@ -542,13 +547,13 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     chain_phase, chain_seconds = _chain(events, now) if chain and not stopped else (None, 0)
     units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
-    state, note = _state(end, paused, journal, halt)
+    state, note = _state(end, paused, journal, halt, live)
     pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase], units),
-        eta=None if to_end is None or paused or halt is not None else now + timedelta(seconds=to_end),
+        eta=None if to_end is None or paused or halt is not None or not live else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase, note=note, mode=str(start["mode"]),
@@ -556,28 +561,42 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     )
 
 
-def _state(end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None) -> tuple[str, str | None]:
+def _has_live_process(journal: Path) -> bool:
+    """True when a process works on the run of `journal`. A lock file that cannot be read does not show that the process stopped."""
+    try:
+        return has_live_process(journal)
+    except RunsError:
+        return True
+
+
+def _state(
+    end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None, live: bool = True,
+) -> tuple[str, str | None]:
     """The state of a run and its note.
 
     The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
-    request waits and the run is active, or `running`. The note of a halted run is `halt_note`. Otherwise it is
-    `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
-    A lock file that cannot be read does not show that the process stopped, so the run is then `pausing`.
+    request waits and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
+    and no live process, or `running`. The note of a halted run is `halt_note`. The note of a stopped run is
+    `stopped_note`. Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
+    and None otherwise.
     """
     requested = pause_requested(journal)
     if halt is not None:
         return HALTED, halt_note(halt)
-    if end is None and not paused and requested:
-        try:
-            active = is_active(journal)
-        except RunsError:
-            active = True
-        if active:
-            return PAUSING, None
+    if end is None and not paused and requested and live:
+        return PAUSING, None
+    if end is None and not paused and not live:
+        return STOPPED, stopped_note(journal.parent.name, requested)
     note = PAUSE_REQUEST_NOTE if requested else None
     if end is not None:
         return str(end["result"]), note
     return (PAUSED if paused else RUNNING), note
+
+
+def stopped_note(run_id: str, requested: bool = False) -> str:
+    """The note of a stopped run: no process works on it, and the command that goes on with it."""
+    note = f"no process works on the run; go on with delegate run --resume {run_id}"
+    return note + ("; the resume removes the pause request that waits" if requested else "")
 
 
 def halt_note(halt: dict[str, object]) -> str:

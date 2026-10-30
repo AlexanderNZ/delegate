@@ -25,7 +25,7 @@ import pytest
 from delegate.cli import delegate
 from delegate.run.status import format_duration, format_tokens
 
-from .support import bare_repo, frames, live_lock
+from .support import bare_repo, frames
 from .test_watch_frame import Clock, ends_at_first_poll, painted_frames, terminal_of_a_person, watch  # noqa: F401
 from .test_watch_live import PYTEST, START, Run
 from .test_watch_plan_table import START_CELL, line_of
@@ -259,8 +259,7 @@ def test_while_the_run_is_pausing_the_next_row_gives_pauses_before_this_step_and
     request.write_text(json.dumps({"time": "2026-10-16T03:10:00+00:00", "pid": os.getpid()}) + "\n")
     Clock(monkeypatch, 700)
 
-    with live_lock(run.path):
-        code, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
+    code, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))  # the Run holds the lock of a run that works
 
     assert code == 1
     pausing = frames(out)[0]
