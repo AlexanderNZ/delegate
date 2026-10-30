@@ -500,7 +500,7 @@ def workflow_of_run(repo: Path, run_id: str, vcs: VersionControl) -> Path:
     """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown."""
     _, state_dir = state_directory(repo, vcs)
     try:
-        events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
+        events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
     except JournalError as error:
         raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
     if not events or events[0]["event"] != "run-start":
@@ -724,7 +724,7 @@ def review_plan_change(
     """
     top, state_dir = state_directory(repo, vcs)
     try:
-        events = read_events(state_dir / "runs" / run_id / "journal.jsonl")
+        events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
     except JournalError as error:
         raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
     if not events or events[0]["event"] != "run-start":

@@ -61,6 +61,7 @@ RUN_BRANCH_ADVANCE: str = "run-branch-advance"
 RUN_BRANCH_MOVED: str = "run-branch-moved"
 STEP_END: str = "step-end"
 CLEANUP: str = "cleanup"
+JOURNAL_REPAIRED: str = "journal-repaired"
 RUN_END: str = "run-end"
 
 
@@ -438,6 +439,10 @@ class Cleanup(TypedDict):
     bytes_freed: NotRequired[int]
 
 
+class JournalRepaired(TypedDict):
+    bytes_removed: int
+
+
 class RunEnd(TypedDict):
     result: str
     built: list[str]
@@ -485,6 +490,7 @@ EVENTS: dict[str, type] = {
     RUN_BRANCH_MOVED: RunBranchMoved,
     STEP_END: StepEnd,
     CLEANUP: Cleanup,
+    JOURNAL_REPAIRED: JournalRepaired,
     RUN_END: RunEnd,
 }
 

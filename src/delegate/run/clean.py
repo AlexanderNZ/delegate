@@ -153,7 +153,7 @@ def _run(repo: Path, state: Path, journal: Path, merged: bool, dry_run: bool, vc
     """Clean one run, or give the reason that it keeps everything."""
     run_id = journal.parent.name
     try:
-        events = read_events(journal)
+        events = read_events(journal, torn_tail=True)
         if not events or events[0]["event"] != "run-start":
             raise JournalError(f"journal {journal}: the first event is not 'run-start'")
         run_branch = str(events[0]["run_branch"])
@@ -169,7 +169,7 @@ def _run(repo: Path, state: Path, journal: Path, merged: bool, dry_run: bool, vc
     try:
         # The lock keeps a resume out while the clean works. A stale lock names no live process, so it goes.
         with run_lock(state, run_branch, run_id, break_stale=True):
-            events = read_events(journal)  # the journal can change before the lock
+            events = read_events(journal, torn_tail=True)  # the journal can change before the lock
             return _clean_run(repo, state, journal, events, merged, dry_run, vcs)
     except LockError as error:
         return RunClean(run_id, kept=f"the run is active: {error}")

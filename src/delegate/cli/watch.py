@@ -267,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.run_id is None:
             runs = runs_of(args.repo, GitVersionControl())
+            for line in runs.unreadable_lines("delegate watch"):
+                print(line, file=sys.stderr)
             if runs.chosen is None:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
                 active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list

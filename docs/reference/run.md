@@ -723,6 +723,8 @@ The `## Report` section of the verifier brief holds the report path, the JSON ty
 
 The journal is a JSONL file. The engine only appends to it. Each line is a JSON object with `seq` (the position, from 1), `time` (UTC, ISO 8601), and `event`, plus the fields below.
 
+The engine writes each line with one write call. `seq` grows only after the write succeeded, so an append that fails leaves the journal as it was, and the next append gets the next `seq`. After the lines `run-end`, `run-branch-advance` and `verdict`, it also syncs the file to the disk. A power loss can still cut the last line in half. When a command opens the journal to append (`delegate run --resume`, `delegate clean`, or the interrupt of a run), it removes a last line that has no newline at its end, and writes `journal-repaired` with the number of bytes that it removed. `delegate run --resume` and `delegate clean` read a journal with such a line as if the line was not there.
+
 The journal is a public interface. Tools outside the kit read it, and `delegate status --json` gives a view of it. The module `delegate.run.events` names each event below with its fields, and `tests/test_run_reference.py` and `tests/test_run_events.py` keep the table equal to the module and to the journals of real runs.
 
 | `event` | Fields |
@@ -765,6 +767,7 @@ The journal is a public interface. Tools outside the kit read it, and `delegate 
 | `run-branch-moved` | `ticket` (the ticket of the step that found the difference, or `null` when a resume found it), `run_branch`, `expected` (the tip that the journal says), `found` (the tip that the run branch has). A commit that the engine did not advance to is on the run branch, and the run halts. See [the run branch check](#the-run-branch-check). |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
 | `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
+| `journal-repaired` | `bytes_removed` (the number of bytes of the last line that the engine removed because it had no newline at its end: a write that a power loss cut). The command that opened the journal to append writes it first, before the event that it came to write, so the numbers of the lines go on from the last complete line. |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
 
 ### The schema version

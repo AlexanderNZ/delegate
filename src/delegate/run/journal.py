@@ -6,25 +6,43 @@ and `event` (the event name), plus the fields of that event.
 
 A resume opens the journal of an earlier run and appends to it. `seq` goes on
 from the last line.
+
+An append writes one line with one write call. `seq` grows only after the write succeeded, so a failed append leaves
+the journal as it was (#191). A power loss can cut the last line in half. `Journal.reopen` removes a last line that has
+no newline at its end, and records the removal in `journal-repaired`.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .events import JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT
+
+# The events whose line must be on the disk before the engine goes on: a run that ended, a move of the run branch, and a
+# verdict. A power loss then cannot take a fact that the repository already shows.
+SYNCED: frozenset[str] = frozenset({RUN_END, RUN_BRANCH_ADVANCE, VERDICT})
 
 
 class JournalError(Exception):
     """A journal cannot be read. The message names the file."""
 
 
-def read_events(path: Path) -> list[dict[str, object]]:
-    """The events of a journal file, in order. Raise JournalError when the file is missing or a line is not an event."""
+def read_events(path: Path, *, torn_tail: bool = False) -> list[dict[str, object]]:
+    """The events of a journal file, in order. Raise JournalError when the file is missing or a line is not an event.
+
+    With `torn_tail`, a last line that has no newline at its end is not read: a power loss cut it, and `Journal.reopen`
+    removes it. A reader that changes nothing uses this form to read the journal that a resume or a clean goes on with.
+    """
     try:
         text = path.read_text()
     except FileNotFoundError:
         raise JournalError(f"journal {path} not found") from None
+    if torn_tail and text and not text.endswith("\n"):
+        text = text[: text.rfind("\n") + 1]
     events: list[dict[str, object]] = []
     for number, line in enumerate(text.splitlines(), start=1):
         try:
@@ -167,13 +185,39 @@ class Journal:
     def reopen(cls, path: Path) -> tuple[Journal, list[dict[str, object]]]:
         """Open the journal of an earlier run for appending. Return it with the events it holds.
 
+        A last line with no newline at its end is a write that a power loss cut. It is removed, and `journal-repaired`
+        records the number of bytes removed; the events that come back hold that event.
+
         Raise JournalError when the file is missing or a line is not an event.
         """
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            raise JournalError(f"journal {path} not found") from None
+        removed = len(data) - (data.rfind(b"\n") + 1) if data and not data.endswith(b"\n") else 0
+        if removed:
+            os.truncate(path, len(data) - removed)
         events = read_events(path)
-        return cls(path, seq=len(events), create=False), events
+        journal = cls(path, seq=len(events), create=False)
+        if removed:
+            journal.append(JOURNAL_REPAIRED, bytes_removed=removed)
+            events = read_events(path)
+        return journal, events
 
     def append(self, event: str, **fields: object) -> None:
-        self._seq += 1
-        line = {"seq": self._seq, "time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
-        with self.path.open("a") as handle:
-            handle.write(json.dumps(line, sort_keys=False) + "\n")
+        """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line."""
+        seq = self._seq + 1
+        line = {"seq": seq, "time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
+        data = (json.dumps(line, sort_keys=False) + "\n").encode()
+        size = self.path.stat().st_size
+        try:
+            with self.path.open("ab") as handle:
+                handle.write(data)
+                if event in SYNCED:
+                    handle.flush()
+                    os.fsync(handle.fileno())
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.truncate(self.path, size)  # a part of the line must not stay: the next line would join it
+            raise
+        self._seq = seq

@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         run_id = args.run_id
         if run_id is None:
             runs = runs_of(args.repo, GitVersionControl())
+            for line in runs.unreadable_lines("delegate status"):
+                print(line, file=sys.stderr)
             if runs.chosen is None:
                 ids = ", ".join(active.parent.name for active in runs.active)
                 if args.json:

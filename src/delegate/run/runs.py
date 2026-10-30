@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import EngineError, StateRootError, state_directory
-from .journal import newest_run_end, read_new_events
+from .journal import JournalError, newest_run_end, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
 
@@ -167,11 +167,18 @@ def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
 class Runs:
     """The runs of a repository: the newest run, and the journals of the active runs, oldest first.
 
-    The newest run is its journal, or a `FailedStart` when the newest run failed at start.
+    The newest run is its journal, or a `FailedStart` when the newest run failed at start. `unreadable` holds each
+    journal that the listing skipped, with the reason: one bad journal does not stop the listing of the other runs
+    (#191). The command that lists the runs names each one on stderr.
     """
 
     newest: Path | FailedStart
     active: tuple[Path, ...]
+    unreadable: tuple[tuple[Path, str], ...] = ()
+
+    def unreadable_lines(self, command: str) -> list[str]:
+        """One line for each journal that the listing skipped, for stderr: the command, the journal and the reason."""
+        return [f"{command}: skipped the journal {path}: {reason}" for path, reason in self.unreadable]
 
     @property
     def chosen(self) -> Path | FailedStart | None:
@@ -187,6 +194,8 @@ class Runs:
 def is_active(journal: Path) -> bool:
     """True when the run of `journal` is active. Raise RunsError when its lock file cannot be read.
 
+    Raise JournalError when its first line is not JSON, or when a complete line is not an event.
+
     The journal is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory that holds the lock.
     `delegate status` uses the rule also for the state of a run with a pause request.
     """
@@ -194,7 +203,12 @@ def is_active(journal: Path) -> bool:
     with journal.open() as handle:
         line = handle.readline()
     # `_start_time` checked that a complete first line is an event. A journal with no `run-start` names no run branch.
-    first = json.loads(line) if line.endswith("\n") else {}
+    try:
+        first = json.loads(line) if line.endswith("\n") else {}
+    except json.JSONDecodeError as error:
+        raise JournalError(f"journal {journal}: line 1 is not valid JSON: {error}") from None
+    if not isinstance(first, dict):
+        raise JournalError(f"journal {journal}: line 1 is not an event")
     branch = first.get("run_branch") if first.get("event") == "run-start" else None
     if branch is None:
         return False
@@ -211,15 +225,33 @@ def is_active(journal: Path) -> bool:
 def runs_of(repo: Path, vcs: VersionControl) -> Runs:
     """The newest run and the active runs of the repository. A run that failed at start can be the newest run.
 
-    Raise RunsError when `repo` is not a git repository, when the repository has no run, or when a lock file cannot be
-    read. Raise JournalError when the journal of a run with a live lock is not valid.
+    A journal that cannot be read is not listed: `Runs.unreadable` names it with the reason, and the other runs are
+    listed (#191). Raise RunsError when `repo` is not a git repository, when the repository has no run that can be
+    listed, or when a lock file cannot be read.
     """
     state = _state(repo, vcs)
     journals = _all_journals(state)
     failed = _failed_starts(state)
     if not journals and not failed:
         raise RunsError(f"no run found in {repo}: no journal under {state / 'runs'}")
-    active = tuple(journal for journal in sorted(journals, key=_start_time) if is_active(journal))
-    ranked: list[tuple[datetime, Path | FailedStart]] = [(_start_time(journal), journal) for journal in journals]
+    unreadable: list[tuple[Path, str]] = []
+    started: list[tuple[datetime, Path]] = []
+    for journal in journals:
+        try:
+            started.append((_start_time(journal), journal))
+        except RunsError as error:
+            unreadable.append((journal, str(error)))
+    started.sort(key=lambda pair: pair[0])
+    active: list[Path] = []
+    for _, journal in started:
+        try:
+            if is_active(journal):
+                active.append(journal)
+        except JournalError as error:
+            unreadable.append((journal, str(error)))
+    skipped = {path for path, _ in unreadable}
+    ranked: list[tuple[datetime, Path | FailedStart]] = [(time, journal) for time, journal in started if journal not in skipped]
     ranked += [(start.changed, start) for start in failed]
-    return Runs(max(ranked, key=lambda pair: pair[0])[1], active)
+    if not ranked:
+        raise RunsError(f"no run found in {repo}: " + "; ".join(reason for _, reason in unreadable))
+    return Runs(max(ranked, key=lambda pair: pair[0])[1], tuple(active), tuple(unreadable))
