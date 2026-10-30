@@ -17,7 +17,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, bare_repo, git, journal_path, live_lock, make_repo, read_journal_file, run_end, run_start, state_dir, write_journal
+from .support import ScriptedAdapter, bare_repo, git, journal_path, live_lock, make_repo, read_journal_file, run_end, run_start, stale_lock, state_dir, write_journal
 from .support import event_names, resume_main, run_main, ticket_of
 from .test_run_multi import HEAD, ticket
 from .test_run_pause import ECONOMY_HEAD, pause_during_the_specialist_of, run_id_of
@@ -265,3 +265,29 @@ def test_watch_without_a_run_id_gives_the_state_abandoned_and_the_reason_in_its_
     assert (code, err) == (1, "")
     assert out.startswith("no run is active; the newest run r1 ended abandoned at ")
     assert out.rstrip("\n").endswith(f"; reason: {REASON}") and out.count("\n") == 1
+
+
+def test_abandon_of_a_run_with_a_stale_lock_records_lock_broken_with_the_old_holder_before_run_end(tmp_path, capsys, scripted):
+    repo, run_id = a_paused_run(tmp_path, capsys, scripted)
+    stale_lock(journal_path(repo, run_id))
+    (lock_file,) = (state_dir(repo) / "locks").glob("*.lock")
+    dead_pid = json.loads(lock_file.read_text())["pid"]
+
+    code, out, err = abandon(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    events = read_journal_file(repo, run_id)
+    (broken,) = [e for e in events if e["event"] == "lock-broken"]
+    assert (broken["run_id"], broken["pid"]) == (run_id, dead_pid)
+    names = event_names(events)
+    assert names.index("lock-broken") < names.index("run-end")
+    assert not lock_file.exists()
+
+
+def test_abandon_of_a_run_with_no_lock_records_no_lock_broken(tmp_path, capsys, scripted):
+    repo, run_id = a_paused_run(tmp_path, capsys, scripted)
+
+    code, out, err = abandon(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert "lock-broken" not in event_names(read_journal_file(repo, run_id))

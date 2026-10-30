@@ -17,19 +17,21 @@ A run is cleaned only when the newest `run-end` of its journal after its newest
 holds the lock of its run branch. Each other run keeps everything, and its line
 gives the reason: it is active, it failed, it is paused, or it stopped. The
 clean takes the lock of the run branch while it works, so a resume cannot start
-in the middle.
+in the middle. When the clean removes a stale lock of the run, the journal gets `lock-broken` with the run id and the
+process id of the old holder, as for `delegate run --break-lock` (#207), before the clean changes anything else.
 
 The journal of each cleaned run gets one `cleanup` event after its `run-end`,
 with what went, what stayed and why, the copies removed, and the bytes freed.
 A run where nothing went gets no event: a second clean adds no line. `watch` and `status` read a
-`cleanup` after `run-end` as no continuation of the run (`journal.AFTER_END`).
+`cleanup` and a `lock-broken` after `run-end` as no continuation of the run (`journal.AFTER_END`).
 
 With `dry_run` nothing changes: no file, no branch, no journal, and no lock.
 The lines then say what the command would remove and keep.
 
 `abandon` is the other use of the module (#201): it ends a run that is not built for good. It writes `run-end` with the
 result `abandoned` and the reason, and then removes the ticket worktrees, the ticket branches and the hooks directory
-whatever they hold. It keeps the run branch, unless the caller asks to delete it.
+whatever they hold. It keeps the run branch, unless the caller asks to delete it. A stale lock that it removes is
+recorded with `lock-broken` before the `run-end` (#207).
 
 The module starts no process and imports no adapter: the port does the work.
 """
@@ -47,7 +49,7 @@ from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, rem
 from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, EngineError, restore_progress, state_directories
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
-from .lock import LockError, live_holder, run_lock
+from .lock import LockError, LockHolder, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
 
 BUILT: str = "built"
@@ -179,7 +181,9 @@ def _run(repo: Path, state: Path, journal: Path, merged: bool, dry_run: bool, vc
         return _clean_run(repo, state, journal, events, merged, dry_run, vcs)
     try:
         # The lock keeps a resume out while the clean works. A stale lock names no live process, so it goes.
-        with run_lock(state, run_branch, run_id, break_stale=True):
+        with run_lock(state, run_branch, run_id, break_stale=True) as broken:
+            if broken is not None:
+                _record_lock_broken(Journal.reopen(journal)[0], broken)
             events = read_events(journal, torn_tail=True)  # the journal can change before the lock
             return _clean_run(repo, state, journal, events, merged, dry_run, vcs)
     except LockError as error:
@@ -424,18 +428,30 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
         )
     try:
         # The lock keeps a resume out while the command works. A stale lock names no live process, so it goes.
-        with run_lock(state, run_branch, run_id, break_stale=True):
-            return _abandon_run(top, state, journal, reason, delete_run_branch, vcs)
+        with run_lock(state, run_branch, run_id, break_stale=True) as broken:
+            return _abandon_run(top, state, journal, reason, delete_run_branch, vcs, broken)
     except LockError as error:
         raise AbandonError(f"run {run_id} has a live process: {error}; stop it with delegate stop {run_id}, then abandon it") from None
     except JournalError as error:
         raise AbandonError(str(error)) from None
 
 
-def _abandon_run(repo: Path, state: Path, journal: Path, reason: str, delete_run_branch: bool, vcs: VersionControl) -> Abandoned:
-    """Do the abandon of one run, with its lock held. The journal can have changed since the first read, so it is read again."""
+def _record_lock_broken(handle: Journal, broken: LockHolder) -> None:
+    """Append `lock-broken` with the run id and the process id of the old holder, as `delegate run --break-lock` does (#207)."""
+    handle.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
+
+
+def _abandon_run(
+    repo: Path, state: Path, journal: Path, reason: str, delete_run_branch: bool, vcs: VersionControl, broken: LockHolder | None = None
+) -> Abandoned:
+    """Do the abandon of one run, with its lock held. The journal can have changed since the first read, so it is read again.
+
+    `broken` is the holder of the stale lock that the command removed. The journal records it before anything else, so before `run-end`.
+    """
     run_id = journal.parent.name
     handle, events = Journal.reopen(journal)
+    if broken is not None:
+        _record_lock_broken(handle, broken)
     start = events[0]
     run_branch = str(start["run_branch"])
     end = newest_run_end(events)

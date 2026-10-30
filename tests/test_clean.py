@@ -20,7 +20,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import WORKFLOW, git, journal_path, kill_a_run, live_lock, make_repo, read_journal, read_journal_file
+from .support import WORKFLOW, git, journal_path, kill_a_run, live_lock, make_repo, read_journal, read_journal_file, stale_lock, state_dir
 
 
 @pytest.fixture
@@ -114,14 +114,17 @@ def test_clean_ended_removes_the_worktree_and_merged_ticket_branch_of_a_built_ru
 
 def test_a_run_that_stopped_keeps_everything_and_the_line_names_the_reason(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path)
-    stopped, _ = kill_a_run(repo, 2)
-    before = (worktrees(repo), branches(repo), journal_path(repo, stopped).read_text())
+    stopped, dead_pid = kill_a_run(repo, 2)
+    before = (worktrees(repo), branches(repo), read_journal_file(repo, stopped))
 
     code, out, err = clean(repo, capsys, stopped)
 
     assert (code, err) == (0, "")
     assert "stopped" in line_of(out, stopped)
-    assert (worktrees(repo), branches(repo), journal_path(repo, stopped).read_text()) == before
+    # The clean removes the stale lock of the killed run, and the journal records only that (#207).
+    after = read_journal_file(repo, stopped)
+    assert (worktrees(repo), branches(repo), after[:-1]) == before
+    assert (after[-1]["event"], after[-1]["run_id"], after[-1]["pid"]) == ("lock-broken", stopped, dead_pid)
 
 
 def test_merged_deletes_the_run_branch_only_when_the_base_branch_holds_it(tmp_path, capsys, scripted):
@@ -309,3 +312,80 @@ def test_two_runs_of_the_same_second_each_keep_their_own_run_branch_and_line(tmp
     assert "branch run/open: the base branch 'main' does not hold its commits" in line_of(out, open_run)
     assert read_journal_file(repo, merged)[-1]["branches_deleted"] == ["run/merged-a", "run/merged"]
     assert read_journal_file(repo, open_run)[-1]["branches_deleted"] == ["run/open-a"]
+
+
+def stale_holder_pid(repo: Path) -> int:
+    """The process id that the lock file in the state directory names: the process that no longer exists."""
+    (lock_file,) = (state_dir(repo) / "locks").glob("*.lock")
+    return int(json.loads(lock_file.read_text())["pid"])
+
+
+def test_clean_of_a_built_run_with_a_stale_lock_records_lock_broken_and_the_run_stays_built(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    assert code == 0
+    stale_lock(journal_path(repo, run_id), "run/built")
+    dead_pid = stale_holder_pid(repo)
+
+    code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    events = read_journal_file(repo, run_id)
+    (broken,) = [e for e in events if e["event"] == "lock-broken"]
+    assert (broken["run_id"], broken["pid"]) == (run_id, dead_pid)
+    assert not list((state_dir(repo) / "locks").glob("*.lock"))
+    # The event is after the `run-end`, and it does not continue the run: `watch` and `status` still show it as built.
+    assert [e["event"] for e in events][-3:] == ["run-end", "lock-broken", "cleanup"]
+    watch_code = delegate.main(["watch", run_id, "--repo", str(repo), "--raw"])
+    capsys.readouterr()
+    status_code = delegate.main(["status", run_id, "--repo", str(repo), "--json"])
+    status = json.loads(capsys.readouterr().out)
+    assert watch_code == 0
+    assert status_code == 0 and status["state"] == "built"
+
+
+def test_clean_of_a_built_run_with_a_stale_lock_and_nothing_to_remove_still_records_lock_broken(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    assert clean(repo, capsys, run_id)[0] == 0
+    stale_lock(journal_path(repo, run_id), "run/built")
+
+    code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert [e["event"] for e in read_journal_file(repo, run_id)].count("lock-broken") == 1
+
+
+def test_clean_of_a_built_run_with_no_lock_records_no_lock_broken(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+
+    code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert "lock-broken" not in [e["event"] for e in read_journal_file(repo, run_id)]
+
+
+def test_clean_of_a_built_run_whose_lock_a_live_process_holds_records_no_lock_broken(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+
+    with live_lock(journal_path(repo, run_id), "run/built"):
+        code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert "active" in line_of(out, run_id)
+    assert "lock-broken" not in [e["event"] for e in read_journal_file(repo, run_id)]
+
+
+def test_a_dry_run_clean_with_a_stale_lock_records_no_lock_broken_and_leaves_the_lock(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    stale_lock(journal_path(repo, run_id), "run/built")
+    before = journal_path(repo, run_id).read_text()
+
+    code, out, err = clean(repo, capsys, run_id, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert journal_path(repo, run_id).read_text() == before
+    assert len(list((state_dir(repo) / "locks").glob("*.lock"))) == 1

@@ -127,8 +127,9 @@ def abandon_note(end: dict[str, object]) -> str:
 
 
 # The events that a command writes to the journal of a run that ended, after its `run-end`. They do not continue the
-# run: `delegate clean` writes `cleanup` (#168). The engine writes its own `cleanup` before `run-end`.
-AFTER_END: frozenset[str] = frozenset({"cleanup"})
+# run: `delegate clean` writes `cleanup` (#168), and `lock-broken` when it removes a stale lock (#207). The engine
+# writes its own `cleanup` before `run-end`.
+AFTER_END: frozenset[str] = frozenset({"cleanup", "lock-broken"})
 
 
 def before_after_end(events: list[dict[str, object]]) -> list[dict[str, object]]:
