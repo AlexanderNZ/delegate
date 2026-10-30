@@ -60,7 +60,7 @@ On a terminal with a UTF-8 locale, the table has the glyphs and the colours of t
 ```text
 run 20260302T090000Z-58c2: running (mode assure, adapter claude-code)
 progress: 72%, 5 of 8 ended, 52m50s used, ETA 22m42s, tokens 241k new, 3.0M cache
-journal ~/project/.git/delegate/runs/20260302T090000Z-58c2/journal.jsonl
+journal ~/.local/state/delegate/project-3f9a1c0b7d42/runs/20260302T090000Z-58c2/journal.jsonl
 
   #      plan    state     phase          after     verdict  branch              used    new   cache  last event
   1      ● 101   ✓ built                            ACCEPT   run/demo-101      10m00s    38k    401k  2026-03-02T09:10:00+00:00

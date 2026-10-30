@@ -5,7 +5,7 @@ for the light scheme and one for the dark scheme of the docs theme. The two file
 `<style>` element. `delegate docs --check` names each file that differs from the code.
 
 A figure is the frame that the code renders from the journals in `SOURCE/<figure>/`, with a fixed clock, a fixed
-width and a fixed height. The render copies the journals into the state directory of a temporary repository, and
+width and a fixed height. The render copies the journals into a temporary state directory, and
 replaces `$RUN` in them with the directory of the run. A journal names its event streams in `$RUN/reports/`: the render
 copies them there from `SOURCE/streams/`. It writes each gate log that a journal names as an empty file, and gives each
 file of a run the time of the newest event of its journal. It holds the lock of each run that has no `run-end`, no
@@ -19,7 +19,7 @@ on, a UTF-8 locale and the UTC time zone:
 * `picker`: the run picker of `delegate watch` with more than one active run (`delegate.run.status.picker_lines`),
   cut to the width, and the prompt.
 
-The path of the temporary repository shows as `REPOSITORY` in a frame. The SVG writer uses the standard library only.
+The path of the temporary state directory shows as `STATE_DIRECTORY` in a frame. The SVG writer uses the standard library only.
 It reads the SGR codes of each line, and writes one `<text>` row for each line, with one `<tspan>` for each run of
 one role. Each character is one monospace cell, and each `<tspan>` starts at the cell of its first character. Bold
 is `font-weight` 600, and faint is the `dim` colour. The colours are the tokens of the docs theme
@@ -56,8 +56,9 @@ SOURCE_IN_REPOSITORY: str = "src/delegate/docs/figures"
 # The directory of the figure files, relative to the repository root.
 ASSETS: str = "docs/assets/terminal"
 
-# The text that a frame shows for the path of the temporary repository of the render.
-REPOSITORY: str = "~/project"
+# The text that a frame shows for the path of the state directory of the render: the default state root, and the
+# directory of a repository under it (#206).
+STATE_DIRECTORY: str = "~/.local/state/delegate/project-3f9a1c0b7d42"
 
 # The environment of the terminal of a figure: a UTF-8 locale and the UTC time zone.
 LOCALE: str = "C.UTF-8"
@@ -200,12 +201,12 @@ def _tzset() -> None:
         time.tzset()
 
 
-def _stage(figure: Figure, repo: Path, locks: contextlib.ExitStack) -> list[Path]:
-    """Copy the journals of a figure into the state directory of `repo`, with the files that they name. Return the
+def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Path]:
+    """Copy the journals of a figure into the state directory `state`, with the files that they name. Return the
     journals, in the order of their names. `locks` holds the lock of each run that works."""
     journals = []
     for source in figure.journals:
-        run = repo / ".git" / "delegate" / "runs" / source.stem
+        run = state / "runs" / source.stem
         run.mkdir(parents=True)
         journal = run / "journal.jsonl"
         journal.write_text(source.read_text().replace("$RUN", json.dumps(str(run))[1:-1]))
@@ -219,7 +220,7 @@ def _stage(figure: Figure, repo: Path, locks: contextlib.ExitStack) -> list[Path
             else:
                 path.write_text("")  # a gate log: the code reads only its time
         if newest_run_end(events) is None and not is_paused(events) and halt_of(events) is None:
-            locks.enter_context(run_lock(repo / ".git" / "delegate", str(events[0]["run_branch"]), source.stem))
+            locks.enter_context(run_lock(state, str(events[0]["run_branch"]), source.stem))
         newest = datetime.fromisoformat(str(events[-1]["time"])).timestamp()
         for path in [journal, *files]:
             os.utime(path, (newest, newest))
@@ -251,18 +252,18 @@ def _picker(figure: Figure, journals: list[Path], now: datetime) -> list[str]:
 
 def frame_lines(figure: Figure, colour: bool = True) -> list[str]:
     """The lines of the frame of a figure as the command prints them: with the SGR codes of the roles, or with
-    `NO_COLOR` set when `colour` is false. The path of the temporary repository shows as `REPOSITORY`."""
+    `NO_COLOR` set when `colour` is false. The path of the temporary state directory shows as `STATE_DIRECTORY`."""
     now = datetime.fromisoformat(figure.now)
     with tempfile.TemporaryDirectory() as temporary, _terminal(colour), contextlib.ExitStack() as locks:
-        repo = Path(temporary).resolve() / "project"
-        journals = _stage(figure, repo, locks)
+        state = Path(temporary).resolve() / "state"
+        journals = _stage(figure, state, locks)
         if figure.command == "watch":
             lines = _watch(figure, journals[0], now)
         elif figure.command == "status":
             lines = _status(journals[0], now)
         else:
             lines = _picker(figure, journals, now)
-        return [line.replace(str(repo), REPOSITORY) for line in lines]
+        return [line.replace(str(state), STATE_DIRECTORY) for line in lines]
 
 
 # The SVG writer.
