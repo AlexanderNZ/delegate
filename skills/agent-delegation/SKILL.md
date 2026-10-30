@@ -753,6 +753,40 @@ exits 1 with the ticket and the field at fault. With `--detach`, the command
 applies these rules before it starts the run process. A plan change is refused
 for a run that an invariant violation halted: start a new run.
 
+## Tell the owner before you change the course of a run
+
+The owner of the work must see each change to a run before it happens. A
+change of the course is a pause, a stop, an abandon, a retry, or a new run that
+replaces a run. Use a command of the engine for each one. A run that you change
+by hand leaves a journal that does not tell what happened.
+
+1. **Tell the owner first.** Before you change the course of a run, tell the
+   owner three things: the run id, the reason, and the exact command that you
+   will run. Then run that command, and no other.
+2. **An earlier approval does not cover a later step.** The owner who agreed to
+   a pause did not agree to an abandon. Tell the owner again before each step.
+3. **Use the commands of the engine.** Never use `kill` on a process id of the
+   engine: use `delegate stop <run-id>`. Never remove a state directory, a
+   worktree, a ticket branch or a run directory by hand: use
+   `delegate clean --abandon <run-id> --reason "<text>"`.
+4. **Check the engine before you start a run.** Before you start a run, check
+   that the engine on the host is the version that the docs of the repository
+   name. A different version can read a workflow or a journal in a different
+   way.
+
+The table gives the command for each case. Run `delegate status <run-id>` first,
+and show its output to the owner with the command.
+
+| Case | What to do |
+| --- | --- |
+| An invalid verdict: the verifier wrote a verdict that the engine refuses, and the step failed | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket>`. The retry uses the worktree and the commits again. |
+| A failed economy chain: the gates or the verifier of the chain failed after the fix-up rounds | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket>` for the failed ticket. The engine builds the tickets that the failure made it skip. |
+| A new ruling of the owner in the middle of a run, for a ticket that failed | Edit the text of that ticket in the workflow. Run `delegate run --resume <run-id> --retry <ticket> --dry-run` and show the verdict to the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket> --reviewed all`. |
+| A new ruling of the owner for a ticket that has not started | Pause with `delegate pause <run-id>`, change the workflow, and follow the steps of "Change the plan of a run". |
+| A stop now: the owner wants the run to stop with no wait | Tell the owner that the run can lose the work of a running agent. Then run `delegate stop <run-id>`. Go on later with `delegate run --detach --resume <run-id>`. |
+| Give up on a run: the owner does not want the run to go on | Tell the owner that the command removes the worktrees and the branches of the tickets, also with work that is not committed. Then run `delegate clean --abandon <run-id> --reason "<text>"`. To do the work again, start a new run. |
+| A dev server that refuses a path with `.git` | Use the default state root. It is `$XDG_STATE_HOME/delegate`, or `~/.local/state/delegate`, and has no `.git` component. Do not set `DELEGATE_STATE_ROOT` to a path in the git directory. Run `delegate run --dry-run <workflow>` to see the state directory. A run that started in the git directory stays there: abandon it, and start a new run. |
+
 ## Shared mutable resources are single-writer
 Even with disjoint file boundaries, actions against a shared live resource (a
 deploy target, a prod DB, an external service) must be serialized to the
