@@ -63,7 +63,11 @@ def commands(markdown: str) -> list[str]:
 
 
 @outside_the_package
-def test_an_agent_that_follows_the_tutorial_word_for_word_reaches_an_accept_verdict(tmp_path, monkeypatch):
+def test_an_agent_that_follows_the_tutorial_word_for_word_reaches_an_accept_verdict(tmp_path, monkeypatch, home):
+    # The tutorial reads the verdict from `~/.local/state/delegate` (#200), the default state root of a host with no
+    # `XDG_STATE_HOME`. The test host has the same home for the engine and for the commands, and no `XDG_STATE_HOME`.
+    monkeypatch.delenv("XDG_STATE_HOME")
+    (home / ".gitconfig").write_text("[user]\n\tname = Tutorial\n\temail = tutorial@example.com\n")
     work = tmp_path / "work"
     work.mkdir()
     (work / "delegate-kit").symlink_to(ROOT)  # the clone that the tutorial's git clone step makes

@@ -63,7 +63,7 @@ from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
-    EngineError, PlanReview, RunInterrupted, check_start, new_run_id, record_state_root, review_plan_change, run_workflow, state_directory,
+    EngineError, PlanReview, RunInterrupted, StateRootError, check_start, new_run_id, record_state_root, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
@@ -411,14 +411,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"halted at {result.halted_at}; go on with delegate run --resume {result.run_id}")
             return EXIT_HALTED
         return 0 if result.ok else 1
+    state: Path | None = None
     try:
         _, state = state_directory(args.repo, vcs)
-    except EngineError as error:
+    except StateRootError as error:
         print(f"delegate run: {error}", file=sys.stderr)
         return 1
+    except EngineError:
+        pass  # a dry run needs no repository, so a directory that is not a repository has no state directory to print
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")
-    print(f"state directory {state}")
+    if state is not None:
+        print(f"state directory {state}")
     if workflow.ticket_start == START_RUN_BRANCH:
         print(f"each ticket starts from the run branch {workflow.run_branch}")
     for number, ticket in enumerate(plan_order(workflow), start=1):

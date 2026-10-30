@@ -87,8 +87,8 @@ def test_a_gate_that_the_runner_reports_green_passes_whatever_the_command_says(t
 # The gate waits until the journal holds `gate-start` and its first line is in a gate log of ticket a. So it is green
 # only when the engine journals the gate before it runs, and the log grows while the gate runs.
 WATCHED_GATE = (
-    'echo first; d="$(git rev-parse --git-common-dir)/delegate/runs"; for i in $(seq 100); do '
-    'grep -q gate-start "$d"/*/journal.jsonl && grep -qx first "$d"/*/gates/a/*.log && { echo seen; exit 0; }; '
+    'echo first; d="$XDG_STATE_HOME/delegate"; for i in $(seq 100); do '
+    'grep -q gate-start "$d"/*/runs/*/journal.jsonl && grep -qx first "$d"/*/runs/*/gates/a/*.log && { echo seen; exit 0; }; '
     "sleep 0.05; done; exit 9"
 )
 
