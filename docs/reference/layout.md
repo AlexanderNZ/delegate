@@ -99,7 +99,7 @@ The port speaks the language of the domain. It names no git command and no flag,
 
 | Operation | What it does |
 | --- | --- |
-| `repository_root`, `shared_data_directory` | Find the top of the checkout, and the directory that the checkout and all its worktrees share, where the engine keeps its state. |
+| `repository_root`, `shared_data_directory` | Find the top of the checkout, and the directory that the checkout and all its worktrees share, where the engine keeps its state, or, with `DELEGATE_STATE_ROOT`, the file `delegate/state-root` that names the [**state directory**](../glossary.md#state-directory). See [where the engine writes](run.md#where-the-engine-writes). |
 | `branch_exists`, `create_branch`, `branch_tip` | Look for a branch, make the [**run branch**](../glossary.md#run-branch) or a ticket branch, and read its newest commit. |
 | `delete_branch` | Delete a ticket branch when the run branch holds its newest commit, with the safe delete of git, and keep it when the run branch does not hold it. The clean-up of a run uses it. |
 | `commit_of`, `head_commit`, `commits_since` | Name a commit, and list the commits that a branch holds beyond another. |

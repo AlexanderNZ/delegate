@@ -135,6 +135,7 @@ import json
 import os
 import secrets
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -477,33 +478,95 @@ class StateRootError(EngineError):
     """`DELEGATE_STATE_ROOT` has a value that the engine cannot use."""
 
 
+# The file in `<git common dir>/delegate` that holds the absolute path of the state directory, one line, when the
+# engine keeps its state elsewhere (#199). A command in a shell without `DELEGATE_STATE_ROOT` finds the state with it.
+STATE_ROOT_FILE: str = "state-root"
+
+# The pairs of directories that a warning named already, so a command that finds the state directory more than once
+# prints one warning line.
+_WARNED: set[tuple[Path, Path]] = set()
+
+
+def _recorded_root(shared: Path) -> Path | None:
+    """The state directory that `<git common dir>/delegate/state-root` names, or None when the file does not exist."""
+    path = shared / "delegate" / STATE_ROOT_FILE
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise StateRootError(f"the file {path} cannot be read: {error}") from None
+    recorded = text.strip()
+    if not recorded or not Path(recorded).is_absolute():
+        raise StateRootError(f"the file {path} holds {recorded!r}, which is not an absolute path; remove the file or write the path of the state directory")
+    return Path(recorded)
+
+
 def state_directory(repo: Path, vcs: VersionControl) -> tuple[Path, Path]:
     """The top level of the repository and the directory where the engine keeps its state.
 
-    The state is in `<git common dir>/delegate`. When the host sets
-    `DELEGATE_STATE_ROOT`, it is in `<root>/<name>-<key>` instead. Both parts
-    come from the git common directory, which every worktree of a repository
-    shares: `<name>` is the name of the directory that holds it (`.git` is in
-    the top level of the main checkout), or its own name when it is not called
-    `.git` (a bare repository or a separate git directory), and `<key>` is the
-    first 12 hex digits of the SHA-256 of its absolute path. So one root serves
-    every repository of a host, each repository gets its own directory, and
-    every worktree of a repository finds the same one.
+    The directory is the first of these. When the host sets
+    `DELEGATE_STATE_ROOT`, it is `<root>/<name>-<key>`. Else it is the path in
+    `<git common dir>/delegate/state-root`, when that file exists. Else it is
+    `<git common dir>/delegate`. `<name>` and `<key>` come from the git common
+    directory, which every worktree of a repository shares: `<name>` is the
+    name of the directory that holds it (`.git` is in the top level of the main
+    checkout), or its own name when it is not called `.git` (a bare repository
+    or a separate git directory), and `<key>` is the first 12 hex digits of the
+    SHA-256 of its absolute path. So one root serves every repository of a
+    host, each repository gets its own directory, and every worktree of a
+    repository finds the same one.
+
+    When the variable is set, and `state-root` names another directory, the
+    variable wins and one warning line on stderr names both directories.
 
     Raise EngineError when `repo` is not inside a repository, and
-    StateRootError when the root is not an absolute path.
+    StateRootError when the root, or the path in `state-root`, is not an
+    absolute path.
     """
     with _vcs_errors():
         top = vcs.repository_root(repo)
         shared = vcs.shared_data_directory(top)
+    recorded = _recorded_root(shared)
     root = os.environ.get(STATE_ROOT_VARIABLE)
     if not root:
-        return top, shared / "delegate"
+        return top, recorded if recorded is not None else shared / "delegate"
     if not Path(root).is_absolute():
         raise StateRootError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
     name = shared.parent.name if shared.name == ".git" else shared.name
     key = hashlib.sha256(str(shared).encode()).hexdigest()[:12]
-    return top, Path(root) / f"{name}-{key}"
+    chosen = Path(root) / f"{name}-{key}"
+    if recorded is not None and recorded != chosen and (chosen, recorded) not in _WARNED:
+        _WARNED.add((chosen, recorded))
+        print(
+            f"delegate: {STATE_ROOT_VARIABLE} names the state directory {chosen}, but {shared / 'delegate' / STATE_ROOT_FILE} names {recorded}; "
+            f"using {chosen}",
+            file=sys.stderr,
+        )
+    return top, chosen
+
+
+def _record_state_root(repo: Path, vcs: VersionControl, state_dir: Path) -> None:
+    """Write the path of `state_dir` to `<git common dir>/delegate/state-root` when the state is not in `<git common dir>/delegate`.
+
+    The file is the one line that a command needs to find the state without `DELEGATE_STATE_ROOT`. It is written
+    to a private file first, and a rename puts it in place, so a command never reads half a path.
+    """
+    with _vcs_errors():
+        shared_delegate = vcs.shared_data_directory(vcs.repository_root(repo)) / "delegate"
+    if state_dir == shared_delegate:
+        return
+    path = shared_delegate / STATE_ROOT_FILE
+    line = f"{state_dir}\n"
+    try:
+        if path.exists() and path.read_text() == line:
+            return
+        shared_delegate.mkdir(parents=True, exist_ok=True)
+        private = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        private.write_text(line)
+        os.replace(private, path)
+    except OSError as error:
+        raise EngineError(f"the engine cannot write {path}: {error}") from None
 
 
 def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:
@@ -996,6 +1059,7 @@ def run_workflow(
         workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
     )
     repo, state_dir = state_directory(repo, vcs)
+    _record_state_root(repo, vcs, state_dir)
     roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
     try:
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
