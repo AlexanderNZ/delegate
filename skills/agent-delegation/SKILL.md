@@ -87,6 +87,15 @@ stop rule, the tracker, and the output language — everything no harness
 enforces. Run the command with `--dry-run` first, and read every file before it
 lands.
 
+A flag that the verifier may put after a gate, for example `--noEmit` or
+`--project <value>`, goes in with `--gate-extra-flag '<flag>'`, once for each
+flag; the command writes `gateExtraFlags` in the declaration. To make the
+context skill current later, for example after `validate` gives
+`LOAD_BLOCK_NOT_PLAIN` for a skill that an older `bootstrap` wrote, run the
+command with `--skill-only` and the options of the command in the header
+comment of the skill. It writes `SKILL.md` only, so a declaration that holds a
+hand edit stays as it is.
+
 Four rules the command applies for you:
 
 1. **The context skill goes to `.claude/skills/<repo>-context/`.** Claude Code

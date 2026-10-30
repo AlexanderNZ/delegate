@@ -551,7 +551,8 @@ def load_time_block_findings(skill: Path) -> list[Finding]:
                 findings.append(Finding(
                     "LOAD_BLOCK_NOT_PLAIN", str(skill),
                     f"the load-time block holds {', '.join(forms)}; Claude Code cannot analyse it, "
-                    "so a subagent that preloads this skill does not start. Write one plain command (ADR 0006)",
+                    "so a subagent that preloads this skill does not start. Write one plain command (ADR 0006). To write the skill again, "
+                    "run `agent-definitions bootstrap --skill-only` with the options of the command in the header comment of the skill",
                     line=first,
                 ))
             in_fence = False

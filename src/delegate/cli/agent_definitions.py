@@ -110,6 +110,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
+    skill_only = bool(getattr(args, "skill_only", False))
+    if not skill_only:
+        # The context skill needs neither a tier nor a preloaded skill, so the parser cannot require them.
+        for flag, value in (("--tier", args.tier), ("--skill", args.skill)):
+            if not value:
+                print(f"agent-definitions bootstrap: error: the following arguments are required: {flag}", file=sys.stderr)
+                return 2
     try:
         tiers = load_tiers(args.tiers)
     except (OSError, KeyError) as e:
@@ -119,8 +126,8 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         repo=Path(args.repo).resolve(),
         name=args.name,
         domain=args.domain,
-        tier=args.tier,
-        skills=list(args.skill),
+        tier=args.tier or "",
+        skills=list(args.skill or []),
         references=list(args.reference),
         prompt_file=args.prompt_file,
         max_turns=args.max_turns,
@@ -133,6 +140,8 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         output_language=getattr(args, "output_language", None),
         tracked_file_build=bool(getattr(args, "tracked_file_build", False)),
         context_load=getattr(args, "context_load", None),
+        gate_extra_flags=list(getattr(args, "gate_extra_flag", None) or []),
+        skill_only=skill_only,
     )
 
 
@@ -163,13 +172,18 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--repo", required=True, help="the repository root")
     b.add_argument("--name", required=True, help="the agent name; the skill is <name>-context")
     b.add_argument("--domain", required=True, help="the domain in one sentence; it is also the skill description")
-    b.add_argument("--tier", required=True, help="the tier of the agent: strong, standard or cheap")
+    b.add_argument(
+        "--skill-only",
+        action="store_true",
+        help="write only <skills root>/<name>-context/SKILL.md: no declaration, no render, no agent file. "
+        "It needs only --repo, --name, --domain, --reference, --context-load and --skills-root",
+    )
+    b.add_argument("--tier", help="the tier of the agent: strong, standard or cheap; required, except with --skill-only")
     b.add_argument(
         "--skill",
         action="append",
-        required=True,
         metavar="NAME",
-        help="a preloaded skill; repeat it. <name>-context is added first",
+        help="a preloaded skill; repeat it. <name>-context is added first. Required, except with --skill-only",
     )
     b.add_argument(
         "--reference",
@@ -191,6 +205,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="CMD",
         help="a command the verifier may run only without -X, alone or with arguments; repeat it",
+    )
+    b.add_argument(
+        "--gate-extra-flag",
+        action="append",
+        metavar="FLAG",
+        help="a read-only flag the verifier may put after a gate, in the entry format of gateExtraFlags: "
+        "'--flag' or '--flag <value>'; the next word is always the value of this option; repeat it",
     )
     b.add_argument(
         "--output-language",
@@ -218,8 +239,27 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _attach_flag_values(argv: list[str]) -> list[str]:
+    """Write `--gate-extra-flag <flag>` as `--gate-extra-flag=<flag>`.
+
+    The value of the option is itself a flag, for example `--noEmit`, and
+    argparse reads such a word as an option of the command. The `=` form makes
+    the next word the value, whatever it starts with.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--gate-extra-flag" and i + 1 < len(argv):
+            out.append(f"--gate-extra-flag={argv[i + 1]}")
+            i += 2
+        else:
+            out.append(argv[i])
+            i += 1
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_args(_attach_flag_values(list(sys.argv[1:] if argv is None else argv)))
     return args.fn(args)
 
 

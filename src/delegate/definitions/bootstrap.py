@@ -211,6 +211,7 @@ def declaration_toml(
     output_language: str | None = None,
     tracked_file_build: bool = False,
     context_load: str | None = None,
+    gate_extra_flags: Sequence[str] = (),
 ) -> str:
     """The `[agents.<name>]` declaration, in the key order the skill documents.
 
@@ -237,6 +238,8 @@ def declaration_toml(
         lines.append("gateCommands = [" + ", ".join(_toml_string(c) for c in gate_commands) + "]")
     if get_only_commands:
         lines.append("getOnlyCommands = [" + ", ".join(_toml_string(c) for c in get_only_commands) + "]")
+    if gate_extra_flags:
+        lines.append("gateExtraFlags = [" + ", ".join(_toml_string(c) for c in gate_extra_flags) + "]")
     if output_language is not None:
         lines.append(f"outputLanguage = {_toml_string(output_language)}")
     if tracked_file_build:
@@ -262,6 +265,7 @@ def rerun_command(
     output_language: str | None = None,
     tracked_file_build: bool = False,
     context_load: str | None = None,
+    gate_extra_flags: Sequence[str] = (),
 ) -> str:
     """The command that reproduces this run, with `--repo .` for portability.
 
@@ -282,10 +286,30 @@ def rerun_command(
         parts += ["--gate-command", c]
     for c in get_only_commands:
         parts += ["--get-only-command", c]
+    for c in gate_extra_flags:
+        parts += ["--gate-extra-flag", c]
     if output_language is not None:
         parts += ["--output-language", output_language]
     if tracked_file_build:
         parts += ["--tracked-file-build"]
+    if context_load is not None:
+        parts += ["--context-load", context_load]
+    parts += ["--skills-root", skills_root]
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+def skill_only_command(
+    name: str, domain: str, references: list[str], skills_root: str, context_load: str | None = None
+) -> str:
+    """The command that reproduces the context skill alone, with `--repo .` for portability.
+
+    It holds only the options that the skill uses. The header of a skill that
+    `--skill-only` writes carries it, because that run knows no tier, no
+    preloaded skill and no gate.
+    """
+    parts = ["agent-definitions", "bootstrap", "--skill-only", "--repo", ".", "--name", name, "--domain", domain]
+    for r in references:
+        parts += ["--reference", r]
     if context_load is not None:
         parts += ["--context-load", context_load]
     parts += ["--skills-root", skills_root]
@@ -325,6 +349,55 @@ class BootstrapError(Exception):
     """An argument the command cannot act on. The message names what is wrong."""
 
 
+def _check_context_arguments(repo: Path, references: list[str], context_load: str | None) -> None:
+    """Refuse an argument that the context skill cannot use. The message names what is wrong."""
+    if not repo.is_dir():
+        raise BootstrapError(f"repository not found: {repo}")
+    if context_load is not None and context_load not in CONTEXT_LOADS:
+        raise BootstrapError(
+            f"unknown context load {context_load!r}; permitted values: {', '.join(CONTEXT_LOADS)}"
+        )
+    missing = [reference_path(r) for r in references if not (repo / reference_path(r)).exists()]
+    if missing:
+        raise BootstrapError("\n".join(f"reference not found in {repo}: {m}" for m in missing))
+    # A load-time block reads one file. A directory is not a document.
+    not_files = [reference_path(r) for r in references if not (repo / reference_path(r)).is_file()]
+    if not_files:
+        raise BootstrapError("\n".join(f"reference is not a file in {repo}: {m}" for m in not_files))
+
+
+def _run_skill_only(
+    repo: Path,
+    name: str,
+    domain: str,
+    references: list[str],
+    skills_root: str,
+    dry_run: bool,
+    context_load: str | None,
+) -> int:
+    """Write `<skills root>/<name>-context/SKILL.md` and nothing else.
+
+    A repository whose declaration holds a key that `bootstrap` cannot write
+    needs a way to make the skill current without a new declaration. The
+    declaration, the rendering and the agent directories do not change.
+    """
+    try:
+        _check_context_arguments(repo, references, context_load)
+    except BootstrapError as e:
+        print(e, file=sys.stderr)
+        return 1
+    command = skill_only_command(name, domain, references, skills_root, context_load)
+    path = repo / skills_root / f"{name}-context" / "SKILL.md"
+    content = context_skill(repo, name, domain, references, command, context_load)
+    if dry_run:
+        print(f"--- {path} ---")
+        print(content, end="")
+        return 0
+    _write({path: content})
+    print(path)
+    return 0
+
+
 def plan(
     repo: Path,
     name: str,
@@ -341,28 +414,17 @@ def plan(
     output_language: str | None = None,
     tracked_file_build: bool = False,
     context_load: str | None = None,
+    gate_extra_flags: Sequence[str] = (),
 ) -> tuple[dict[Path, str], dict[str, dict[str, str]]]:
     """The skill and the declaration to write, and the pair to render from them.
 
     It reads the arguments and the prompt file, and it writes nothing.
     """
-    if not repo.is_dir():
-        raise BootstrapError(f"repository not found: {repo}")
+    _check_context_arguments(repo, references, context_load)
     if output_language is not None and output_language not in OUTPUT_LANGUAGES:
         raise BootstrapError(
             f"unknown output language {output_language!r}; permitted values: {', '.join(OUTPUT_LANGUAGES)}"
         )
-    if context_load is not None and context_load not in CONTEXT_LOADS:
-        raise BootstrapError(
-            f"unknown context load {context_load!r}; permitted values: {', '.join(CONTEXT_LOADS)}"
-        )
-    missing = [reference_path(r) for r in references if not (repo / reference_path(r)).exists()]
-    if missing:
-        raise BootstrapError("\n".join(f"reference not found in {repo}: {m}" for m in missing))
-    # A load-time block reads one file. A directory is not a document.
-    not_files = [reference_path(r) for r in references if not (repo / reference_path(r)).is_file()]
-    if not_files:
-        raise BootstrapError("\n".join(f"reference is not a file in {repo}: {m}" for m in not_files))
     prompt = ""
     if prompt_file:
         p = Path(prompt_file)
@@ -372,7 +434,7 @@ def plan(
 
     command = rerun_command(
         name, domain, tier, skills, references, prompt_file, max_turns, skills_root, gate_commands,
-        get_only_commands, output_language, tracked_file_build, context_load,
+        get_only_commands, output_language, tracked_file_build, context_load, gate_extra_flags,
     )
     declared_skills = [f"{name}-context", *skills]
     skill_dir = repo / skills_root / f"{name}-context"
@@ -380,7 +442,7 @@ def plan(
         skill_dir / "SKILL.md": context_skill(repo, name, domain, references, command, context_load),
         skill_dir / "agents.toml": declaration_toml(
             name, domain, tier, declared_skills, references, prompt, max_turns, command, gate_commands,
-            get_only_commands, output_language, tracked_file_build, context_load,
+            get_only_commands, output_language, tracked_file_build, context_load, gate_extra_flags,
         ),
     }
 
@@ -412,11 +474,15 @@ def run(
     output_language: str | None = None,
     tracked_file_build: bool = False,
     context_load: str | None = None,
+    gate_extra_flags: Sequence[str] = (),
+    skill_only: bool = False,
 ) -> int:
+    if skill_only:
+        return _run_skill_only(repo, name, domain, references, skills_root, dry_run, context_load)
     try:
         sources, rendered = plan(
             repo, name, domain, tier, skills, references, prompt_file, max_turns, skills_root, tiers,
-            gate_commands, get_only_commands, output_language, tracked_file_build, context_load,
+            gate_commands, get_only_commands, output_language, tracked_file_build, context_load, gate_extra_flags,
         )
     except BootstrapError as e:
         print(e, file=sys.stderr)
