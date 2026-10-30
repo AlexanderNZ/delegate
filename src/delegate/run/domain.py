@@ -321,6 +321,7 @@ PLAN_RULES: dict[int, str] = {
     7: "a ticket that has started cannot be removed",
     8: "the coordinator reviews the later tickets",
     9: "the brief of each later ticket gets the section Plan change",
+    10: "a failed ticket that a retry starts again can change its text",
 }
 
 # The value of `--reviewed` that covers every later ticket.
@@ -348,7 +349,9 @@ class PlanCheck(NamedTuple):
     its changed fields. `later` holds each ticket that has not started and
     comes after an added or changed ticket, in the new order; an added ticket
     is not in it. `problems` maps a rule number to the messages of that rule
-    that refuse the change.
+    that refuse the change. `restarted` maps the failed ticket that a retry
+    starts again with a new text (rule 10) to its old and its new
+    `text_sha256`; it is empty when no such text changed.
     """
 
     fixed: list[str]
@@ -357,9 +360,12 @@ class PlanCheck(NamedTuple):
     removed: list[str]
     later: list[str]
     problems: dict[int, list[str]]
+    restarted: dict[str, tuple[str, str]] = {}
 
 
-def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], started: Collection[str]) -> PlanCheck:
+def check_plan_change(
+    old: Sequence[PlanTicket], new: Sequence[PlanTicket], started: Collection[str], retried: str | None = None
+) -> PlanCheck:
     """Apply the rules of a plan change to the old plan and the new plan, each in plan order.
 
     `started` holds the ids of the tickets with a `step-start`. The built part
@@ -368,6 +374,10 @@ def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], star
     built part that did not start (a ticket that the run skipped) is fixed
     too, because the run went past it. A new ticket goes after the built part.
     A ticket after the built part can change or go.
+
+    `retried` is the id of a failed ticket that a retry starts again, or None.
+    Its `text` can change (rule 10). Its `stack` and its `blocked-by` stay
+    fixed, and so does each other ticket of the built part.
     """
     old_ids, new_ids = [t.id for t in old], [t.id for t in new]
     by_id = {t.id: t for t in new}
@@ -382,6 +392,7 @@ def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], star
             if fields:
                 changed[ticket.id] = fields
     problems: dict[int, list[str]] = {}
+    restarted: dict[str, tuple[str, str]] = {}
     last_started = fixed[-1] if fixed else None
     for ticket_id in fixed:
         where = "has started" if ticket_id in started else f"is in the built part, before ticket {last_started!r}, which has started"
@@ -389,7 +400,12 @@ def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], star
             rule = 7 if ticket_id in started else 1
             problems.setdefault(rule, []).append(f"ticket {ticket_id!r} {where}; it cannot be removed")
         elif ticket_id in changed:
-            problems.setdefault(1, []).append(f"ticket {ticket_id!r} {where}; its {', '.join(changed[ticket_id])} changed")
+            fields = changed[ticket_id]
+            if ticket_id == retried and "text" in fields:
+                restarted[ticket_id] = (next(t for t in old if t.id == ticket_id).text_sha256, by_id[ticket_id].text_sha256)
+                fields = [name for name in fields if name != "text"]
+            if fields:
+                problems.setdefault(1, []).append(f"ticket {ticket_id!r} {where}; its {', '.join(fields)} changed")
     if not problems and new_ids[: len(fixed)] != fixed:
         end = new_ids.index(last_started) if last_started in new_ids else len(new_ids)
         early = [i for i in new_ids[:end] if i in added]
@@ -406,7 +422,7 @@ def check_plan_change(old: Sequence[PlanTicket], new: Sequence[PlanTicket], star
     if moved:
         first = new_ids.index(moved[0])
         later = [i for i in new_ids[first + 1 :] if i not in added and i not in started]
-    return PlanCheck(fixed, added, changed, removed, later, problems)
+    return PlanCheck(fixed, added, changed, removed, later, problems, restarted)
 
 
 def unreviewed(later: Sequence[str], reviewed: Collection[str]) -> list[str]:

@@ -255,6 +255,8 @@ class PlanChange(TypedDict):
     order: list[str]
     reviewed: list[str]
     plan: list[PlanTicket]
+    # Only when a retry starts a failed ticket again with a new text (#202): the old and the new `text_sha256` of each such ticket.
+    retry_text: NotRequired[dict[str, dict[str, str]]]
 
 
 class Retry(TypedDict):

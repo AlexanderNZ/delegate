@@ -94,7 +94,9 @@ covers the built tickets whose work the run branch does not hold. In `assure`
 mode, the tickets that the step made the engine skip are checked again with
 the skip rule (see `domain.skipped_because_of`), so a ticket that only the
 step blocked is built after it, in plan order. The journal records `retry`,
-and then a new `step-end` and a new `run-end`. The newest of each wins.
+and then a new `step-end` and a new `run-end`. The newest of each wins. A retry
+can also change the text of its own failed ticket, and only the text (rule 10 of
+a plan change): `plan-change` then holds the old and the new `text_sha256`.
 
 A run that ends with a failed step or a skipped ticket ends with the result
 `failed`.
@@ -795,6 +797,7 @@ class PlanReview:
             7: f"removed: {', '.join(check.removed) or 'none'}",
             8: f"reviewed: {later}" if later else "no later ticket",
             9: f"the briefs of {later} get the section" if later else "no brief gets the section",
+            10: "text of the retried ticket changes: " + ", ".join(check.restarted) if check.restarted else "no retried ticket changes its text",
         }
         found = {rule: list(messages) for rule, messages in check.problems.items()}
         if self.missing:
@@ -817,7 +820,7 @@ def _violation_text(violation: dict[str, object]) -> str:
 
 def _review(
     workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, reviewed: tuple[str, ...],
-    branch_exists: Callable[[str], bool],
+    branch_exists: Callable[[str], bool], retry: str | None = None,
 ) -> PlanReview:
     """Apply the rules of a plan change to the workflow and the journal of a run. Change nothing.
 
@@ -825,6 +828,9 @@ def _review(
     `run-start`. Raise EngineError when a field other than the tickets differs
     (see `_check_same_run`), when the plan changed and the journal records
     no plan to compare with, or when the owner abandoned the run (#201).
+
+    `retry` is the ticket of `--retry`. When its newest `step-end` is `failed`,
+    its text can change (rule 10): the retry starts it again.
     """
     abandoned = abandoned_end(events)
     if abandoned is not None:
@@ -847,7 +853,8 @@ def _review(
     if old == new_plan:
         return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted)
     started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
-    check = domain.check_plan_change(old, new_plan, started)
+    ended = [str(event["state"]) for event in events if event["event"] == "step-end" and event["ticket"] == retry]
+    check = domain.check_plan_change(old, new_plan, started, retry if ended and ended[-1] == FAILED else None)
     other = [
         f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
         for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
@@ -862,11 +869,14 @@ def _review(
 
 
 def review_plan_change(
-    workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = ()
+    workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
+    retry: str | None = None,
 ) -> PlanReview:
     """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
 
-    `delegate run --resume <run-id> --dry-run` prints the result. Raise
+    `delegate run --resume <run-id> --dry-run` prints the result. `retry` is the
+    ticket of `--retry`: the text of a failed ticket that it starts again can
+    change (rule 10). Raise
     EngineError when the run is unknown, or when the workflow differs from the
     run in a field other than the tickets.
     """
@@ -878,7 +888,7 @@ def review_plan_change(
     if not events or events[0]["event"] != "run-start":
         raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
     with _vcs_errors():
-        return _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch))
+        return _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
 
 
 def _refuse_plan_change(review: PlanReview, workflow_path: Path, run_id: str) -> None:
@@ -1042,7 +1052,7 @@ def _check_chain_start(
 
 def check_start(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *,
-    resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (),
+    resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (), retry: str | None = None,
 ) -> None:
     """The checks of a run that need no agent: the tier of each role, the lock, and the branches or the plan. Create nothing.
 
@@ -1063,7 +1073,7 @@ def check_start(
     except LockError as error:
         raise EngineError(str(error)) from None
     if resume:
-        _refuse_plan_change(review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed), workflow_path, run_id)
+        _refuse_plan_change(review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed, retry), workflow_path, run_id)
     else:
         _check_branches(workflow, repo, vcs)
 
@@ -1112,6 +1122,7 @@ def run_workflow(
     run_id = resume if resume is not None else (run_id or new_run_id())
     check_start(
         workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
+        retry=retry,
     )
     repo, state_dir = state_directory(repo, vcs, run_id)
     record_state_root(repo, vcs, state_dir)
@@ -1171,7 +1182,7 @@ def _execute(
                 "a halted run cannot be resumed: start a new run"
             )
         with _vcs_errors():
-            review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch))
+            review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry)
         # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
         _refuse_plan_change(review, workflow_path, run_id)
         progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
@@ -1335,13 +1346,14 @@ def _pause_point(journal: Journal, ticket: str, before: str, where: str, **field
 def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.PlanCheck, progress: _Progress) -> None:
     """Write `plan-change`, and apply the change to the progress of the run.
 
-    A removed ticket leaves the run. A changed ticket that the run skipped is
+    A removed ticket leaves the run. A failed ticket that a retry starts again with a new text is in `retry_text`, with its old and its new `text_sha256`. A changed ticket that the run skipped is
     no longer skipped: the skip rule applies to it again, with its new blockers.
     """
     plan = _plan_of(workflow)
     journal.append(
         "plan-change", added=check.added, changed=list(check.changed), fields=check.changed, removed=check.removed,
         order=[t.id for t in plan], reviewed=check.later, plan=_plan_record(plan),
+        **({"retry_text": {t: {"old": old, "new": new} for t, (old, new) in check.restarted.items()}} if check.restarted else {}),
     )
     for ticket_id in [*check.removed, *check.changed]:
         progress.skipped.pop(ticket_id, None)

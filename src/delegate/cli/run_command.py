@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.dry_run and args.resume is not None:
         try:
-            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed)
+            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
@@ -358,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
                 # The checks that need no agent come before the run process, so their error goes to the caller.
                 check_start(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
-                    break_lock=args.break_lock, reviewed=reviewed,
+                    break_lock=args.break_lock, reviewed=reviewed, retry=args.retry,
                 )
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
