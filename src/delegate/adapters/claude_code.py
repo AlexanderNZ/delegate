@@ -46,6 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
+from .agent_files import find_agent_file
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -55,6 +56,9 @@ COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
 TIER_COLUMN: str = "claude-code"
+
+# The directory of the agent files, in the project and in the user directory.
+AGENT_DIRECTORY: Path = Path(".claude") / "agents"
 
 # The tools that the adapter disallows for every agent. Under `--print` the
 # notification of a monitor never comes to the agent, and a monitor that stays
@@ -214,6 +218,10 @@ class ClaudeCodeAdapter:
             process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
             ended_timeout=process.ended_timeout,
         )
+
+    def agent_file(self, agent: str, directory: Path) -> Path | None:
+        """The file `.claude/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.claude/agents`)."""
+        return find_agent_file(agent, directory, AGENT_DIRECTORY, AGENT_DIRECTORY)
 
     def activity(self, stream: Path) -> Activity:
         new = cache = 0

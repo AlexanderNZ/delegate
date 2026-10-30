@@ -110,6 +110,12 @@ step starts, before a gate runs, and before a verifier starts (see
 records `pause-requested` and `paused`, the run writes no `run-end`, and a
 resume goes on from the boundary as from a stop.
 
+The agents of a run are the agents that it started with, or the journal records the change (#205). `run-start`
+records the SHA-256 of each agent file that a role of the run names, as the adapter finds the file for the main
+checkout. Before each agent session, after `prepare`, the engine hashes the agent file in the tree of the agent. A hash
+that differs from the record, or a missing file, fails the step before the agent starts, and the journal records
+`agents-changed` (see `_check_agent_file`). A resume with `--agents-changed` records the hashes again, in `resume`.
+
 A failure of the harness halts the run. An `AdapterError` from `Adapter.run` is a
 failure of the harness, not of the work: a harness that is not logged in, a CLI
 that is gone, a rate limit. The engine writes `halted` (the ticket, the role,
@@ -155,6 +161,7 @@ from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
+from .agents import agent_names, check_agent, record_agents, recorded_agents
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
     notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
@@ -289,6 +296,8 @@ class RunResult:
     # The message of the `AdapterError` that halted the run, or None when it did not halt. `halted_at` says where.
     halted: str | None = None
     halted_at: str | None = None
+    # The note of a resume that recorded the hashes of the agent files because its journal holds no record, or None (#205).
+    agents_note: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -1109,6 +1118,7 @@ def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False,
     on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
+    agents_changed: bool = False,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -1145,6 +1155,10 @@ def run_workflow(
     holds the ids of the later tickets that the coordinator reviewed, or
     `all`. Raise EngineError, which names each ticket and field at fault, when
     the rules refuse the change. A plan change also goes on with a run that ended.
+
+    `agents_changed` is for a resume: the engine records the hashes of the agent files of the main checkout again, in
+    the `resume` event, and goes on with them as the agents of the run (see `delegate.run.agents`). A resume of a
+    journal with no record of the agent files records them too, and the result has `agents_note`.
     """
     run_id = resume if resume is not None else (run_id or new_run_id())
     check_start(
@@ -1159,7 +1173,7 @@ def run_workflow(
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start,
+                    reviewed, on_start, agents_changed,
                 )
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
@@ -1184,8 +1198,10 @@ def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
     retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
+    agents_changed: bool = False,
 ) -> RunResult:
     order = plan_order(workflow)
+    agents_note: str | None = None
     plan: _RetryPlan | None = None
     # A pause request from before this process is not for it: the run that it asked to pause has stopped.
     (state_dir / "runs" / run_id / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
@@ -1198,6 +1214,7 @@ def _execute(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
             plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
+            agents=record_agents(adapter, repo, agent_names(workflow)),
         )
         progress = _Progress()
     else:
@@ -1224,9 +1241,19 @@ def _execute(
         plan = _retry_plan(workflow, progress, run_id, retry, restart) if retry is not None else None
         if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
             _check_chain_start(workflow, order, progress.built, plan, vcs, repo, run_base, run_id)
+        # The record of the agent files changes only at the request of the person, or when the journal has none.
+        agent_fields: dict[str, object] = {}
+        if agents_changed or recorded_agents(events) is None:
+            agent_fields = {"agents": record_agents(adapter, repo, agent_names(workflow))}
+            if recorded_agents(events) is None:
+                agents_note = (
+                    f"run {run_id} has no record of its agent files (its journal is of an earlier version); "
+                    "the hashes of the agent files are recorded now, at the resume"
+                )
+                agent_fields["agents_note"] = agents_note
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
-            skipped=list(progress.skipped), open=progress.open_ticket,
+            skipped=list(progress.skipped), open=progress.open_ticket, **agent_fields,
         )
         if review.check is not None:
             _record_plan_change(journal, workflow, review.check, progress)
@@ -1313,10 +1340,11 @@ def _execute(
         where = f"the {stopped_by.role} of ticket {stopped_by.ticket}"
         return RunResult(
             run_id, journal.path, built, failed, failures, skipped, unmapped, halted=str(stopped_by), halted_at=where,
+            agents_note=agents_note,
         )
     if paused is not None:
         # A paused run has no `run-end`: a resume goes on with it.
-        return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused)
+        return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, paused=paused, agents_note=agents_note)
     # A skipped ticket is work that the run did not build, so the run fails, as `RunResult.ok` says.
     result = BUILT if not failed and not skipped else FAILED
     if result == BUILT and not workflow.keep_worktrees:
@@ -1325,7 +1353,7 @@ def _execute(
     journal.append("run-end", result=result, built=built, failed=failed, skipped=list(skipped))
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
-    return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped)
+    return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, agents_note=agents_note)
 
 
 def _clean_up(
@@ -1489,6 +1517,27 @@ def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round
     except AdapterError as error:
         journal.append("halted", ticket=ticket, role=role, round=round_number, message=str(error))
         raise _Halted(ticket, role, round_number, str(error)) from None
+
+
+def _check_agent_file(
+    adapter: Adapter, journal: Journal, agent: str, ticket: str, role: str, round_number: int, tree: str, directory: Path
+) -> None:
+    """Fail the step before an agent session when the agent file in its tree is not the file that the run recorded (#205).
+
+    `directory` is the tree where the agent runs, after `prepare`: the worktree of the ticket (TREE_WORKTREE) or the verifier
+    copy (TREE_VERIFY_COPY). The journal gets `agents-changed` with the ticket, the role, the round, the tree, the agent, the
+    recorded path of the file, the recorded hash, and the new hash (`None` for a missing file). Raise `_StepFailed`, whose message
+    names the file and both hashes. A run that recorded no file for the agent passes.
+    """
+    recorded = recorded_agents(read_events(journal.path))
+    change = None if recorded is None else check_agent(adapter, recorded, agent, directory)
+    if change is None:
+        return
+    journal.append(
+        "agents-changed", ticket=ticket, role=role, round=round_number, tree=tree, agent=agent, path=str(change.path),
+        recorded_hash=change.recorded, new_hash=change.found,
+    )
+    raise _StepFailed(change.message())
 
 
 def _lenient_fields(report: SpecialistReport | VerifierReport) -> dict[str, object]:
@@ -1840,6 +1889,10 @@ def _build_with_continuations(
         if spawned:
             spawned, result = False, None
         else:
+            try:
+                _check_agent_file(adapter, journal, stack.specialist, ticket.id, ROLE_SPECIALIST, 0, TREE_WORKTREE, worktree)
+            except _StepFailed as failed:
+                return str(failed)
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
             result = _run_agent(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
@@ -2179,6 +2232,9 @@ def _run_fixup(
         ticket.id, ticket.text, step.worktree, step.stack.all_hotspots, step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes,
     )
+    _check_agent_file(
+        step.adapter, step.journal, step.stack.specialist, ticket.id, ROLE_FIXUP, round_number, TREE_WORKTREE, step.worktree
+    )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     result = _run_agent(
@@ -2339,6 +2395,9 @@ def _verify_round(
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
         _run_prepare(step.gates, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
+        _check_agent_file(
+            step.adapter, step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number, TREE_VERIFY_COPY, copy
+        )
         added = _make_proof_copy(copy)
         # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
         before = snapshot_worktree(step.vcs, step.worktree)

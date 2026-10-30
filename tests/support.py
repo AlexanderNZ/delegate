@@ -226,6 +226,9 @@ class ScriptedAdapter:
     adapter touches the working directory. A test uses it to raise an error, to
     break the repository, or to start another command while the run holds its lock.
 
+    `agent_file` gives the agent file that the harness would find for a directory: the project file under
+    `.claude/agents`, then the file in `user_agents`.
+
     `report_checks` holds, for each request, the role (`specialist`, `fix-up`
     or `verifier`), the `idle_timeout` of the request, and the answer of its
     `report_valid` check before and after the adapter writes the report (`None`
@@ -281,6 +284,14 @@ class ScriptedAdapter:
     timeout_roles: set[str] = field(default_factory=set)
     report_checks: list[tuple[str, float | None, bool | None, bool | None]] = field(default_factory=list)
     refusals: dict[str, tuple[tuple[str, str], ...]] = field(default_factory=dict)
+    user_agents: Path | None = None
+
+    def agent_file(self, agent: str, directory: Path) -> Path | None:
+        """Where the agent file of `agent` is for `directory`: `.claude/agents/<agent>.md` in it, else in `user_agents`, else nowhere."""
+        for candidate in (directory / ".claude" / "agents", self.user_agents):
+            if candidate is not None and (candidate / f"{agent}.md").is_file():
+                return candidate / f"{agent}.md"
+        return None
 
     def _report_check(self, request: AdapterRequest) -> bool | None:
         return None if request.report_valid is None else request.report_valid()

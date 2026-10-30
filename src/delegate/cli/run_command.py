@@ -163,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         "use its worktree and its commits again, and go on at the first phase that did not complete",
     )
     parser.add_argument(
+        "--agents-changed", action="store_true",
+        help="with --resume, record the hashes of the agent files of the main checkout again, in the resume event, and go on with "
+        "them as the agents of the run; without it, an agent file that differs from the record of the run fails the step",
+    )
+    parser.add_argument(
         "--break-lock", action="store_true",
         help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
     )
@@ -312,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--retry needs --resume RUN_ID")
     if args.reviewed is not None and args.resume is None:
         parser.error("--reviewed needs --resume RUN_ID")
+    if args.agents_changed and args.resume is None:
+        parser.error("--agents-changed needs --resume RUN_ID")
     reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
@@ -377,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_workflow(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
+                    agents_changed=args.agents_changed,
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -396,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"process {result.taken_over.pid}, which no longer exists",
                 file=sys.stderr,
             )
+        if result.agents_note is not None:
+            print(f"delegate run: {result.agents_note}", file=sys.stderr)
         for ticket, reason in result.failures.items():
             print(f"delegate run: ticket {ticket}: {reason}", file=sys.stderr)
         for finding in result.unmapped:

@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
+from .agent_files import find_agent_file
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -48,6 +49,10 @@ COMMAND: str = "opencode"
 
 # The column of the tier table that holds the OpenCode models.
 TIER_COLUMN: str = "opencode"
+
+# The directories of the agent files: in the project, and in the user directory.
+PROJECT_AGENT_DIRECTORY: Path = Path(".opencode") / "agents"
+USER_AGENT_DIRECTORY: Path = Path(".config") / "opencode" / "agents"
 
 # The `reason` of a `step_finish` event, mapped to the end state of the run.
 # `stop` is a normal end. `length` is the model reaching its output limit. Any
@@ -171,6 +176,10 @@ class OpenCodeAdapter:
             process.returncode, _end_state(events, stream), session_id, stream, process.ended_idle, final_text=final_text,
             ended_timeout=process.ended_timeout,
         )
+
+    def agent_file(self, agent: str, directory: Path) -> Path | None:
+        """The file `.opencode/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.config/opencode/agents`)."""
+        return find_agent_file(agent, directory, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY)
 
     def activity(self, stream: Path) -> Activity:
         new = cache = 0

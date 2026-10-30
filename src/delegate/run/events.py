@@ -39,6 +39,7 @@ PREPARE_RESULT: str = "prepare-result"
 CONTINUATION: str = "continuation"
 CONTINUATION_LIMIT: str = "continuation-limit"
 RESUME: str = "resume"
+AGENTS_CHANGED: str = "agents-changed"
 PLAN_CHANGE: str = "plan-change"
 RETRY: str = "retry"
 LOCK_BROKEN: str = "lock-broken"
@@ -96,6 +97,14 @@ class KeptBranch(TypedDict):
     reason: str
 
 
+class AgentFile(TypedDict):
+    """One agent file of a record: the agent, the path of its file, and the SHA-256 of the file (#205)."""
+
+    agent: str
+    path: str
+    sha256: str
+
+
 class RunStart(TypedDict):
     run_id: str
     workflow: str
@@ -108,6 +117,8 @@ class RunStart(TypedDict):
     plan: list[PlanTicket]
     # Absent in a journal of version 0.
     schema: NotRequired[int]
+    # The agent files of the roles of the run, as the adapter finds them for the main checkout. Absent in a journal of an earlier version (#205).
+    agents: NotRequired[list[AgentFile]]
 
 
 class StepStart(TypedDict):
@@ -245,6 +256,22 @@ class Resume(TypedDict):
     failed: list[str]
     skipped: list[str]
     open: str | None
+    # Only a resume with `--agents-changed`, or a resume of a journal with no record of the agent files, has these (#205):
+    # the new record, and the note that says that the journal had none.
+    agents: NotRequired[list[AgentFile]]
+    agents_note: NotRequired[str]
+
+
+class AgentsChanged(TypedDict):
+    ticket: str
+    role: str
+    round: int
+    tree: str
+    agent: str
+    path: str
+    recorded_hash: str
+    # None when the agent file is missing in the tree.
+    new_hash: str | None
 
 
 class PlanChange(TypedDict):
@@ -483,6 +510,7 @@ EVENTS: dict[str, type] = {
     CONTINUATION: Continuation,
     CONTINUATION_LIMIT: ContinuationLimit,
     RESUME: Resume,
+    AGENTS_CHANGED: AgentsChanged,
     PLAN_CHANGE: PlanChange,
     RETRY: Retry,
     LOCK_BROKEN: LockBroken,

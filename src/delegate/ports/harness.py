@@ -170,6 +170,11 @@ class Adapter(Protocol):
     continuation the engine then passes the session id of the last run in
     `AdapterRequest.resume_session`. Otherwise the engine starts a new agent.
 
+    `agent_file` tells where the harness finds the agent `agent` for the working directory `directory`: the path of its
+    agent file, or `None` when the harness finds none. It reads the project directory of `directory` first, then the
+    user directory (outside the repository), as the harness does. The engine hashes the file at the start of a run, and
+    again in each tree before each agent session (#205). It changes nothing.
+
     `activity` reads a stream that this adapter captured. A live stream can end
     in half a line, which it ignores. It raises AdapterError when the file is
     missing or a line before the last one is not JSON, and the error of the file
@@ -181,5 +186,7 @@ class Adapter(Protocol):
     supports_resume: bool
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
+
+    def agent_file(self, agent: str, directory: Path) -> Path | None: ...
 
     def activity(self, stream: Path) -> Activity: ...
