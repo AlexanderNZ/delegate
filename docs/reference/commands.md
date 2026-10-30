@@ -165,7 +165,7 @@ delegate clean --abandon <run-id> --reason <text> [--delete-run-branch] [--repo 
 A run is cleaned only when the newest `run-end` of its [**journal**](../glossary.md#journal) after its newest `resume` has the result `built`, and no live process holds the lock of its [**run branch**](../glossary.md#run-branch). A run that is active, failed, paused or stopped keeps everything. For each run that is cleaned, the command:
 
 1. stops the file watcher of each ticket worktree, and removes each worktree that has no change that is not committed, with its push-guard hooks;
-2. deletes each ticket branch that the run branch holds, with the safe delete of git (`git branch -d`). The branch of a worktree that stays, stays too;
+2. deletes each ticket branch that the run branch holds, with the safe delete of git (`git branch -d`). The branch of a worktree that stays, stays too. It also deletes each branch `<branch>-failed-<n>` that a [retry with a new text](run.md#the-retry-with-a-new-text) kept, with `git branch -D`, whatever it holds: the old work of a failed step is in no other branch;
 3. removes each verifier copy and proof copy that the journal names and the disk still holds. A run process that was killed during a verifier leaves them;
 4. removes each crash traceback file (`crash-<seq>.txt`) that a `step-end` of the run names and the disk still holds. A crash that a retry built over leaves it;
 5. with `--merged`, deletes the run branch when the [**base branch**](../glossary.md#base-branch) holds it, with `git branch -d`. When the run branch is gone already, `--merged` makes the base branch the holder of the ticket branches. Without `--merged`, the run branch stays.

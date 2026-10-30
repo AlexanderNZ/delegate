@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- A retry with a new ticket text starts the failed ticket again from its base (#204). Before, `delegate run --resume <run-id> --retry <ticket>` with a new text (rule 10, #202) used the worktree and the commits of the failed step again and went on at the first phase that did not complete. In `assure` mode it spawned no specialist, so a new ruling of the owner, for example "no new dependency", reached only the verifier brief and the fix-up brief, and the old commits stayed. Now a retry that changes the text makes the branch and the worktree of the ticket again from the base of the step, as the first `step-start` took it, and spawns a new specialist with the new text in both modes. Then the gates and the verifier run as for a new step. The rounds of the old step do not count against the fix-up limit, and a step that failed for a phase reason, for example a REJECT after the last fix-up round, can be retried this way. The engine keeps the old branch as `<branch>-failed-<n>`, and `delegate clean` removes it with the other branches of the run. `retry` has the new fields `restart` and `failed_branch`, a new `step-start` follows it, and `delegate status` names the kept branch on a line `kept:`. In `economy` mode, the tickets after the retried ticket start from the new tip. A retry with no change of the text goes on as before. See `docs/reference/run.md`, `docs/reference/commands.md` and `docs/reference/status-and-watch.md`.
+
 ## [1.12.0] - 2026-10-30
 
 ### Added

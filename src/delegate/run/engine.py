@@ -96,7 +96,9 @@ the skip rule (see `domain.skipped_because_of`), so a ticket that only the
 step blocked is built after it, in plan order. The journal records `retry`,
 and then a new `step-end` and a new `run-end`. The newest of each wins. A retry
 can also change the text of its own failed ticket, and only the text (rule 10 of
-a plan change): `plan-change` then holds the old and the new `text_sha256`.
+a plan change): `plan-change` then holds the old and the new `text_sha256`. Such a retry does not use
+the worktree and the commits again: it starts the ticket again from its base, with a new specialist, and
+keeps the old branch as `<branch>-failed-<n>` (see `_restart_step`).
 
 A run that ends with a failed step or a skipped ticket ends with the result
 `failed`.
@@ -914,9 +916,21 @@ class _RetryPlan:
     prior: tuple[dict[str, object], ...]
     rejected: str | None = None
     findings: tuple[str, ...] = ()
+    restart: bool = False
 
 
-def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str) -> _RetryPlan:
+def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[dict[str, object]]:
+    """The journal events of the newest step of `ticket_id`: its events from its last `step-start`.
+
+    A retry with a new text starts the ticket again (see `_restart_step`), so the journal of such a ticket holds
+    more than one step. The rounds, the verdicts and the reports of the steps before the last one are history.
+    """
+    own = [event for event in events if event.get("ticket") == ticket_id]
+    starts = [index for index, event in enumerate(own) if event["event"] == "step-start"]
+    return own[starts[-1] :] if starts else own
+
+
+def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str, restart: bool = False) -> _RetryPlan:
     """The first phase of the failed step of `ticket_id` that did not complete. Raise EngineError when it cannot be retried.
 
     The phase comes from the journal events of the step. The round is the
@@ -937,6 +951,11 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
 
     A run that an invariant violation halted is refused in each mode: the state
     of the worktree that the verifier changed cannot be trusted.
+
+    With `restart` the retry changes the text of the ticket, and starts it again
+    from its base (see `_restart_step`). It spawns a specialist, so no phase of the
+    failed step matters: the plan is the specialist at round 0, and the refusals
+    that depend on the phase of the step do not apply.
     """
     refused = _refused(ticket_id, run_id)
     violations = [e for e in progress.events if e["event"] == "invariant-violation"]
@@ -952,9 +971,11 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
         raise EngineError(f"{refused}: its step is open; --resume without --retry goes on with it")
     if ticket_id not in progress.failed:
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that failed")
-    prior = tuple(e for e in progress.events if e.get("ticket") == ticket_id)
+    prior = tuple(_ticket_events(progress.events, ticket_id))
     if workflow.mode == domain.ECONOMY:
-        return _economy_retry_plan(workflow, progress, refused, ticket_id, prior)
+        return _economy_retry_plan(workflow, progress, refused, ticket_id, prior, restart)
+    if restart:
+        return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
     if not _specialist_committed(prior):
         raise EngineError(
             f"{refused}: its specialist gave no valid report that says committed; "
@@ -996,7 +1017,7 @@ def _specialist_committed(prior: tuple[dict[str, object], ...]) -> bool:
 
 
 def _economy_retry_plan(
-    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...]
+    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...], restart: bool = False
 ) -> _RetryPlan:
     """The first phase of a failed step of `economy` mode that did not complete. Raise EngineError when it cannot be retried.
 
@@ -1010,6 +1031,10 @@ def _economy_retry_plan(
     branch of that ticket does not hold the commits of this step. A step with
     no `step-start` is refused too. `_check_chain_start` refuses a step whose
     chain start moved.
+
+    With `restart` the step starts again from the chain start of now, so the
+    phase is the specialist, and the check of the chain start does not apply
+    (see `_restart_step`).
     """
     if not any(e["event"] == "step-start" for e in prior):
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that started")
@@ -1025,6 +1050,8 @@ def _economy_retry_plan(
             f"{refused}: ticket {later[0]!r} after it in the chain is built, "
             "and its branch does not hold the commits of this step"
         )
+    if restart:
+        return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
     phase = RETRY_GATES if _specialist_committed(prior) else RETRY_SPECIALIST
     return _RetryPlan(ticket_id, phase, 0, prior)
 
@@ -1193,8 +1220,9 @@ def _execute(
         run_base = _run_base(vcs, repo, workflow, events)
         _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
         # A step that cannot be retried is refused before the journal changes.
-        plan = _retry_plan(workflow, progress, run_id, retry) if retry is not None else None
-        if plan is not None and workflow.mode == domain.ECONOMY:
+        restart = retry is not None and review.check is not None and retry in review.check.restarted
+        plan = _retry_plan(workflow, progress, run_id, retry, restart) if retry is not None else None
+        if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
             _check_chain_start(workflow, order, progress.built, plan, vcs, repo, run_base, run_id)
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
@@ -1231,7 +1259,7 @@ def _execute(
             skipped[ticket.id] = skip
             journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
-        prior = [e for e in progress.events if e.get("ticket") == ticket.id] if ticket.id == progress.open_ticket else None
+        prior = _ticket_events(progress.events, ticket.id) if ticket.id == progress.open_ticket else None
         start = _start_ref(workflow, order, built, ticket, run_base, vcs, repo)
         try:
             _pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
@@ -2433,8 +2461,12 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
 
     In `economy` mode the step goes on as an open step does after a stop, at
     the specialist or at the check of its report (see `_build_ticket`).
+
+    A plan with `restart` starts the ticket again from its base (see `_restart_step`).
     """
     workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
+    if plan.restart:
+        return _restart_step(step, failure, start_ref)
     if workflow.mode == domain.ECONOMY:
         step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure)
         return _build_ticket(
@@ -2470,6 +2502,57 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
         return _advance_run_branch(step, _accepted_commit(step, plan.round))
     except _StepFailed as failed:
         return str(failed)
+
+
+def _restart_step(step: _Step, failure: str, start_ref: str) -> str | None:
+    """Start the ticket of a retry that changed its text again from its base (#204). Return None when it is built, or the reason it failed.
+
+    The engine keeps the old branch under the name `<branch>-failed-<n>`, with
+    the first `n` that is free, so the coordinator can read the old work. It
+    removes the old worktree, and the old reports and evidence of the ticket
+    go to the directories `failed-<n>`, so a report of the old step cannot pass
+    for a report of the new one. The branch and the worktree of the ticket are
+    then made again at `start_ref`, the base of the step as the first
+    `step-start` took it, and the engine builds the ticket as a new step: a new
+    specialist with the new text, the gates and the verifier for the mode. The
+    rounds of the old step do not count (see `_ticket_events`). The `retry` event
+    has `restart` and `failed_branch`, and a new `step-start` follows it.
+    """
+    ticket, vcs, repo = step.ticket, step.vcs, step.repo
+    branch = step.branch
+    with _vcs_errors():
+        number = 1
+        while vcs.branch_exists(repo, f"{branch}-failed-{number}"):
+            number += 1
+        failed_branch = f"{branch}-failed-{number}"
+        step.journal.append(
+            "retry", ticket=ticket.id, phase=RETRY_SPECIALIST, round=0, reason=failure, restart=True, failed_branch=failed_branch
+        )
+        if step.worktree.is_dir():
+            vcs.remove_worktree(repo, step.worktree)
+        shutil.rmtree(step.state_dir / "hooks" / step.run_id / ticket.id, ignore_errors=True)
+        vcs.prune_worktrees(repo)
+        if vcs.branch_exists(repo, branch):
+            # The old branch gets its new name first, so no commit is ever without a branch.
+            vcs.create_branch(repo, failed_branch, branch)
+            vcs.discard_branch(repo, branch)
+    _archive_old_step(step.run_dir, ticket.id, number)
+    return _build_ticket(
+        step.workflow, ticket, step.adapter, vcs, step.gates, step.roles, repo, step.state_dir, step.run_id, step.journal, start_ref
+    )
+
+
+def _archive_old_step(run_dir: Path, ticket_id: str, number: int) -> None:
+    """Move the reports, the findings and the verifier evidence of the old step of a ticket to directories named `failed-<n>`."""
+    for kind, patterns in (("reports", (f"{ticket_id}.specialist.json", f"{ticket_id}.fixup-*.specialist.json")), ("findings", (f"{ticket_id}.fixup-*.md",))):
+        for pattern in patterns:
+            for path in sorted((run_dir / kind).glob(pattern)):
+                target = run_dir / kind / f"failed-{number}"
+                target.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(path), target / path.name)
+    evidence = run_dir / "verifier" / ticket_id
+    if evidence.is_dir():
+        shutil.move(str(evidence), run_dir / "verifier" / f"{ticket_id}-failed-{number}")
 
 
 class _ChainRun:

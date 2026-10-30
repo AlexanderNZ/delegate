@@ -264,6 +264,10 @@ class Retry(TypedDict):
     phase: str
     round: int
     reason: str
+    # Only when the retry changes the text of the ticket and starts it again from its base (#204): `restart` is true,
+    # and `failed_branch` is the branch that keeps the old work.
+    restart: NotRequired[bool]
+    failed_branch: NotRequired[str]
 
 
 class LockBroken(TypedDict):

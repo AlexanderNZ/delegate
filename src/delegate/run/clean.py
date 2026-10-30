@@ -204,7 +204,7 @@ def _clean_run(
             holder, holder_name = base_branch, "the base branch"
         trees = _ticket_trees(events, state, run_id)
         sizes = {str(tree.worktree): _size(tree.worktree) for tree in trees if tree.worktree.is_dir()}
-        cleanup = clean_tickets(vcs, repo, trees, holder, holder_name, dry_run=dry_run)
+        cleanup = clean_tickets(vcs, repo, trees, holder, holder_name, dry_run=dry_run, discard_failed=True)
         if merged and vcs.branch_exists(repo, run_branch):
             try:
                 if delete_held_branch(vcs, repo, run_branch, base_branch, dry_run=dry_run):
@@ -276,13 +276,22 @@ def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
 
 
 def _ticket_trees(events: list[dict[str, object]], state: Path, run_id: str) -> list[TicketTree]:
-    """The worktree, the branch and the hooks directory of each ticket that started a step, in the order of the first start."""
+    """The worktree, the branch and the hooks directory of each ticket that started a step, in the order of the first start.
+
+    A branch that a retry with a new text kept (`failed_branch` of a `retry` event, #204) follows them: it has no worktree.
+    """
     trees: dict[str, TicketTree] = {}
+    kept: list[TicketTree] = []
     for event in events:
         if event["event"] == "step-start":
             ticket = str(event["ticket"])
             trees[ticket] = TicketTree(Path(str(event["worktree"])), str(event["branch"]), state / "hooks" / run_id / ticket)
-    return list(trees.values())
+        elif event["event"] == "retry" and event.get("failed_branch"):
+            ticket = str(event["ticket"])
+            # No directory has this path: the engine removed the worktree of the failed step before it kept the branch.
+            gone = state / "worktrees" / run_id / f"{ticket}-failed-{len(kept) + 1}"
+            kept.append(TicketTree(gone, str(event["failed_branch"]), state / "hooks" / run_id / ticket, failed=True))
+    return [*trees.values(), *kept]
 
 
 def _leftover_copies(events: list[dict[str, object]]) -> list[Path]:

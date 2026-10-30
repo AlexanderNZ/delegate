@@ -11,6 +11,9 @@ clean-up existed, or with `keep-worktrees = true` (#168). Both use the rules of
   branch. Its file watcher is stopped, because nothing else stops it.
 - A ticket branch goes only when the holder branch (the run branch) holds its
   newest commit, with the safe delete of the port. Otherwise it stays.
+- A branch that a retry with a new text kept (`TicketTree.failed`) goes whatever
+  it holds, when the caller allows it (`discard_failed`). The engine does not
+  allow it at the end of a run: the coordinator reads that work first.
 - A failure of one item keeps that item, and the clean-up goes on with the others.
 
 The module starts no process and imports no adapter: the port does the work.
@@ -30,11 +33,16 @@ CLEANUP_PATHS_NAMED: int = 10
 
 @dataclass(frozen=True)
 class TicketTree:
-    """The worktree of one ticket, its branch, and the directory of its push-guard hooks."""
+    """The worktree of one ticket, its branch, and the directory of its push-guard hooks.
+
+    `failed` marks a branch that a retry with a new text kept (#204): it holds the work of a step that failed, which
+    the run branch does not hold. It has no worktree.
+    """
 
     worktree: Path
     branch: str
     hooks: Path
+    failed: bool = False
 
 
 @dataclass
@@ -66,7 +74,7 @@ class Cleanup:
 
 def clean_tickets(
     vcs: VersionControl, repo: Path, trees: list[TicketTree], holder: str, holder_name: str = "the run branch",
-    *, dry_run: bool = False,
+    *, dry_run: bool = False, discard_failed: bool = False,
 ) -> Cleanup:
     """Remove the worktree and the hooks of each ticket, and delete each ticket branch that the branch `holder` holds.
 
@@ -74,6 +82,7 @@ def clean_tickets(
     holder does not exist, every ticket branch stays. A worktree whose
     directory does not exist is gone already, and its branch can still go.
     With `dry_run` nothing changes, and the result says what would change.
+    With `discard_failed` the branch of a tree with `failed` goes, whatever it holds.
     """
     result = Cleanup()
     try:
@@ -81,6 +90,9 @@ def clean_tickets(
     except VcsError as failure:
         held, result.errors = False, [f"branch {holder}: {failure}"]
     for tree in trees:
+        if tree.failed:
+            _discard_failed(vcs, repo, tree.branch, result, discard_failed, dry_run)
+            continue
         kept: str | None = None
         if tree.worktree.is_dir():
             kept, error = _worktree_reason(vcs, tree.worktree)
@@ -114,6 +126,21 @@ def clean_tickets(
         except VcsError as failure:
             result.keep_branch(tree.branch, str(failure), error=True)
     return result
+
+
+def _discard_failed(vcs: VersionControl, repo: Path, branch: str, result: Cleanup, allowed: bool, dry_run: bool) -> None:
+    """Delete the branch that a retry kept for the work of a failed step, when `allowed`. Keep it, and say why, when not."""
+    try:
+        if not vcs.branch_exists(repo, branch):
+            return
+        if not allowed:
+            result.keep_branch(branch, "it holds the work of a step that a retry started again; delegate clean removes it")
+            return
+        if not dry_run:
+            vcs.discard_branch(repo, branch)
+        result.branches_deleted.append(branch)
+    except VcsError as failure:
+        result.keep_branch(branch, str(failure), error=True)
 
 
 def remove_empty_directories(*directories: Path) -> None:
