@@ -15,6 +15,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
 from .test_run_multi import HEAD, ticket
 
@@ -46,7 +47,7 @@ def run(repo, capsys):
 
 def real_worktree(repo, ticket_id="a"):
     """The worktree where the specialist built the ticket. The run id is the only directory below `worktrees`."""
-    (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+    (run_dir,) = (state_dir(repo) / "worktrees").iterdir()
     return run_dir / ticket_id
 
 
@@ -229,5 +230,6 @@ def test_a_git_failure_of_the_guard_names_the_worktree_where_git_ran(tmp_path, c
 
     assert code == 1
     reason = next(e for e in read_journal(out) if e["event"] == "step-end")["reason"]
-    assert reason.startswith("crashed: GuardError: git status")
+    # The worktree is outside every repository now, so git fails at its first command: the one that reads HEAD.
+    assert reason.startswith("crashed: GuardError: git ")
     assert f" failed in {real_worktree(repo)}: fatal:" in reason

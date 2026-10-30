@@ -12,6 +12,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 
@@ -403,7 +404,7 @@ def test_a_base_branch_that_does_not_exist_exits_1_names_it_and_creates_nothing(
 
     assert (code, out) == (1, "")
     assert "'trunk'" in err and "Traceback" not in err
-    assert not (repo / ".git" / "delegate").exists()
+    assert not state_dir(repo).exists()
     assert scripted.calls == []
 
 
@@ -411,11 +412,11 @@ def test_a_ticket_branch_that_exists_stops_the_run_before_it_starts(tmp_path, ca
     repo = make_repo(tmp_path)
     assert run(repo, capsys)[0] == 0
     calls_before = len(scripted.calls)
-    runs_before = sorted(path.name for path in (repo / ".git" / "delegate" / "runs").iterdir())
+    runs_before = sorted(path.name for path in (state_dir(repo) / "runs").iterdir())
 
     code, out, err = run(repo, capsys)  # the same workflow again: the branch of ticket a is taken
 
     assert (code, out) == (1, "")
     assert "run/demo-a" in err and "Traceback" not in err
     assert len(scripted.calls) == calls_before
-    assert sorted(path.name for path in (repo / ".git" / "delegate" / "runs").iterdir()) == runs_before
+    assert sorted(path.name for path in (state_dir(repo) / "runs").iterdir()) == runs_before

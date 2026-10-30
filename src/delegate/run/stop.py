@@ -63,7 +63,7 @@ def stop_run(repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float) 
         raise StopError(f"run {run_id!r} is paused already, and no process works on it; go on with {resume}")
     run_branch = str(events[0]["run_branch"])
     try:
-        _, state_dir = state_directory(repo, vcs)
+        _, state_dir = state_directory(repo, vcs, run_id)
         holder = live_holder(state_dir, run_branch)
     except (EngineError, LockError) as error:
         raise StopError(str(error)) from None

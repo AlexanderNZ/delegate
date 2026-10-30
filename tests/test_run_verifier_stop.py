@@ -17,6 +17,7 @@ import pytest
 
 from delegate import adapters
 
+from .support import state_dir
 from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main
 from .test_run_multi import HEAD, ticket
 
@@ -34,12 +35,12 @@ def start(repo, capsys):
 
 
 def run_id_of(repo) -> str:
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     return run_dir.name
 
 
 def real_worktree(repo):
-    (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+    (run_dir,) = (state_dir(repo) / "worktrees").iterdir()
     return run_dir / "a"
 
 

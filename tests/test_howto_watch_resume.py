@@ -17,6 +17,7 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, Block, follow, new_repo, outside_the_package, write_files
+from .support import state_dir
 from .support import ScriptedAdapter, git, state_and_verdict
 
 PAGE = HOW_TO / "watch-and-resume-a-run.md"
@@ -116,7 +117,7 @@ def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_t
     repo = a_repo(tmp_path)
     stopped = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
     assert [step.code for step in stopped] == [130]  # Ctrl-C ends the command as a shell ends it on SIGINT (#109)
-    run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
+    run_id = next((state_dir(repo) / "runs").iterdir()).name
     assert f"Go on with delegate run --resume {run_id}" in stopped[0].err
 
     # The run has no end, so `watch` would wait for it: it is not run here.
@@ -160,7 +161,7 @@ def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_t
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(SOURCE), str(ROOT), os.environ.get("PYTHONPATH")]))}
     child = subprocess.run([sys.executable, "-c", KILL, str(repo)], cwd=repo, env=env, capture_output=True, text=True)
     assert child.returncode == -signal.SIGKILL, child.stderr
-    run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
+    run_id = next((state_dir(repo) / "runs").iterdir()).name
     adapter = ScriptedAdapter(files_by_ticket=FILES)
     registered(adapter)
 
@@ -182,7 +183,7 @@ def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lo
 
     def pause_from_a_second_terminal(request):
         if not paused:  # the pause comes while the specialist of ticket 1 works
-            run_id = next((repo / ".git" / "delegate" / "runs").iterdir()).name
+            run_id = next((state_dir(repo) / "runs").iterdir()).name
             paused.extend(follow(PAGE, repo, monkeypatch, only=containing("delegate pause"), replace={"<run-id>": run_id}))
 
     adapter.on_specialist = pause_from_a_second_terminal
@@ -209,7 +210,7 @@ def test_the_page_cleans_up_after_a_merged_run_and_its_dry_run_changes_nothing(t
     repo = a_repo(tmp_path)
     run_id = run_id_of(follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml")))
     git(repo, "merge", "-q", "--ff-only", "run/demo")
-    journal = (repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl").read_text()
+    journal = (state_dir(repo) / "runs" / run_id / "journal.jsonl").read_text()
 
     (dry_run,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean --ended --merged --dry-run"))
     branches_after_dry_run = git(repo, "branch", "--format=%(refname:short)").split()
@@ -221,4 +222,4 @@ def test_the_page_cleans_up_after_a_merged_run_and_its_dry_run_changes_nothing(t
     assert branches_after_dry_run == ["main", "run/demo", "run/demo-1", "run/demo-2"]
     assert cleaned.out.startswith(f"run {run_id}: deleted 1 branch (run/demo); kept worktree ") and cleaned.out.count("\n") == 1
     assert git(repo, "branch", "--format=%(refname:short)").split() == ["main", "run/demo-1", "run/demo-2"]
-    assert (repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl").read_text().startswith(journal)
+    assert (state_dir(repo) / "runs" / run_id / "journal.jsonl").read_text().startswith(journal)

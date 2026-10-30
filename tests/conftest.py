@@ -77,6 +77,19 @@ def isolated_git_config(monkeypatch, empty_git_config):
     monkeypatch.setenv("GIT_CONFIG_COUNT", str(count))
 
 
+@pytest.fixture(autouse=True)
+def isolated_state_home(tmp_path_factory, monkeypatch) -> Path:
+    """Keep the state of the runs of a test out of the home of the machine (#200).
+
+    The default state root is `$XDG_STATE_HOME/delegate`. Each test gets its own value, so no test writes under the
+    real home, and `DELEGATE_STATE_ROOT` of the machine takes no part in a test. A test that needs another root sets it.
+    """
+    path = tmp_path_factory.mktemp("state-home")
+    monkeypatch.setenv("XDG_STATE_HOME", str(path))
+    monkeypatch.delenv("DELEGATE_STATE_ROOT", raising=False)
+    return path
+
+
 @pytest.fixture
 def home(tmp_path_factory, monkeypatch) -> Path:
     """A user directory that holds nothing, so no agent file of the machine takes part in a case (#182).

@@ -11,6 +11,7 @@ import pytest
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
 
 pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
@@ -73,7 +74,7 @@ def test_a_bad_ticket_id_is_refused_by_name_and_the_run_makes_no_branch(tmp_path
     assert repr(ticket_id) in err
     assert git(repo, "branch", "--all") == branches
     assert git(repo, "worktree", "list") == trees
-    assert not (repo / ".git" / "delegate" / "runs").exists()
+    assert not (state_dir(repo) / "runs").exists()
 
 
 @pytest.mark.parametrize("ticket_id", BAD_IDS)

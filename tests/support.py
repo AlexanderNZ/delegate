@@ -441,7 +441,7 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     )
     _, err = child.communicate(timeout=300)
     assert child.returncode == -signal.SIGKILL, (child.returncode, err)
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     return run_dir.name, child.pid
 
 
@@ -460,8 +460,19 @@ def is_gone(pid: int, seconds: float = 10.0) -> bool:
         time.sleep(0.05)
 
 
+def state_dir(repo: Path) -> Path:
+    """The state directory of `repo`: the directory that `<git common dir>/delegate/state-root` names after a run, else `<git common dir>/delegate`.
+
+    A journal that a test writes before any run is in `<git common dir>/delegate`, where the runs of the versions before
+    #200 are; `status` and the other commands find it there.
+    """
+    shared = repo / ".git" / "delegate"
+    recorded = shared / "state-root"
+    return Path(recorded.read_text().strip()) if recorded.is_file() else shared
+
+
 def journal_path(repo: Path, run_id: str) -> Path:
-    return repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl"
+    return state_dir(repo) / "runs" / run_id / "journal.jsonl"
 
 
 def read_journal_file(repo: Path, run_id: str) -> list[dict[str, object]]:

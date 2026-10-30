@@ -25,6 +25,7 @@ from delegate.cli import delegate
 from delegate.cli import stop as stop_command
 
 from . import claude_fake
+from .support import state_dir
 from .support import (
     WORKFLOW, bare_repo, event_names, is_gone, journal_path, make_repo, read_journal_file, run_end, run_main, run_start,
     stale_lock, write_journal,
@@ -67,7 +68,7 @@ def reap_in_background(repo: Path) -> None:
     The test process started the detached run, so it is the parent of the run process. A real detached run has
     the init process as its parent, which reaps it. A process that is not reaped stays a zombie and shows as alive.
     """
-    (lock,) = (repo / ".git" / "delegate" / "locks").glob("*.lock")
+    (lock,) = (state_dir(repo) / "locks").glob("*.lock")
     pid = int(json.loads(lock.read_text())["pid"])
 
     def reap() -> None:
@@ -102,7 +103,7 @@ def test_stop_ends_a_detached_run_now_and_a_resume_goes_on_with_the_step(tmp_pat
     events = read_journal_file(repo, run_id)
     assert event_names(events)[-1] == "interrupted"
     assert "run-end" not in event_names(events)
-    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
+    assert list((state_dir(repo) / "locks").glob("*.lock")) == []
     assert is_gone(harness, 0), "the harness process stayed alive"
     assert is_gone(child, 0), "a child process of the harness stayed alive"
 

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from . import claude_fake
+from .support import state_dir
 from .support import WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
@@ -95,7 +96,7 @@ def test_detach_with_resume_of_an_unknown_run_exits_1_and_starts_nothing(tmp_pat
 
     assert (code, out) == (1, "")
     assert "20261018T000000Z-0000" in err and "not found" in err
-    assert not (repo / ".git" / "delegate" / "runs").exists()
+    assert not (state_dir(repo) / "runs").exists()
 
 
 def test_detach_with_a_workflow_problem_exits_1_at_once_and_starts_nothing(tmp_path, capsys):
@@ -105,7 +106,7 @@ def test_detach_with_a_workflow_problem_exits_1_at_once_and_starts_nothing(tmp_p
 
     assert (code, out) == (1, "")
     assert "no-such-harness" in err
-    assert not (repo / ".git" / "delegate" / "runs").exists()
+    assert not (state_dir(repo) / "runs").exists()
 
 
 def _take_the_run_branch(repo: Path) -> contextlib.AbstractContextManager[None]:
@@ -146,7 +147,7 @@ def test_detach_with_a_check_that_fails_exits_1_with_the_error_of_a_run_in_the_f
     assert error in err and err.startswith("delegate run: ")
     assert (foreground[0], foreground[2]) == (1, err), "the detached start and the run in the foreground give different errors"
     # No run process started: the run has no directory, so it has no log and no journal, and no agent was called.
-    assert not (repo / ".git" / "delegate" / "runs").exists()
+    assert not (state_dir(repo) / "runs").exists()
     assert fake.calls() == []
 
 
@@ -158,4 +159,4 @@ def test_detach_and_dry_run_cannot_go_together(tmp_path, capsys):
 
     assert stop.value.code == 2
     assert "--detach and --dry-run cannot go together" in capsys.readouterr().err
-    assert not (repo / ".git" / "delegate").exists()
+    assert not state_dir(repo).exists()

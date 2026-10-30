@@ -9,6 +9,7 @@ from pathlib import Path
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import event_names, git, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree
 from .test_run_economy import ECONOMY
 from .test_run_multi import HEAD, ticket
@@ -54,7 +55,7 @@ def test_an_exception_from_git_during_a_step_records_a_failed_step_end_then_a_ru
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     assert code == 1
-    events = read_journal_file(repo, next((repo / ".git" / "delegate" / "runs").iterdir()).name)
+    events = read_journal_file(repo, next((state_dir(repo) / "runs").iterdir()).name)
     step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "b")
     assert step_end["state"] == "failed" and "git" in step_end["reason"]
     assert event_names(events)[-1] == "run-end" and events[-1]["result"] == "failed"
@@ -90,7 +91,7 @@ def test_a_crash_of_a_step_keeps_its_traceback_in_a_file_that_the_step_end_names
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     assert code == 1
-    run_dir = next((repo / ".git" / "delegate" / "runs").iterdir())
+    run_dir = next((state_dir(repo) / "runs").iterdir())
     step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
     assert step_end["reason"] == "crashed: RuntimeError: boom"
     assert Path(step_end["traceback"]) == run_dir / f"crash-{step_end['seq']}.txt"
@@ -107,7 +108,7 @@ def test_a_crash_of_the_chain_verification_of_economy_mode_keeps_its_traceback_i
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     assert code == 1
-    run_dir = next((repo / ".git" / "delegate" / "runs").iterdir())
+    run_dir = next((state_dir(repo) / "runs").iterdir())
     step_end = [e for e in read_journal(out) if e["event"] == "step-end" and e["state"] == "failed"][-1]
     assert Path(step_end["traceback"]) == run_dir / f"crash-{step_end['seq']}.txt"
     assert Path(step_end["traceback"]).read_text().rstrip().endswith("RuntimeError: boom")

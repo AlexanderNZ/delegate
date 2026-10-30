@@ -32,6 +32,8 @@ stack = "python"
 blocked-by = ["1"]
 ```
 
+The [**engine**](../glossary.md#engine) keeps the state of a run in `~/.local/state/delegate`, outside the git directory. `XDG_STATE_HOME` or `DELEGATE_STATE_ROOT` changes the root. A run that an older version started is in `.git/delegate`. Each command below finds it there, so you change nothing. See [where the engine writes](../reference/run.md#where-the-engine-writes).
+
 ## Watch a run
 
 ### 1. Start the run

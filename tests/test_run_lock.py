@@ -13,6 +13,7 @@ import pytest
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import (
     event_names, finished_run, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
@@ -41,7 +42,7 @@ def test_a_second_run_on_a_run_branch_in_use_exits_non_zero_and_names_the_lock_h
 
     assert (code, err) == (0, "")  # the first run is not harmed
     ((second_code, second_err),) = seen
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     assert second_code == 1 and "Traceback" not in second_err
     assert "run/demo" in second_err and run_dir.name in second_err and f"process {os.getpid()}" in second_err
     assert "a.txt" in tree(repo, "run/demo")
@@ -82,7 +83,7 @@ def test_a_resume_of_the_same_run_is_refused_while_the_process_of_its_lock_is_al
 
     def resume_inside(request):
         if ticket_of(request) == "b":
-            (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+            (run_dir,) = (state_dir(repo) / "runs").iterdir()
             seen.append((run_dir.name, journal_path(repo, run_dir.name).read_bytes(), nested_run(repo, "--resume", run_dir.name, *extra)))
 
     scripted.on_specialist = resume_inside
@@ -112,7 +113,7 @@ def test_a_lock_of_another_run_whose_process_no_longer_exists_still_needs_break_
         "pass --break-lock to remove the lock" in err
     )
     assert "took over" not in err
-    assert [p.name for p in (repo / ".git" / "delegate" / "runs").iterdir()] == [run_id]
+    assert [p.name for p in (state_dir(repo) / "runs").iterdir()] == [run_id]
     assert journal_path(repo, run_id).read_bytes() == before and scripted.calls == []
 
 
@@ -135,8 +136,8 @@ def test_the_lock_is_gone_when_a_run_is_stopped_by_an_interrupt_and_it_can_be_re
     scripted.on_specialist = interrupt
     assert delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)]) == 130  # Ctrl-C, as a shell gives it (#109)
     capsys.readouterr()
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
-    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
+    assert list((state_dir(repo) / "locks").glob("*.lock")) == []
     assert "run-end" not in event_names(read_journal_file(repo, run_dir.name))
     scripted.on_specialist = None
 

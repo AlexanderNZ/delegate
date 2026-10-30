@@ -40,7 +40,7 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
-from .engine import CRASH_FILE_PREFIX, EngineError, state_directory
+from .engine import CRASH_FILE_PREFIX, EngineError, state_directories
 from .journal import Journal, JournalError, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
@@ -114,14 +114,15 @@ class CleanResult:
 def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run: bool, vcs: VersionControl) -> CleanResult:
     """Clean each run that `run_ids` names, and with `ended` each run of the repository. Return the outcome of each run.
 
-    A run id is a full run id or the short id of one run. A run id that names
+    A run id is a full run id or the short id of one run. A run is in the default state directory or in
+    `<git common dir>/delegate` (#200), and `ended` covers both. A run id that names
     no run is an error of the result, and the other runs are cleaned. Raise
     CleanError when `repo` is not a git repository. Before the runs and at the
     end, the port prunes the records of the worktrees whose directory is gone,
     except with `dry_run`.
     """
     try:
-        top, state = state_directory(repo, vcs)
+        top, states = state_directories(repo, vcs)
     except EngineError as error:
         raise CleanError(f"{repo} is not a git repository: {error}") from None
     errors: list[str] = []
@@ -132,12 +133,14 @@ def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run
         except RunsError as error:
             errors.append(str(error))
     if ended:
-        runs_dir = state / "runs"
-        journals.update(runs_dir.glob(f"*/{JOURNAL_NAME}") if runs_dir.is_dir() else ())
+        for state in states:
+            runs_dir = state / "runs"
+            journals.update(runs_dir.glob(f"*/{JOURNAL_NAME}") if runs_dir.is_dir() else ())
     # Git refuses to delete the branch of a worktree whose directory is gone while it still records that worktree, so
     # the records go first. The prune at the end drops the records of the worktrees that the clean removed.
     _prune(vcs, top, dry_run, errors)
-    outcomes = [_run(top, state, journal, merged, dry_run, vcs) for journal in sorted(journals)]
+    # The journal of a run is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory of the run.
+    outcomes = [_run(top, journal.parents[2], journal, merged, dry_run, vcs) for journal in sorted(journals)]
     _prune(vcs, top, dry_run, errors)
     return CleanResult(outcomes, errors)
 

@@ -251,10 +251,10 @@
 *[Stacks]: A stack is one technology of a repository, for example a Python package or a web front end, with its own gates and hotspots.
 *[stack]: A stack is one technology of a repository, for example a Python package or a web front end, with its own gates and hotspots.
 *[stacks]: A stack is one technology of a repository, for example a Python package or a web front end, with its own gates and hotspots.
-*[State directory]: The state directory is the directory delegate/ in the git directory of the repository, or a directory under DELEGATE_STATE_ROOT when the host sets it.
-*[State directorys]: The state directory is the directory delegate/ in the git directory of the repository, or a directory under DELEGATE_STATE_ROOT when the host sets it.
-*[state directory]: The state directory is the directory delegate/ in the git directory of the repository, or a directory under DELEGATE_STATE_ROOT when the host sets it.
-*[state directorys]: The state directory is the directory delegate/ in the git directory of the repository, or a directory under DELEGATE_STATE_ROOT when the host sets it.
+*[State directory]: The state directory is where the engine writes the journals, the reports, the worktrees and the locks of a repository.
+*[State directorys]: The state directory is where the engine writes the journals, the reports, the worktrees and the locks of a repository.
+*[state directory]: The state directory is where the engine writes the journals, the reports, the worktrees and the locks of a repository.
+*[state directorys]: The state directory is where the engine writes the journals, the reports, the worktrees and the locks of a repository.
 *[STE]: See ASD-STE100.
 *[Step]: A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in assure mode, the verifier.
 *[Step cap]: See Turn cap.

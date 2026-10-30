@@ -12,6 +12,7 @@ import json
 
 from delegate.ports.harness import AdapterError
 
+from .support import state_dir
 from .support import event_names, make_repo, read_journal_file, resume_main, run_main, ticket_of
 from .test_run_multi import HEAD, ticket
 
@@ -30,7 +31,7 @@ def not_logged_in(request):
 def halted_run(repo, capsys, scripted):
     scripted.on_specialist = not_logged_in
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     return code, out, err, run_dir.name
 
 
@@ -70,7 +71,7 @@ def test_an_exception_that_is_not_an_adapter_error_fails_the_step_as_before(tmp_
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     assert code == 1
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     events = read_journal_file(repo, run_dir.name)
     assert "halted" not in event_names(events)
     step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "b")
@@ -86,7 +87,7 @@ def test_an_adapter_error_from_the_verifier_halts_the_run_and_a_resume_goes_on(t
 
     scripted.during_verifier = logged_out
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
 
     assert code == RUN_HALTED
     events = read_journal_file(repo, run_dir.name)
@@ -152,7 +153,7 @@ def test_an_adapter_error_from_the_verifier_of_the_chain_halts_an_economy_run_an
 
     scripted.during_verifier = rate_limited
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
 
     assert code == RUN_HALTED
     events = read_journal_file(repo, run_dir.name)

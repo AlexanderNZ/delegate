@@ -108,16 +108,6 @@ def test_a_resume_finds_its_run_under_the_state_root(tmp_path, capsys, git_ident
     assert "has ended with the result 'built'" in err
 
 
-def test_with_no_state_root_the_state_is_in_the_git_common_directory(tmp_path, capsys, git_identity, monkeypatch):
-    monkeypatch.delenv(ROOT_VARIABLE, raising=False)
-    repo = make_repo(tmp_path)
-
-    events = run_in(tmp_path, capsys, repo)
-
-    (start,) = [event for event in events if event["event"] == "step-start"]
-    assert Path(str(start["worktree"])).is_relative_to((repo / ".git" / "delegate").resolve())
-
-
 def test_a_state_root_that_is_not_an_absolute_path_is_an_error(tmp_path, capsys, git_identity, monkeypatch):
     monkeypatch.setenv(ROOT_VARIABLE, "relative/root")
     repo = make_repo(tmp_path)
@@ -301,20 +291,6 @@ def test_a_variable_that_names_another_directory_than_state_root_wins_and_the_co
     assert str(first_state) in warning and str(second_state) in warning
     assert delegate.main(["status", second_id, "--repo", str(repo), "--json"]) != 0
     capsys.readouterr()
-
-
-def test_a_repository_with_no_state_root_file_and_no_variable_uses_the_git_common_directory(tmp_path, capsys, git_identity, monkeypatch):
-    monkeypatch.delenv(ROOT_VARIABLE, raising=False)
-    repo = make_repo(tmp_path)
-    run_id = str(run_in(tmp_path, capsys, repo)[0]["run_id"])
-
-    code = delegate.main(["status", run_id, "--repo", str(repo), "--json"])
-    out, err = capsys.readouterr()
-
-    assert code == 0 and err == ""
-    assert json.loads(out)["state"] == "built"
-    assert not (repo / ".git" / "delegate" / "state-root").exists()
-    assert (repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl").is_file()
 
 
 def test_a_state_root_file_with_a_path_that_is_not_absolute_is_an_error(tmp_path, capsys, git_identity, monkeypatch):

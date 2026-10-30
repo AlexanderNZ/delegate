@@ -12,6 +12,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import ScriptedAdapter, event_names, git, make_repo, read_journal
 
 
@@ -155,7 +156,7 @@ def leave_an_earlier_run(repo):
     worktree `core.fsmonitor=false` and a `core.hooksPath` whose `pre-push` hook
     refuses each push. Return the old worktree.
     """
-    state = (repo / ".git" / "delegate").resolve()
+    state = state_dir(repo).resolve()
     worktree = state / "worktrees" / "old-run" / "a"
     hooks = state / "hooks" / "old-run" / "a"
     hooks.mkdir(parents=True)

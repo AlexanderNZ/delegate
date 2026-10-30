@@ -1,7 +1,9 @@
 """Find the journal of a run in a repository, and the active runs. `status` and `watch` share it.
 
 The engine keeps one directory for each run in the state directory of the
-repository. `journal_of` reads only the names of those directories and the first
+repository. A run that started before #200 is in `<git common dir>/delegate`, and
+a newer run is in the default state directory, so the functions here search both.
+`journal_of` reads only the names of those directories and the first
 line of each journal. It needs no adapter and no workflow file.
 
 `runs_of` also finds the active runs. A run is active when its journal has no
@@ -28,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .engine import EngineError, StateRootError, state_directory
+from .engine import EngineError, StateRootError, state_directories
 from .journal import JournalError, newest_run_end, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
@@ -55,28 +57,32 @@ def _start_time(journal: Path) -> datetime:
         raise RunsError(f"journal {journal}: the first line is not an event with a time") from None
 
 
-def _state(repo: Path, vcs: VersionControl) -> Path:
-    """The state directory of the repository. Raise RunsError when `repo` is not a git repository."""
+def _states(repo: Path, vcs: VersionControl) -> list[Path]:
+    """Each state directory of the repository that can hold a run, the default one first (#200).
+
+    The second directory is `<git common dir>/delegate`, when it holds runs of the versions before #200. Raise RunsError
+    when `repo` is not a git repository.
+    """
     try:
-        return state_directory(repo, vcs)[1]
+        return state_directories(repo, vcs)[1]
     except StateRootError as error:
         raise RunsError(str(error)) from None
     except EngineError as error:
         raise RunsError(f"{repo} is not a git repository: {error}") from None
 
 
-def _journals(repo: Path, state: Path) -> list[Path]:
-    """The journal of each run in the state directory, in the order of the names. Raise RunsError when there is none."""
-    journals = _all_journals(state)
-    if not journals:
-        raise RunsError(f"no run found in {repo}: no journal under {state / 'runs'}")
-    return journals
+def _all_journals(states: list[Path]) -> list[Path]:
+    """The journal of each run in the state directories, in the order of the paths. The list can be empty."""
+    found: list[Path] = []
+    for state in states:
+        runs = state / "runs"
+        found += sorted(runs.glob(f"*/{JOURNAL_NAME}")) if runs.is_dir() else []
+    return found
 
 
-def _all_journals(state: Path) -> list[Path]:
-    """The journal of each run in the state directory, in the order of the names. The list can be empty."""
-    runs = state / "runs"
-    return sorted(runs.glob(f"*/{JOURNAL_NAME}")) if runs.is_dir() else []
+def _no_run(repo: Path, states: list[Path]) -> RunsError:
+    """The error of a repository with no journal; it names `runs` of each state directory."""
+    return RunsError(f"no run found in {repo}: no journal under {' or '.join(str(state / 'runs') for state in states)}")
 
 
 @dataclass(frozen=True)
@@ -96,14 +102,14 @@ class FailedStart:
         return f"no run is active; the newest run {self.run_id} failed at start: {self.last_line}; log {self.log}"
 
 
-def _failed_starts(state: Path) -> list[FailedStart]:
-    """Each run of the state directory that failed at start, in the order of the names.
+def _failed_starts(states: list[Path]) -> list[FailedStart]:
+    """Each run of the state directories that failed at start, in the order of the names.
 
     Raise RunsError when a lock file cannot be read.
     """
-    runs = state / "runs"
     found: list[FailedStart] = []
-    for log in sorted(runs.glob(f"*/{LOG_NAME}")) if runs.is_dir() else []:
+    logs = [(state, log) for state in states for log in sorted((state / "runs").glob(f"*/{LOG_NAME}"))]
+    for state, log in logs:
         run_dir = log.parent
         if (run_dir / JOURNAL_NAME).exists():
             continue
@@ -123,16 +129,18 @@ def _failed_starts(state: Path) -> list[FailedStart]:
     return found
 
 
-def _full_run_id(state: Path, run_id: str) -> str:
+def _full_run_id(states: list[Path], run_id: str) -> str:
     """The full id of the run that `run_id` names: the run with that id, or else the one run whose short id it is.
 
     The short id is the part of a run id after the last `-`. A run id that names no run comes back as it is, so the
     caller gives its own error for an unknown run. Raise RunsError when more than one run has the short id.
     """
-    runs = state / "runs"
-    if (runs / run_id).is_dir() or not runs.is_dir():
+    if any((state / "runs" / run_id).is_dir() for state in states):
         return run_id
-    matches = sorted(path.name for path in runs.iterdir() if path.is_dir() and path.name.rsplit("-", 1)[-1] == run_id)
+    matches = sorted(
+        {path.name for state in states if (state / "runs").is_dir() for path in (state / "runs").iterdir()
+         if path.is_dir() and path.name.rsplit("-", 1)[-1] == run_id}
+    )
     if len(matches) > 1:
         raise RunsError(f"run id {run_id!r} matches more than one run: {', '.join(matches)}; give the full run id")
     return matches[0] if matches else run_id
@@ -144,23 +152,28 @@ def run_id_of(repo: Path, run_id: str, vcs: VersionControl) -> str:
     `delegate run --resume` uses it. A run id that names no run comes back as it is. Raise RunsError when `repo` is not
     a git repository, or when more than one run has the short id.
     """
-    return _full_run_id(_state(repo, vcs), run_id)
+    return _full_run_id(_states(repo, vcs), run_id)
 
 
 def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
     """The journal file of the run `run_id`, or of the newest run when `run_id` is `None`.
 
-    `run_id` is a full run id, or the short id of one run (`run_id_of`). Raise RunsError when `repo` is not a git
-    repository, when the run is unknown, when more than one run has the short id, or when the repository has no run.
+    `run_id` is a full run id, or the short id of one run (`run_id_of`). The run can be in the default state directory
+    or in `<git common dir>/delegate` (#200). Raise RunsError when `repo` is not a git repository, when the run is
+    unknown, when more than one run has the short id, or when the repository has no run.
     """
-    state = _state(repo, vcs)
+    states = _states(repo, vcs)
     if run_id is not None:
-        run_id = _full_run_id(state, run_id)
-        journal = state / "runs" / run_id / JOURNAL_NAME
-        if not journal.is_file():
-            raise RunsError(f"run {run_id!r} not found in {repo}: no journal at {journal}")
-        return journal
-    return max(_journals(repo, state), key=_start_time)
+        run_id = _full_run_id(states, run_id)
+        for state in states:
+            journal = state / "runs" / run_id / JOURNAL_NAME
+            if journal.is_file():
+                return journal
+        raise RunsError(f"run {run_id!r} not found in {repo}: no journal at {states[0] / 'runs' / run_id / JOURNAL_NAME}")
+    journals = _all_journals(states)
+    if not journals:
+        raise _no_run(repo, states)
+    return max(journals, key=_start_time)
 
 
 @dataclass(frozen=True)
@@ -240,11 +253,11 @@ def runs_of(repo: Path, vcs: VersionControl) -> Runs:
     listed (#191). Raise RunsError when `repo` is not a git repository, when the repository has no run that can be
     listed, or when a lock file cannot be read.
     """
-    state = _state(repo, vcs)
-    journals = _all_journals(state)
-    failed = _failed_starts(state)
+    states = _states(repo, vcs)
+    journals = _all_journals(states)
+    failed = _failed_starts(states)
     if not journals and not failed:
-        raise RunsError(f"no run found in {repo}: no journal under {state / 'runs'}")
+        raise _no_run(repo, states)
     unreadable: list[tuple[Path, str]] = []
     started: list[tuple[datetime, Path]] = []
     for journal in journals:

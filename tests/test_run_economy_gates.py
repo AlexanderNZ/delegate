@@ -22,6 +22,7 @@ from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
+from .support import state_dir
 from .support import git, make_repo, read_journal_file
 
 HEAD = '''\
@@ -125,7 +126,7 @@ def test_red_gates_at_the_end_of_the_chain_start_a_fixup_round_with_the_gate_out
     events = read_journal_file(repo, result.run_id)
     (start,) = [e for e in events if e["event"] == "fixup-start"]
     assert (start["ticket"], start["round"], start["rejected_commit"], start["trigger"]) == ("c", 1, red_commit, "gates-red")
-    assert "RED-GATE-4410" in (repo / ".git" / "delegate" / "runs" / result.run_id / "findings" / "c.fixup-1.md").read_text()
+    assert "RED-GATE-4410" in (state_dir(repo) / "runs" / result.run_id / "findings" / "c.fixup-1.md").read_text()
 
 
 def test_the_brief_of_the_chain_verifier_holds_the_green_gate_output_and_does_not_tell_the_verifier_to_run_the_gates(

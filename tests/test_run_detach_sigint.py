@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from . import claude_fake
+from .support import state_dir
 from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
@@ -98,7 +99,7 @@ def stop_with_sigint(tmp_path: Path, monkeypatch, hold_in: str) -> tuple[Path, s
         run_id = re.search(r"^run (\S+)$", started.read_text(), flags=re.MULTILINE).group(1)
         wait_until(lambda: pids_file.is_file() and len(pids_file.read_text().split()) == 2, f"the {hold_in} session")
         pids = [int(pid) for pid in pids_file.read_text().split()]
-        (lock,) = (repo / ".git" / "delegate" / "locks").glob("*.lock")
+        (lock,) = (state_dir(repo) / "locks").glob("*.lock")
         engine = int(json.loads(lock.read_text())["pid"])
 
         before = time.monotonic()
@@ -118,10 +119,10 @@ def assert_stopped(repo: Path, run_id: str, seconds: float, pids: list[int]) -> 
     events = read_journal_file(repo, run_id)
     assert event_names(events)[-1] == "interrupted"
     assert "run-end" not in event_names(events)
-    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
+    assert list((state_dir(repo) / "locks").glob("*.lock")) == []
     for pid in pids:
         assert is_gone(pid, 0), f"process {pid} of the session stayed alive"
-    assert re.search(rf"go on with delegate run --resume {run_id}", (repo / ".git/delegate/runs" / run_id / "run.log").read_text(), re.I)
+    assert re.search(rf"go on with delegate run --resume {run_id}", (state_dir(repo) / "runs" / run_id / "run.log").read_text(), re.I)
 
 
 def test_sigint_to_a_detached_run_in_a_specialist_session_stops_the_run_within_10_seconds(tmp_path, monkeypatch):

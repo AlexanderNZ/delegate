@@ -15,6 +15,7 @@ import shutil
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import (
     event_names, finished_run, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
@@ -247,13 +248,13 @@ def test_the_dry_run_of_a_resume_takes_no_lock_and_changes_nothing(tmp_path, cap
     repo = make_repo(tmp_path, THREE)
     run_id, _ = kill_a_run(repo, 3)
     before = journal_path(repo, run_id).read_bytes()
-    locks = sorted(p.name for p in (repo / ".git" / "delegate").rglob("*.lock"))
+    locks = sorted(p.name for p in state_dir(repo).rglob("*.lock"))
 
     code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
 
     assert (code, err) == (0, "") and f"run {run_id}: no plan change" in out
     assert journal_path(repo, run_id).read_bytes() == before
-    assert sorted(p.name for p in (repo / ".git" / "delegate").rglob("*.lock")) == locks
+    assert sorted(p.name for p in state_dir(repo).rglob("*.lock")) == locks
     assert scripted.calls == []
 
 

@@ -16,6 +16,7 @@ from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 
+from .support import state_dir
 from .support import CLEANED_WORKFLOW, ScriptedAdapter, make_repo, read_journal, valid_report
 from .pages import repository_root
 
@@ -283,7 +284,7 @@ def test_the_reference_lists_the_invariant_violation_event_of_a_real_halted_jour
         repo = make_repo(tmp_path)
 
         def write_in_the_real_worktree(request):
-            (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+            (run_dir,) = (state_dir(repo) / "worktrees").iterdir()
             (run_dir / "a" / "oops.txt").write_text("by the verifier\n")
 
         scripted.during_verifier = write_in_the_real_worktree

@@ -12,6 +12,7 @@ import pytest
 
 from delegate import adapters
 
+from .support import state_dir
 from .support import ScriptedAdapter, make_repo, run_main
 
 
@@ -24,7 +25,7 @@ def scripted(git_identity):
 
 
 def journal_now(repo: Path) -> list[dict[str, object]]:
-    (journal,) = (repo / ".git" / "delegate" / "runs").glob("*/journal.jsonl")
+    (journal,) = (state_dir(repo) / "runs").glob("*/journal.jsonl")
     return [json.loads(line) for line in journal.read_text().splitlines()]
 
 

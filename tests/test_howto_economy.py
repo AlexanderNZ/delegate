@@ -11,6 +11,7 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
+from .support import state_dir
 from .support import ScriptedAdapter, git, state_and_verdict
 
 PAGE = HOW_TO / "run-an-economy-chain.md"
@@ -51,7 +52,7 @@ def test_following_the_economy_page_builds_a_chain_from_one_ticket_to_the_next_a
         assert text in scripted.verifier_calls[0].prompt
     # Each ticket branch starts from the previous ticket: the start commit of a step holds the file of the ticket before it.
     # The journal gives the start commits, because a run that ends built deletes the ticket branches that the run branch holds (#167).
-    (journal,) = (repo / ".git" / "delegate" / "runs").glob("*/journal.jsonl")
+    (journal,) = (state_dir(repo) / "runs").glob("*/journal.jsonl")
     events = [json.loads(line) for line in journal.read_text().splitlines()]
     starts = {e["ticket"]: e["base_commit"] for e in events if e["event"] == "step-start"}
     assert "test_read.py" in git(repo, "ls-tree", "-r", "--name-only", starts["2"]).split()

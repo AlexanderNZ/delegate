@@ -18,6 +18,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import CLEANED_WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal
 
 TWO_TICKETS = CLEANED_WORKFLOW + '\n[[tickets]]\nid = "b"\ntext = "The import command reads a CSV file."\nstack = "python"\nblocked-by = []\n'
@@ -73,7 +74,7 @@ def test_a_run_of_two_tickets_that_ends_built_removes_their_worktrees_and_branch
     assert sorted(cleanup["branches_deleted"]) == ["run/demo-a", "run/demo-b"]
     assert (cleanup["worktrees_kept"], cleanup["branches_kept"]) == ([], [])
     # The evidence of the run stays: the journal, the reports and the gate logs.
-    run_dir = repo / ".git" / "delegate" / "runs" / str(events[0]["run_id"])
+    run_dir = state_dir(repo) / "runs" / str(events[0]["run_id"])
     assert (run_dir / "journal.jsonl").is_file()
     assert (run_dir / "reports" / "a.specialist.json").is_file()
     assert any(run_dir.rglob("*.log"))

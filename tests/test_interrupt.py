@@ -18,6 +18,7 @@ import pytest
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import (
     TITLE, Terminal, bare_repo, event_names, frames, journal_path, live_lock, make_repo, read_journal, read_journal_file,
     resume_main, run_start, step_start, ticket_of, write_journal,
@@ -162,7 +163,7 @@ def test_ctrl_c_in_a_foreground_run_releases_the_lock_records_interrupted_and_re
     assert "Traceback" not in err
     run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
     assert err == f"delegate run: interrupted; the run {run_id} stopped. Go on with delegate run --resume {run_id}\n"
-    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
+    assert list((state_dir(repo) / "locks").glob("*.lock")) == []
     events = read_journal_file(repo, run_id)
     assert event_names(events)[-1] == "interrupted"
     assert "run-end" not in event_names(events)

@@ -128,7 +128,7 @@ When the run starts, the command prints three lines. When the run ends, it print
 
 ```text
 run 20261009T031500Z-a1b2
-journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
+journal /home/you/.local/state/delegate/sample-3f9a1c0b7d42/runs/20261009T031500Z-a1b2/journal.jsonl
 follow it with delegate watch · pause it with delegate pause a1b2
 run built · 4m03s · 1 built · 0 failed · 0 skipped · 39k new · 0 cache
 ```
@@ -182,7 +182,7 @@ The output looks like this, without its colours. Your run id, path, times and to
 ```text
 run 20261009T031500Z-a1b2: built (mode assure, adapter claude-code)
 progress: 100%, 1 of 1 ended, 4m03s used, tokens 39k new, 0 cache
-journal /path/to/sample/.git/delegate/runs/20261009T031500Z-a1b2/journal.jsonl
+journal /home/you/.local/state/delegate/sample-3f9a1c0b7d42/runs/20261009T031500Z-a1b2/journal.jsonl
 
   #      plan    state     phase          after     verdict  branch              used    new   cache  last event
   1      ● 1     ✓ built                            ACCEPT   run/sample-1       4m01s    39k       0  2026-10-09T03:19:02.512384+00:00
@@ -195,8 +195,10 @@ The state `built` and the verdict `ACCEPT` mean that the ticket is done and chec
 The verifier writes its verdict to a file. Read it:
 
 ```bash
-cat .git/delegate/runs/*/verifier/1/verdict.json
+cat ~/.local/state/delegate/sample-*/runs/*/verifier/1/verdict.json
 ```
+
+The path is the directory of the `journal` line, without the file name. If you set `XDG_STATE_HOME` or `DELEGATE_STATE_ROOT`, the directory is under that root.
 
 The file holds these things:
 

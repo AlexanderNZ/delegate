@@ -40,7 +40,7 @@ The first line gives the run id, the result, the [**mode**](../glossary.md#mode)
 ```
 run 20261016T030000Z-abcd: running (mode assure, adapter claude-code)
 progress: 45%, 1 of 4 ended, 18m20s used, ETA 21m40s, tokens 58k new, 0 cache
-journal /path/to/repo/.git/delegate/runs/20261016T030000Z-abcd/journal.jsonl
+journal /home/you/.local/state/delegate/repo-3f9a1c0b7d42/runs/20261016T030000Z-abcd/journal.jsonl
 
   #      plan    state     phase          after     verdict  branch              used    new   cache  last event
   1      * a     + built                            ACCEPT   run/demo-a        10m00s    39k       0  2026-10-16T03:10:00+00:00
@@ -406,7 +406,7 @@ The line gives the run id, the local date and time of the newest event of the jo
 When `status` or `watch` gets no run id, no run is active, and the newest run [failed at start](#the-run-with-no-run-id), the run has no journal. The command prints one line on stdout, and no line `position <seq>`:
 
 ```
-no run is active; the newest run 20261019T070133Z-b937 failed at start: delegate run: git branch run/watch-chain e0dbee4 failed: fatal: a branch named 'run/watch-chain' already exists; log /path/to/.git/delegate/runs/20261019T070133Z-b937/run.log
+no run is active; the newest run 20261019T070133Z-b937 failed at start: delegate run: git branch run/watch-chain e0dbee4 failed: fatal: a branch named 'run/watch-chain' already exists; log /home/you/.local/state/delegate/repo-3f9a1c0b7d42/runs/20261019T070133Z-b937/run.log
 ```
 
 The line gives the run id, the last line of the log that holds text, and the path of the log. In the example, another process made the run branch after the checks of the run. `watch` exits 1: the run failed. `status` exits 0. With `--json`, `status` exits 2, and the message on stderr is the line: the run has no snapshot. Since `delegate run --detach` makes [the checks that need no agent](run.md#the-detached-run) before it starts the run process, a run fails at start only after those checks.

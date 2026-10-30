@@ -19,6 +19,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree
 from .test_run_economy import ECONOMY
 from .test_run_multi import HEAD, ticket
@@ -45,7 +46,7 @@ def start(repo, capsys) -> tuple[int, str, str]:
 
 
 def run_id_of(repo) -> str:
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     return run_dir.name
 
 
@@ -378,7 +379,7 @@ def test_a_plan_change_does_not_go_on_with_a_run_that_an_invariant_violation_hal
     repo = make_repo(tmp_path, HEAD + ticket("a"))
 
     def write_in_the_real_worktree(request):
-        (run_dir,) = (repo / ".git" / "delegate" / "worktrees").iterdir()
+        (run_dir,) = (state_dir(repo) / "worktrees").iterdir()
         (run_dir / "a" / "oops.txt").write_text("by the verifier\n")
 
     scripted.during_verifier = write_in_the_real_worktree

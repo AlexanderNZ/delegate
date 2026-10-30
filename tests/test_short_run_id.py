@@ -15,6 +15,7 @@ import json
 
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import (
     bare_repo, journal_path, kill_a_run, live_lock, make_repo, read_journal_file, resume_main, run_end, run_start, step_end,
     step_start, write_journal,
@@ -140,7 +141,7 @@ def test_an_ambiguous_short_id_is_an_error_of_pause_that_writes_no_request(tmp_p
 
     assert (code, out) == (1, "")
     assert AMBIGUOUS in err
-    assert not list((repo / ".git" / "delegate" / "runs").glob("*/pause-request"))
+    assert not list((state_dir(repo) / "runs").glob("*/pause-request"))
 
 
 def test_an_ambiguous_short_id_is_an_error_of_run_resume_that_changes_no_journal(tmp_path, capsys):

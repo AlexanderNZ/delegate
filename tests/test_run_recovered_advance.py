@@ -14,6 +14,7 @@ from delegate.run.engine import RunInterrupted, run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
+from .support import state_dir
 from .support import ScriptedAdapter, git, make_repo, read_journal_file
 from .test_run_multi import HEAD, ticket
 
@@ -60,7 +61,7 @@ def run(repo, adapter, vcs, **options):
 
 
 def only_run_id(repo) -> str:
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     return run_dir.name
 
 

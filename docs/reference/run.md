@@ -26,7 +26,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | Option | Meaning |
 |---|---|
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
-| `--dry-run` | Validate the workflow and print the plan, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
+| `--dry-run` | Validate the workflow and print the plan and the state directory of the run, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets differ from the newest plan of the run is a plan change. |
 | `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete. |
@@ -507,19 +507,27 @@ The workflow field `keep-worktrees = true` turns the clean-up off for the run. T
 
 ## Where the engine writes
 
-All files are in the [**state directory**](../glossary.md#state-directory). By default it is `<git common dir>/delegate/`. The working tree of the repository stays clean. A command finds the state directory in this order: `DELEGATE_STATE_ROOT` when it is set, then the path in the file `<git common dir>/delegate/state-root` when the file exists, then `<git common dir>/delegate/`. See [the state root of a host](#the-state-root-of-a-host) and [the file `state-root`](#the-file-state-root).
+All files are in the [**state directory**](../glossary.md#state-directory). By default it is outside the git directory (#200), so no path that the engine gives to an agent or to a gate has a `.git` component. The default is `<state root>/<name>-<key>/`. The state root is `$XDG_STATE_HOME/delegate`, or `~/.local/state/delegate` when `XDG_STATE_HOME` is not set. A value of `XDG_STATE_HOME` that is empty or not an absolute path counts as not set. The working tree of the repository stays clean.
+
+A command finds the state directory in this order: `DELEGATE_STATE_ROOT` when it is set, then the path in the file `<git common dir>/delegate/state-root` when the file exists, then the default. See [the state root of a host](#the-state-root-of-a-host), [the file `state-root`](#the-file-state-root) and [runs in the git directory](#runs-in-the-git-directory). `delegate run --dry-run` prints the state directory of the run on the line `state directory <path>`.
 
 ### The state root of a host
 
-A host can move the state directory of every repository out of the git directory with the environment variable `DELEGATE_STATE_ROOT`. Its value must be an absolute path. The state directory of a repository is then `<root>/<name>-<key>/`. Both parts come from the git common directory, which every worktree of a repository shares: `<name>` is the name of the directory that holds it (for a main checkout, the name of its top level), or its own name when it is not called `.git` (a bare repository or a separate git directory), and `<key>` is the first 12 hex digits of the SHA-256 of its absolute path. So one root serves every repository of the host, two repositories get two directories, and every worktree of one repository, linked worktrees included, finds the same directory and the same run lock. `delegate run`, `status`, `watch` and `--resume` all use it. A value that is not an absolute path is an error. With no value, and no file `state-root`, the state directory is `<git common dir>/delegate/`, as in 1.2.0.
+A host can choose the state root of every repository with the environment variable `DELEGATE_STATE_ROOT`. It takes the place of the default state root. Its value must be an absolute path. The state directory of a repository is then `<root>/<name>-<key>/`. The default state root has the same layout. Both parts come from the git common directory, which every worktree of a repository shares: `<name>` is the name of the directory that holds it (for a main checkout, the name of its top level), or its own name when it is not called `.git` (a bare repository or a separate git directory), and `<key>` is the first 12 hex digits of the SHA-256 of its absolute path. So one root serves every repository of the host, two repositories get two directories, and every worktree of one repository, linked worktrees included, finds the same directory and the same run lock. `delegate run`, `status`, `watch` and `--resume` all use it. A value that is not an absolute path is an error.
 
 #### The file `state-root`
 
-When the engine uses a state directory outside `<git common dir>/delegate/`, it writes the absolute path of that directory to the file `<git common dir>/delegate/state-root`, in one line. `delegate run` writes the file before the `run-start` event, also for a `--resume`. A file with the same path is not written again. So a shell that does not set `DELEGATE_STATE_ROOT`, for example the shell of a person who watches the run of a coordinator, finds the run: `status`, `watch`, `stop`, `pause`, `clean` and `run --resume` read the file. A file whose line is not an absolute path is an error, and the message names the file.
+For each run, the engine writes the absolute path of its state directory to the file `<git common dir>/delegate/state-root`, in one line. It writes nothing when the state directory is `<git common dir>/delegate/`. `delegate run` writes the file before the `run-start` event, also for a `--resume`. `delegate run --detach` writes it before it prints the run id. A file with the same path is not written again. So a shell with another `XDG_STATE_HOME`, or with no `DELEGATE_STATE_ROOT`, for example the shell of a person who watches the run of a coordinator, finds the run: `status`, `watch`, `stop`, `pause`, `clean` and `run --resume` read the file. A file whose line is not an absolute path is an error, and the message names the file.
 
 When the variable is set and the file names another directory, the command uses the variable. It prints one warning line on stderr that names both directories. The next `delegate run` with the variable writes its directory to the file.
 
-A host needs the state root when its agents run in a permission mode that refuses a write on a path with a `.git` component. Measured on the agent host on 2026-10-18: Claude Code in `dontAsk` mode refused `Edit` and `Write` in `.git/delegate/...`, also with an allow rule for them, and permitted them in the same layout without `.git`. With the default state directory, the specialist on that host could write neither in its worktree nor its report. Such a host also gives its agents a settings file that allows the tools they need: see [the settings of a host](claude-code-adapter.md#the-settings-of-a-host).
+#### Runs in the git directory
+
+Before #200, the default state directory was `<git common dir>/delegate/`. A run that started there stays there. `status`, `watch`, `stop`, `pause`, `clean` and `run --resume` find it by its run id, also when the state directory of a new run is another directory. `delegate status` and `delegate watch` with no run id search both directories. When more than one run is active, the list of the runs shows the runs of both directories, newest first. `delegate clean --ended` also cleans the runs of both directories. A run branch that a run holds in one directory is in use for a new run in the other directory.
+
+#### Why the default is outside the git directory
+
+A tool that refuses a path with a `.git` component fails in each worktree under `<git common dir>/delegate/`. Claude Code in `dontAsk` mode is one such tool. Measured on the agent host on 2026-10-18: it refused `Edit` and `Write` in `.git/delegate/...`, also with an allow rule for them, and permitted them in the same layout without `.git`. The Vite dev server is another: it refuses such a path by default (`server.fs.deny`), so each end-to-end test of a web stack timed out. The default state directory has no `.git` component, so such a host needs no `DELEGATE_STATE_ROOT` for this. A host that runs agents in a permission mode that refuses writes also gives its agents a settings file that allows the tools they need: see [the settings of a host](claude-code-adapter.md#the-settings-of-a-host).
 
 The paths below are relative to the state directory.
 
@@ -562,7 +570,7 @@ When the run holds its lock and its journal records the start (`run-start`, or `
 
 ```
 run 20261016T030000Z-e9dc
-journal /repo/.git/delegate/runs/20261016T030000Z-e9dc/journal.jsonl
+journal /home/you/.local/state/delegate/repo-3f9a1c0b7d42/runs/20261016T030000Z-e9dc/journal.jsonl
 follow it with delegate watch · pause it with delegate pause e9dc
 ```
 

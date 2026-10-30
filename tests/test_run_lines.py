@@ -27,6 +27,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import state_dir
 from .support import ScriptedAdapter, Terminal, make_repo, read_journal, resume_main, run_main, ticket_of
 from .test_run_multi import HEAD, ticket
 from .test_run_pause import RUN_PAUSED
@@ -78,7 +79,7 @@ def pause_during_the_specialist_of(repo, scripted, ticket_id: str, read_out: Cal
         if ticket_of(request) != ticket_id:
             return
         before.append(read_out())
-        (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+        (run_dir,) = (state_dir(repo) / "runs").iterdir()
         with redirect_stdout(io.StringIO()) as second:
             assert delegate.main(["pause", run_dir.name, "--repo", str(repo)]) == 0
         assert "pause" in second.getvalue()
@@ -91,7 +92,7 @@ def start_lines(out: str, repo, run_id: str) -> None:
     """Assert the three start lines of frame 1k: the run id, the journal, and the hint to follow and to pause."""
     assert out.splitlines() == [
         f"run {run_id}",
-        f"journal {repo / '.git' / 'delegate' / 'runs' / run_id / 'journal.jsonl'}",
+        f"journal {state_dir(repo) / 'runs' / run_id / 'journal.jsonl'}",
         f"follow it with delegate watch · pause it with delegate pause {short(run_id)}",
     ]
 
@@ -111,7 +112,7 @@ def test_a_built_run_prints_the_follow_hint_after_the_journal_and_the_summary_at
     assert (code, err) == (0, "")
     run_id = run_id_of(out)
     lines = out.splitlines()
-    assert lines[:2] == [f"run {run_id}", f"journal {repo / '.git' / 'delegate' / 'runs' / run_id / 'journal.jsonl'}"]
+    assert lines[:2] == [f"run {run_id}", f"journal {state_dir(repo) / 'runs' / run_id / 'journal.jsonl'}"]
     assert lines[2] == f"follow it with delegate watch · pause it with delegate pause {short(run_id)}"
     assert len(lines) == 4, out
     assert re.fullmatch(rf"run built · {USED} · 2 built · 0 failed · 0 skipped · 0 new · 0 cache", lines[3]), lines[3]
@@ -144,7 +145,7 @@ def test_a_paused_run_prints_the_start_lines_and_the_summary_before_the_line_tha
     code, out, err = start(repo, capsys)
 
     assert (code, err) == (RUN_PAUSED, "")
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     run_id = run_dir.name
     (started,) = before
     start_lines(started, repo, run_id)
@@ -228,7 +229,7 @@ def test_on_a_terminal_the_result_of_a_paused_run_is_warn_and_bold_and_the_other
     code = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))[0]
 
     assert code == RUN_PAUSED
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     run_id = run_dir.name
     (started,) = before
     start_lines(started, repo, run_id)  # the start lines are plain

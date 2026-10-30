@@ -62,7 +62,7 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
     if is_paused(events):
         raise PauseError(f"run {run_id!r} is paused already; go on with {resume}")
     try:
-        _, state_dir = state_directory(repo, vcs)
+        _, state_dir = state_directory(repo, vcs, run_id)
         holder = live_holder(state_dir, str(events[0]["run_branch"]))
     except (EngineError, LockError) as error:
         raise PauseError(str(error)) from None

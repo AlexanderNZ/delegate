@@ -14,6 +14,7 @@ from __future__ import annotations
 from delegate.run.journal import read_events
 from delegate.run.status import plan_links
 
+from .support import state_dir
 from .support import bare_repo, finished_run, make_repo, run_start, step_end, step_start, write_journal
 from .test_run_multi import HEAD, ticket
 
@@ -33,7 +34,7 @@ def test_the_links_of_a_real_run_give_a_rail_to_each_ticket_after_the_row_above(
     repo = make_repo(tmp_path, workflow)
     run_id = finished_run(repo, capsys)
 
-    events = read_events(repo / ".git" / "delegate" / "runs" / run_id / "journal.jsonl")
+    events = read_events(state_dir(repo) / "runs" / run_id / "journal.jsonl")
 
     assert links(events) == [("a", False, ()), ("b", True, ()), ("c", True, ()), ("d", False, ())]
 

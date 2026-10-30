@@ -1,6 +1,6 @@
 """The `delegate run` command: check a workflow file and print its plan, or build its tickets.
 
-`--dry-run` validates the file and prints the plan in dependency order. Then it checks the setup (#182, `setup_check.py`):
+`--dry-run` validates the file and prints the plan in dependency order, with the state directory of the run (#200). Then it checks the setup (#182, `setup_check.py`):
 for each stack, the agent files exist for the adapter, and the verifier permits each gate; it exits 1 on a problem. It
 creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
@@ -63,7 +63,7 @@ from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
-    EngineError, PlanReview, RunInterrupted, check_start, new_run_id, review_plan_change, run_workflow, state_directory,
+    EngineError, PlanReview, RunInterrupted, check_start, new_run_id, record_state_root, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="validate the workflow and print the plan, then check that each stack has its agent files and that its verifier "
+        help="validate the workflow and print the plan and the state directory of the run, then check that each stack has its agent files and that its verifier "
         "permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; "
         "create nothing",
     )
@@ -223,7 +223,8 @@ def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVers
         if resume:
             run_dir = journal_of(repo, run_id, vcs).parent
         else:
-            _, state = state_directory(repo, vcs)
+            top, state = state_directory(repo, vcs, run_id)
+            record_state_root(top, vcs, state)  # the command that prints the run id finds the run, before the run process starts
             run_dir = state / "runs" / run_id
     except (EngineError, RunsError) as error:
         print(f"delegate run: {error}", file=sys.stderr)
@@ -410,8 +411,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"halted at {result.halted_at}; go on with delegate run --resume {result.run_id}")
             return EXIT_HALTED
         return 0 if result.ok else 1
+    try:
+        _, state = state_directory(args.repo, vcs)
+    except EngineError as error:
+        print(f"delegate run: {error}", file=sys.stderr)
+        return 1
     print(f"workflow {args.workflow}: mode {workflow.mode}, adapter {workflow.adapter}")
     print(f"base branch {workflow.base_branch}, run branch {workflow.run_branch}")
+    print(f"state directory {state}")
     if workflow.ticket_start == START_RUN_BRANCH:
         print(f"each ticket starts from the run branch {workflow.run_branch}")
     for number, ticket in enumerate(plan_order(workflow), start=1):

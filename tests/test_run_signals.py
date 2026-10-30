@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from . import claude_fake
+from .support import state_dir
 from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
@@ -60,11 +61,11 @@ def test_a_signal_stops_the_run_as_ctrl_c_does_and_no_process_of_the_harness_sta
                 os.kill(pid, signal.SIGKILL)  # keep the machine clean when the run left a process alive
 
     assert engine.returncode == 130, err
-    (run_dir,) = (repo / ".git" / "delegate" / "runs").iterdir()
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
     events = read_journal_file(repo, run_dir.name)
     assert event_names(events)[-1] == "interrupted"
     assert "run-end" not in event_names(events)
     assert f"go on with delegate run --resume {run_dir.name}".lower() in err.lower()
-    assert list((repo / ".git" / "delegate" / "locks").glob("*.lock")) == []
+    assert list((state_dir(repo) / "locks").glob("*.lock")) == []
     assert is_gone(harness), "the harness process stayed alive"
     assert is_gone(child), "a child process of the harness stayed alive"
