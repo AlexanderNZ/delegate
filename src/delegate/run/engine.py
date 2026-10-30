@@ -155,6 +155,7 @@ from .brief import (
     verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
+from .events import RUN_START, SCHEMA_VERSION
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree,
@@ -1009,9 +1010,9 @@ def _execute(
             vcs.create_branch(repo, workflow.run_branch, run_base)
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
         journal.append(
-            "run-start", run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
+            RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
-            plan=_plan_record(_plan_of(workflow)),
+            plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
         )
         progress = _Progress()
     else:

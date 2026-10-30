@@ -723,9 +723,11 @@ The `## Report` section of the verifier brief holds the report path, the JSON ty
 
 The journal is a JSONL file. The engine only appends to it. Each line is a JSON object with `seq` (the position, from 1), `time` (UTC, ISO 8601), and `event`, plus the fields below.
 
+The journal is a public interface. Tools outside the kit read it, and `delegate status --json` gives a view of it. The module `delegate.run.events` names each event below with its fields, and `tests/test_run_reference.py` and `tests/test_run_events.py` keep the table equal to the module and to the journals of real runs.
+
 | `event` | Fields |
 |---|---|
-| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `base_commit` (the base of the run: the commit of `base_branch` at the start), `run_branch`, `tickets` (the ids in plan order), `plan` (each ticket in plan order, as an object with `id`, `stack`, `blocked_by` and `text_sha256`, the SHA-256 of its text) |
+| `run-start` | `run_id`, `workflow`, `mode`, `adapter`, `base_branch`, `base_commit` (the base of the run: the commit of `base_branch` at the start), `run_branch`, `tickets` (the ids in plan order), `plan` (each ticket in plan order, as an object with `id`, `stack`, `blocked_by` and `text_sha256`, the SHA-256 of its text), `schema` (the version of the journal schema, see [the schema version](#the-schema-version); a journal with no `schema` is version 0) |
 | `step-start` | `ticket`, `stack`, `branch`, `worktree`, `base_commit`, `agent`, `tier`, `model` |
 | `agent-start` | `ticket`, `role` (`specialist`, `fix-up`, or `verifier`), `round` (0 for the specialist and the first verifier, else the fix-up round), `event_stream` (the path of the stream of the agent). The engine writes it just before each agent starts: the specialist, each continuation, the fix-up specialist, and each verifier. The result event of the agent names the same path. |
 | `adapter-result` | `ticket`, `exit_status`, `end_state`, `session_id`, `event_stream`, and `refused` when a permission mode of the harness refused a tool: a list of objects, each with the `tool` and the `mode`. `fixup-result` and `verify-result` have the same `refused` field. See [the settings of a host](claude-code-adapter.md#the-settings-of-a-host). Each of the three result events also has the totals of its agent: `tokens_new` (the new tokens), `tokens_cache` (the cache reads) and `last_event` (the time of the last activity in the stream, as an ISO 8601 time in UTC, or `null`). See [the totals of an agent that ended](#the-totals-of-an-agent-that-ended). |
@@ -764,6 +766,16 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
 | `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
+
+### The schema version
+
+`run-start` writes `schema`, the version of the schema of the journal, as an integer. The version in this release is 1.
+
+- A new optional field, or a new event, does not change the version. A reader skips a field or an event that it does not know.
+- A field that is removed or changed does change the version. A change is a new name, a new type, or a new meaning of the value. The new version is the old one plus 1.
+- A journal with no `schema` in `run-start` is version 0: an earlier release of the kit wrote it. `delegate status`, `delegate watch` and `delegate run --resume` read it. A resume appends to the journal and does not add `schema` to it.
+
+A reader outside the kit reads `schema` of the first line first, and it checks that it knows that version.
 
 ## Limits of this version
 
