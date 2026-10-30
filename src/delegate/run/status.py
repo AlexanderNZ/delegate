@@ -175,8 +175,9 @@ class TicketSnapshot:
     `gate_idle_seconds` is the seconds since the log file of that gate last changed. It is None when no gate runs, or
     when the log file cannot be read. It needs no reader of the streams.
 
-    The last four fields are for the ticket table, and `to_json` leaves them out. `reason` is the reason of the
-    `step-end` or the `skip` of the ticket. `fixup_round` is the round of the newest `fixup-start` of the step, or 0.
+    The last five fields are for the ticket table, and `to_json` leaves them out. `reason` is the reason of the
+    `step-end` or the `skip` of the ticket. `traceback` is the `traceback` of that `step-end`, the file that holds the
+    traceback of a crash (#194), or None. `fixup_round` is the round of the newest `fixup-start` of the step, or 0.
     `continuation` is the count and the limit of the newest `continuation` of the step, or None. `gate_count` is set
     only in the phase `gates`: the number of the gate of the round (the gates that ended, and the gate that runs), and
     the gates of the stack of the ticket (see `_gate_counts`). It is None when no gate of the round started yet, or
@@ -193,6 +194,7 @@ class TicketSnapshot:
     gate: str | None = None
     gate_idle_seconds: int | None = None
     reason: str | None = None
+    traceback: str | None = None
     fixup_round: int = 0
     continuation: tuple[int, int] | None = None
     gate_count: tuple[int, int] | None = None
@@ -282,16 +284,18 @@ def _ticket(
     live: dict[str, object] | None = None  # the `agent-start` of the agent that runs now
     gate: dict[str, object] | None = None  # the `gate-start` of the gate that runs now
     reason: str | None = None
+    trace: str | None = None
     fixup_round, continuation = 0, None
     for event in own:
         kind = str(event["event"])
         if kind in ("step-start", "retry"):
-            reason, fixup_round, continuation = None, 0, None
+            reason, trace, fixup_round, continuation = None, None, 0, None
         if kind == "step-start":
             state, started = RUNNING, started or _time(event)
         elif kind == "step-end":
             state, ended, live, gate = str(event["state"]), ended or _time(event), None, None
             reason = None if event.get("reason") is None else str(event["reason"])
+            trace = None if event.get("traceback") is None else str(event["traceback"])
         elif kind == "retry":
             state, ended = RUNNING, None
         elif kind == "skip":
@@ -326,7 +330,7 @@ def _ticket(
     duration = elapsed if started and ended else None
     gate_command = None if gate is None else str(gate["command"])
     gate_idle = None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now)
-    table = {"reason": reason, "fixup_round": fixup_round, "continuation": continuation}
+    table = {"reason": reason, "traceback": trace, "fixup_round": fixup_round, "continuation": continuation}
     if activity is None:
         return TicketSnapshot(ticket, state, phase, elapsed, None, None, None, gate_command, gate_idle, **table), duration
     tokens: tuple[int, int] | None = (0, 0)  # the new tokens and the cache reads
@@ -943,7 +947,7 @@ def _rows(
             if ticket.gate is not None:
                 at = active if 0 < active < len(details) else 0
                 details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(ticket, idle_limit, glyph)) if part)
-        reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket)
+        reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket, live)
         cells = _row(ticket, position, link, glyph)
         cells.update(phase=phases[0] if phases else "", **{TAIL: reason or details[0]})
         cells.update((facts or {}).get(ticket.id, {}))
@@ -985,12 +989,19 @@ def _pausing_before(snap: Snapshot) -> str | None:
     return next((t.id for t in snap.tickets[running:] if t.state == PENDING), None)
 
 
-def _reason(snap: Snapshot, ticket: TicketSnapshot) -> str:
-    """The reason of a ticket that the pause of the run stopped before, that failed, or that was skipped, or empty."""
+def _reason(snap: Snapshot, ticket: TicketSnapshot, live: bool) -> str:
+    """The reason of a ticket that the pause of the run stopped before, that failed, or that was skipped, or empty.
+
+    The reason of a crash ends with the file of its traceback. `delegate status` gives the whole path. The live view
+    cuts it to the name of the file, as it does each path (`output.without_paths`).
+    """
     if snap.state == PAUSED and snap.paused_before is not None and snap.paused_before[0] == ticket.id:
         return output.styled("warn", PAUSED_CELL.get(snap.paused_before[1], f"paused before the {snap.paused_before[1]}"))
     if ticket.state == FAILED and ticket.reason:
-        return output.styled("bad", output.without_paths(ticket.reason))
+        text = output.styled("bad", output.without_paths(ticket.reason))
+        if ticket.traceback:
+            text += output.styled("dim", f" (traceback {output.without_paths(ticket.traceback) if live else ticket.traceback})")
+        return text
     if ticket.state == SKIPPED and ticket.reason:
         return output.styled("dim", output.without_paths(ticket.reason))
     return ""

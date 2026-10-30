@@ -141,6 +141,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from traceback import format_exception
 from typing import NamedTuple
 
 from ..ports import harness
@@ -170,6 +171,9 @@ GATE_OUTPUT_TAIL_CHARS: int = 4000
 
 # The directory of the run that holds the log file of each gate run, in one directory for each ticket.
 GATE_LOG_DIRECTORY: str = "gates"
+
+# The file of the run directory that holds the traceback of a crash: this prefix, the `seq` of the `step-end`, `.txt`.
+CRASH_FILE_PREFIX: str = "crash-"
 
 BUILT: str = "built"
 FAILED: str = "failed"
@@ -345,6 +349,23 @@ def _halt_reason(error: Exception) -> str:
     if isinstance(error, _RunBranchMoved):
         return f"run branch moved: {error}"
     return f"crashed: {type(error).__name__}: {error}"
+
+
+def _crash_fields(journal: Journal, error: Exception) -> dict[str, object]:
+    """The `traceback` field of the `step-end` that records a crash, or no field for any other failure.
+
+    The traceback goes to `crash-<seq>.txt` in the run directory, where `<seq>` is the `seq` that the next event gets,
+    so it is the `seq` of the `step-end` (#194). A file that cannot be written does not hide the crash: the event then
+    has no `traceback`.
+    """
+    if isinstance(error, (InvariantViolation, _RunBranchMoved)):
+        return {}
+    trace = journal.path.parent / f"{CRASH_FILE_PREFIX}{journal.next_seq}.txt"
+    try:
+        trace.write_text("".join(format_exception(error)))
+    except OSError:
+        return {}
+    return {"traceback": str(trace)}
 
 
 def _expected_tip(events: list[dict[str, object]]) -> str | None:
@@ -1105,7 +1126,7 @@ def _execute(
             # worktree can no longer be trusted.
             halted, ended_early = isinstance(error, (InvariantViolation, _RunBranchMoved)), True
             reason = _halt_reason(error)
-            journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
+            journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason, **_crash_fields(journal, error))
             failed.append(ticket.id)
             failures[ticket.id] = reason
             for unreached in order[position + 1 :]:
@@ -2375,13 +2396,17 @@ class _ChainRun:
             raise  # a pause and a halt are no failure of the chain: `_execute` ends the run process with no `run-end`
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
             reason = _halt_reason(error)
-            self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built})
+            self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built}, error)
             return []
 
-    def _fail(self, reasons: dict[str, str]) -> None:
-        """Fail the built tickets in `reasons`. The newest `step-end` of a ticket wins, so the journal keeps both."""
+    def _fail(self, reasons: dict[str, str], error: Exception | None = None) -> None:
+        """Fail the built tickets in `reasons`. The newest `step-end` of a ticket wins, so the journal keeps both.
+
+        With the `error` that ended the verification, each `step-end` of a crash names its own file of the traceback.
+        """
         for ticket_id, reason in reasons.items():
-            self.journal.append("step-end", ticket=ticket_id, state=FAILED, reason=reason)
+            fields = {} if error is None else _crash_fields(self.journal, error)
+            self.journal.append("step-end", ticket=ticket_id, state=FAILED, reason=reason, **fields)
             self.built.remove(ticket_id)
             self.failed.append(ticket_id)
             self.failures[ticket_id] = reason

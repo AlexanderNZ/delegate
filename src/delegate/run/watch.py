@@ -383,6 +383,8 @@ class _Tracker:
             return f"the step continued {event['count']} times (limit {event['limit']}, trigger {event['trigger']})"
         elif kind == "step-end" and event["state"] == "failed":
             red = [label for label in self._gates.get(ticket, {}).values() if label is not None]
+            if event.get("traceback"):
+                return f"the step failed: {event['reason']} (traceback {event['traceback']})"
             if red:
                 return f"the gates are not green: {'; '.join(red)}"
             return f"the step failed: {event['reason']}" if event.get("reason") else "the step failed"

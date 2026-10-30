@@ -204,6 +204,11 @@ class Journal:
             events = read_events(path)
         return journal, events
 
+    @property
+    def next_seq(self) -> int:
+        """The `seq` that the next event gets. A file that a crash record names holds this number."""
+        return self._seq + 1
+
     def append(self, event: str, **fields: object) -> None:
         """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line."""
         seq = self._seq + 1

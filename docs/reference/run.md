@@ -307,10 +307,12 @@ The lock is a file for each run branch in `locks/`, and it holds the run id and 
 
 An exception that the engine did not plan for is a crash. Examples are an exception from the adapter that is not an `AdapterError`, and a failure of git in the middle of a step. An `AdapterError` is not a crash. See [a failure of the harness](#a-failure-of-the-harness). A crash leaves the state of the step unknown, so it ends the run. The engine does these things in order:
 
-1. It writes `step-end` with the state `failed`. The `reason` is `crashed: <exception type>: <message>`.
+1. It writes the full traceback to `runs/<run id>/crash-<seq>.txt`, where `<seq>` is the `seq` of the `step-end` that follows. Then it writes `step-end` with the state `failed`. The `reason` is `crashed: <exception type>: <message>`, and the field `traceback` is the path of the file. If the engine cannot write the file, the `step-end` has no `traceback`, and the crash is recorded as before.
 2. It writes `skip` for each ticket that it did not reach. The `blockers` list is empty, and the reason is `the run ended after ticket <id> crashed`.
 3. It writes `run-end` with the result `failed`.
 4. The command prints `delegate run: ticket <id>: crashed: ...` on stderr, and `delegate run: ticket <id>: skipped: the run ended after ticket <id> crashed` for each ticket that it did not reach. Then it prints [the summary and the retry line](#output-and-exit-codes) on stdout, and exits 1.
+
+The crash of the chain verification of `economy` mode is the same: each ticket that the crash fails gets its own `step-end` and its own file. `delegate status` shows the path after the reason, and `delegate watch` shows it in the problem line. The live view of `delegate watch` shows the name of the file only. `delegate clean` removes the file of a run that it cleans. The files of a halt (an invariant violation or a moved run branch) do not exist: only a crash has a traceback.
 
 The branch and the worktree of the ticket stay as the crash left them.
 
@@ -518,6 +520,7 @@ The paths below are relative to the state directory.
 | Path | Content |
 |---|---|
 | `runs/<run id>/journal.jsonl` | The journal of the run. |
+| `runs/<run id>/crash-<seq>.txt` | The traceback of a crash. `<seq>` is the `seq` of the `step-end` that names the file in `traceback`. See [a crash in a step](#a-crash-in-a-step). |
 | `runs/<run id>/run.log` | The standard output and the standard error of a detached run process. See [the detached run](#the-detached-run). |
 | `runs/<run id>/reports/<ticket id>.specialist.json` | The report path that the brief gives the specialist. |
 | `runs/<run id>/findings/<ticket id>.fixup-<round>.md` | The findings that start a fix-up round. |
@@ -766,8 +769,8 @@ The journal is a public interface. Tools outside the kit read it, and `delegate 
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit`, and `recovered` (`true`) when a resume wrote the event for a move that an earlier process made before it stopped. See [the resume](#the-resume). |
 | `run-branch-moved` | `ticket` (the ticket of the step that found the difference, or `null` when a resume found it), `run_branch`, `expected` (the tip that the journal says), `found` (the tip that the run branch has). A commit that the engine did not advance to is on the run branch, and the run halts. See [the run branch check](#the-run-branch-check). |
-| `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
-| `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
+| `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built), `traceback` (only for a crash: the path of the file that holds the traceback, see [a crash in a step](#a-crash-in-a-step)). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
+| `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed), `tracebacks_removed` (the paths of the crash traceback files that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
 | `journal-repaired` | `bytes_removed` (the number of bytes of the last line that the engine removed because it had no newline at its end: a write that a power loss cut). The command that opened the journal to append writes it first, before the event that it came to write, so the numbers of the lines go on from the last complete line. |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
 

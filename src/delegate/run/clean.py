@@ -40,7 +40,7 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
-from .engine import EngineError, state_directory
+from .engine import CRASH_FILE_PREFIX, EngineError, state_directory
 from .journal import Journal, JournalError, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
@@ -70,6 +70,7 @@ class RunClean:
     kept: str | None = None
     cleanup: Cleanup | None = None
     copies_removed: list[str] = field(default_factory=list)
+    tracebacks_removed: list[str] = field(default_factory=list)
     bytes_freed: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -86,6 +87,8 @@ class RunClean:
             parts.append(f"{verbs[1]} {_count(c.branches_deleted, 'branch', 'branches')} ({', '.join(c.branches_deleted)})")
         if self.copies_removed:
             parts.append(f"{verbs[0]} {_count(self.copies_removed, 'verifier copy', 'verifier copies')} ({', '.join(self.copies_removed)})")
+        if self.tracebacks_removed:
+            parts.append(f"{verbs[0]} {_count(self.tracebacks_removed, 'crash traceback')} ({', '.join(self.tracebacks_removed)})")
         kept = [f"worktree {k['worktree']}: {k['reason']}" for k in c.worktrees_kept]
         kept += [f"branch {k['branch']}: {k['reason']}" for k in c.branches_kept]
         if kept:
@@ -220,13 +223,26 @@ def _clean_run(
             remove_empty_directories(copy.parent)
         outcome.copies_removed.append(str(copy))
         outcome.bytes_freed += size
+    for trace in _crash_files(events, journal.parent):
+        size = _size(trace)
+        if not dry_run:
+            try:
+                trace.unlink()
+            except OSError as error:
+                outcome.errors.append(f"crash traceback {trace}: it could not be removed: {error}")
+                continue
+        outcome.tracebacks_removed.append(str(trace))
+        outcome.bytes_freed += size
     if dry_run:
         return outcome
     remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
     # A run where nothing went gets no event, so a second clean of the same run adds no line to its journal.
-    if outcome.copies_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
+    if outcome.copies_removed or outcome.tracebacks_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
         handle, _ = Journal.reopen(journal)
-        handle.append("cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed, bytes_freed=outcome.bytes_freed)
+        handle.append(
+            "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed,
+            tracebacks_removed=outcome.tracebacks_removed, bytes_freed=outcome.bytes_freed,
+        )
     return outcome
 
 
@@ -270,6 +286,22 @@ def _leftover_copies(events: list[dict[str, object]]) -> list[Path]:
         for path in (copy, copy.parent / PROOF_COPY_NAME):
             if path.is_dir() and path not in found:
                 found.append(path)
+    return found
+
+
+def _crash_files(events: list[dict[str, object]], run_directory: Path) -> list[Path]:
+    """The files of a crash traceback (#194) that the `step-end` events name and that are still on the disk.
+
+    Only a file of the shape that the engine makes counts: `crash-<number>.txt` in the directory of the run.
+    """
+    found: list[Path] = []
+    for event in events:
+        if event["event"] != "step-end" or "traceback" not in event:
+            continue
+        trace = Path(str(event["traceback"]))
+        shaped = trace.name.startswith(CRASH_FILE_PREFIX) and trace.suffix == ".txt"
+        if shaped and trace.parent == run_directory and trace.is_file() and trace not in found:
+            found.append(trace)
     return found
 
 

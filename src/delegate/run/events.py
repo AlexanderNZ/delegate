@@ -428,6 +428,8 @@ class StepEnd(TypedDict):
     ticket: str
     state: str
     reason: str | None
+    # Only the `step-end` of a crash has it: the path of the file that holds the traceback (#194).
+    traceback: NotRequired[str]
 
 
 class Cleanup(TypedDict):
@@ -435,8 +437,9 @@ class Cleanup(TypedDict):
     branches_deleted: list[str]
     worktrees_kept: list[KeptWorktree]
     branches_kept: list[KeptBranch]
-    # Only the event that `delegate clean` writes after `run-end` has these two.
+    # Only the event that `delegate clean` writes after `run-end` has these.
     copies_removed: NotRequired[int]
+    tracebacks_removed: NotRequired[list[str]]
     bytes_freed: NotRequired[int]
 
 

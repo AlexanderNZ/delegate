@@ -4,7 +4,13 @@ Each case calls `delegate.main` against a real temporary git repository with a
 scripted adapter that fails on demand.
 """
 
-from .support import event_names, git, make_repo, read_journal, read_journal_file, run_main, ticket_of, tree
+import json
+from pathlib import Path
+
+from delegate.cli import delegate
+
+from .support import event_names, git, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree
+from .test_run_economy import ECONOMY
 from .test_run_multi import HEAD, ticket
 
 
@@ -71,3 +77,80 @@ def test_an_exception_from_the_verifier_adapter_records_a_failed_step_end_then_a
     assert (step_end["ticket"], step_end["state"]) == ("a", "failed") and "verifier harness died" in step_end["reason"]
     assert event_names(events)[-1] == "run-end"
     assert "a.txt" not in tree(repo, "run/demo")
+
+
+def boom(request):
+    raise RuntimeError("boom")
+
+
+def test_a_crash_of_a_step_keeps_its_traceback_in_a_file_that_the_step_end_names(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    scripted.on_specialist = boom
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1
+    run_dir = next((repo / ".git" / "delegate" / "runs").iterdir())
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+    assert step_end["reason"] == "crashed: RuntimeError: boom"
+    assert Path(step_end["traceback"]) == run_dir / f"crash-{step_end['seq']}.txt"
+    text = Path(step_end["traceback"]).read_text()
+    assert "Traceback (most recent call last)" in text
+    assert "in boom" in text and text.rstrip().endswith("RuntimeError: boom")
+
+
+def test_a_crash_of_the_chain_verification_of_economy_mode_keeps_its_traceback_in_a_file(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, ECONOMY)
+    scripted.files_by_ticket = {"a": {"feature.txt": "a\n"}}  # the gate of the workflow needs this file
+    scripted.during_verifier = boom
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1
+    run_dir = next((repo / ".git" / "delegate" / "runs").iterdir())
+    step_end = [e for e in read_journal(out) if e["event"] == "step-end" and e["state"] == "failed"][-1]
+    assert Path(step_end["traceback"]) == run_dir / f"crash-{step_end['seq']}.txt"
+    assert Path(step_end["traceback"]).read_text().rstrip().endswith("RuntimeError: boom")
+
+
+def test_status_of_a_run_that_crashed_shows_the_path_of_the_traceback(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    scripted.on_specialist = boom
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+
+    assert delegate.main(["status", "--repo", str(repo)]) == 0
+    text = capsys.readouterr().out
+
+    assert "crashed: RuntimeError: boom" in text
+    assert step_end["traceback"] in text
+
+
+def test_watch_of_a_run_that_crashed_shows_the_path_of_the_traceback(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    scripted.on_specialist = boom
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
+
+    delegate.main(["watch", "--repo", str(repo)])
+    text = capsys.readouterr().out
+
+    assert step_end["traceback"] in text
+
+
+def test_clean_removes_the_traceback_of_a_crash_that_a_retry_built_over(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    scripted.during_verifier = boom
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    crash_file = Path(next(e for e in read_journal(out) if e["event"] == "step-end")["traceback"])
+    scripted.during_verifier = None
+    assert resume_main(repo, capsys, run_id, "--retry", "a")[0] == 0
+    assert crash_file.exists()
+
+    assert delegate.main(["clean", run_id, "--repo", str(repo)]) == 0
+    cleaned = capsys.readouterr().out
+
+    assert not crash_file.exists()
+    assert str(crash_file) in cleaned
+    assert str(crash_file) in json.dumps(read_journal_file(repo, run_id)[-1])
