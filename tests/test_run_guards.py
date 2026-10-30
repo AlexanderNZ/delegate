@@ -258,6 +258,34 @@ def test_a_specialist_that_changes_a_hotspot_path_fails_the_step_naming_the_path
     assert git(repo, "rev-parse", "run/demo").strip() == base_tip
 
 
+def make_agent_directories(request):
+    for name in (".claude/agents", ".opencode/agents"):
+        (request.cwd / name).mkdir(parents=True, exist_ok=True)
+
+
+@pytest.mark.parametrize("directory", [".claude/agents", ".opencode/agents"])
+def test_a_specialist_commit_in_an_agent_directory_fails_the_step_with_a_workflow_that_names_no_hotspot(
+    tmp_path, capsys, registered, directory
+):
+    path = f"{directory}/python-verifier.md"
+    repo = make_repo(tmp_path, hotspot_workflow(hotspots="[]"))
+    adapter = registered(
+        ScriptedAdapter(files={"feature.txt": "feature\n", path: "changed\n"}, on_specialist=make_agent_directories)
+    )
+    base_tip = git(repo, "rev-parse", "main").strip()
+
+    code, out, err = run(repo, capsys)
+
+    events = read_journal(out)
+    assert code == 1
+    assert f"delegate run: ticket a: hotspot finding: {path} matches the hotspot '{directory}/'" in err
+    (finding,) = [e for e in events if e["event"] == "hotspot-finding"]
+    assert [m["path"] for m in finding["matches"]] == [path]
+    assert adapter.verifier_calls == []
+    assert "gate-start" not in event_names(events)
+    assert git(repo, "rev-parse", "run/demo").strip() == base_tip
+
+
 def test_a_change_outside_the_hotspots_continues_to_the_verifier_even_beside_a_path_that_only_looks_like_a_hotspot(
     tmp_path, capsys, registered
 ):

@@ -1627,14 +1627,14 @@ def _build_with_continuations(
     each_ticket = domain.gates_each_ticket(workflow.mode)
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
-        ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
+        ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
         plan_change=plan_change, notes=stack.specialist_notes,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, so_far,
+                ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
                 notes=stack.specialist_notes,
             )
@@ -1724,7 +1724,7 @@ def _build_with_continuations(
             prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems)
         else:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.hotspots, stack.gates, report_path, commits, reason,
+                ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
                 plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths,
             )
@@ -1771,7 +1771,7 @@ def _hotspot_stop(
     recorded as `hotspot-finding`. The caller stops the step before any gate
     and any verifier runs.
     """
-    matches = hotspot_matches(changed_paths(vcs, worktree, since, merge_base=merge_base), stack.hotspots)
+    matches = hotspot_matches(changed_paths(vcs, worktree, since, merge_base=merge_base), stack.all_hotspots)
     if not matches:
         return None
     journal.append(
@@ -1981,7 +1981,7 @@ def _run_fixup(
     # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
     leftovers = frozenset(_uncommitted_paths(step.vcs, step.worktree))
     prompt = specialist_brief(
-        ticket.id, ticket.text, step.worktree, step.stack.hotspots, step.stack.gates, report_path, rejected, findings_text,
+        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots, step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)

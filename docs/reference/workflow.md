@@ -55,6 +55,7 @@ specialist = "cheap"
 specialist = "python-specialist"
 verifier = "python-verifier"
 gates = ["python3 -m pytest -rs"]
+# The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["LICENSE", ".github/workflows/*"]
 
 [[tickets]]
@@ -157,7 +158,7 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | `specialist` | string | The name of the specialist agent for this stack. |
 | `verifier` | string | The name of the verifier agent for this stack. |
 | [**`gates`**](../glossary.md#gate) | list of strings | The gate commands. The engine runs them. At least one is required. |
-| [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. See [the pattern rules](run.md#the-hotspot-guard). |
+| [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. The engine adds the built-in hotspots `.claude/agents/` and `.opencode/agents/` to the list of each stack, also when the list is empty. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
 | `gate-timeout` | number | The time limit of one gate run, in minutes. A fraction is permitted: `0.5` is 30 seconds. The number must be greater than 0. With no field, the engine waits for a gate without a limit. See [Time limits](#time-limits). |

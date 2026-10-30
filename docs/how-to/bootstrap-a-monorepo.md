@@ -38,6 +38,8 @@ Only the coordinator changes these paths:
 
 - `docs/agents/delegation.md`
 - `workflow.toml`
+
+The engine adds two hotspots to the hotspots of each stack: `.claude/agents/` and `.opencode/agents/`. You do not list them. An agent definition is never part of the work that a run builds.
 ````
 
 The [agent-definitions skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md) holds the rules of the gate selection.
@@ -115,12 +117,14 @@ adapter = "claude-code"
 specialist = "backend-specialist"
 verifier = "backend-verifier"
 gates = ["cd backend && python3 -m pytest"]
+# The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
 
 [stacks.web]
 specialist = "web-specialist"
 verifier = "web-verifier"
 gates = ["cd web && npm test"]
+# The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
 
 [[tickets]]

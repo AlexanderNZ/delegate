@@ -306,7 +306,9 @@ def test_the_brief_holds_the_ticket_the_file_boundary_the_gates_and_the_report_p
         assert f"`{name}`" in report
 
 
-def test_the_brief_gives_the_text_of_a_ticket_file_and_states_when_no_path_is_reserved(tmp_path, capsys, scripted):
+def test_the_brief_gives_the_text_of_a_ticket_file_and_lists_the_built_in_hotspots_when_the_workflow_names_none(
+    tmp_path, capsys, scripted
+):
     workflow = WORKFLOW.replace('text = "The export command writes a CSV file."', 'text-file = "ticket-a.md"').replace(
         'hotspots = ["LICENSE", ".github/workflows/*"]', "hotspots = []"
     )
@@ -318,7 +320,9 @@ def test_the_brief_gives_the_text_of_a_ticket_file_and_states_when_no_path_is_re
     (call,) = scripted.calls
     sections = brief_sections(call.prompt)
     assert "The export command reads from a pipe." in sections["Task"]
-    assert "no path is reserved" in sections["File boundary"].lower()
+    boundary = sections["File boundary"]
+    assert "`.claude/agents/`" in boundary and "`.opencode/agents/`" in boundary
+    assert "no path is reserved" not in boundary.lower()
 
 
 @pytest.mark.parametrize(

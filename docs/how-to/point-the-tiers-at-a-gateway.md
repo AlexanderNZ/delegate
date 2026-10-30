@@ -64,6 +64,7 @@ adapter = "claude-code"
 specialist = "python-specialist"
 verifier = "python-verifier"
 gates = ["python3 -m unittest"]
+# The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["workflow.toml", "my-tiers.toml"]
 
 [[tickets]]

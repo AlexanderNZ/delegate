@@ -71,6 +71,12 @@ def _ticket_id_problem(ticket_id: str) -> str | None:
     return None
 
 
+# The directories where a harness looks for a project agent (#188). The verifier runs in a clone of the ticket
+# branch, so it can load its definition from the clone. An agent definition is never part of the work that a run
+# builds: each stack has these paths as hotspots, in addition to the hotspots that the workflow names.
+BUILT_IN_HOTSPOTS: tuple[str, ...] = (".claude/agents/", ".opencode/agents/")
+
+
 @dataclass(frozen=True)
 class Stack:
     name: str
@@ -87,6 +93,11 @@ class Stack:
     # The time limit of one gate run and of one agent session of this stack, in minutes (#179). None: no limit.
     gate_timeout: float | None = None
     agent_timeout: float | None = None
+
+    @property
+    def all_hotspots(self) -> list[str]:
+        """The built-in hotspots, then the hotspots that the workflow names for this stack, each one once."""
+        return [*BUILT_IN_HOTSPOTS, *(pattern for pattern in self.hotspots if pattern not in BUILT_IN_HOTSPOTS)]
 
 
 @dataclass(frozen=True)

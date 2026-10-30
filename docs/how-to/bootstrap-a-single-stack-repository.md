@@ -30,6 +30,8 @@ Only the coordinator changes these paths:
 
 - `docs/agents/delegation.md`
 - `workflow.toml`
+
+The engine adds two hotspots to the hotspots of each stack: `.claude/agents/` and `.opencode/agents/`. You do not list them. An agent definition is never part of the work that a run builds.
 ````
 
 ### 2. Write the skill with your style rules
@@ -99,6 +101,7 @@ adapter = "claude-code"
 specialist = "python-specialist"
 verifier = "python-verifier"
 gates = ["python3 -m pytest"]
+# The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
 
 [[tickets]]
