@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-30
+
 ### Added
 
 - `delegate run --resume <run-id> --retry <ticket>` can change the text of the failed ticket that the retry starts again (#202). Before, a failed ticket had started, so its text was fixed, and a new ruling of the owner for it, for example "no new dependency", needed a new run with the ticket and all the tickets after it. The new rule 10 of the plan change allows only the field `text`, only for the ticket of `--retry`, and only when its newest `step-end` is `failed`. `plan-change` records the old and the new `text_sha256` in `retry_text`, `--resume --dry-run` prints the verdict of the rule, and the briefs of the retried ticket hold the new text.
