@@ -236,7 +236,7 @@ A process that SIGKILL ends cannot release the lock of its run branch, and it ca
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
-A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
+A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. The same is true for a run that halted with `run-branch-moved`, because a commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
 
 ## Clean up after a run
 

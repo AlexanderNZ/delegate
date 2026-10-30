@@ -177,6 +177,9 @@ def test_a_failure_and_a_skip_with_no_reason_in_the_journal_do_not_print_the_tex
         events.append(event)
     events.append({"event": "skip", "ticket": "c", "blockers": [], "reason": None})
     journal_path(repo, run_id).write_text("".join(json.dumps({**e, "seq": n}) + "\n" for n, e in enumerate(events, start=1)))
+    # The journal no longer holds the advance of ticket c, so the run branch goes back to where the journal says it is (#186).
+    advanced = [e["to_commit"] for e in events if e["event"] == "run-branch-advance"]
+    git(repo, "update-ref", "refs/heads/run/demo", advanced[-1])
     calls = len(scripted.calls)
 
     code, out, err = resume_main(repo, capsys, run_id)

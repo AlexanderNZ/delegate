@@ -29,6 +29,11 @@ from the rejected commit, and the output of the green gates on the fix-up
 commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
 the step fails. The run branch moves only on ACCEPT.
 
+The engine checks that. The tip that the journal says is the `to_commit` of the newest `run-branch-advance`, or the
+`base_commit` of `run-start`. Before each rebase onto the run branch, before each fast-forward, before the chain
+verification and at each resume, the engine compares it with the real tip (see `_check_run_branch`). A difference
+writes `run-branch-moved` and halts the run as an invariant violation does: the run cannot be resumed.
+
 The engine records the HEAD and the status of the worktree of the ticket before
 and after each verifier run (see `guards.py`). A difference is an invariant
 violation: the journal records it with the changes, and the run halts. Before
@@ -246,6 +251,10 @@ class _Halted(Exception):
         self.ticket, self.role, self.round_number = ticket, role, round_number
 
 
+class _RunBranchMoved(Exception):
+    """The run branch is not where the journal says. The journal holds `run-branch-moved`. The message is the reason the run halts."""
+
+
 class _Rejected(_StepFailed):
     """The verifier rejected the branch after the last fix-up round. `findings` holds the findings of the last verdict."""
 
@@ -326,6 +335,89 @@ def _holds(vcs: VersionControl, repo: Path, ancestor: str, descendant: str) -> b
         return vcs.is_ancestor(repo, ancestor, descendant)
     except VcsError:
         return False
+
+
+def _halt_reason(error: Exception) -> str:
+    """The reason a step fails when `error` ends it: an invariant violation and a moved run branch halt the run, any other error is a crash."""
+    if isinstance(error, InvariantViolation):
+        return f"invariant violation: {error}"
+    if isinstance(error, _RunBranchMoved):
+        return f"run branch moved: {error}"
+    return f"crashed: {type(error).__name__}: {error}"
+
+
+def _expected_tip(events: list[dict[str, object]]) -> str | None:
+    """Where the journal says the run branch is: the `to_commit` of the newest `run-branch-advance`, or the `base_commit` of `run-start`.
+
+    Return None for the journal of an engine that did not record `base_commit` (1.2.0 and before) and has no advance yet.
+    """
+    for event in reversed(events):
+        if event["event"] == "run-branch-advance":
+            return str(event["to_commit"])
+    base = events[0].get("base_commit") if events else None
+    return None if base is None else str(base)
+
+
+def _moved_text(run_branch: str, expected: str, found: str) -> str:
+    return (
+        f"the run branch {run_branch} is at {found}, but the journal says it is at {expected}; "
+        "a commit that the engine did not advance to is on the run branch"
+    )
+
+
+def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_branch: str, ticket: str) -> None:
+    """Halt the run when the run branch is not at the tip that the journal says (#186).
+
+    The run branch moves only when the engine advances it after an ACCEPT. A difference means that a commit landed with
+    no verification. The engine writes `run-branch-moved` (the expected tip and the tip that it found) and raises
+    `_RunBranchMoved`, which halts the run as an invariant violation does. Do nothing when the tips agree.
+    """
+    expected = _expected_tip(read_events(journal.path))
+    if expected is None:
+        return
+    found = _tip(vcs, repo, run_branch)
+    if found == expected:
+        return
+    journal.append("run-branch-moved", ticket=ticket, run_branch=run_branch, expected=expected, found=found)
+    raise _RunBranchMoved(_moved_text(run_branch, expected, found))
+
+
+def _accepted_unrecorded(events: list[dict[str, object]]) -> list[str]:
+    """The commits that a verifier accepted after the newest `run-branch-advance`: the engine can have moved the run branch to one.
+
+    The engine moves the run branch first and writes `run-branch-advance` after it, so a stop between the two leaves a tip
+    that the journal does not record yet. A resume closes such a step (see `_recover_advance`).
+    """
+    last = max((index for index, e in enumerate(events) if e["event"] == "run-branch-advance"), default=-1)
+    accepted: list[str] = []
+    commit: str | None = None
+    for event in events[last + 1 :]:
+        if event["event"] == "verify-start":
+            commit = str(event["commit"])
+        elif event["event"] == "verdict" and commit is not None and domain.is_accepted(str(event["verdict"])):
+            accepted.append(commit)
+    return accepted
+
+
+def _check_run_branch_at_resume(
+    journal: Journal, events: list[dict[str, object]], vcs: VersionControl, repo: Path, run_branch: str, built: list[str],
+    failed: list[str], skipped: dict[str, str],
+) -> None:
+    """Refuse to resume a run whose run branch is not where the journal says (#186).
+
+    The tip is also right when it is a commit that a verifier accepted and that the engine moved the run branch to just
+    before it stopped, with the new tip holding the tip of the journal. On a difference the engine writes
+    `run-branch-moved` and `run-end` with the result `failed`, and raises EngineError.
+    """
+    expected = _expected_tip(events)
+    if expected is None:
+        return
+    found = _tip(vcs, repo, run_branch)
+    if found == expected or (found in _accepted_unrecorded(events) and _holds(vcs, repo, expected, found)):
+        return
+    journal.append("run-branch-moved", ticket=None, run_branch=run_branch, expected=expected, found=found)
+    journal.append("run-end", result=FAILED, built=built, failed=failed, skipped=list(skipped))
+    raise EngineError(f"run cannot be resumed: {_moved_text(run_branch, expected, found)}; a halted run cannot be resumed: start a new run")
 
 
 def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
@@ -924,6 +1016,12 @@ def _execute(
         progress = _Progress()
     else:
         journal, events = _journal_events(state_dir, run_id)
+        moved = [e for e in events if e["event"] == "run-branch-moved"]
+        if moved:
+            raise EngineError(
+                f"run {run_id!r} cannot be resumed: {_moved_text(workflow.run_branch, str(moved[-1]['expected']), str(moved[-1]['found']))}; "
+                "a halted run cannot be resumed: start a new run"
+            )
         with _vcs_errors():
             review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch))
         # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
@@ -934,6 +1032,7 @@ def _execute(
         if not run_branch_exists:
             raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
         run_base = _run_base(vcs, repo, workflow, events)
+        _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
         # A step that cannot be retried is refused before the journal changes.
         plan = _retry_plan(workflow, progress, run_id, retry) if retry is not None else None
         if plan is not None and workflow.mode == domain.ECONOMY:
@@ -996,8 +1095,8 @@ def _execute(
             # step unknown, so the run ends here. The journal says why. A verifier
             # that changed the real worktree also ends the run: the state of the
             # worktree can no longer be trusted.
-            halted, ended_early = isinstance(error, InvariantViolation), True
-            reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
+            halted, ended_early = isinstance(error, (InvariantViolation, _RunBranchMoved)), True
+            reason = _halt_reason(error)
             journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
             failed.append(ticket.id)
             failures[ticket.id] = reason
@@ -1739,6 +1838,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     start, or one that ended with a failed hook, leaves nothing to abort.
     """
     ticket, run_branch = step.ticket, step.workflow.run_branch
+    _check_run_branch(step.journal, step.vcs, step.repo, run_branch, ticket.id)
     onto = _tip(step.vcs, step.repo, run_branch)
     before = _head(step.vcs, step.worktree)
     with _vcs_errors():
@@ -2100,6 +2200,7 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     Return None when it moved, or the reason the step fails.
     """
     run_branch = step.workflow.run_branch
+    _check_run_branch(step.journal, step.vcs, step.repo, run_branch, step.ticket.id)
     run_tip = _tip(step.vcs, step.repo, run_branch)
     with _vcs_errors():
         moved = step.vcs.fast_forward_branch(step.repo, run_branch, verified)
@@ -2235,8 +2336,7 @@ class _ChainRun:
         except (_Paused, _Halted):
             raise  # a pause and a halt are no failure of the chain: `_execute` ends the run process with no `run-end`
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
-            halted = isinstance(error, InvariantViolation)
-            reason = f"invariant violation: {error}" if halted else f"crashed: {type(error).__name__}: {error}"
+            reason = _halt_reason(error)
             self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built})
             return []
 
@@ -2268,6 +2368,7 @@ class _ChainRun:
         return segments
 
     def _verify_stacks(self) -> list[str]:
+        _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
         every_event = read_events(self.journal.path)
         retries = [index for index, e in enumerate(every_event) if e["event"] in ("retry", "plan-change")]
         # The verification of the chain since the last retry or plan change.

@@ -258,7 +258,7 @@ def test_the_event_stream_of_the_verifier_survives_the_removal_of_its_copy(tmp_p
     assert json.loads(open(verdict["report"]).read())["verdict"] == "ACCEPT"
 
 
-def test_an_accepted_ticket_that_cannot_fast_forward_the_run_branch_fails_and_the_run_branch_keeps_the_commit_that_landed_meanwhile(
+def test_a_commit_that_lands_on_the_run_branch_during_the_verifier_halts_the_run_and_the_run_branch_keeps_it(
     tmp_path, capsys, scripted
 ):
     repo = make_repo(tmp_path)
@@ -276,7 +276,8 @@ def test_an_accepted_ticket_that_cannot_fast_forward_the_run_branch_fails_and_th
 
     assert code == 1
     assert "Traceback" not in err
-    assert "run/demo" in err and "fast-forward" in err
+    assert "run/demo" in err and "run branch moved" in err  # the check of the tip comes before the fast-forward (#186)
+    assert any(e["event"] == "run-branch-moved" for e in read_journal(out))
     assert git(repo, "show", "run/demo:hand.txt") == "by hand\n"
     assert "feature.txt" not in git(repo, "ls-tree", "-r", "--name-only", "run/demo")
     assert "run-branch-advance" not in event_names(read_journal(out))

@@ -223,7 +223,7 @@ The plan of a run is the tickets in plan order, with the id, the stack, the `blo
 
 A refused resume writes no journal line, makes no branch and starts no agent. It removes a pause request that no process read. The command exits 1 and names each ticket and field at fault.
 
-A plan change also goes on with a run that ended: a `run-end` before the newest `plan-change` does not end the run. A plan change does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted. See [the worktree invariant](#the-worktree-invariant). A journal of an earlier version of `delegate` has no `plan` in `run-start`. A resume of such a run with the same ticket ids goes on as before. A plan change on such a run is refused: the engine cannot check the built part, so start a new run.
+A plan change also goes on with a run that ended: a `run-end` before the newest `plan-change` does not end the run. A plan change does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted, or with a run that `run-branch-moved` halted. See [the worktree invariant](#the-worktree-invariant) and [the run branch check](#the-run-branch-check). A journal of an earlier version of `delegate` has no `plan` in `run-start`. A resume of such a run with the same ticket ids goes on as before. A plan change on such a run is refused: the engine cannot check the built part, so start a new run.
 
 ### The dry run of a resume
 
@@ -241,7 +241,7 @@ The dry run takes `--reviewed` too. It exits 1 when a rule of the plan change re
 
 `delegate run --resume <run-id> --retry <ticket>` goes on with one failed step of a run. A failed step has a `step-end`, so a resume without `--retry` does not build it again. The retry also works in a run that has a `run-end`. It takes the [**run lock**](../glossary.md#run-lock), and it builds the steps that are not complete, as a resume does.
 
-The retry does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted, in each mode and for each ticket of the run. The verifier changed the real worktree of a ticket, so the engine cannot trust the worktree and the branch that the retry would use. The command exits 1, names the ticket of the violation, the worktree and each change of the `invariant-violation` event, tells you to start a new run, and appends no event. A plain resume and a plan change of such a run are refused too. See [the worktree invariant](#the-worktree-invariant).
+The retry does not go on with a run that an [**invariant**](../glossary.md#invariant) violation halted, in each mode and for each ticket of the run. The verifier changed the real worktree of a ticket, so the engine cannot trust the worktree and the branch that the retry would use. The command exits 1, names the ticket of the violation, the worktree and each change of the `invariant-violation` event, tells you to start a new run, and appends no event. A plain resume and a plan change of such a run are refused too. See [the worktree invariant](#the-worktree-invariant). A run that `run-branch-moved` halted is refused in the same way: see [the run branch check](#the-run-branch-check).
 
 The retry uses the worktree and the commits of the step again, and goes on at the first phase that did not complete. The phase comes from the journal events of the step. In `assure` mode the retry spawns no specialist:
 
@@ -278,6 +278,7 @@ After the step, the chain goes on. The engine checks each ticket after the step 
 The command exits 1, names the ticket, and changes nothing, when the step cannot be retried:
 
 - An invariant violation halted the run. Start a new run.
+- The run branch moved, and `run-branch-moved` halted the run. Start a new run.
 - The ticket is not a ticket of the run.
 - The step is built, was skipped, did not start, or is open. Resume an open step without `--retry`.
 - In `assure` mode: the specialist, or the fix-up specialist of the next round, gave no valid report that says `committed`. A retry of `assure` mode spawns no specialist.
@@ -367,6 +368,16 @@ The verifier works in a [**temporary copy**](../glossary.md#temporary-copy). It 
 - The [**verdict**](../glossary.md#verdict) does not count. The run branch does not move, also when the report on disk says ACCEPT. The branch and the worktree stay as the verifier left them. A plain resume, a plan change and a retry of a run that a violation halted are refused. See [the retry](#the-retry). Start a new run.
 - A verifier that writes only in its temporary copy does not halt the run. The engine removes the copy after each verifier run, also when the run halts.
 - The check covers the worktree of the ticket. It does not cover the main checkout of the repository, which the coordinator can change at any time, and it does not cover a path outside the repository.
+
+### The run branch check
+
+The run branch moves only when the engine advances it after an ACCEPT. A commit that moves the run branch from outside the engine would land with no verification. Such a commit can come from a specialist with a shell, from a person, or from another tool. So the engine checks the tip of the run branch against the journal (#186).
+
+- The expected tip is the `to_commit` of the newest `run-branch-advance`. When the run branch did not move yet, it is the `base_commit` of `run-start`. A journal of an earlier version of `delegate` that has no `base_commit` and no advance gives no expected tip, and the engine makes no check for it.
+- The engine compares the tip that the run branch has with the expected tip before each rebase onto the run branch, before each fast-forward, before the [**chain verification**](#the-chain-verification) of `economy` mode, and at each resume.
+- A difference halts the run. The engine writes `run-branch-moved` with the `expected` tip and the `found` tip, and then it writes `step-end` with the state `failed` and the reason `run branch moved: ...`. It writes `skip` for each ticket that it did not reach, and `run-end` with the result `failed`. The command prints `delegate run: ticket <id>: run branch moved: ...` on stderr and exits 1. The run branch keeps the commit that moved it. The ticket does not land.
+- At a resume, the engine makes the check before any other step. It writes `run-branch-moved` with `ticket` `null` and `run-end` with the result `failed`, spawns no agent, and exits 1. A resume does not count a tip as a move when the engine itself moved the run branch to a commit that a verifier accepted, and stopped before it wrote `run-branch-advance`. See [the resume](#the-resume).
+- A run that `run-branch-moved` halted cannot be resumed, also not with `--retry` or with a plan change: start a new run. A run that nothing else moves has no `run-branch-moved` event and ends as before.
 
 ## The rebase onto the run branch
 
@@ -749,6 +760,7 @@ The journal is a JSONL file. The engine only appends to it. Each line is a JSON 
 | `fixup-report` | `ticket`, `round`, `valid`, `path`, `reason` (`null` when valid), `status`, `blocked_reason` (as in `report-validation`) |
 | `fixup-refused` | `ticket`, `round`, `reason` (the refusal of the brief generator) |
 | `run-branch-advance` | `ticket`, `run_branch`, `from_commit`, `to_commit`, and `recovered` (`true`) when a resume wrote the event for a move that an earlier process made before it stopped. See [the resume](#the-resume). |
+| `run-branch-moved` | `ticket` (the ticket of the step that found the difference, or `null` when a resume found it), `run_branch`, `expected` (the tip that the journal says), `found` (the tip that the run branch has). A commit that the engine did not advance to is on the run branch, and the run halts. See [the run branch check](#the-run-branch-check). |
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
 | `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with two more fields: `copies_removed` (the verifier copies and proof copies that it removed) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
 | `run-end` | `result` (`built` or `failed`), `built`, `failed`, `skipped` (lists of ticket ids). The result is `failed` when a step failed or a ticket was skipped. |
