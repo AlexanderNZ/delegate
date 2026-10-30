@@ -312,7 +312,7 @@ def test_the_example_of_the_reference_page_is_the_output_of_status_for_the_run_t
 
     lines = status(repo, capsys, run_id).splitlines()
 
-    journal = f"journal /path/to/repo/.git/delegate/runs/{run_id}/journal.jsonl"
+    journal = f"journal /home/you/.local/state/delegate/repo-3f9a1c0b7d42/runs/{run_id}/journal.jsonl"
     assert example.splitlines() == [journal if line.startswith("journal ") else line for line in lines]
 
 
