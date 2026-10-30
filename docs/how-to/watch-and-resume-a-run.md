@@ -219,7 +219,7 @@ delegate run --resume <run-id> --reviewed 2
 
 ## Resume a run
 
-A run stops when you press Ctrl-C, when you send its process SIGTERM or SIGHUP, or when its process is killed with SIGKILL. Such a run has no `run-end` in its journal, and no process works on it, so `delegate status` shows the result `stopped` and the command that goes on with it: `delegate run --resume <run-id>`. After Ctrl-C, `delegate run` writes `interrupted` in the journal, prints the command that goes on with the run, and exits 130. See [Ctrl-C](../reference/run.md#ctrl-c). SIGTERM and SIGHUP do the same, so `kill <pid>` is the way to stop a detached run. The run first ends its harness and its gates with all their child processes, so no agent keeps working after the run stopped. See [SIGTERM and SIGHUP](../reference/run.md#sigterm-and-sighup). A paused run has no `run-end` too, and `delegate status` shows `paused`.
+A run stops when you press Ctrl-C, when you send its process SIGTERM or SIGHUP, or when its process is killed with SIGKILL. Such a run has no `run-end` in its journal, and no process works on it. So `delegate status` shows the result `stopped` and the command that goes on with it: `delegate run --resume <run-id>`. After Ctrl-C, `delegate run` writes `interrupted` in the journal, prints the command that goes on with the run, and exits 130. See [Ctrl-C](../reference/run.md#ctrl-c). SIGTERM and SIGHUP do the same, so `kill <pid>` is the way to stop a detached run. The run first ends its harness and its gates with all their child processes, so no agent keeps working after the run stopped. See [SIGTERM and SIGHUP](../reference/run.md#sigterm-and-sighup). A paused run has no `run-end` too, and `delegate status` shows `paused`.
 
 ### 1. Resume after Ctrl-C
 
@@ -237,7 +237,7 @@ A process that SIGKILL ends cannot release the lock of its run branch, and it ca
 
 A lock whose process still exists stays. A lock of another run id, whose process no longer exists, needs `--break-lock`. First check that no other run uses the run branch. See [the run lock](../reference/run.md#the-run-lock).
 
-A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. The same is true for a run that halted with `run-branch-moved`, because a commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
+A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. The same is true for a run that halted with `run-branch-moved`. A commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
 
 ## Clean up after a run
 
