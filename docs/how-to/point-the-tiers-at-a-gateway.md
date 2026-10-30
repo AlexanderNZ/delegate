@@ -76,7 +76,7 @@ blocked-by = []
 
 ### 3. Check the file and run
 
-Give the file with `--tiers`, after `run`. The check reports a tier file that is not valid, and it builds nothing.
+Give the file with `--tiers`, after `run`. The check reports a tier file that is not valid, and it builds nothing. It also needs the agent files that the workflow names to exist first: for `claude-code`, in `.claude/agents/` of the repository or in `.claude/agents/` of your home directory.
 
 ```bash
 delegate run workflow.toml --tiers my-tiers.toml --dry-run

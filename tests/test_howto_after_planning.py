@@ -11,7 +11,7 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, file_block, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter
+from .support import ScriptedAdapter, write_project_agents
 
 PAGE = HOW_TO / "use-the-kit-after-to-spec-and-to-tickets.md"
 
@@ -30,9 +30,10 @@ def scripted():
 
 
 @outside_the_package
-def test_the_ticket_files_of_the_page_reach_the_specialists_in_the_order_of_their_blocking_edges(tmp_path, monkeypatch, git_identity, scripted):
+def test_the_ticket_files_of_the_page_reach_the_specialists_in_the_order_of_their_blocking_edges(tmp_path, monkeypatch, home, git_identity, scripted):
     repo = new_repo(tmp_path / "repo")
     write_files(PAGE, repo)
+    write_project_agents(repo)  # the page assumes that the agent files of its stack exist; the home of the machine takes no part
 
     steps = follow(PAGE, repo, monkeypatch)
 

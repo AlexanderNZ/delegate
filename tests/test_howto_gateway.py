@@ -10,7 +10,7 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter, git
+from .support import ScriptedAdapter, git, write_project_agents
 
 PAGE = HOW_TO / "point-the-tiers-at-a-gateway.md"
 
@@ -26,6 +26,7 @@ def scripted():
 def a_repo(tmp_path):
     repo = new_repo(tmp_path / "repo")
     write_files(PAGE, repo)
+    write_project_agents(repo)  # the page assumes that the agent files of its stack exist; the home of the machine takes no part
     (repo / "seed.txt").write_text("seed\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "seed")
@@ -34,7 +35,7 @@ def a_repo(tmp_path):
 
 @outside_the_package
 def test_the_engine_asks_for_the_gateway_model_of_the_tier_file_of_the_page_for_the_specialist_and_for_the_verifier(
-    tmp_path, monkeypatch, git_identity, scripted
+    tmp_path, monkeypatch, home, git_identity, scripted
 ):
     repo = a_repo(tmp_path)
 
