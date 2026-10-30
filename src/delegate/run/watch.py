@@ -9,11 +9,12 @@ in any harness can run `watch` as a background task and act on the code.
 `follow` gives each event, and the reason to end, to a sink (`Sink`). The raw
 sink (`RawSink`) prints the raw line of each event: the form for a script and
 for a standard output that is not a terminal. The live view of a terminal is
-the sink in `delegate.run.live`.
+the sink in `delegate.run.live`. The JSON sink (`JsonSink`) prints each event as one JSON object on one line (#190).
 """
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -460,6 +461,63 @@ class RawSink:
 
     def end(self) -> None:
         return None
+
+
+# The reason that the JSON sink names in its last object, for each reason of the watch to end that is not the end of the run.
+REASON_PROBLEM: str = "problem"
+REASON_VERDICT: str = "verdict"
+REASON_STALL: str = "stall"
+REASON_TIME_LIMIT: str = "time-limit"
+
+# The `event` value of the last object of `--json`.
+WATCH_END: str = "watch-end"
+
+
+class JsonSink:
+    """The JSON lines of `watch --json` (#190): one JSON object on one line for each reported event, as the journal holds it.
+
+    A reason to end other than the end of the run (a problem, a verdict, a stall or the time limit) sets `reason`.
+    `end_object` then gives the last object, which the command prints with the exit code. An event at or before `--from`
+    is read and not printed.
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+        self.reason: str | None = None
+
+    def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
+        if not reported:
+            return
+        self._emit(json.dumps(event))
+        if problem is not None:
+            self.reason = REASON_PROBLEM
+
+    def verdict(self, event: dict[str, object]) -> None:
+        self.reason = REASON_VERDICT
+
+    def stall(self, minutes: float, last_event: dict[str, object] | None) -> None:
+        self.reason = REASON_STALL
+
+    def time_limit(self, minutes: float) -> None:
+        self.reason = REASON_TIME_LIMIT
+
+    def poll(self) -> None:
+        return None
+
+    def wait(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def interrupted(self) -> None:
+        return None  # the command prints the line of an interrupted watch on stderr
+
+    def end(self) -> None:
+        return None
+
+    def end_object(self, exit_code: int) -> str | None:
+        """The JSON line of the last object, or None when the watch ended with the run and not for a reason of its own."""
+        if self.reason is None:
+            return None
+        return json.dumps({"event": WATCH_END, "reason": self.reason, "exit_code": exit_code})
 
 
 def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:

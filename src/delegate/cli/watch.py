@@ -4,7 +4,11 @@ The use case lives in `delegate.run.watch`, which never imports an adapter. This
 of the command: it makes the git backend of the version-control port, finds the journal, and hands the use case a sink.
 When standard output is a terminal, the sink is the live view of `delegate.run.live`, with the stream reader of the
 adapter of the run, as for `delegate status`, and this module draws its frames in place. Otherwise, and with `--raw`,
-the sink prints the raw line of each event.
+the sink prints the raw line of each event. With `--json` (#190), the sink prints each event as one JSON object on one
+line (`watch.JsonSink`), then, for a reason of the watch to end that is not the end of the run, one last object
+`{"event": "watch-end", "reason": ..., "exit_code": ...}`. That form has no picker, no title, no replay line for the newest
+run and no line `position <seq>`: with no active run and no `--from`, it replays the journal of the newest run, and its
+failure to start goes on stderr. `--json` and `--raw` exclude each other.
 
 When standard output is a terminal, this module also sets the title of the terminal (`delegate.cli.title`): the short
 run id, the percentage and the local time of the ETA while the watch goes on, and the result when it ends.
@@ -105,9 +109,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="go on after the event with this position, which an earlier watch printed; no event is reported twice",
     )
     parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
-    parser.add_argument(
+    form = parser.add_mutually_exclusive_group()
+    form.add_argument(
         "--raw", action="store_true",
         help="print the raw line of each event, as to a standard output that is not a terminal; default on a terminal is the live view",
+    )
+    form.add_argument(
+        "--json", action="store_true",
+        help="print each event as one JSON object on one line, and a last object for a reason of the watch to end; cannot be used with --raw",
     )
     return parser
 
@@ -261,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             if runs.chosen is None:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
                 active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list
-                if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                if args.json or not (sys.stdin.isatty() and sys.stdout.isatty()):  # --json prints no prompt
                     _error(status.choices_line(active), args.raw)
                     return watch.EXIT_ERROR
                 picked = _pick(active, args.raw)
@@ -270,24 +279,38 @@ def main(argv: list[str] | None = None) -> int:
                 journal = picked.journal
             elif isinstance(runs.chosen, FailedStart):
                 # No run is active, and the newest run failed at start: it has no journal, also to go on from a position.
+                if args.json:
+                    print(runs.chosen.line(), file=sys.stderr)  # standard output holds JSON objects only
+                    return watch.EXIT_FAILED
                 Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(runs.chosen.run_id)}{SEPARATOR}failed")
                 print(runs.chosen.line())
                 return watch.EXIT_FAILED
-            elif not runs.active and args.from_position is None:
+            elif not runs.active and args.from_position is None and not args.json:
                 # No run is active: the newest run gets one line, not a replay of its journal.
                 return _newest_run(watch.newest_run(runs.chosen), args.raw)
+            elif not runs.active and args.from_position is None:
+                # --json: a script wants the events, so the journal of the newest run is replayed. A run that stopped with
+                # no pause and no halt has no end to follow: the error line goes to stderr, as for the other forms.
+                newest = watch.newest_run(runs.chosen)
+                if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None:
+                    _error(newest.line(), args.raw)
+                    return newest.code
+                journal = runs.chosen
             else:
                 # The one active run, or, with `--from` and no active run, the newest run from the position.
                 journal = runs.chosen
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)
-        live_view = not args.raw and sys.stdout.isatty()
-        if live_view:
+        json_sink = watch.JsonSink(_emit)
+        live_view = not args.raw and not args.json and sys.stdout.isatty()
+        if args.json:
+            sink = json_sink
+        elif live_view:
             screen = _Screen(sys.stdout)
             sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw, args.stall_minutes)
         title = Title(sys.stdout)
-        if title.enabled:
+        if title.enabled and not args.json:  # the title sequence is no JSON
             sink = _Titled(sink, journal, title)
         result = watch.follow(journal, options, sink)
     except (RunsError, JournalError) as error:
@@ -303,6 +326,12 @@ def main(argv: list[str] | None = None) -> int:
             f"Resume with delegate watch {run_id} --from {result.position}",
             file=sys.stderr,
         )
+        return result.code
+    if args.json:
+        # Standard output holds JSON objects only: no line `position <seq>`. Each object has its `seq`.
+        end_object = json_sink.end_object(result.code)
+        if end_object is not None:
+            _emit(end_object)
         return result.code
     print(f"position {result.position}")
     return result.code

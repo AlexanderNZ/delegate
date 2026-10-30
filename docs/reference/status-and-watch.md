@@ -3,7 +3,7 @@ man: DELEGATE-STATUS(1)
 man_name: "delegate-status, delegate-watch — show the state of a run"
 synopsis:
   - "delegate status [<run-id>] [--repo <repo>] [--json]"
-  - "delegate watch [<run-id>] [--repo <repo>] [--until verdict] [--stall-minutes <n>] [--max-minutes <n>] [--from <position>] [--poll-seconds <n>] [--raw]"
+  - "delegate watch [<run-id>] [--repo <repo>] [--until verdict] [--stall-minutes <n>] [--max-minutes <n>] [--from <position>] [--poll-seconds <n>] [--raw | --json]"
 ---
 
 # Reference: `delegate status` and `delegate watch`
@@ -238,15 +238,16 @@ For example, two tickets of 600 and 300 seconds ended, and the gates of the chai
 ## `delegate watch`
 
 ```
-delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--max-minutes N] [--from <position>] [--poll-seconds N] [--raw]
+delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--max-minutes N] [--from <position>] [--poll-seconds N] [--raw | --json]
 ```
 
 `watch` follows the run: it reads the journal at each poll, shows each new event, and exits when it has a reason. The form of the output depends on standard output:
 
 - When standard output is a terminal, `watch` shows [the live view](#the-live-view): the run line and a table of the tickets at the top, and below them a short line for each event of the ticket that runs now.
 - When standard output is not a terminal, or with `--raw`, `watch` prints [the raw lines](#the-raw-lines): one line for each event. A [**coordinator**](../glossary.md#coordinator) can run `watch` as a background task, read the lines, and act on the exit code.
+- With `--json`, `watch` prints [the JSON lines](#the-json-lines): one JSON object on one line for each event. A script reads the objects and needs no other tool than a JSON reader. `--json` and `--raw` cannot be used together: the parser refuses both and exits 2.
 
-The exit codes, the options, and the last line `position <seq>` are the same in the two forms. The position is the `seq` of the last event that `watch` reported.
+The exit codes and the options are the same in the three forms. The last line `position <seq>` is the same in the two forms that print text; `--json` prints no such line. The position is the `seq` of the last event that `watch` reported.
 
 With no run id, `watch` follows the one active run of the repository, also with `--from`. When no run is active, it prints one line for the newest run, and no event. With `--from`, it replays the journal of the newest run from the position. When more than one run is active, it shows [the run picker](#the-run-picker) on a terminal. Otherwise it prints one line on stderr that names each active run, follows none, and exits 2. See [the run with no run id](#the-run-with-no-run-id).
 
@@ -265,6 +266,7 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 | `--from <position>` | Go on after the event with this position, which an earlier watch printed; no event is reported twice. |
 | `--poll-seconds <poll-seconds>` | How often to read the journal; default 1. |
 | `--raw` | Print the raw line of each event, as to a standard output that is not a terminal; default on a terminal is the live view. |
+| `--json` | Print each event as one JSON object on one line, and a last object for a reason of the watch to end; cannot be used with --raw. |
 
 <!-- generated:end watch-options -->
 
@@ -284,7 +286,7 @@ A run directory with a `run.log` and no journal is the directory of a [detached 
 | Active runs | `status` | `watch` |
 |---|---|---|
 | One | Shows the active run, also when a newer run ended. | Follows the active run, also when a newer run ended. |
-| None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. With `--from`, replays the journal of the newest run from the position, when that run has a journal. See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
+| None | Shows the newest run. When the newest run failed at start, prints its line, and exits 0. With `--json`, it exits 2, and the message is the line. | Prints one line for the newest run, and exits. With `--from`, replays the journal of the newest run from the position, when that run has a journal. With `--json`, replays the journal of the newest run, also with no `--from`: see [the JSON lines](#the-json-lines). See [the newest run that ended](#the-newest-run-that-ended), [the newest run that stopped](#the-newest-run-that-stopped) and [the newest run that failed at start](#the-newest-run-that-failed-at-start). |
 | More than one | Prints the table of the active runs, with no prompt, and exits 0. With `--json`, it exits 2, and the message names each active run. | On a terminal, shows [the run picker](#the-run-picker), and follows the run that you choose. Otherwise, prints one line on stderr that names each active run, follows none, and exits 2. |
 
 ### The run picker
@@ -594,6 +596,33 @@ With `NO_COLOR` set, there is no animation. Before the stall time, the liveness 
 ### The raw lines
 
 When standard output is not a terminal, or with `--raw`, `watch` prints one line for each event. A line has the position (`seq`), the time, the event name, and then each field of the event that is not a list or an object, as `name=value`. The field `output_tail` is not printed. When a problem, a verdict, a stall or the time limit ends the watch, `watch` prints the reason on a line that starts with `watch:`. At `run-end` and at `paused`, the line of that event is the last event line. Then `watch` prints the line `position <seq>`. An error and Ctrl-C give no line `position <seq>`.
+
+### The JSON lines
+
+With `--json`, `watch` prints each event that it reports as one JSON object on one line. The object is the event as the journal holds it, with the fields that [the journal table](run.md#the-journal) gives, and with the field `output_tail` too. An event at or before `--from` is not printed. The exit codes are the same as for the other forms.
+
+When the watch ends for a reason of its own, `watch` prints one last object after the last event:
+
+```json
+{"event": "watch-end", "reason": "verdict", "exit_code": 4}
+```
+
+| `reason` | The watch ended because | `exit_code` |
+|---|---|---|
+| `problem` | An event is a [problem](#the-problem-events). | 3 |
+| `verdict` | `--until verdict` is set and the journal holds a `verdict` event. | 4 |
+| `stall` | `--stall-minutes` is set and nothing changed for that time. | 5 |
+| `time-limit` | `--max-minutes` is set and the time is used. | 6 |
+
+The run itself ends the watch at `run-end`, `paused` and `halted`. Then the last object is that event, and there is no `watch-end` object: the exit code is the code of the result. An error and Ctrl-C also give no `watch-end` object.
+
+Standard output holds JSON objects only. So `--json` prints no line `position <seq>`, no run picker, no live view and no title of the terminal: each object has its `seq`, and `--from <seq>` goes on after it. With more than one active run, `--json` never asks: it prints the names of the active runs on stderr and exits 2, as for a standard output that is not a terminal. With no run id, no active run and no `--from`, `--json` replays the journal of the newest run, and does not print the one line of [the newest run](#the-run-with-no-run-id). A newest run that stopped with no pause and no halt, and a newest run that failed at start, have no events to follow: `--json` prints their line on stderr and exits with the same code as the other forms.
+
+For example, this command prints the `seq` and the name of each event, and the last object of a watch that a reason of its own ended:
+
+```
+delegate watch --json --until verdict | jq -r '[.seq // "-", .event] | @tsv'
+```
 
 ### Exit codes
 
