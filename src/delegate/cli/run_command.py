@@ -28,6 +28,10 @@ stderr, and the same exit status. `kill <pid>` is the way to stop a detached run
 engine releases the lock, it ends the process group of the harness or the gate that runs, so no child process of the
 run stays alive. A signal that comes while the engine ends the run is ignored: the first one decides.
 
+A background shell that is not interactive sets SIGINT to ignored for its command, and the detached run inherits that
+(#198). In that case Python installs no handler for SIGINT, and `kill -INT <pid>` did nothing. The run now handles
+SIGINT as SIGTERM, so it stops within seconds.
+
 `--detach` starts the run in a new process with the setsid system call, with its
 output in the log file of the run, then prints the run id and the log path and
 exits 0. A harness that stops its tool shell, or a background task at a time
@@ -99,6 +103,9 @@ STOP_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGHUP)
 def _stop_signals_as_ctrl_c() -> Iterator[None]:
     """For the block, SIGTERM and SIGHUP raise `KeyboardInterrupt` in the main thread, as SIGINT does. Restore the old handlers after.
 
+    SIGINT also raises it when the process inherited SIGINT as ignored, as a run that a background shell started does
+    (#198). With the default handler of Python, SIGINT is left as it is.
+
     Only the first signal raises: the engine ends the child process group and releases the lock while it handles the
     interrupt, and a second exception would cut that off. A thread other than the main thread cannot set a handler,
     and then the block runs with the handlers as they are.
@@ -114,7 +121,13 @@ def _stop_signals_as_ctrl_c() -> Iterator[None]:
             raised = True
             raise KeyboardInterrupt
 
-    old = {signum: signal.signal(signum, handler) for signum in STOP_SIGNALS}
+    handled = list(STOP_SIGNALS)
+    if signal.getsignal(signal.SIGINT) == signal.SIG_IGN:
+        # A shell that is not interactive sets SIGINT to ignored for a background command, and each process of a run that
+        # starts from it inherits that (#198). Python then installs no handler, and SIGINT does nothing. Handle it as the
+        # others.
+        handled.append(signal.SIGINT)
+    old = {signum: signal.signal(signum, handler) for signum in handled}
     try:
         yield
     finally:
