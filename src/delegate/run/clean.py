@@ -27,6 +27,10 @@ A run where nothing went gets no event: a second clean adds no line. `watch` and
 With `dry_run` nothing changes: no file, no branch, no journal, and no lock.
 The lines then say what the command would remove and keep.
 
+`abandon` is the other use of the module (#201): it ends a run that is not built for good. It writes `run-end` with the
+result `abandoned` and the reason, and then removes the ticket worktrees, the ticket branches and the hooks directory
+whatever they hold. It keeps the run branch, unless the caller asks to delete it.
+
 The module starts no process and imports no adapter: the port does the work.
 """
 
@@ -40,8 +44,9 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
-from .engine import CRASH_FILE_PREFIX, EngineError, state_directories
-from .journal import Journal, JournalError, halt_of, is_paused, newest_run_end, read_events
+from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, EngineError, restore_progress, state_directories
+from .events import RUN_END
+from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
 
@@ -215,17 +220,7 @@ def _clean_run(
     outcome.cleanup = cleanup
     outcome.errors += cleanup.errors
     outcome.bytes_freed = sum(sizes.get(path, 0) for path in cleanup.worktrees_removed)
-    for copy in _leftover_copies(events):
-        size = _size(copy)
-        if not dry_run:
-            vcs.stop_file_watcher(copy)
-            shutil.rmtree(copy, ignore_errors=True)
-            if copy.exists():
-                outcome.errors.append(f"copy {copy}: it could not be removed")
-                continue
-            remove_empty_directories(copy.parent)
-        outcome.copies_removed.append(str(copy))
-        outcome.bytes_freed += size
+    _remove_copies(outcome, events, dry_run, vcs)
     for trace in _crash_files(events, journal.parent):
         size = _size(trace)
         if not dry_run:
@@ -249,6 +244,21 @@ def _clean_run(
     return outcome
 
 
+def _remove_copies(outcome: RunClean, events: list[dict[str, object]], dry_run: bool, vcs: VersionControl) -> None:
+    """Remove the leftover verifier copies and proof copies of the run (`_leftover_copies`), and add each to `outcome`. With `dry_run`, remove none."""
+    for copy in _leftover_copies(events):
+        size = _size(copy)
+        if not dry_run:
+            vcs.stop_file_watcher(copy)
+            shutil.rmtree(copy, ignore_errors=True)
+            if copy.exists():
+                outcome.errors.append(f"copy {copy}: it could not be removed")
+                continue
+            remove_empty_directories(copy.parent)
+        outcome.copies_removed.append(str(copy))
+        outcome.bytes_freed += size
+
+
 def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
     """The reason that a run with no live process is not cleaned, or None for a run that ended `built`."""
     end = newest_run_end(events)
@@ -258,6 +268,8 @@ def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
         if halt_of(events) is not None:
             return f"the run is halted; go on with delegate run --resume {run_id}"
         return f"the run stopped with no run-end, and no process works on it; go on with delegate run --resume {run_id}"
+    if end["result"] == ABANDONED:
+        return f"the run was {abandon_note(end)}; delegate clean --abandon removed what it left"
     if end["result"] != BUILT:
         return f"the run ended {end['result']}; its worktrees and branches stay for a retry"
     return None
@@ -335,3 +347,146 @@ def format_size(size: int) -> str:
         if value < 1000 or unit == "TB":
             break
     return f"{value:.1f} {unit}"
+
+
+class AbandonError(Exception):
+    """The run cannot be abandoned: it is unknown, it has a live process, or it ended built. The message names the cause and the command to use."""
+
+
+@dataclass
+class Abandoned:
+    """The outcome of an abandon: the run branch, the reason, and what the command removed.
+
+    `already` is true when the run was abandoned before, so the command wrote no `run-end`. `run.errors` holds each
+    failure of the port or of a file, which makes the exit code 1.
+    """
+
+    run: RunClean
+    run_branch: str
+    reason: str
+    already: bool
+    run_branch_deleted: bool = False
+
+    def lines(self) -> list[str]:
+        """The lines of the command: the decision, what went and what stayed, and the run branch with what happened to it."""
+        said = f"run {self.run.run_id}: abandoned already" if self.already else f"run {self.run.run_id}: abandoned: {self.reason}"
+        if self.run_branch_deleted:
+            branch = f"run branch {self.run_branch}: deleted"
+        else:
+            branch = f"run branch {self.run_branch}: kept; --delete-run-branch deletes it"
+        return [said, self.run.line(False), branch]
+
+
+def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: VersionControl) -> Abandoned:
+    """End the run `run_id` for good (#201): write `run-end` with the result `abandoned` and the reason, then remove what the run left.
+
+    The run is paused, halted, failed, or stopped with no `run-end`, and no live process works on it. The command
+    removes the worktree, the branch and the hooks directory of each ticket that started a step, whatever the worktree
+    holds and whether the run branch holds the branch, and the leftover verifier copies. It keeps the run branch, or
+    with `delete_run_branch` deletes it. The journal then gets a `cleanup` event, as for `clean`. A run that was
+    abandoned before gets no new `run-end`: the command only removes what is left, so a failed removal can be tried again.
+
+    Raise AbandonError, and change nothing, when the run is unknown, its journal cannot be read, a live process works on
+    it (the message names `delegate stop`), or it ended `built` (the message names `delegate clean`). A failure of the
+    port while it removes is an error of the result, and the other items are still removed.
+    """
+    try:
+        top, _ = state_directories(repo, vcs)
+        journal = journal_of(top, run_id, vcs)
+    except EngineError as error:
+        raise AbandonError(f"{repo} is not a git repository: {error}") from None
+    except RunsError as error:
+        raise AbandonError(str(error)) from None
+    state, run_id = journal.parents[2], journal.parent.name  # `run_id` can be a short id; the lock and the messages name the full id
+    try:
+        events = read_events(journal, torn_tail=True)
+        if not events or events[0]["event"] != "run-start":
+            raise JournalError(f"journal {journal}: the first event is not 'run-start'")
+        run_branch = str(events[0]["run_branch"])
+        holder = live_holder(state, run_branch)
+    except (JournalError, LockError) as error:
+        raise AbandonError(str(error)) from None
+    if holder is not None:
+        if holder.run_id == run_id:
+            raise AbandonError(f"run {run_id} has a live process, {holder.pid}; stop it with delegate stop {run_id}, then abandon it")
+        raise AbandonError(
+            f"the run branch {run_branch} of run {run_id} is in use by the active run {holder.run_id} (process {holder.pid}); "
+            f"stop that run with delegate stop {holder.run_id}, then abandon this one"
+        )
+    try:
+        # The lock keeps a resume out while the command works. A stale lock names no live process, so it goes.
+        with run_lock(state, run_branch, run_id, break_stale=True):
+            return _abandon_run(top, state, journal, reason, delete_run_branch, vcs)
+    except LockError as error:
+        raise AbandonError(f"run {run_id} has a live process: {error}; stop it with delegate stop {run_id}, then abandon it") from None
+    except JournalError as error:
+        raise AbandonError(str(error)) from None
+
+
+def _abandon_run(repo: Path, state: Path, journal: Path, reason: str, delete_run_branch: bool, vcs: VersionControl) -> Abandoned:
+    """Do the abandon of one run, with its lock held. The journal can have changed since the first read, so it is read again."""
+    run_id = journal.parent.name
+    handle, events = Journal.reopen(journal)
+    start = events[0]
+    run_branch = str(start["run_branch"])
+    end = newest_run_end(events)
+    if end is not None and end["result"] == BUILT:
+        raise AbandonError(f"run {run_id} ended built; it has nothing to abandon, and delegate clean {run_id} removes what it left")
+    already = end is not None and end["result"] == ABANDONED
+    if not already:
+        progress = restore_progress(events, run_id, retrying=True)
+        handle.append(RUN_END, result=ABANDONED, built=progress.built, failed=progress.failed, skipped=list(progress.skipped), reason=reason)
+    # A request that nothing reads goes: the run has ended.
+    (journal.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
+    outcome = RunClean(run_id, cleanup=Cleanup())
+    errors = outcome.errors
+    _prune(vcs, repo, False, errors)
+    trees = _ticket_trees(events, state, run_id)
+    sizes = {str(tree.worktree): _size(tree.worktree) for tree in trees if tree.worktree.is_dir()}
+    cleanup = _discard_tickets(vcs, repo, trees)
+    outcome.cleanup = cleanup
+    errors += cleanup.errors
+    outcome.bytes_freed = sum(sizes.get(path, 0) for path in cleanup.worktrees_removed)
+    _remove_copies(outcome, events, False, vcs)
+    result = Abandoned(outcome, run_branch, reason, already)
+    if delete_run_branch:
+        try:
+            if vcs.branch_exists(repo, run_branch):
+                vcs.discard_branch(repo, run_branch)
+                cleanup.branches_deleted.append(run_branch)
+            result.run_branch_deleted = True
+        except VcsError as error:
+            errors.append(f"branch {run_branch}: {error}")
+    remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
+    _prune(vcs, repo, False, errors)
+    if outcome.copies_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
+        handle.append(
+            "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed, tracebacks_removed=[], bytes_freed=outcome.bytes_freed,
+        )
+    return result
+
+
+def _discard_tickets(vcs: VersionControl, repo: Path, trees: list[TicketTree]) -> Cleanup:
+    """Remove the worktree, the hooks directory and the branch of each ticket, whatever they hold. A failure keeps that item only.
+
+    A worktree whose directory is gone is gone already, and its branch still goes. A worktree that cannot go keeps its branch.
+    """
+    result = Cleanup()
+    for tree in trees:
+        if tree.worktree.is_dir():
+            try:
+                vcs.remove_worktree(repo, tree.worktree)
+            except VcsError as error:
+                result.worktrees_kept.append({"worktree": str(tree.worktree), "reason": str(error)})
+                result.errors.append(f"worktree {tree.worktree}: {error}")
+                result.keep_branch(tree.branch, "its worktree is kept")
+                continue
+            result.worktrees_removed.append(str(tree.worktree))
+        shutil.rmtree(tree.hooks, ignore_errors=True)
+        try:
+            if vcs.branch_exists(repo, tree.branch):
+                vcs.discard_branch(repo, tree.branch)
+                result.branches_deleted.append(tree.branch)
+        except VcsError as error:
+            result.keep_branch(tree.branch, str(error), error=True)
+    return result

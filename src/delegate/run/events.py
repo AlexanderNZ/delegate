@@ -455,6 +455,8 @@ class RunEnd(TypedDict):
     built: list[str]
     failed: list[str]
     skipped: list[str]
+    # Only the `run-end` with the result `abandoned` has it (#201).
+    reason: NotRequired[str]
 
 
 # Every event name with the `TypedDict` of its fields.

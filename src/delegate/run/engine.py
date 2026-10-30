@@ -162,7 +162,7 @@ from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
 )
-from .journal import Journal, JournalError, plan_ids, read_events
+from .journal import Journal, JournalError, abandoned_end, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order
@@ -653,7 +653,7 @@ class _Progress:
     events: list[dict[str, object]] = field(default_factory=list)
 
 
-def _restore(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
+def restore_progress(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
     """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended, unless `retrying`.
 
     A `run-end` before the newest `plan-change` does not end the run: a plan change goes on with a run that ended.
@@ -823,9 +823,13 @@ def _review(
 
     The workflow is compared with the newest plan of the run, not with
     `run-start`. Raise EngineError when a field other than the tickets differs
-    (see `_check_same_run`), or when the plan changed and the journal records
-    no plan to compare with.
+    (see `_check_same_run`), when the plan changed and the journal records
+    no plan to compare with, or when the owner abandoned the run (#201).
     """
+    abandoned = abandoned_end(events)
+    if abandoned is not None:
+        reason = f" ({abandoned['reason']})" if abandoned.get("reason") else ""
+        raise EngineError(f"run {run_id!r} cannot be resumed: it ended abandoned{reason}; start a new run")
     _check_same_run(workflow, workflow_path, events[0], run_id)
     old_order, new_plan = plan_ids(events), _plan_of(workflow)
     new_order = [t.id for t in new_plan]
@@ -1170,7 +1174,7 @@ def _execute(
             review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch))
         # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
         _refuse_plan_change(review, workflow_path, run_id)
-        progress = _restore(events, run_id, retrying=retry is not None or review.changed)
+        progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
         with _vcs_errors():
             run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
         if not run_branch_exists:

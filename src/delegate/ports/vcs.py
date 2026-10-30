@@ -146,6 +146,14 @@ class VersionControl(Protocol):
         """
         ...
 
+    def discard_branch(self, repo: Path, branch: str) -> None:
+        """Delete the branch `branch` whatever it holds: the commits that no other branch holds are lost (#201).
+
+        The abandon of a run uses it for the branches of a run that the owner ended. Raise VcsError when the
+        branch does not exist, or when the tool refuses the delete, for example a branch that a worktree has checked out.
+        """
+        ...
+
     def prune_worktrees(self, repo: Path) -> None:
         """Remove the records of the worktrees whose directory does not exist. A worktree whose directory exists stays."""
         ...

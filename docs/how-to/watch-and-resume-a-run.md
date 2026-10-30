@@ -265,6 +265,28 @@ delegate clean --ended --merged
 
 The command removes what the dry run named, and records a `cleanup` event in the [**journal**](../glossary.md#journal) of each run where something went. A worktree with a change that is not committed stays, and so does its branch. A file that a gate makes, for example in `__pycache__`, is such a change when `.gitignore` does not name it. The command exits 0 when it removed or kept each item by these rules, and 1 on an error.
 
+## Abandon a run
+
+Use this section when you give up on a run that is not built. A run that you abandon cannot be resumed. The decision goes to the [**journal**](../glossary.md#journal), so the owner of the run can see it.
+
+### 1. Check that no process works on the run
+
+The run must be paused, halted, failed, or stopped with no `run-end`. If a process works on it, stop it first. See [stop a run now](#stop-a-run-now).
+
+### 2. Abandon it
+
+```bash
+delegate clean --abandon <run-id> --reason "<why you give up on the run>"
+```
+
+The reason is required. The command writes `run-end` with the result `abandoned` and your reason in the journal. Then it removes the [**worktree**](../glossary.md#worktree), the ticket branch and the hooks directory of each ticket. It removes them also when they hold work that is not committed or not merged. The command keeps the [**run branch**](../glossary.md#run-branch) and prints its name. Add `--delete-run-branch` to delete it too.
+
+The command exits 1 and changes nothing in these cases. A process works on the run: the message names `delegate stop <run-id>`. The run ended `built`: the message names `delegate clean`. A run that was abandoned before needs no new decision. The command then only removes what is left.
+
+### 3. See the result
+
+`delegate status <run-id>` shows the state `abandoned` and the line `note: abandoned: <reason>`. The live view of `delegate watch` shows the reason on the last line of the feed. `delegate run --resume <run-id>` refuses the run and exits 1. To do the work again, start a new run. See [`delegate clean`](../reference/commands.md#delegate-clean).
+
 ## Report a run as a coordinator agent
 
 A [**coordinator**](../glossary.md#coordinator) agent can start a run for a person. The person cannot see the agents, so the coordinator reports the run. This example starts the run detached from the tool shell.

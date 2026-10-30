@@ -111,6 +111,21 @@ def newest_run_end(events: list[dict[str, object]]) -> dict[str, object] | None:
     return None
 
 
+# The result of the `run-end` that `delegate clean --abandon` writes (#201). The engine never writes it.
+ABANDONED: str = "abandoned"
+
+
+def abandoned_end(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The `run-end` of a run that the owner abandoned, or None: the newest `run-end` has the result `abandoned` (`newest_run_end`)."""
+    end = newest_run_end(events)
+    return end if end is not None and end["result"] == ABANDONED else None
+
+
+def abandon_note(end: dict[str, object]) -> str:
+    """The text that gives the state and the reason of an abandoned run: `abandoned: <reason>`. An old `run-end` has no reason."""
+    return f"abandoned: {end['reason']}" if end.get("reason") else "abandoned"
+
+
 # The events that a command writes to the journal of a run that ended, after its `run-end`. They do not continue the
 # run: `delegate clean` writes `cleanup` (#168). The engine writes its own `cleanup` before `run-end`.
 AFTER_END: frozenset[str] = frozenset({"cleanup"})

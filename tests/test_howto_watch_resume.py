@@ -214,7 +214,7 @@ def test_the_page_cleans_up_after_a_merged_run_and_its_dry_run_changes_nothing(t
 
     (dry_run,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean --ended --merged --dry-run"))
     branches_after_dry_run = git(repo, "branch", "--format=%(refname:short)").split()
-    (cleaned,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean"), skip=("delegate clean --ended --merged --dry-run",))
+    (cleaned,) = follow(PAGE, repo, monkeypatch, only=containing("delegate clean"), skip=("delegate clean --ended --merged --dry-run", "delegate clean --abandon"))
 
     assert [(step.code, step.err) for step in (dry_run, cleaned)] == [(0, "")] * 2
     # One line for the run. The gates leave `__pycache__` files that no commit holds, so the run kept its worktrees (#167).

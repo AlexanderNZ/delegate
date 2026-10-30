@@ -480,6 +480,8 @@ class LiveView:
         start = datetime.fromisoformat(str(self._events[0]["time"])) if self._events and self._events[0]["event"] == "run-start" else when
         result = str(event["result"])
         spans: list[Span] = [("ok bold" if result == status.BUILT else "bad", f"run {result}"), JOIN, ("", duration((when - start).total_seconds()))]
+        if event.get("reason"):
+            spans += [JOIN, ("", f"reason: {event['reason']}")]
         snap = self._snapshot()
         if snap is not None and snap.tokens_new is not None and snap.tokens_cache is not None:
             spans += [JOIN, ("dim", status.format_token_counts(snap.tokens_new, snap.tokens_cache))]

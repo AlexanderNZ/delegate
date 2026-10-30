@@ -429,6 +429,31 @@ def test_delete_branch_keeps_a_branch_that_the_holder_does_not_hold_and_leaves_n
     assert git_status(repo, "config", "--get-regexp", r"^branch\.run/x-a\.").stdout == ""
 
 
+def test_discard_branch_deletes_a_branch_that_no_other_branch_holds(tmp_path, vcs):
+    repo, _ = branch_with_work(tmp_path, vcs, "run/x-a")
+
+    vcs.discard_branch(repo, "run/x-a")
+
+    assert not vcs.branch_exists(repo, "run/x-a")
+
+
+def test_discard_branch_of_a_branch_that_does_not_exist_is_an_error(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError):
+        vcs.discard_branch(repo, "run/no-such-branch")
+
+
+def test_discard_branch_of_a_branch_that_a_worktree_has_checked_out_is_an_error_and_the_branch_stays(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    vcs.ensure_worktree(repo, tmp_path / "wt", "run/x-a", "main")
+
+    with pytest.raises(VcsError):
+        vcs.discard_branch(repo, "run/x-a")
+
+    assert vcs.branch_exists(repo, "run/x-a")
+
+
 def test_prune_worktrees_drops_the_record_of_a_worktree_whose_directory_is_gone_and_keeps_the_others(tmp_path, vcs):
     repo = make_repo(tmp_path)
     gone, kept = tmp_path / "gone", tmp_path / "kept"

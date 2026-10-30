@@ -58,7 +58,7 @@ EXIT_INTERRUPTED: int = 130
 EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_SUCCEEDED: "The journal holds `run-end` with the result `built`.",
     EXIT_FAILED: (
-        "The journal holds `run-end` with the result `failed`, or, with no run id, "
+        "The journal holds `run-end` with the result `failed` or `abandoned`, or, with no run id, "
         "[the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active."
     ),
     EXIT_ERROR: (
@@ -129,12 +129,14 @@ class EndedRun:
     """A run whose journal holds `run-end`: its id, its result, the time of the `run-end`, and its first problem.
 
     `problem` is `ticket <id>: <reason>` for the first problem event of the journal, or None when it has none.
+    `reason` is the reason of a run that `delegate clean --abandon` ended (#201), or None.
     """
 
     run_id: str
     result: str
     ended: datetime
     problem: str | None
+    reason: str | None = None
 
     @property
     def code(self) -> int:
@@ -155,6 +157,8 @@ class EndedRun:
             ("", f"no run is active; the newest run {self.run_id} ended "), (RESULT_ROLES.get(self.result, ""), self.result),
             ("", " at "), ("dim", self.ended.astimezone().strftime("%Y-%m-%d %H:%M")),
         ]
+        if self.reason:
+            parts += [("", f"; reason: {self.reason}")]
         if self.result != "built" and self.problem is not None:
             parts += [("", "; "), ("bad", f"first problem: {self.problem}")]
         return parts
@@ -180,7 +184,8 @@ def ended_run(journal: Path) -> EndedRun | None:
         if problem is None and reason is not None and event["seq"] not in superseded:
             problem = f"ticket {event.get('ticket')}: {reason}"
     end = events[-1]
-    return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem)
+    reason = str(end["reason"]) if end.get("reason") else None
+    return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem, reason)
 
 
 @dataclass(frozen=True)

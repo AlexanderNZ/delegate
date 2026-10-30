@@ -211,6 +211,9 @@ class GitVersionControl:
             raise
         return True
 
+    def discard_branch(self, repo: Path, branch: str) -> None:
+        _git(repo, "branch", "--quiet", "-D", branch)
+
     def prune_worktrees(self, repo: Path) -> None:
         _git(repo, "worktree", "prune")
 

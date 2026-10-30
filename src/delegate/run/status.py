@@ -50,7 +50,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output
-from .journal import JournalError, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
+from .journal import ABANDONED, JournalError, abandon_note, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
 
@@ -760,7 +760,7 @@ def _state(
     The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
     request waits and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
     and no live process, or `running`. The note of a halted run is `halt_note`. The note of a stopped run is
-    `stopped_note`. Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
+    `stopped_note`. The note of an abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
     and None otherwise.
     """
     requested = pause_requested(journal)
@@ -771,6 +771,8 @@ def _state(
     if end is None and not paused and not live:
         return STOPPED, stopped_note(journal.parent.name, requested)
     note = PAUSE_REQUEST_NOTE if requested else None
+    if end is not None and end["result"] == ABANDONED:
+        return ABANDONED, abandon_note(end)
     if end is not None:
         return str(end["result"]), note
     return (PAUSED if paused else RUNNING), note
