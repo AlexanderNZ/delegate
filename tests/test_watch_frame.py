@@ -354,11 +354,12 @@ def test_in_economy_mode_the_feed_of_the_chain_verification_is_one_group_named_b
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
     assert frame == [
-        "run r1  running · verifier  ██████████░░░░░░ 66%  2/2 ended  18m20s used  ETA 4m20s  39k new · 0 cache",
+        "run r1  running · verifier  ██████████████░░ 93%  2/2 ended  18m20s used  ETA 4m20s  39k new · 0 cache",
         "",
-        "  #      plan    state       phase          after        used    new   cache",
-        "  1      ● a     ✓ built                                6m00s    19k       0",
-        "  2      ● b     ✓ built                                6m00s    19k       0",
+        "  #      plan      state       phase          after        used    new   cache",
+        "  1      ● a       ✓ built                                6m00s    19k       0",
+        "  2      ● b       ✓ built                                6m00s    19k       0",
+        "         ▶ python  running     verifier ●                 1m40s      0       0  quiet 1m40s",
         "─" * 120,
         "16:16  stack python  verifier started (#a, #b)",
         "16:18  stack python  verifier running · 1m · 0 new · 0 cache · quiet 1m40s",

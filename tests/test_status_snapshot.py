@@ -207,7 +207,7 @@ def test_the_percentage_and_the_eta_follow_the_rules_of_the_reference_page(tmp_p
     assert snap["phase"] is None  # only the chain of `economy` mode is a phase of the run
 
 
-def test_the_eta_is_never_earlier_than_now(tmp_path, capsys, monkeypatch):
+def test_the_eta_of_a_unit_that_runs_past_the_mean_is_unknown_and_not_the_time_of_now(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     run = Run(repo, "r1", "a", "b")
     run.built(0, 60, "a", run.stream("a.stream.jsonl", claude("finished.jsonl")))
@@ -215,7 +215,9 @@ def test_the_eta_is_never_earlier_than_now(tmp_path, capsys, monkeypatch):
     run.agent_start(60, "b", "specialist", run.stream("b.stream.jsonl", ""))
     frozen(monkeypatch, 4000)  # b used 3940 seconds, much more than the mean of 60
 
-    assert snapshot(repo, capsys)["eta"] == at(4000)
+    # The estimate is 60 - 3940, less than 0, and ticket b still runs: the ETA is `-` and not `now` (#196).
+    assert snapshot(repo, capsys)["eta"] is None
+    assert ", ETA -," in plain_status(repo, capsys)[1]
 
 
 @pytest.mark.parametrize(
@@ -344,7 +346,8 @@ def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
     return block_of(frames(out.getvalue())[0])
 
 
-# Two tickets ended (2 of 3 units, with the chain), and no ticket runs: floor(2 / 3 * 100) = 66. The mean of the
+# Two tickets ended (2 of 3 units, with the chain), and no ticket runs. The chain counts by its phase (#196): none 0, gates
+# 6 tenths, verifier and fix-up 8 tenths. So the percentage is floor((20 + tenths) / 30 * 100): 66, 86 or 93. The mean of the
 # tickets is (600 + 300) / 2 = 450, and one unit, the chain, did not end. The new tokens are 19326 for each ticket, and 0
 # for a chain agent whose stream has no event yet. The streams have no cache reads.
 @pytest.mark.parametrize(
@@ -379,13 +382,15 @@ def test_the_verification_of_an_economy_chain_is_a_phase_of_the_run_and_keeps_th
     lines = plain_status(repo, capsys)
     view = follow_lines(repo, monkeypatch, run)
 
-    assert (snap["state"], snap["phase"], snap["percent"], snap["tickets_ended"], snap["eta"]) == ("running", phase, 66, 2, at(1000 + eta))
+    percent = {None: 66, "gates": 86, "verifier": 93, "fix-up": 93}[phase]
+    assert (snap["state"], snap["phase"], snap["percent"], snap["tickets_ended"], snap["eta"]) == ("running", phase, percent, 2, at(1000 + eta))
     assert [(t["state"], t["phase"]) for t in snap["tickets"]] == [("built", None), ("built", None)]
     shown = f"{phase}, " if phase else ""
     eta_text = "5m51s" if eta == 450 - 99 else "7m30s"
-    assert lines[1] == f"progress: {shown}66%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
+    assert lines[1] == f"progress: {shown}{percent}%, 2 of 2 ended, 16m40s used, ETA {eta_text}, tokens 39k new, 0 cache"
     state = f"running · {phase}" if phase else "running"
-    assert view[0] == f"run r1  {state}  ██████████░░░░░░ 66%  2/2 ended  16m40s used  ETA {eta_text}  39k new · 0 cache"
+    bar = "█" * (percent * 16 // 100) + "░" * (16 - percent * 16 // 100)
+    assert view[0] == f"run r1  {state}  {bar} {percent}%  2/2 ended  16m40s used  ETA {eta_text}  39k new · 0 cache"
 
 
 def test_in_economy_mode_the_chain_counts_as_one_more_unit_while_a_ticket_runs(tmp_path, capsys, monkeypatch):

@@ -168,12 +168,13 @@ def test_the_status_of_a_paused_run_gives_paused_before_this_step_at_the_end_of_
 @pytest.mark.parametrize(("state", "make", "clock"), [
     ("running", a_running_run, 1100), ("ended", an_ended_run, 9000), ("paused", a_paused_run, 9000),
 ])
-def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the_plan_as_the_last_field(
+def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the_plan_and_the_chains_after_the_tickets(
     tmp_path, capsys, monkeypatch, state, make, clock
 ):
     """The golden files are the output of `status --json` of version 1.6.0 with #115 and #116, before #117.
 
-    #120 adds the field `plan` after `tickets`. The text up to the end of `tickets` stays byte-identical.
+    #120 adds the field `plan` after `tickets`, and #196 adds the field `chains` after `plan`. The text up to the end of
+    `tickets` stays byte-identical.
     """
     repo = bare_repo(tmp_path)
     make(repo)
@@ -184,7 +185,8 @@ def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the
     golden = (ROOT / "tests" / "fixtures" / "status-json" / f"{state}.json").read_text()
     assert golden.endswith("\n  ]\n}\n")
     assert out.startswith(golden.removesuffix("\n}\n") + ",\n  \"plan\": ")
-    assert list(json.loads(out)) == [*json.loads(golden), "plan"]
+    assert list(json.loads(out)) == [*json.loads(golden), "plan", "chains"]
+    assert json.loads(out)["chains"] == []  # an `assure` run has no chain row
 
 
 def test_status_json_gives_the_plan_of_the_run_with_the_blockers_of_each_ticket_in_plan_order(tmp_path, capsys, monkeypatch):

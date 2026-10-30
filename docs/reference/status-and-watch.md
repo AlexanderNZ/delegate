@@ -76,7 +76,7 @@ journal ~/project/.git/delegate/runs/20260302T090000Z-58c2/journal.jsonl
   8      · 108   pending                  104 107
 ```
 
-The progress line comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta). It gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
+The progress line comes from [the snapshot](#the-snapshot), and follows [the rules of the progress and the ETA](#the-progress-and-the-eta). It gives the percentage, the tickets that ended, the time used, the ETA, and the tokens as `tokens <new> new, <cache> cache`. See [the token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends and while the run is later than its estimate. A run that ended or paused shows no ETA. In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs, the line starts with its phase. For example: `progress: verifier, 66%, 2 of 2 ended, 16m40s used, ETA 5m51s, tokens 39k new, 1.2M cache`.
 
 The columns of the table:
 
@@ -114,13 +114,14 @@ On a terminal, `status` sets the title of the terminal to `delegate status`. See
 | `tickets_total` | integer | The number of [**tickets**](../glossary.md#ticket) of the run. |
 | `tickets_ended` | integer | The number of tickets that ended: `built`, `failed`, or `skipped`. |
 | `percent` | integer | The part of the run that is complete, from 0 to 100. See [the progress and the ETA](#the-progress-and-the-eta). |
-| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends and while the run is paused, halted or stopped. See [the progress and the ETA](#the-progress-and-the-eta). |
+| `eta` | string or `null` | The estimated time of the end of the run (ISO 8601, UTC), or `null` before the first ticket ends, while a unit of the run still runs and the estimate is 0 or less, and while the run is paused, halted or stopped. See [the progress and the ETA](#the-progress-and-the-eta). |
 | `tokens_new` | integer or `null` | The new tokens of the run: the sum of `tokens_new` of all tickets. A ticket whose `tokens_new` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). See [the token counts](#the-token-counts). |
 | `tokens_cache` | integer or `null` | The cache tokens of the run: the sum of `tokens_cache` of all tickets. A ticket whose `tokens_cache` is `null` adds nothing. `null` for [a run with no stream reader](#a-run-with-no-stream-reader). |
 | `phase` | string or `null` | In [**`economy`**](../glossary.md#economy) mode, while the verification of the [**chain**](../glossary.md#chain) runs: its phase, `gates`, [**`verifier`**](../glossary.md#verifier) or [**`fix-up`**](../glossary.md#fix-up). See [the verification of an `economy` chain](#the-verification-of-an-economy-chain). `null` before the verification starts, after `run-end`, while the run is paused, and in [**`assure`**](../glossary.md#assure) mode. |
 | `note` | string or `null` | For a [stopped run](#the-stopped-run): `no process works on the run; go on with delegate run --resume <run id>`, and `; the resume removes the pause request that waits` when a pause request waits in the directory of the run. `a pause request waits; delegate run --resume removes it` when a pause request waits and the run is paused or ended and not [active](#the-run-with-no-run-id). For a halted run, the place and the message of the halt. `null` otherwise. |
 | `tickets` | list of objects | One object for each ticket, in plan order. See the table below. |
 | `plan` | list of objects or `null` | The newest plan of the run: one object for each ticket, in plan order, with its `id` (string) and its `blocked_by` (list of strings), the ids of its [**blockers**](../glossary.md#blocker) as the `plan` field of `run-start` or of the newest `plan-change` records them. A blocker that is not in the plan can be in the list. `null` for the journal of an earlier version of the engine, which records no plan. |
+| `chains` | list of objects | One object for each [**stack**](../glossary.md#stack) that started the verification of its [**chain**](../glossary.md#chain), in the order of the first event of the verification. See [the chain row](#the-chain-row). An empty list in [**`assure`**](../glossary.md#assure) mode, and before the first verification starts. |
 
 | Ticket field | Type | Meaning |
 |---|---|---|
@@ -213,7 +214,7 @@ Only `status` treats such a stream as no data. `delegate run` reads the stream o
 The percentage:
 
 - A ticket that ended (`built`, `failed`, or `skipped`) counts 1.
-- A running ticket counts by its phase: `specialist` 0, `gates` 0.6, `verifier` 0.8, `fix-up` 0.8.
+- A running ticket counts by its phase: `specialist` 0, `gates` 0.6, `verifier` 0.8, `fix-up` 0.8. The verification of an `economy` chain counts by its phase in the same way.
 - A pending ticket counts 0.
 - The percentage is the sum, divided by the number of units, times 100, rounded down. A unit is a ticket. In `economy` mode, the verification of the chain is one more unit. See [the verification of an `economy` chain](#the-verification-of-an-economy-chain).
 
@@ -223,17 +224,46 @@ The ETA:
 - After that, the ETA is `time` + M × N − R. M is the mean duration of the ended tickets. N is the number of units that did not end. R is the `elapsed_seconds` of the running ticket, and the time that the verification of an `economy` chain used.
 - The mean uses the tickets that ended after a step (`built` or `failed`). A skipped ticket has no step and no duration, so it does not count in the mean. It counts as ended.
 - The ETA is never earlier than `time`. For a run that ended, it is the time of `run-end`.
+- The ETA never shows `0s` while a unit of the run still runs. A unit runs when a ticket runs, or when the verification of an `economy` chain runs. When the estimate is 0 or less and a unit runs, the ETA is `null` in the JSON and `-` in each line: the run is later than its estimate, and the estimate does not know the end. The ETA of a run with no unit that runs, for example between two steps, is still the estimate, and it can be `time`.
 
 ### The verification of an `economy` chain
 
 In [**`economy`**](../glossary.md#economy) mode the verification of the [**chain**](../glossary.md#chain) runs after the last ticket ends: the gates on the chain tip, the verifier, and the fix-up rounds. For the percentage and the ETA, the verification, with its gates, is one more unit of the run, as a ticket is:
 
-- The verification counts 0 until the journal holds `run-end`. After `run-end` it counts 1. Thus the percentage stays below 100 until the run ends.
+- While the verification runs, it counts by its phase, as a running ticket does: `gates` 0.6, `verifier` 0.8, `fix-up` 0.8. Before it starts it counts 0. After `run-end` it counts 1. Thus the percentage stays below 100 until the run ends.
 - The verification starts at the first `gate-start` or `gate-skip` of the phase `chain`, or at the first `verify-start` when the journal holds no such gate event. While it runs, `phase` of the snapshot follows the newest `gate-start` or `gate-skip` of the phase `chain` (`gates`), `verify-start` (`verifier`), or `fixup-start` (`fix-up`). After a fix-up round the gates of the chain run again, so the phase is `gates` again.
 - The ETA estimates the verification as one mean ticket: M. R holds the time from the start of the verification to `time`.
 - The tickets of the chain stay `built`, with the `phase` `null`. The last ticket of each stack shows the tokens and the `idle_seconds` of the verifier of its stack.
 
-For example, two tickets of 600 and 300 seconds ended, and the gates of the chain started 99 seconds ago. The percentage is 2 ÷ 3 × 100, rounded down: 66. The ETA is `time` + 450 × 1 − 99.
+For example, two tickets of 600 and 300 seconds ended, and the gates of the chain started 99 seconds ago. The percentage is (2 + 0.6) ÷ 3 × 100, rounded down: 86. The ETA is `time` + 450 × 1 − 99. When the gates have run for 450 seconds or more, the estimate is 0 or less and the ETA is `-`.
+
+#### The chain row
+
+The verification of a chain is also a row of the ticket table, in `delegate status` and in the live view of `delegate watch`. A gate of the chain can run for hours, and a table with only `built` rows would not show it. In `economy` mode, the table has one chain row for each [**stack**](../glossary.md#stack) that started its verification. The row starts at the first gate, verifier or fix-up of the chain of the stack. It goes after the last ticket row of the stack, under the sub-rows of that ticket, and it folds with that ticket when the rows fold to fit the height of the terminal. A run in `assure` mode has no chain row, and `--raw` does not change.
+
+| Cell | The chain row |
+|---|---|
+| `plan` | The name of the stack, with the node glyph of the state. |
+| `state` | `running` while the chain of the stack runs, then `accepted` when its verifier gave [**ACCEPT**](../glossary.md#accept), or `rejected` when it ended without that verdict: a [**REJECT**](../glossary.md#reject) with no fix-up round left, red gates after the last round, or a crash. A run that ended with no ACCEPT also shows its running chain as `rejected`. |
+| `phase` | While the chain runs: `gates ●`, `verifier ●` or `fix-up ● <round>/<limit>`. Empty after the chain ended. |
+| `verdict` | In `delegate status`, the verdict that ended the chain (`ACCEPT` or `REJECT`). The live view has no such column, and gives `verdict <verdict>` in its live tail. |
+| `used` | The time from the start of the verification of the stack to now, or to its end. |
+| `new`, `cache` | The tokens of the agents of the chain: its verifier and its fix-up specialist. The same tokens are in the row of the last ticket of the stack. The run line counts them once. |
+| live tail | In the phase `gates`: `gate <name> · log <time> ago`, the gate command and the age of its log, with `⚠ idle <time>` past the stall time. In the phases `verifier` and `fix-up`: the [liveness](#the-liveness-of-an-agent) of the agent. `delegate status` has the same text, as a snapshot. |
+
+The `chains` list of `status --json` has one object for each chain row:
+
+| Chain field | Type | Meaning |
+|---|---|---|
+| `stack` | string | The name of the stack. |
+| `phase` | string or `null` | `gates`, `verifier` or `fix-up` while the chain runs. `null` after it ended. |
+| `state` | string | `running`, `accepted` or `rejected`. |
+| `elapsed_seconds` | integer | The time that the verification of the stack used: from its first event to `time`, or to its end. |
+| `gate_command` | string or `null` | While a gate of the chain runs: its command, from its `gate-start`. `null` otherwise. |
+| `gate_idle_seconds` | integer or `null` | While a gate of the chain runs: the seconds from the last change of its log file to `time`. `null` when no gate runs, and when the log file is missing or cannot be read. |
+| `tokens_new` | integer or `null` | The new tokens of the agents of the chain. `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a chain with [a stream that cannot be read](#a-stream-that-cannot-be-read). |
+| `tokens_cache` | integer or `null` | The cache reads of the same agents. It is `null` when `tokens_new` is `null`. |
+| `verdict` | string or `null` | The verdict that ended the chain. `null` while it runs, and when red gates ended it. |
 
 ## `delegate watch`
 
@@ -437,11 +467,12 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
 
 The run line and the table come from the snapshot of `status` (see [the snapshot](#the-snapshot)), drawn again at each poll:
 
-- The run line gives the [**short run id**](../glossary.md#short-run-id), the state, a bar of 16 cells, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. While the verification of an `economy` chain runs, its phase comes after the state: `running · verifier`.
+- The run line gives the [**short run id**](../glossary.md#short-run-id), the state, a bar of 16 cells, the percentage, the tickets that ended, the time used, the ETA, and the two [token counts](#the-token-counts). The ETA is the time from now, or `-` before the first ticket ends. A run that ended or paused shows no ETA. While a unit of the run runs and the estimate is 0 or less, the ETA is `-`. While the verification of an `economy` chain runs, its phase comes after the state: `running · verifier`.
 - The table has one row for each ticket, flat and in plan order. The columns are `#` (the position in the plan), the rail (no header), `plan`, `state`, `phase`, `after`, `used`, `new`, `cache`, and a live tail with no header. The node glyph in `plan` gives the state: `●` built, `▶` running, `·` pending, `✗` failed, and `–` skipped.
 - The rail and `after` show the [**blockers**](../glossary.md#blocker) of the plan, from `blocked_by` in the plan of `run-start` or of the newest `plan-change`. When the one blocker of a ticket is the row directly above it, the rail `│` joins the two rows, and `after` is empty. Otherwise `after` gives the id of each blocker: a ticket after a row that is not the row above has no rail, and `after` names that row, as `66`. A join names each blocker, as `126 132`. The depth of the plan never makes the table wider: a chain of 40 tickets has the columns of a chain of 3. A journal of an earlier version of the engine records no plan, and then no row has a rail or an `after` cell.
 - The row of a running ticket gives its first phase, and each further phase is a sub-row under it, with only the rail, the phase and a detail in the live tail. The rail runs through the sub-rows when the next row has it. A phase shows `✓` when it is done, `●` when it runs, and `○` when it is to come. While a gate runs, the phase gives its count, as `gates ● 2/3`: the gate that runs, and the gates of the stack. The count shows when the journal holds an earlier run of the gates of the same stack that ended. A fix-up round shows its round and the limit, as `fix-up ● 1/2`. In `economy` mode a ticket has the phases `specialist` and `gates` only. Only phases go in the `phase` column.
 - The live tail of the row of a running ticket gives the [liveness](#the-liveness-of-an-agent) of its agent. While a gate runs, the sub-row of its phase gives `gate <name> · log <time> ago` in its live tail. After a gate log has no change for the stall time, the tail gives `⚠ idle <time>`. The stall time is `--stall-minutes`, or 5 minutes. After a [**continuation**](../glossary.md#continuation), the tail starts with `cont <count>/<limit>`.
+- In `economy` mode, the table has a [chain row](#the-chain-row) under the last ticket of each stack that started its verification. It gives the stack, the state, the phase, the time used, and in its live tail the gate that runs or the activity of the verifier.
 - The live tail of a ticket that failed or was skipped gives the reason, with no path. The reason of a crash ends with ` (traceback <name>)`, where `<name>` is the name of the file of its traceback only. While the run is `pausing`, the live tail of the next row gives `pauses before this step`: the first pending ticket after the running ticket, or the first pending ticket when no ticket runs. In a paused run, the live tail of the ticket that the pause stopped before gives `paused before this step`, `paused before the gate` or `paused before the verifier`.
 - For [a run with no stream reader](#a-run-with-no-stream-reader), the table has no columns `new` and `cache`, and the live tail gives no activity.
 
