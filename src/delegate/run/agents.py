@@ -31,11 +31,15 @@ class AgentChange:
     recorded: str
     found: str | None
 
-    def message(self) -> str:
+    def message(self, ticket: str) -> str:
+        """The reason of the step: the file, both hashes, and the command that goes on, which names the ticket (#205).
+
+        A step that this check stops fails, and the run ends `failed`, so only `--retry <ticket>` can go on with it.
+        """
         now = self.found if self.found is not None else "missing"
         return (
             f"agent file {self.path} is not the file that the run started with: recorded sha256 {self.recorded}, now {now}; "
-            "if the change is meant, go on with delegate run --resume RUN_ID --agents-changed"
+            f"if the change is meant, go on with delegate run --resume RUN_ID --retry {ticket} --agents-changed"
         )
 
 

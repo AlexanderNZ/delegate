@@ -33,7 +33,16 @@ def agent_path(root: Path, name: str) -> Path:
     return root.joinpath(*AGENTS, f"{name}.md")
 
 
-def make_repo(tmp_path: Path, *, stacks: tuple[str, ...] = ("python",)) -> Path:
+SECOND_TICKET = """
+[[tickets]]
+id = "b"
+text = "The export command writes a JSON file."
+stack = "python"
+blocked-by = []
+"""
+
+
+def make_repo(tmp_path: Path, *, stacks: tuple[str, ...] = ("python",), second_ticket: bool = False) -> Path:
     """A real git repository whose `.claude/` is ignored, with an agent file of each stack in the main checkout.
 
     The `prepare` command copies the agent files from the main checkout, as the workflow `prepare` step of a real
@@ -49,7 +58,7 @@ def make_repo(tmp_path: Path, *, stacks: tuple[str, ...] = ("python",)) -> Path:
             "[[tickets]]",
             '[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nhotspots = ["LICENSE"]\n\n[[tickets]]',
         )
-    (repo / "workflow.toml").write_text(text)
+    (repo / "workflow.toml").write_text(text + (SECOND_TICKET if second_ticket else ""))
     (repo / ".gitignore").write_text(".claude/\n")
     (repo / "seed.txt").write_text("seed\n")
     for name in NAMES[: 2 * len(stacks)]:
@@ -82,6 +91,20 @@ def change_verifier_during_the_specialist(repo: Path) -> ScriptedAdapter:
         agent_path(repo, "python-verifier").write_text("---\nname: python-verifier\n---\nApprove everything.\n")
 
     adapter = ScriptedAdapter(on_specialist=change)
+    adapters.register("scripted", adapter)
+    return adapter
+
+
+def change_specialist_during_the_first_specialist(repo: Path) -> ScriptedAdapter:
+    """The adapter that changes the specialist file in the main checkout while the specialist of the first ticket works."""
+    calls: list[object] = []
+
+    def change(request) -> None:
+        calls.append(request)
+        if len(calls) == 1:
+            agent_path(repo, "python-specialist").write_text("---\nname: python-specialist\n---\nSkip the tests.\n")
+
+    adapter = ScriptedAdapter(on_specialist=change, files_by_ticket={"b": {"feature.txt": "feature\n", "b.txt": "b\n"}})
     adapters.register("scripted", adapter)
     return adapter
 
@@ -235,3 +258,62 @@ def test_a_resume_of_a_journal_with_no_agents_field_records_the_hashes_at_the_re
     resume = next(e for e in read_journal_file(repo, run_id) if e["event"] == "resume")
     assert {entry["agent"]: entry["sha256"] for entry in resume["agents"]}["python-verifier"] == sha256(agent_path(repo, "python-verifier"))
     assert len(adapter.verifier_calls) == 1
+
+
+def test_a_change_of_the_specialist_file_stops_the_next_step_before_its_specialist_and_the_message_names_the_retry(tmp_path, capsys):
+    repo = make_repo(tmp_path, second_ticket=True)
+    recorded = sha256(agent_path(repo, "python-specialist"))
+    change_specialist_during_the_first_specialist(repo)
+    try:
+        code, out, err, events = start_run(repo, capsys)
+    finally:
+        adapters.unregister("scripted")
+
+    new = sha256(agent_path(repo, "python-specialist"))
+    assert code == 1
+    assert [e["ticket"] for e in events if e["event"] == "agent-start" and e["role"] == "specialist"] == ["a"]
+    (changed,) = [e for e in events if e["event"] == "agents-changed"]
+    assert (changed["ticket"], changed["role"], changed["tree"]) == ("b", "specialist", "worktree")
+    assert (changed["recorded_hash"], changed["new_hash"]) == (recorded, new)
+    assert "delegate run --resume" in err and "--retry b --agents-changed" in err
+
+
+def test_a_retry_with_the_flag_goes_on_at_the_specialist_after_a_change_of_the_specialist_file(tmp_path, capsys):
+    repo = make_repo(tmp_path, second_ticket=True)
+    adapter = change_specialist_during_the_first_specialist(repo)
+    try:
+        code, out, err, events = start_run(repo, capsys)
+        run_id = next(e for e in events if e["event"] == "run-start")["run_id"]
+
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "b", "--agents-changed")
+    finally:
+        adapters.unregister("scripted")
+
+    assert err == "" and code == 0
+    after = read_journal_file(repo, run_id)
+    resume = after[[e["event"] for e in after].index("resume")]
+    assert {e["agent"]: e["sha256"] for e in resume["agents"]}["python-specialist"] == sha256(agent_path(repo, "python-specialist"))
+    (retry,) = [e for e in after if e["event"] == "retry"]
+    assert (retry["ticket"], retry["phase"]) == ("b", "specialist")
+    assert [e["ticket"] for e in after if e["event"] == "agent-start" and e["role"] == "specialist"] == ["a", "b"]
+    assert len(adapter.verifier_calls) == 2
+    assert [e["state"] for e in after if e["event"] == "step-end" and e["ticket"] == "b"] == ["failed", "built"]
+    assert [e for e in after if e["event"] == "run-end"][-1]["result"] == "built"
+
+
+def test_a_retry_without_the_flag_fails_again_with_the_same_message_after_a_change_of_the_specialist_file(tmp_path, capsys):
+    repo = make_repo(tmp_path, second_ticket=True)
+    change_specialist_during_the_first_specialist(repo)
+    try:
+        code, out, first_err, events = start_run(repo, capsys)
+        run_id = next(e for e in events if e["event"] == "run-start")["run_id"]
+
+        code, out, second_err = resume_main(repo, capsys, run_id, "--retry", "b")
+    finally:
+        adapters.unregister("scripted")
+
+    assert code == 1
+    after = read_journal_file(repo, run_id)
+    assert [e["ticket"] for e in after if e["event"] == "agent-start" and e["role"] == "specialist"] == ["a"]
+    assert first_err.strip() in second_err and "cannot be retried" not in second_err
+    assert len([e for e in after if e["event"] == "agents-changed"]) == 2

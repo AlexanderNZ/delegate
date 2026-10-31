@@ -99,13 +99,15 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
     start = events[0]
     if start["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
+    # A branch that a `cleanup` event lists as deleted is gone: no line says that it is kept.
+    deleted = {str(b) for e in events if e["event"] == "cleanup" for b in e.get("branches_deleted", [])}  # type: ignore[union-attr]
     lines = [
         f"run {start['run_id']}: {snap.state} (mode {start['mode']}, adapter {start['adapter']})",
         *([f"note: {snap.note}"] if snap.note else []),
         f"progress: {_run_progress(snap)}", f"journal {journal}",
         *[
             f"kept: branch {e['failed_branch']} holds the old work of ticket {e['ticket']}, which a retry started again; delegate clean removes it"
-            for e in events if e["event"] == "retry" and e.get("failed_branch")
+            for e in events if e["event"] == "retry" and e.get("failed_branch") and e["failed_branch"] not in deleted
         ],
     ]
     states = {t.id: t.state for t in snap.tickets}

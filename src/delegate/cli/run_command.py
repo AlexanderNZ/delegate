@@ -160,7 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retry", metavar="TICKET",
         help="with --resume, go on with the failed step of TICKET, also in a run that ended; "
-        "use its worktree and its commits again, and go on at the first phase that did not complete",
+        "use its worktree and its commits again, and go on at the first phase that did not complete; "
+        "when the text of TICKET in the workflow changed, start TICKET again from its base with a new specialist, "
+        "and keep the old branch as <branch>-failed-<n>",
     )
     parser.add_argument(
         "--agents-changed", action="store_true",

@@ -206,3 +206,20 @@ def test_status_names_the_branch_that_keeps_the_old_work_of_a_restarted_ticket(t
     assert code == 0
     (line,) = [line for line in out.splitlines() if line.startswith("kept: ")]
     assert "run/demo-b-failed-1" in line and "ticket b" in line and "delegate clean" in line
+
+
+def test_status_names_no_kept_branch_after_delegate_clean_removed_it(tmp_path, capsys, scripted):
+    repo, run_id = failed_run(tmp_path, capsys, scripted)
+    scripted.files_by_ticket["b"] = {"b.txt": "b built again\n"}
+    write(repo, workflow_of(NEW_B))
+    code, _, err = resume_main(repo, capsys, run_id, "--retry", "b", "--reviewed", "c")
+    assert (code, err) == (0, "")
+    assert delegate.main(["clean", "--ended", "--repo", str(repo)]) == 0
+    capsys.readouterr()
+    assert "run/demo-b-failed-1" not in branches(repo)
+
+    code = delegate.main(["status", run_id, "--repo", str(repo)])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert [line for line in out.splitlines() if line.startswith("kept: ")] == []

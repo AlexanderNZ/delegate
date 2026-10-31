@@ -953,7 +953,8 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     - The last verdict is a REJECT, and the fix-up specialist of the next round
       reported committed work: the gates of that fix-up, then its scoped verifier.
 
-    A retry of `assure` mode spawns no specialist. So a step whose specialist,
+    A retry of `assure` mode spawns no specialist, except for a step that the agent check stopped before a specialist
+    session (`_stopped_before_specialist`): the plan is then the specialist. So a step whose specialist,
     or whose fix-up specialist, gave no valid report that says committed is
     refused. So is a step that the verifier accepted, or rejected after the
     last fix-up round. For `economy` mode, see `_economy_retry_plan`.
@@ -985,6 +986,8 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
         return _economy_retry_plan(workflow, progress, refused, ticket_id, prior, restart)
     if restart:
         return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
+    if _stopped_before_specialist(prior):
+        return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior)
     if not _specialist_committed(prior):
         raise EngineError(
             f"{refused}: its specialist gave no valid report that says committed; "
@@ -1013,6 +1016,18 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
             "--retry goes on only at the gates, the verifier or the scoped verifier"
         )
     return _RetryPlan(ticket_id, RETRY_GATES, round_number, prior, rejected, findings)
+
+
+def _stopped_before_specialist(prior: tuple[dict[str, object], ...]) -> bool:
+    """True when the agent check (#205) stopped the step before a specialist session, and no agent started after it.
+
+    The step then holds no work of that session, so a retry of `assure` mode can spawn the specialist. It is the only
+    case where a retry of `assure` mode spawns one, with a new text of the ticket excepted (see `_restart_step`).
+    """
+    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
+    if not stops or prior[stops[-1]]["role"] != ROLE_SPECIALIST:
+        return False
+    return not any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :])
 
 
 def _refused(ticket_id: str, run_id: str) -> str:
@@ -1537,7 +1552,7 @@ def _check_agent_file(
         "agents-changed", ticket=ticket, role=role, round=round_number, tree=tree, agent=agent, path=str(change.path),
         recorded_hash=change.recorded, new_hash=change.found,
     )
-    raise _StepFailed(change.message())
+    raise _StepFailed(change.message(ticket))
 
 
 def _lenient_fields(report: SpecialistReport | VerifierReport) -> dict[str, object]:
@@ -2526,7 +2541,7 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
     if plan.restart:
         return _restart_step(step, failure, start_ref)
-    if workflow.mode == domain.ECONOMY:
+    if workflow.mode == domain.ECONOMY or plan.phase == RETRY_SPECIALIST:
         step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure)
         return _build_ticket(
             workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
