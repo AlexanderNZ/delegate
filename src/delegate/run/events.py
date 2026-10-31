@@ -272,6 +272,13 @@ class AgentsChanged(TypedDict):
     recorded_hash: str
     # None when the agent file is missing in the tree.
     new_hash: str | None
+    # Only for the role `fix-up`: the fix-up that did not start, so that a retry runs it again (#209).
+    rejected_commit: NotRequired[str]
+    findings_file: NotRequired[str]
+    # Only for a stop before a chain fix-up of the verification of `economy` mode (#209).
+    stack: NotRequired[str]
+    tickets: NotRequired[list[str]]
+    trigger: NotRequired[str]
 
 
 class PlanChange(TypedDict):
@@ -291,6 +298,8 @@ class Retry(TypedDict):
     phase: str
     round: int
     reason: str
+    # Only with `phase` `chain-fixup` (#209): the other tickets that the stop failed and that the retry builds again.
+    revived: NotRequired[list[str]]
     # Only when the retry changes the text of the ticket and starts it again from its base (#204): `restart` is true,
     # and `failed_branch` is the branch that keeps the old work.
     restart: NotRequired[bool]
