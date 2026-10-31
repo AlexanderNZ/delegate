@@ -4,6 +4,8 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-31
+
 ### Added
 
 - `agent-definitions bootstrap --skill-only` writes only `<skills root>/<name>-context/SKILL.md`, and `bootstrap --gate-extra-flag <flag>` writes `gateExtraFlags` (#208). Before, a repository whose declaration held a key that `bootstrap` could not write, for example `gateExtraFlags`, had no command to make its context skill current: `bootstrap` replaced `agents.toml`, so the hand edits were lost, and it copied the rendered pair into the agent directories at once. Now `--skill-only` writes no declaration, renders nothing and copies no agent file, and it needs only `--repo`, `--name`, `--domain`, each `--reference`, `--context-load` and `--skills-root`. `--gate-extra-flag` can be given more than once, writes each entry in the entry format of the declaration (`--flag` or `--flag <value>`), and the command in the header comment of the files that `bootstrap` writes holds it, so a run of that command gives the same declaration again. The text of the `LOAD_BLOCK_NOT_PLAIN` finding now names the fix: run `agent-definitions bootstrap --skill-only` with the options of the command in the header comment of the skill.
