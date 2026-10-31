@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..ports.harness import Adapter, SealedAgent
+from ..ports.harness import Adapter, AdapterError, SealedAgent
 from ..run.workflow import Stack, Workflow
 
 
@@ -55,14 +55,18 @@ def _stack_problems(name: str, adapter: Adapter, stack: Stack, repo: Path, scrat
     problems: list[str] = []
     sealed: dict[str, SealedAgent] = {}
     for agent in (stack.specialist, stack.verifier):
-        found = adapter.seal(agent, repo, scratch / agent)
+        try:
+            found = adapter.seal(agent, repo, scratch / agent)
+        except AdapterError as error:
+            problems.append(f"stack {stack.name}: the agent {agent!r} cannot be sealed for {name}: {error}")
+            continue
         if found is None:
             looked = ", ".join(str(path) for path in adapter.agent_paths(agent, repo))
             problems.append(f"stack {stack.name}: the agent {agent!r} has no agent file for {name}; looked in {looked}")
         else:
             sealed[agent] = found
     if stack.verifier in sealed:
-        source = adapter.agent_file(stack.verifier, repo)
+        source = sealed[stack.verifier].source
         for gate in stack.gates:
             reason = adapter.permits(sealed[stack.verifier], gate)
             if reason is not None:

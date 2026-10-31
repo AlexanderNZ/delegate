@@ -8,7 +8,8 @@ Every line of a journal also has `seq`, `time` and `event`. The `TypedDict` of a
 A field with `NotRequired` is not in every line of the event: the reference says when it is.
 
 `SCHEMA_VERSION` is the version of the schema. `run-start` writes it as `schema`. A new optional field does not change
-it. A field that is removed or changed does. A journal with no `schema` in `run-start` is version 0.
+it. A field that is removed or changed does. A journal with no `schema` in `run-start` is version 0. Version 2 changes the
+field `agents` of `run-start` (#217): the record of a seal replaces the record of an agent file.
 
 The readers of the journal still read the fields by their string key. They do not use this module yet.
 """
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 # The version of a journal with no `schema` in `run-start`: a journal that an earlier version of the kit wrote.
 UNVERSIONED: int = 0
@@ -97,12 +98,22 @@ class KeptBranch(TypedDict):
     reason: str
 
 
-class AgentFile(TypedDict):
-    """One agent file of a record: the agent, the path of its file, and the SHA-256 of the file (#205)."""
+class SealedFileRecord(TypedDict):
+    """One file of a seal: its path, and the SHA-256 of its content."""
 
-    agent: str
     path: str
     sha256: str
+
+
+class SealedAgentRecord(TypedDict):
+    """One sealed agent of a record (#217): the agent, the source path of its agent file, the seal directory, the handle, and the files of the seal."""
+
+    agent: str
+    # None when the adapter names no source file.
+    source: str | None
+    seal: str
+    handle: str
+    files: list[SealedFileRecord]
 
 
 class RunStart(TypedDict):
@@ -117,8 +128,8 @@ class RunStart(TypedDict):
     plan: list[PlanTicket]
     # Absent in a journal of version 0.
     schema: NotRequired[int]
-    # The agent files of the roles of the run, as the adapter finds them for the main checkout. Absent in a journal of an earlier version (#205).
-    agents: NotRequired[list[AgentFile]]
+    # The sealed agents of the roles of the run, from the main checkout. In a journal of version 1 the field holds the record of #205: the agent, the path and the SHA-256 of each agent file. Absent in a journal of version 0.
+    agents: NotRequired[list[SealedAgentRecord]]
 
 
 class StepStart(TypedDict):
@@ -256,9 +267,9 @@ class Resume(TypedDict):
     failed: list[str]
     skipped: list[str]
     open: str | None
-    # Only a resume with `--agents-changed`, or a resume of a journal with no record of the agent files, has these (#205):
-    # the new record, and the note that says that the journal had none.
-    agents: NotRequired[list[AgentFile]]
+    # Only a resume with `--agents-changed`, or a resume of a journal with no record of seals (version 0 or 1), has these
+    # (#205, #217): the new record of the seals, and the note that says that the journal had none.
+    agents: NotRequired[list[SealedAgentRecord]]
     agents_note: NotRequired[str]
 
 
@@ -270,7 +281,7 @@ class AgentsChanged(TypedDict):
     agent: str
     path: str
     recorded_hash: str
-    # None when the agent file is missing in the tree.
+    # None when the file of the seal is missing.
     new_hash: str | None
     # Only for the role `fix-up`: the fix-up that did not start, so that a retry runs it again (#209).
     rejected_commit: NotRequired[str]

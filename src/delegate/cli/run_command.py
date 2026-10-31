@@ -166,8 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agents-changed", action="store_true",
-        help="with --resume, record the hashes of the agent files of the main checkout again, in the resume event, and go on with "
-        "them as the agents of the run; without it, an agent file that differs from the record of the run fails the step",
+        help="with --resume, seal each agent again from the main checkout, record the new seal in the resume event, and go on with "
+        "it as the agents of the run; without it, a file of a seal that differs from the record of the run fails the step",
     )
     parser.add_argument(
         "--break-lock", action="store_true",

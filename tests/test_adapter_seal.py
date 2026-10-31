@@ -14,11 +14,16 @@ from delegate.definitions.declaration import Agent
 from delegate.definitions.render import render
 from delegate.ports.harness import SealedAgent
 
+pytestmark = pytest.mark.usefixtures("claude_version")
+
 # The adapter name, the project directory of its agent files, and the user directory of them under the home directory.
 HARNESSES = [
     pytest.param("claude-code", Path(".claude/agents"), Path(".claude/agents"), id="claude-code"),
     pytest.param("opencode", Path(".opencode/agents"), Path(".config/opencode/agents"), id="opencode"),
 ]
+
+# The harnesses that seal by a copy of the agent file. The Claude Code seal is a plugin: see tests/test_claude_code_seal.py.
+COPY_SEALS = [HARNESSES[1]]
 
 GATE = "python3 -m pytest -rs"
 
@@ -32,7 +37,7 @@ def write_pair(root: Path, name: str, directory: Path, tiers) -> Path:
     return target
 
 
-@pytest.mark.parametrize(("name", "project", "user"), HARNESSES)
+@pytest.mark.parametrize(("name", "project", "user"), COPY_SEALS)
 def test_an_agent_in_the_project_directory_is_sealed_as_a_copy_in_the_seal_directory(tmp_path, home, tiers, name, project, user):
     repo = tmp_path / "repo"
     source = write_pair(repo, name, project, tiers) / "python-verifier.md"
@@ -49,7 +54,7 @@ def test_an_agent_in_the_project_directory_is_sealed_as_a_copy_in_the_seal_direc
     assert sealed_file.sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
 
 
-@pytest.mark.parametrize(("name", "project", "user"), HARNESSES)
+@pytest.mark.parametrize(("name", "project", "user"), COPY_SEALS)
 def test_an_agent_in_the_user_directory_is_sealed_when_the_project_has_none(tmp_path, home, tiers, name, project, user):
     repo = tmp_path / "repo"
     repo.mkdir()

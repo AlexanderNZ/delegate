@@ -19,7 +19,7 @@ from pathlib import Path
 import delegate
 import pytest
 from delegate import adapters
-from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer, SealedAgent
 
 from . import claude_fake, harness_fake
 from .harness_fake import wrote
@@ -35,6 +35,9 @@ def request(tmp_path: Path, **changes) -> AdapterRequest:
         report_path=tmp_path / "reports" / "a.specialist.json", event_stream=tmp_path / "streams" / "a.stream.jsonl",
     )
     fields.update(changes)
+    # The engine gives each request the sealed agent. Its handle is one that the recorded streams list in their `init` event.
+    agent = fields["agent"]
+    fields.setdefault("sealed", SealedAgent(agent, f"delegate-seal-{agent}:{agent}", tmp_path / "seal" / agent, ()))
     return AdapterRequest(**fields)
 
 
@@ -61,8 +64,78 @@ def test_the_command_holds_the_model_and_the_agent_and_the_prompt_goes_on_stdin_
     assert argv[:1] == ["--print"]
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert argv[argv.index("--model") + 1] == "sonnet"
-    assert argv[argv.index("--agent") + 1] == "python-verifier"
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-verifier:python-verifier"
     assert "--resume" not in argv
+
+
+def test_the_command_runs_from_the_seal_only_with_the_user_settings_the_seal_directory_and_the_handle(tmp_path, monkeypatch):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path, agent="python-verifier"))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path / "seal" / "python-verifier")
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-verifier:python-verifier"
+    assert "python-verifier" not in argv  # the bare agent name is no option: the harness would find the agent of the tree
+
+
+def test_a_resumed_session_gets_the_same_seal_options(tmp_path, monkeypatch):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path, resume_session="session-9"))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv[argv.index("--resume") + 1] == "session-9"
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path / "seal" / "python-specialist")
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-specialist:python-specialist"
+
+
+def test_the_host_settings_file_stays_on_the_command_beside_the_seal_options(tmp_path, monkeypatch):
+    settings = tmp_path / "host-settings.json"
+    settings.write_text("{}")
+    monkeypatch.setenv("DELEGATE_AGENT_SETTINGS", str(settings))
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    adapters.get("claude-code").run(request(tmp_path))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert argv[argv.index("--settings") + 1] == str(settings)
+    assert "--setting-sources" in argv
+
+
+def test_a_request_with_no_sealed_agent_starts_no_session_and_raises(tmp_path, monkeypatch):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    with pytest.raises(AdapterError, match="sealed agent"):
+        adapters.get("claude-code").run(request(tmp_path, sealed=None))
+
+    assert fake.calls() == []
+
+
+def test_an_init_event_that_does_not_list_the_handle_fails_the_session_with_the_reason_and_no_session_id(tmp_path, monkeypatch):
+    # The recorded stream lists the handles of the two test agents. This request seals another agent.
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    other = SealedAgent("web-specialist", "delegate-seal-web-specialist:web-specialist", tmp_path / "seal", ())
+
+    result = adapters.get("claude-code").run(request(tmp_path, agent="web-specialist", sealed=other))
+
+    assert result.end_state == "failed"
+    assert result.reason == "the harness did not load the sealed agent delegate-seal-web-specialist:web-specialist"
+    assert result.session_id is None  # a continuation must not resume a session that ran the wrong agent
+    assert result.ended_idle is False
+
+
+def test_an_init_event_that_lists_the_handle_leaves_the_end_state_and_gives_no_reason(tmp_path, monkeypatch):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert (result.end_state, result.reason) == ("finished", None)
 
 
 def test_a_stream_that_ends_at_the_turn_cap_gives_the_end_state_capped_and_keeps_the_session_id(tmp_path, monkeypatch):
@@ -203,7 +276,7 @@ def test_every_run_disallows_the_monitor_and_the_background_tasks(tmp_path, monk
     assert {"Monitor", "TaskStop"} <= disallowed
     # The `run_in_background` parameter of the Bash and subagent tools is no tool name, so only this variable removes it.
     assert call["env"].get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS") == "1"
-    assert argv[argv.index("--agent") + 1] == agent
+    assert argv[argv.index("--agent") + 1] == f"delegate-seal-{agent}:{agent}"
 
 
 @pytest.mark.parametrize("agent, resume_session", [
@@ -242,7 +315,7 @@ def test_the_mcp_servers_of_the_request_are_the_only_mcp_servers_on_the_command(
     }}
     # `--mcp-config` takes more than one value, so an option must end its values: the prompt is on stdin.
     assert argv[argv.index("--mcp-config") + 2].startswith("--")
-    assert argv[argv.index("--agent") + 1] == "python-specialist"
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-specialist:python-specialist"
 
 
 def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):
@@ -431,7 +504,7 @@ def test_the_settings_file_and_the_permission_mode_of_the_host_reach_each_agent(
     assert argv.count("--settings") == 1
     assert argv[argv.index("--settings") + 1] == str(settings)
     assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
-    assert argv[argv.index("--agent") + 1] == agent
+    assert argv[argv.index("--agent") + 1] == f"delegate-seal-{agent}:{agent}"
 
 
 def test_with_no_setting_of_the_host_the_command_has_no_settings_file_and_no_permission_mode(tmp_path, monkeypatch):

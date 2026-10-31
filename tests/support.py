@@ -227,9 +227,9 @@ class ScriptedAdapter:
     adapter touches the working directory. A test uses it to raise an error, to
     break the repository, or to start another command while the run holds its lock.
 
-    `agent_file` gives the agent file that the harness would find for a directory: the project file under
-    `.claude/agents`, then the file in `user_agents`. `seal` copies that file into the seal directory, and `agent_paths`
-    gives the two paths of the search. `permits` gives the reason that `denials` holds for a command, and `None` for any
+    `agent_paths` gives the two paths where the harness would find an agent file: the project file under
+    `.claude/agents`, then the file in `user_agents`. `seal` copies the first file that exists into the seal directory.
+    Each request holds `sealed`, the seal of its agent, as the engine gives it. `permits` gives the reason that `denials` holds for a command, and `None` for any
     other command. The adapter takes part in the setup check of the dry run only when `checks_setup` is true.
 
     `report_checks` holds, for each request, the role (`specialist`, `fix-up`
@@ -296,25 +296,18 @@ class ScriptedAdapter:
         return tuple(directory / f"{agent}.md" for directory in (source / ".claude" / "agents", self.user_agents) if directory is not None)
 
     def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
-        """Copy the agent file that `agent_file` finds into `into`. The handle is the agent name. None when there is no file."""
-        found = self.agent_file(agent, source)
+        """Copy the agent file that the search finds into `into`. The handle is the agent name. None when there is no file."""
+        found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
             return None
         into.mkdir(parents=True, exist_ok=True)
         sealed = into / found.name
         shutil.copyfile(found, sealed)
-        return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),))
+        return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),), found)
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None:
         """None, or the reason that `denials` gives for `command`."""
         return self.denials.get(command)
-
-    def agent_file(self, agent: str, directory: Path) -> Path | None:
-        """Where the agent file of `agent` is for `directory`: `.claude/agents/<agent>.md` in it, else in `user_agents`, else nowhere."""
-        for candidate in (directory / ".claude" / "agents", self.user_agents):
-            if candidate is not None and (candidate / f"{agent}.md").is_file():
-                return candidate / f"{agent}.md"
-        return None
 
     def _report_check(self, request: AdapterRequest) -> bool | None:
         return None if request.report_valid is None else request.report_valid()
@@ -735,3 +728,4 @@ def write_project_agents(repo: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for name, content in render(agents, tiers)[adapter].items():
         (target / name).write_text(content)
+

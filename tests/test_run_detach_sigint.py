@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import claude_fake
 from .support import state_dir
-from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file
+from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file, write_project_agents
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -31,6 +31,9 @@ CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"'
 STAND_IN = """\
 #!{python}
 import json, os, re, signal, subprocess, sys, time
+if sys.argv[1:] == ["--version"]:
+    print("2.1.287 (Claude Code)")
+    sys.exit(0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 role = "verifier" if any("verifier" in argument for argument in sys.argv) else "specialist"
 prompt = sys.stdin.read()
@@ -89,6 +92,7 @@ def stop_with_sigint(tmp_path: Path, monkeypatch, hold_in: str) -> tuple[Path, s
     monkeypatch.setenv("FAKE_PIDS", str(pids_file))
     monkeypatch.setenv("FAKE_STREAM", str(claude_fake.FIXTURES / "finished.jsonl"))
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
     started = tmp_path / "started.txt"
     # `&` in a shell that is not interactive: the command has SIGINT ignored, and the run process inherits that.
     command = f"{sys.executable} -m delegate.cli.delegate run {repo / 'workflow.toml'} --repo {repo} --detach > {started} 2>&1 &"

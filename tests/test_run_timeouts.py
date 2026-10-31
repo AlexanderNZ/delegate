@@ -149,6 +149,7 @@ def test_a_specialist_session_that_hangs_ends_at_agent_timeout_and_the_step_goes
     # The `claude` stand-in sleeps for 300 seconds before it writes an event. The limit is 3 seconds.
     claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=300)
     repo = make_repo(tmp_path, with_limits(agent="0.05", text=WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')))
+    write_project_agents(repo)
     started = time.monotonic()
 
     code, out, err = run(repo, capsys)

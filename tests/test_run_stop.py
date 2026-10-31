@@ -28,6 +28,7 @@ from . import claude_fake
 from .support import state_dir
 from .support import (
     WORKFLOW, bare_repo, event_names, is_gone, journal_path, make_repo, read_journal_file, run_end, run_main, run_start,
+    write_project_agents,
     stale_lock, write_journal,
 )
 
@@ -85,6 +86,7 @@ def test_stop_ends_a_detached_run_now_and_a_resume_goes_on_with_the_step(tmp_pat
     monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
     fake = claude_fake.install(tmp_path, monkeypatch, "", hold_seconds=300)
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
     code, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
     assert code == 0
     run_id = next(line.split()[1] for line in out.splitlines() if line.startswith("run "))

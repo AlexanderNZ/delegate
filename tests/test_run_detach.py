@@ -20,7 +20,9 @@ import pytest
 
 from . import claude_fake
 from .support import state_dir
-from .support import WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main
+from .support import (
+    WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main, write_project_agents,
+)
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -55,6 +57,7 @@ def test_detach_exits_at_once_prints_the_run_id_and_the_run_goes_on_in_a_new_ses
     # The stand-in waits 2 seconds before it records its call, so a command that waited for the run would see a call.
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", start_seconds=2)
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
 
@@ -73,6 +76,7 @@ def test_detach_with_resume_goes_on_with_the_same_run_in_a_new_session_and_appen
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     # In economy mode, a retry of a step with no report starts the specialist again, so the resumed run starts the stand-in.
     repo = make_repo(tmp_path, CLAUDE_CODE.replace('mode = "assure"', 'mode = "economy"'))
+    write_project_agents(repo)
     _, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
     run_id, log = printed(out)
     wait_for_ends(log, 1)  # the stand-in does no work, so the step of ticket a fails, and the run ends
@@ -91,6 +95,7 @@ def test_detach_with_resume_goes_on_with_the_same_run_in_a_new_session_and_appen
 
 def test_detach_with_resume_of_an_unknown_run_exits_1_and_starts_nothing(tmp_path, capsys):
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--resume", "20261018T000000Z-0000", "--repo", str(repo), "--detach")
 
@@ -138,6 +143,7 @@ def test_detach_with_a_check_that_fails_exits_1_with_the_error_of_a_run_in_the_f
 ):
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     with make_the_fault(repo):
         code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
@@ -153,6 +159,7 @@ def test_detach_with_a_check_that_fails_exits_1_with_the_error_of_a_run_in_the_f
 
 def test_detach_and_dry_run_cannot_go_together(tmp_path, capsys):
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     with pytest.raises(SystemExit) as stop:
         run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach", "--dry-run")

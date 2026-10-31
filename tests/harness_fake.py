@@ -6,6 +6,9 @@ working directory, its environment and its session id, then replays a recorded s
 the test sets. The adapter starts it as a subprocess, as it starts the real
 command.
 
+The stand-in answers `--version` with `FAKE_HARNESS_VERSION` (by default `2.1.287 (Claude Code)`), and records nothing
+for that call.
+
 A test can make the stand-in write one line of the stream each `drip_seconds`,
 as a harness that works writes its events, and stay alive for `hold_seconds`
 after the stream, as an idle session that does not exit does. With
@@ -25,6 +28,10 @@ from pathlib import Path
 SCRIPT = """\
 #!{python}
 import json, os, subprocess, sys, time
+if sys.argv[1:] == ["--version"]:
+    # The version query of an adapter that seals an agent: no session, no log entry, and no stream.
+    print(os.environ.get("FAKE_HARNESS_VERSION", "2.1.287 (Claude Code)"))
+    sys.exit(0)
 time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
     log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0), "pid": os.getpid()}}) + "\\n")

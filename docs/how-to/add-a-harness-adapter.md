@@ -23,6 +23,7 @@ The engine gives the adapter an `AdapterRequest`. It has these fields:
 - `agent_timeout`: the time limit of the session in seconds, or `None`. When the session runs longer, the adapter ends it. `run_harness` does this for you too.
 - `mcp_servers`: the MCP servers of the [**stack**](../glossary.md#stack), as `McpServer` values. Each has a `name` and one of `command` (a local server) and `url` (a remote server). Give the agent these servers in the configuration form of your harness. If your harness can ignore the other MCP configuration of the user and of the project, do that, so the agent gets only these servers.
 - `added_directories`: the directories outside `cwd` that the agent can read and change. For a [**verifier**](../glossary.md#verifier), this is the proof copy of a [**red proof**](../glossary.md#red-proof). Add each one to the session if your harness has a way to do that. If it has none, state that limit on the page of your adapter.
+- `sealed`: the [**sealed agent**](../glossary.md#sealed-agent) for `agent`, as a `SealedAgent` with the `agent`, the `handle`, the seal `directory`, the `files` and the `source`. The engine made it at the start of the work with the `seal` method of your adapter, and it checked each file of the seal before this request. Start the session from the seal. The value is `None` when the engine sealed no agent of that name.
 
 The adapter gives back an `AdapterResult`. It has these fields:
 
@@ -34,6 +35,7 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `ended_timeout`: true when the adapter ended the session at the `agent_timeout`. `run_harness` tells you. Give it as `ended_timeout=process.ended_timeout`. The helper can end a session at the limit before the session writes an event. In that case, do not treat an empty stream as a failure to start.
 - `refused`: one pair for each tool call that the permission settings of the harness refused, in the order of the stream: the tool, and the name that the harness gives that setting (for example `don't ask`). Leave it empty when your harness does not write such a refusal. The engine copies it into the result event, and `delegate watch` shows it as a problem.
 - `final_text`: the last text of the agent in the stream, or `None`. The engine reads the [**verdict**](../glossary.md#verdict) from it when a [**verifier**](../glossary.md#verifier) writes no [**report**](../glossary.md#report) file. Leave it `None` when your harness stream has no such text.
+- `reason`: the text that says why you ended the session as `failed` when the stream does not say it, for example that the harness did not load the sealed agent. The engine puts it in the reason of the failed step. Leave it `None` otherwise.
 
 The adapter class has two attributes and two methods:
 

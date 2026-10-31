@@ -192,3 +192,11 @@ def pytest_terminal_summary(terminalreporter):
     ]
     if counts:
         terminalreporter.write_line(f"{GIT_PROCESSES}: {sum(counts)} in {len(counts)} tests")
+
+
+@pytest.fixture
+def claude_version(tmp_path, monkeypatch):
+    """A `claude` command on PATH that gives the version 2.1.287 to `--version`, as the seal of the Claude Code adapter asks (#217)."""
+    from . import claude_fake
+
+    claude_fake.install_version(tmp_path, monkeypatch)

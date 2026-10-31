@@ -90,6 +90,11 @@ class AdapterRequest:
     `added_directories` holds the directories outside `cwd` that the agent can
     read and change, for example the proof copy of a verifier (#153). An
     adapter adds them to the session where its harness allows that.
+
+    `sealed` is the sealed agent of the run for `agent` (#217): the copy that the engine made at the start of the run,
+    outside each tree. The engine hashed its files against the record of the journal before it made this request, and
+    an adapter starts the session from the seal only. It is `None` when the run sealed no agent of this name. An
+    adapter whose harness runs only from a seal refuses a request with no seal.
     """
 
     agent: str
@@ -104,6 +109,7 @@ class AdapterRequest:
     mcp_servers: tuple[McpServer, ...] = ()
     added_directories: tuple[Path, ...] = ()
     agent_timeout: float | None = None
+    sealed: SealedAgent | None = None
 
 
 @dataclass(frozen=True)
@@ -122,7 +128,10 @@ class AdapterResult:
     (tool, mode) pair for each tool call that a permission mode of the harness
     refused, in the order of the stream, so the engine can name the cause.
     `final_text` is the last text of the agent in the stream, or `None`: the
-    engine reads a missing verdict from it.
+    engine reads a missing verdict from it. `reason` is the text that says why
+    the adapter ended the session as failed when the stream does not say it, for
+    example that the harness did not load the sealed agent (#217), or `None`. The
+    engine puts it in the reason of the failed step.
     """
 
     exit_status: int
@@ -133,6 +142,7 @@ class AdapterResult:
     refused: tuple[tuple[str, str], ...] = ()
     final_text: str | None = None
     ended_timeout: bool = False
+    reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.end_state not in END_STATES:
@@ -173,14 +183,17 @@ class SealedAgent:
 
     `agent` is the name of the agent. `handle` is the name that the harness gets for the session, and the adapter
     chooses it. `directory` is the seal directory, and `files` are the files of the seal, each with its path and its
-    SHA-256. The guard of the agent is in these files, so `Adapter.permits` judges a command against them, and a change
-    of the source file after the seal does not change the seal.
+    SHA-256. A file of the seal can be outside `directory`: the Claude Code seal holds the user settings so that a
+    change of them shows. The guard of the agent is in these files, so `Adapter.permits` judges a command against them,
+    and a change of the source file after the seal does not change the seal. `source` is the agent file that the
+    adapter sealed, or `None` when a record of the journal has no source.
     """
 
     agent: str
     handle: str
     directory: Path
     files: tuple[SealedFile, ...]
+    source: Path | None = None
 
 
 class Adapter(Protocol):
@@ -194,15 +207,13 @@ class Adapter(Protocol):
     continuation the engine then passes the session id of the last run in
     `AdapterRequest.resume_session`. Otherwise the engine starts a new agent.
 
-    `agent_file` tells where the harness finds the agent `agent` for the working directory `directory`: the path of its
-    agent file, or `None` when the harness finds none. It reads the project directory of `directory` first, then the
-    user directory (outside the repository), as the harness does. The engine hashes the file at the start of a run, and
-    again in each tree before each agent session (#205). It changes nothing.
-
-    `seal` finds the agent file of `agent` for the directory `source`, as `agent_file` does (the project directory
-    first, then the user directory), and writes the seal into the directory `into`. It gives the `SealedAgent`, or `None`
-    when it finds no agent file. It changes nothing outside `into`. Today each adapter seals by a copy of the agent file,
-    and the handle is the agent name.
+    `seal` finds the agent file of `agent` for the directory `source` (the project directory first, then the user
+    directory, as the harness does), and writes the seal into the directory `into`. It gives the `SealedAgent`, or
+    `None` when it finds no agent file. It changes nothing outside `into`, and `into` is empty or absent when it is
+    called. The engine seals each agent of a run at the start of the run, hashes the files of the seal before each agent
+    session (#217), and gives the seal to the session in `AdapterRequest.sealed`. The OpenCode adapter seals by a copy of
+    the agent file, and its handle is the agent name. The Claude Code adapter seals a plugin, and its handle names the
+    plugin and the agent. An adapter can refuse to seal, with an `AdapterError` that says why.
 
     `permits` runs the guard of a sealed agent on one command. It gives `None` when the guard permits the command, else
     the reason of the denial, as text. It reads the files of the seal, so it judges the seal and not the source.
@@ -226,8 +237,6 @@ class Adapter(Protocol):
     checks_setup: bool
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
-
-    def agent_file(self, agent: str, directory: Path) -> Path | None: ...
 
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]: ...
 

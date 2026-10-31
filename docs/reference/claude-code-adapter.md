@@ -13,7 +13,7 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --agent <agent> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] [--add-dir <proof copy>] --disallowedTools Monitor,TaskStop [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --setting-sources user --plugin-dir <seal directory> --agent <handle> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] [--add-dir <proof copy>] --disallowedTools Monitor,TaskStop [--resume <session id>]
 ```
 
 The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
@@ -24,7 +24,9 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--output-format stream-json` | The harness writes one JSON event on each line of standard output. |
 | `--verbose` | The harness needs it to write the events with `--print` and `--output-format stream-json`. |
 | `--model <model>` | The model from the `claude-code` column of the [**tier table**](../glossary.md#tier-table). The adapter never chooses a model. A `--tiers` file changes it. |
-| `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
+| `--setting-sources user` | Load the settings of the user only. The [**session**](../glossary.md#session) ignores the project settings (`.claude/settings.json` and `.claude/settings.local.json`), the project agents, and the project skills of its tree. A file that a [**specialist**](../glossary.md#specialist) commits in a tree cannot turn off a hook with `disableAllHooks`, or replace the agent. A host gives its settings with `--settings`. See [the sealed agent](#the-sealed-agent). |
+| `--plugin-dir <seal directory>` | Load the [**sealed agent**](../glossary.md#sealed-agent) as a plugin. The directory is the seal directory of the agent, `<run directory>/agents/<agent>/`. |
+| `--agent <handle>` | The agent of the session: the handle of the sealed agent, `<plugin>:<agent>`. The agent name comes from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
 | `--strict-mcp-config` | Ignore every MCP configuration other than `--mcp-config`: the servers of the user, of the project, and of the plugins. See [what the agent gets](#what-the-agent-gets). |
 | `--mcp-config <servers>` | Only when the stack names MCP servers in its `mcp-servers` table. One JSON object, `{"mcpServers": {...}}`: a local server as `command` and `args`, a remote server as `type` `http` and `url`. |
 | `--add-dir <proof copy>` | Only for a verifier: the proof copy that the engine made for a [**red proof**](../glossary.md#red-proof). See [the proof copy of a verifier](#the-proof-copy-of-a-verifier). |
@@ -73,7 +75,7 @@ The adapter starts each specialist and each verifier with a small context. The a
 
 - **MCP servers**: only the servers of its [**stack**](../glossary.md#stack). By default that is none. `--strict-mcp-config` makes the harness ignore the MCP servers of the user, of the project, and of the installed plugins. A stack that needs a server names it in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)), and the adapter passes it with `--mcp-config`.
 - **Tools**: the built-in tools that the agent definition allows (all of them when the definition has no `tools` field), less `Monitor` and `TaskStop`. The adapter removes no other tool.
-- **Hooks**: the hooks in the frontmatter of the agent definition, for example the Bash guard of the verifier. `--strict-mcp-config` does not change them.
+- **Hooks**: the hooks of the agent definition, for example the Bash guard of the verifier. They are in `hooks/hooks.json` of the seal, and the plugin runs them. `--strict-mcp-config` does not change them.
 - [**Skills**](../glossary.md#skill): every skill that the harness finds, not only the skills of the agent definition. See below.
 
 The harness gives no way to load only the skills of the agent definition. Measured on Claude Code 2.1.287 on 2026-10-18:
@@ -92,11 +94,28 @@ The measurement: one `claude --print` call with model `haiku`, agent `delegate-s
 
 The harness of this version loads the tools of an MCP server on demand, so their names, not their schemas, are in the first turn. A call with `--strict-mcp-config` and the agent `delegate-verifier` still refused the command `whoami` with the message of the [**verifier guard**](../glossary.md#verifier-guard), so the hooks of the agent definition still apply. A call with `--strict-mcp-config` and `--mcp-config` that named two servers listed those two servers in its `init` event, and no other.
 
-## How the adapter selects the agent
+## The sealed agent
 
-The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.claude/agents/` directory of the working directory (or from the user agents), and the body of that file becomes the system prompt of the [**session**](../glossary.md#session). The adapter does not put the agent body in the prompt. The [**live smoke run**](../glossary.md#live-smoke-run) below shows it: the reply of the agent follows a rule that only the agent body holds.
+An agent session of a run starts only from the [**sealed agent**](../glossary.md#sealed-agent) of the run (see [the agent check](run.md#the-agent-check)). The adapter seals an agent as a plugin. The layout is private to the adapter, and today it is:
 
-When the harness does not know the agent, it exits with status 1 and writes no event. See [the start failure](#the-start-failure).
+| File of the seal | Content |
+|---|---|
+| `.claude-plugin/plugin.json` | The plugin name, `delegate-seal-<agent>`. The name always starts with `delegate-seal-`. |
+| `agents/<agent>.md` | The agent file with no `hooks` field. Each project skill that its `skills` list names becomes `<plugin>:<skill>`. A skill that is not in `.claude/skills/` of the main checkout is a user skill: the session loads the user skills, so its name does not change. |
+| `hooks/hooks.json` | The `hooks` field of the agent file, with no change, as `{"hooks": ...}`. The file is absent when the agent file has no `hooks`. |
+| `skills/<skill>/` | A copy of each skill that the `skills` list names and that is in `.claude/skills/` of the main checkout. |
+
+The handle of the sealed agent is `<plugin>:<agent>`. The files of the seal also hold `~/.claude/settings.json` (the path and the hash) when it exists, so that a change of the user settings fails the next step. The adapter finds the agent file in `.claude/agents/` of the main checkout first, then in `~/.claude/agents/`.
+
+The command uses `--setting-sources user --plugin-dir <seal directory> --agent <handle>`. A resumed session gets the same options. Measured on Claude Code 2.1.287 (issue 213): under `--print --agent <name>`, a project agent in the tree replaces a user agent of the same name, and the harness does not run the hooks of a project agent. A committed `.claude/settings.json` with `disableAllHooks: true` turns off a guard that comes from `--agents` or from `--settings` too. With `--setting-sources user`, the session ignores the project settings, the project agents and the project skills of the tree. A plugin from `--plugin-dir` gives its agent as `<plugin>:<agent>`. The plugin ignores `hooks` in the frontmatter of its agent, and it runs the hooks of `hooks/hooks.json`, also in a tree with `disableAllHooks`.
+
+The project settings of a repository therefore no longer apply to an engine session. A host gives its settings with `DELEGATE_AGENT_SETTINGS` (see [the settings of a host](#the-settings-of-a-host)).
+
+The adapter refuses to seal when `claude --version` names a version before 2.1.287, with an `AdapterError` that names the version. It does not refuse when the `claude` command is missing, or when its output has no version: the session then fails with its own error.
+
+After a session, the adapter reads the `init` event of the stream. When the agents that the event lists do not hold the handle, the harness did not load the sealed agent. The session ends `failed`, with no session id and with the reason `the harness did not load the sealed agent <handle>`. The engine puts the reason in the reason of the failed step. A stream with no `init` event is not checked.
+
+A request with no sealed agent starts no session: the adapter raises `AdapterError`.
 
 ## The event stream
 
@@ -158,7 +177,7 @@ The directory `tests/fixtures/claude-code/` holds one recorded stream for each e
 | `capped.jsonl` | `capped` | Model `haiku`, `--max-turns 1`, a prompt that needs two tool calls. | 1 |
 | `failed.jsonl` | `failed` | Model `no-such-model-xyz`, which the API refuses with a 404. | 1 |
 
-Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC).
+Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC). In the `init` event of each stream, the list of agents holds the handles of the two sealed agents of the tests, `delegate-seal-python-specialist:python-specialist` and `delegate-seal-python-verifier:python-verifier`. The recording listed no agent, so the lists were set for the tests of the sealed agent. A request that seals another agent gets the failure `the harness did not load the sealed agent`.
 
 The directory `tests/fixtures/claude-code-progress/` holds parts of a stream of a real run, with their own `manifest.json`: `heartbeats.jsonl` holds four `tool_progress` heartbeat events, and `thinking.jsonl` holds two `thinking_tokens` events. These events have no `timestamp`. A test puts a part after the timed events of a recorded stream, to check [the activity](#the-activity) of a stream that ends with them. Version: Claude Code 2.1.287. Recorded: 2026-10-16 (UTC).
 

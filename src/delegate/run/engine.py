@@ -110,11 +110,12 @@ step starts, before a gate runs, and before a verifier starts (see
 records `pause-requested` and `paused`, the run writes no `run-end`, and a
 resume goes on from the boundary as from a stop.
 
-The agents of a run are the agents that it started with, or the journal records the change (#205). `run-start`
-records the SHA-256 of each agent file that a role of the run names, as the adapter finds the file for the main
-checkout. Before each agent session, after `prepare`, the engine hashes the agent file in the tree of the agent. A hash
-that differs from the record, or a missing file, fails the step before the agent starts, and the journal records
-`agents-changed` (see `_check_agent_file`). A resume with `--agents-changed` records the hashes again, in `resume`.
+An agent session runs from the sealed agent of the run (#217). At the start of the run, the engine seals each agent
+that a role names, from the main checkout, into `<run directory>/agents/<agent>/`, and `run-start` records the seal: the
+path and the SHA-256 of each file. Before each agent session the engine hashes each file of the seal. A hash that differs
+from the record, or a missing file, fails the step before the agent starts, and the journal records `agents-changed`
+with the tree `seal` (see `_check_agent_file`). It reads no agent file in the tree of the agent. A resume with
+`--agents-changed` seals again from the main checkout, and records the new seal in `resume`.
 
 A failure of the harness halts the run. An `AdapterError` from `Adapter.run` is a
 failure of the harness, not of the work: a harness that is not logged in, a CLI
@@ -157,11 +158,11 @@ from typing import NamedTuple
 
 from ..ports import harness
 from ..ports.gates import GateRunner
-from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
+from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
-from .agents import agent_names, check_agent, record_agents, recorded_agents
+from .agents import agent_names, check_agent, recorded_agents, seal_agents
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
     notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
@@ -207,6 +208,8 @@ PHASE_CHAIN: str = domain.GATES_OF_CHAIN
 # The `tree` of a `prepare-start` and a `prepare-result`: the worktree of a ticket, or the temporary copy of a verifier (#155).
 TREE_WORKTREE: str = "worktree"
 TREE_VERIFY_COPY: str = "verify-copy"
+# The tree of an `agents-changed` event: the seal of the agent, outside each tree (#217).
+TREE_SEAL: str = "seal"
 
 # The `trigger` of a `fixup-start` of a chain: red gates on the tip of the chain, or a REJECT.
 TRIGGER_GATES_RED: str = "gates-red"
@@ -1286,6 +1289,8 @@ def _execute(
     # A pause request from before this process is not for it: the run that it asked to pause has stopped.
     (state_dir / "runs" / run_id / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     if not resuming:
+        # The seal comes before the run branch: an adapter that refuses to seal leaves no branch and no journal (#217).
+        sealed = _seal_agents(adapter, repo, state_dir / "runs" / run_id, workflow)
         with _vcs_errors():
             run_base = vcs.commit_of(repo, workflow.base_branch)
             vcs.create_branch(repo, workflow.run_branch, run_base)
@@ -1294,7 +1299,7 @@ def _execute(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
             plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
-            agents=record_agents(adapter, repo, agent_names(workflow)),
+            agents=sealed,
         )
         progress = _Progress()
     else:
@@ -1324,14 +1329,14 @@ def _execute(
             before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
             chain = [*progress.built, *(t for t in plan.revive if t in before)]
             _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
-        # The record of the agent files changes only at the request of the person, or when the journal has none.
+        # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:
-            agent_fields = {"agents": record_agents(adapter, repo, agent_names(workflow))}
+            agent_fields = {"agents": _seal_agents(adapter, repo, state_dir / "runs" / run_id, workflow)}
             if recorded_agents(events) is None:
                 agents_note = (
-                    f"run {run_id} has no record of its agent files (its journal is of an earlier version); "
-                    "the hashes of the agent files are recorded now, at the resume"
+                    f"run {run_id} has no record of sealed agents (its journal is of an earlier version); "
+                    "the agents are sealed now, at the resume, from the main checkout"
                 )
                 agent_fields["agents_note"] = agents_note
         journal.append(
@@ -1608,24 +1613,36 @@ def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round
         raise _Halted(ticket, role, round_number, str(error)) from None
 
 
-def _check_agent_file(
-    adapter: Adapter, journal: Journal, agent: str, ticket: str, role: str, round_number: int, tree: str, directory: Path,
-    fields: dict[str, object] | None = None,
-) -> None:
-    """Fail the step before an agent session when the agent file in its tree is not the file that the run recorded (#205).
+def _seal_agents(adapter: Adapter, repo: Path, run_dir: Path, workflow: Workflow) -> list[dict[str, object]]:
+    """Seal each agent of the workflow from the main checkout into the run directory, and give the record (#217).
 
-    `directory` is the tree where the agent runs, after `prepare`: the worktree of the ticket (TREE_WORKTREE) or the verifier
-    copy (TREE_VERIFY_COPY). The journal gets `agents-changed` with the ticket, the role, the round, the tree, the agent, the
-    recorded path of the file, the recorded hash, and the new hash (`None` for a missing file), and `fields` (the fix-up gives
-    the fields that a retry needs to run it again, see `_run_fixup`). Raise `_StepFailed`, whose message
-    names the file and both hashes. A run that recorded no file for the agent passes.
+    An adapter that refuses to seal (an `AdapterError`) stops the command with an `EngineError`, and the journal gets no event.
+    """
+    try:
+        return seal_agents(adapter, repo, run_dir, agent_names(workflow))
+    except AdapterError as error:
+        raise EngineError(f"the agents of the run cannot be sealed: {error}") from None
+
+
+def _check_agent_file(
+    journal: Journal, agent: str, ticket: str, role: str, round_number: int, fields: dict[str, object] | None = None,
+) -> SealedAgent | None:
+    """Fail the step before an agent session when a file of the seal of the agent is not as the run recorded it (#217).
+
+    The journal gets `agents-changed` with the ticket, the role, the round, the tree `seal`, the agent, the path of the
+    changed file, the recorded hash, and the new hash (`None` for a missing file), and `fields` (the fix-up gives the
+    fields that a retry needs to run it again, see `_run_fixup`). Raise `_StepFailed`, whose message names the file and
+    both hashes. The agent file in the tree of the agent is not read. Give the sealed agent for the request, or None when
+    the run recorded no seal for the agent.
     """
     recorded = recorded_agents(read_events(journal.path))
-    change = None if recorded is None else check_agent(adapter, recorded, agent, directory)
+    if recorded is None:
+        return None
+    sealed, change = check_agent(recorded, agent)
     if change is None:
-        return
+        return sealed
     journal.append(
-        "agents-changed", ticket=ticket, role=role, round=round_number, tree=tree, agent=agent, path=str(change.path),
+        "agents-changed", ticket=ticket, role=role, round=round_number, tree=TREE_SEAL, agent=agent, path=str(change.path),
         recorded_hash=change.recorded, new_hash=change.found, **(fields or {}),
     )
     raise _StepFailed(change.message(ticket))
@@ -1652,12 +1669,13 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
 def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
     report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
+    sealed: SealedAgent | None = None,
 ) -> AdapterRequest:
     """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack."""
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
-        added_directories=added_directories, agent_timeout=_seconds(stack.agent_timeout),
+        added_directories=added_directories, agent_timeout=_seconds(stack.agent_timeout), sealed=sealed,
     )
 
 
@@ -1700,6 +1718,8 @@ def _ended_reason(result: AdapterResult, who: str, stack: Stack) -> str:
     """The reason that an agent run is no done session: the time limit when the adapter ended it there, else its end state and exit status."""
     if result.ended_timeout:
         return f"{who} session ran past the agent-timeout of {_minutes_text(stack.agent_timeout)} minutes"
+    if result.reason is not None:
+        return f"{who} session failed: {result.reason}"
     return f"{who} ended {result.end_state} with exit status {result.exit_status}"
 
 
@@ -1987,13 +2007,13 @@ def _build_with_continuations(
             spawned, result = False, None
         else:
             try:
-                _check_agent_file(adapter, journal, stack.specialist, ticket.id, ROLE_SPECIALIST, 0, TREE_WORKTREE, worktree)
+                sealed = _check_agent_file(journal, stack.specialist, ticket.id, ROLE_SPECIALIST, 0)
             except _StepFailed as failed:
                 return str(failed)
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
             result = _run_agent(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
-                _request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session),
+                _request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             _journal_timeout(journal, result, stack, ticket.id, ROLE_SPECIALIST, 0)
@@ -2320,8 +2340,8 @@ def _run_fixup(
     findings_text = findings_path.read_text()
     # The check comes before `fixup-start`: a stop leaves no `fixup-start`, so the stop is no round (#209), and `agents-changed`
     # holds what a retry needs to run the fix-up again.
-    _check_agent_file(
-        step.adapter, step.journal, step.stack.specialist, ticket.id, ROLE_FIXUP, round_number, TREE_WORKTREE, step.worktree,
+    sealed = _check_agent_file(
+        step.journal, step.stack.specialist, ticket.id, ROLE_FIXUP, round_number,
         {"rejected_commit": rejected, "findings_file": str(findings_path), **(fields or {})},
     )
     step.journal.append(
@@ -2339,7 +2359,7 @@ def _run_fixup(
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     result = _run_agent(
         step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
-        _request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid),
+        _request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed),
     )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     _journal_timeout(step.journal, result, step.stack, ticket.id, ROLE_FIXUP, round_number)
@@ -2495,9 +2515,7 @@ def _verify_round(
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
         _run_prepare(step.gates, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
-        _check_agent_file(
-            step.adapter, step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number, TREE_VERIFY_COPY, copy
-        )
+        sealed = _check_agent_file(step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number)
         added = _make_proof_copy(copy)
         # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
         before = snapshot_worktree(step.vcs, step.worktree)
@@ -2512,7 +2530,10 @@ def _verify_round(
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
         result = _run_agent(
             step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
-            _request(step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added),
+            _request(
+                step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added,
+                sealed=sealed,
+            ),
         )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None

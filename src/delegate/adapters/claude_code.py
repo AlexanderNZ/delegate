@@ -1,8 +1,8 @@
 """The Claude Code adapter: drive `claude` in headless mode.
 
 The command is `claude --print --output-format stream-json --verbose --model
-<model> --agent <agent> --strict-mcp-config [--mcp-config <servers>]
---disallowedTools Monitor,TaskStop`, with
+<model> --setting-sources user --plugin-dir <seal directory> --agent <handle>
+--strict-mcp-config [--mcp-config <servers>] --disallowedTools Monitor,TaskStop`, with
 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in its environment, so each agent runs
 every command in the foreground. `--strict-mcp-config` makes the harness ignore
 the MCP servers of the user, of the project, and of the plugins, so the agent
@@ -19,6 +19,19 @@ copies that stream to the file that the request names, and reads the final
 status does not change it (see `AdapterResult`). After a valid report, the
 adapter ends a session that writes no event for the idle timeout of the request
 (see `process.py`). It also ends a session that runs past the agent timeout of the request, and sets `ended_timeout`.
+
+A session runs from the sealed agent of its run (#217), as a plugin. `seal` writes the plugin into the seal directory:
+`.claude-plugin/plugin.json` (a name that starts with `delegate-seal-`), `agents/<agent>.md` (the agent file with no
+`hooks` field), `hooks/hooks.json` (the `hooks` field of the agent file, with no change), and `skills/<skill>/` (a copy of
+each project skill that the `skills` list of the agent names). The harness gives the agent of a plugin as
+`<plugin>:<agent>`, and that is the handle. A plugin agent ignores `hooks` in its frontmatter, and the plugin runs the
+hooks of `hooks/hooks.json`. `--setting-sources user` makes the session ignore the project settings, the project agents
+and the project skills of its tree, so a file that a specialist commits in a tree cannot turn off a hook or replace the
+agent (measured on 2.1.287, see issue 213). A skill that the `skills` list names and the project does not hold is a
+user skill, which the session loads by its own name. The files of the seal also hold the user settings
+`~/.claude/settings.json` when it exists, so that a change of them shows. The adapter refuses to seal for a harness
+older than 2.1.287. After a session, it reads the `init` event of the stream: when the agents that it lists do not hold
+the handle, the session ends as failed with a reason.
 
 The activity of a stream comes from the `result` events, the `assistant`
 events, and the `timestamp` field. Some events of an agent that works have no
@@ -39,6 +52,7 @@ the cache writes, and the output) and the cache reads.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -47,10 +61,12 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
+from ..definitions.validate import split_frontmatter
 from ..ports.harness import (
-    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent,
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent, SealedFile,
 )
-from .agent_files import agent_search_paths, find_agent_file, seal_agent_file, sealed_frontmatter
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -66,6 +82,17 @@ HOOK_TIMEOUT: float = 30.0
 
 # The directory of the agent files, in the project and in the user directory.
 AGENT_DIRECTORY: Path = Path(".claude") / "agents"
+
+# The directory of the project skills, and the user settings file under the home directory.
+SKILL_DIRECTORY: Path = Path(".claude") / "skills"
+USER_SETTINGS: Path = Path(".claude") / "settings.json"
+
+# The name of the plugin of a seal starts with this text. The name ends with the agent name.
+PLUGIN_PREFIX: str = "delegate-seal-"
+
+# The first version that the measurements of the sealed agent cover (issue 213), and the time that `--version` can take.
+MINIMUM_VERSION: tuple[int, int, int] = (2, 1, 287)
+VERSION_TIMEOUT: float = 30.0
 
 # The tools that the adapter disallows for every agent. Under `--print` the
 # notification of a monitor never comes to the agent, and a monitor that stays
@@ -193,10 +220,17 @@ class ClaudeCodeAdapter:
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
+        sealed = request.sealed
+        if sealed is None:
+            raise AdapterError(
+                f"the run has no sealed agent for {request.agent!r}: the Claude Code adapter starts an agent only from the sealed agent of the run"
+            )
+        # `--setting-sources user` makes the session ignore the project settings, agents and skills of its tree. A resumed
+        # session gets the same options.
         command = [
             COMMAND, "--print", "--output-format", "stream-json", "--verbose",
-            "--model", request.model, "--agent", request.agent, "--strict-mcp-config",
-            *_host_permissions(),
+            "--model", request.model, "--setting-sources", "user", "--plugin-dir", str(sealed.directory),
+            "--agent", sealed.handle, "--strict-mcp-config", *_host_permissions(),
         ]
         if request.mcp_servers:
             command += ["--mcp-config", _mcp_config(request.mcp_servers)]
@@ -217,45 +251,94 @@ class ClaudeCodeAdapter:
             )
         end_state, session_id, final_text = FAILED, None, None
         refused: list[tuple[str, str]] = []
-        for event in read_events(stream):
+        events = read_events(stream)
+        for event in events:
             if event.get("type") == "result":
                 end_state, session_id = _end_state(event), event["session_id"]
                 final_text = event["result"] if isinstance(event.get("result"), str) else final_text
             refused += _refusals(event)
+        init = next((event for event in events if event.get("type") == "system" and event.get("subtype") == "init"), None)
+        if init is not None and sealed.handle not in _listed_agents(init):
+            # The session did not run the sealed agent, so its report is not the work of that agent. No session id: a
+            # continuation must not resume this session.
+            return AdapterResult(
+                process.returncode, FAILED, None, stream, refused=tuple(refused), final_text=final_text,
+                ended_timeout=process.ended_timeout, reason=f"the harness did not load the sealed agent {sealed.handle}",
+            )
         return AdapterResult(
             process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
             ended_timeout=process.ended_timeout,
         )
 
-    def agent_file(self, agent: str, directory: Path) -> Path | None:
-        """The file `.claude/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.claude/agents`)."""
-        return find_agent_file(agent, directory, AGENT_DIRECTORY, AGENT_DIRECTORY)
-
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
         """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
-        return agent_search_paths(agent, source, AGENT_DIRECTORY, AGENT_DIRECTORY)
+        return tuple(directory / f"{agent}.md" for directory in (source / AGENT_DIRECTORY, Path.home() / AGENT_DIRECTORY))
 
     def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
-        """Copy the agent file of `agent` for `source` into `into`. The handle is the agent name. None when there is no file."""
-        return seal_agent_file(agent, source, AGENT_DIRECTORY, AGENT_DIRECTORY, into)
+        """Write the plugin of `agent` for `source` into `into`. None when there is no agent file.
+
+        The handle is `<plugin>:<agent>`, and the plugin name is `delegate-seal-<agent>`. Raise AdapterError for a
+        harness older than 2.1.287, and for an agent file with no usable frontmatter.
+        """
+        found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
+        if found is None:
+            return None
+        _check_version()
+        try:
+            frontmatter, body, error = split_frontmatter(found.read_text())
+        except (OSError, UnicodeDecodeError) as failure:
+            raise AdapterError(f"the agent file {found} cannot be read: {failure}") from None
+        if error is not None or frontmatter is None:
+            raise AdapterError(f"the agent file {found} has no usable frontmatter: {error}")
+        plugin = f"{PLUGIN_PREFIX}{agent}"
+        into.mkdir(parents=True, exist_ok=True)
+        (into / ".claude-plugin").mkdir(exist_ok=True)
+        (into / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": plugin, "version": "0.0.0", "description": f"The sealed agent {agent} of a delegate run"}, indent=2) + "\n"
+        )
+        hooks = frontmatter.pop("hooks", None)
+        if hooks is not None:
+            (into / "hooks").mkdir(exist_ok=True)
+            (into / "hooks" / "hooks.json").write_text(json.dumps({"hooks": hooks}, indent=2) + "\n")
+        if "skills" in frontmatter:
+            frontmatter["skills"] = _seal_skills(frontmatter["skills"], plugin, source, into)
+        (into / "agents").mkdir(exist_ok=True)
+        text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True, width=1_000_000, default_flow_style=False)
+        (into / "agents" / f"{agent}.md").write_text(f"---\n{text}---{body}")
+        files = [SealedFile(path, _digest(path)) for path in sorted(into.rglob("*")) if path.is_file()]
+        settings = Path.home() / USER_SETTINGS
+        if settings.is_file():
+            files.append(SealedFile(settings, _digest(settings)))
+        return SealedAgent(agent, f"{plugin}:{agent}", into, tuple(files), found)
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None:
-        """Run each Bash hook of the sealed file with `command` on standard input, as the harness does.
+        """Run each Bash hook of the sealed `hooks/hooks.json` with `command` on standard input, as the harness does.
 
         A hook that exits 0 permits the command. Any other exit status denies it: the guard blocks with status 2.
         The reason names the exit status and the message of the hook. A sealed file that lists tools but not `Bash`
         denies every command.
         """
-        frontmatter, problem = sealed_frontmatter(sealed)
-        if frontmatter is None:
-            return problem
+        agent_file = sealed.directory / "agents" / f"{sealed.agent}.md"
+        try:
+            frontmatter, _, error = split_frontmatter(agent_file.read_text())
+        except (OSError, UnicodeDecodeError) as failure:
+            return f"the sealed file {agent_file} cannot be read: {failure}"
+        if error is not None or frontmatter is None:
+            return f"the sealed file {agent_file} has no usable frontmatter: {error}"
+        hooks_file = sealed.directory / "hooks" / "hooks.json"
+        hooks = None
+        if hooks_file.is_file():
+            try:
+                hooks = json.loads(hooks_file.read_text()).get("hooks")
+            except (OSError, ValueError, AttributeError) as failure:
+                return f"the sealed file {hooks_file} cannot be read: {failure}"
         tools = frontmatter.get("tools")
         listed = [t.strip() for t in tools.split(",")] if isinstance(tools, str) else list(tools or [])
         if tools is not None and "Bash" not in listed:
             return "the agent does not list the Bash tool"
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
         shell = shutil.which("bash") or shutil.which("sh") or "sh"
-        for hook in _bash_hooks(frontmatter):
+        for hook in _bash_hooks(hooks):
             try:
                 process = subprocess.run([shell, "-c", hook], input=payload, capture_output=True, text=True, timeout=HOOK_TIMEOUT)
             except (OSError, subprocess.TimeoutExpired) as failure:
@@ -288,9 +371,8 @@ class ClaudeCodeAdapter:
         return Activity(new, cache, last)
 
 
-def _bash_hooks(frontmatter: dict) -> list[str]:
-    """The commands of the `PreToolUse` hooks on `Bash` in the frontmatter of an agent."""
-    hooks = frontmatter.get("hooks")
+def _bash_hooks(hooks: object) -> list[str]:
+    """The commands of the `PreToolUse` hooks on `Bash` in the `hooks` field of an agent."""
     commands: list[str] = []
     if not isinstance(hooks, dict):
         return commands
@@ -299,3 +381,57 @@ def _bash_hooks(frontmatter: dict) -> list[str]:
             continue
         commands.extend(str(h["command"]) for h in entry.get("hooks") or [] if isinstance(h, dict) and "command" in h)
     return commands
+
+
+def _digest(path: Path) -> str:
+    """The SHA-256 of the file as a hexadecimal text."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _seal_skills(skills: object, plugin: str, source: Path, into: Path) -> object:
+    """Copy each project skill that the `skills` list names into the plugin, and prefix its name with the plugin.
+
+    A skill that the project of `source` does not hold is a user skill: the session loads it by its own name, so it is not
+    copied and its name does not change. A value that is not a list or a text stays as it is.
+    """
+    names = [part.strip() for part in skills.split(",") if part.strip()] if isinstance(skills, str) else skills
+    if not isinstance(names, list):
+        return skills
+    sealed: list[object] = []
+    for name in names:
+        project = source / SKILL_DIRECTORY / str(name)
+        if isinstance(name, str) and name and "/" not in name and project.is_dir():
+            shutil.copytree(project, into / "skills" / name)
+            sealed.append(f"{plugin}:{name}")
+        else:
+            sealed.append(name)
+    return sealed
+
+
+def _listed_agents(init: dict[str, object]) -> list[str]:
+    """The names of the agents that the `init` event lists. An entry is a text, or an object with a `name`."""
+    listed = init.get("agents")
+    if not isinstance(listed, list):
+        return []
+    return [entry if isinstance(entry, str) else str(entry.get("name")) for entry in listed if isinstance(entry, (str, dict))]
+
+
+def _check_version() -> None:
+    """Raise AdapterError when `claude --version` names a version before the minimum.
+
+    A harness that is not installed, or whose output has no version, is no refusal here: the session fails with its own
+    error when it starts.
+    """
+    try:
+        done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=process_environment())
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)
+    if match is None:
+        return
+    found = tuple(int(part) for part in match.groups())
+    if found < MINIMUM_VERSION:
+        raise AdapterError(
+            f"Claude Code {'.'.join(map(str, found))} is older than {'.'.join(map(str, MINIMUM_VERSION))}, "
+            "the first version that the sealed agent was measured on; update Claude Code"
+        )

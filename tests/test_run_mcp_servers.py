@@ -81,6 +81,7 @@ def test_the_specialist_and_the_verifier_of_a_stack_get_its_mcp_servers_and_the_
 def test_the_claude_code_command_of_the_specialist_holds_the_mcp_servers_of_its_stack(tmp_path, monkeypatch, capsys):
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"').replace("\n[[tickets]]", SERVERS + "\n[[tickets]]"))
+    write_project_agents(repo)
 
     run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 

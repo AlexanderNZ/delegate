@@ -15,22 +15,28 @@ import pytest
 from delegate.cli.run_command import EXIT_HALTED
 
 from . import claude_fake
-from .support import WORKFLOW, make_repo, read_journal, run_main
+from .support import WORKFLOW, make_repo, read_journal, run_main, write_project_agents
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
+
+# The user directory holds nothing, and the repository holds the agent files that the engine seals.
+pytestmark = pytest.mark.usefixtures("home")
 
 
 @pytest.mark.parametrize("mode, model", [("assure", "opus"), ("economy", "sonnet")])
 def test_the_model_on_the_command_comes_from_the_claude_code_tier_column_of_the_mode(tmp_path, monkeypatch, capsys, mode, model):
     fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     repo = make_repo(tmp_path, CLAUDE_CODE.replace('mode = "assure"', f'mode = "{mode}"'))
+    write_project_agents(repo)
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     (call,) = fake.calls()
     argv = call["argv"]
     assert argv[argv.index("--model") + 1] == model
-    assert argv[argv.index("--agent") + 1] == "python-specialist"
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-specialist:python-specialist"
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert argv[argv.index("--plugin-dir") + 1].endswith("/agents/python-specialist")
     assert "The export command writes a CSV file." in call["stdin"]
     assert not any("The export command" in arg for arg in argv)
     result = next(e for e in read_journal(out) if e["event"] == "adapter-result")
@@ -43,6 +49,7 @@ def test_a_tier_file_of_the_user_changes_the_model_on_the_command(tmp_path, monk
     tiers = tmp_path / "gateway-tiers.toml"
     tiers.write_text(bundled.replace('[tiers.strong]\nclaude-code = "opus"', '[tiers.strong]\nclaude-code = "claude-opus-5"'))
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--tiers", str(tiers))
 
@@ -53,6 +60,7 @@ def test_a_tier_file_of_the_user_changes_the_model_on_the_command(tmp_path, monk
 def test_a_harness_that_cannot_start_the_agent_ends_the_run_with_its_message_and_no_traceback(tmp_path, monkeypatch, capsys):
     claude_fake.install(tmp_path, monkeypatch, "", exit_status=1, stderr="--agent 'python-specialist' not found. Available agents: Plan\n")
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 

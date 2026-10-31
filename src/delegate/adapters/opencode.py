@@ -32,17 +32,18 @@ no `cache` field has no cache reads and no cache writes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..definitions.validate import opencode_bash_action
+from ..definitions.validate import opencode_bash_action, split_frontmatter
 from ..ports.harness import (
-    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent,
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent, SealedFile,
 )
-from .agent_files import agent_search_paths, find_agent_file, seal_agent_file, sealed_frontmatter
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -181,24 +182,28 @@ class OpenCodeAdapter:
             ended_timeout=process.ended_timeout,
         )
 
-    def agent_file(self, agent: str, directory: Path) -> Path | None:
-        """The file `.opencode/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.config/opencode/agents`)."""
-        return find_agent_file(agent, directory, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY)
-
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
         """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
-        return agent_search_paths(agent, source, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY)
+        return tuple(
+            directory / f"{agent}.md" for directory in (source / PROJECT_AGENT_DIRECTORY, Path.home() / USER_AGENT_DIRECTORY)
+        )
 
     def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
         """Copy the agent file of `agent` for `source` into `into`. The handle is the agent name. None when there is no file."""
-        return seal_agent_file(agent, source, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY, into)
+        found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
+        if found is None:
+            return None
+        into.mkdir(parents=True, exist_ok=True)
+        sealed = into / f"{agent}.md"
+        shutil.copyfile(found, sealed)
+        return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),), found)
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None:
         """Resolve `command` against the `permission.bash` map of the sealed file with the matcher of the validator.
 
         The map permits the command when it resolves to `allow`. A file with no permission map permits every command.
         """
-        frontmatter, problem = sealed_frontmatter(sealed)
+        frontmatter, problem = _sealed_frontmatter(sealed)
         if frontmatter is None:
             return problem
         permission = frontmatter.get("permission")
@@ -215,3 +220,15 @@ class OpenCodeAdapter:
                 more, read = _tokens_of(event, stream)
                 new, cache = new + more, cache + read
         return Activity(new, cache, last)
+
+
+def _sealed_frontmatter(sealed: SealedAgent) -> tuple[dict | None, str | None]:
+    """The frontmatter of the sealed file `<agent>.md`, or the reason that it has none: (frontmatter, None) or (None, reason)."""
+    path = sealed.directory / f"{sealed.agent}.md"
+    try:
+        frontmatter, _, error = split_frontmatter(path.read_text())
+    except (OSError, UnicodeDecodeError) as failure:
+        return None, f"the sealed file {path} cannot be read: {failure}"
+    if error is not None or frontmatter is None:
+        return None, f"the sealed file {path} has no usable frontmatter: {error}"
+    return frontmatter, None

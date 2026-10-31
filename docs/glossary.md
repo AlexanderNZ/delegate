@@ -370,6 +370,12 @@ The run branch is the branch that the engine owns, and only accepted work lands 
 
 The run lock is a file that stops a second run on one run branch. Two runs cannot race on one branch, and `--break-lock` removes the lock of a process that no longer exists. See [the run lock](reference/run.md#the-run-lock).
 
+## Sealed agent
+
+The sealed agent is the copy of an agent file, its harness hooks and its project skills that the engine makes from the main checkout at the start of a run, outside each tree. Each session of the run uses it, and only when the files of the seal match the record in the journal. See [the agent check](reference/run.md#the-agent-check).
+
+Not: bundle, plugin, snapshot.
+
 ## Session
 
 A session is one conversation of a harness with an agent, with a session id. The adapter resumes the session for a continuation when the harness supports it, so the agent keeps its context. See [what a session is](explanation/the-concepts-behind-the-words.md#session) and [the continuation](reference/run.md#the-continuation).

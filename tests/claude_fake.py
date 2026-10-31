@@ -22,3 +22,31 @@ def install(
         tmp_path, monkeypatch, "claude", FIXTURES, fixture, exit_status=exit_status, stderr=stderr,
         drip_seconds=drip_seconds, hold_seconds=hold_seconds, start_seconds=start_seconds,
     )
+
+
+VERSION_SCRIPT = """\
+#!{python}
+import sys
+if sys.argv[1:] == ["--version"]:
+    print("{version} (Claude Code)")
+    sys.exit(0)
+sys.exit(1)
+"""
+
+
+def install_version(tmp_path: Path, monkeypatch, version: str = "2.1.287") -> None:
+    """Put a `claude` command first on PATH that answers `--version` with `version`, and fails for any other argument.
+
+    The seal of the Claude Code adapter asks the harness for its version. The command stands in for the harness
+    at that boundary, so a test needs no `claude` on the machine.
+    """
+    import os
+    import stat
+    import sys
+
+    bin_dir = tmp_path / "version-bin"
+    bin_dir.mkdir(exist_ok=True)
+    executable = bin_dir / "claude"
+    executable.write_text(VERSION_SCRIPT.format(python=sys.executable, version=version))
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")

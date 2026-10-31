@@ -17,7 +17,7 @@ import pytest
 
 from . import claude_fake
 from .support import state_dir
-from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file
+from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file, write_project_agents
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -46,6 +46,7 @@ def test_a_signal_stops_the_run_as_ctrl_c_does_and_no_process_of_the_harness_sta
     monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
     fake = claude_fake.install(tmp_path, monkeypatch, "", hold_seconds=300)
     repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
     engine = start_run(repo)
     harness = child = None
     try:
