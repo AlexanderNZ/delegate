@@ -194,3 +194,33 @@ def test_the_check_changes_nothing_on_disk(tmp_path, home, tiers, capsys):
     dry_run(repo, capsys)
 
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if ".git" not in p.parts) == before
+
+
+def test_a_scripted_adapter_that_seals_is_checked_through_the_port_with_no_harness_knowledge(tmp_path, home, scripted, capsys):
+    repo = make_repo(tmp_path, "scripted")
+    user = tmp_path / "user-agents"
+    user.mkdir()
+    for name in ("python-specialist", "python-verifier", "docs-specialist", "docs-verifier"):
+        (user / f"{name}.md").write_text("rules\n")
+    scripted.checks_setup = True
+    scripted.user_agents = user
+    scripted.denials = {"make links": "the scripted guard says no"}
+
+    code, out, err = dry_run(repo, capsys)
+
+    assert code == 1
+    assert "stack python: checked" in out
+    assert "stack docs: checked" not in out
+    assert "the gate 'make links': the scripted guard says no" in err
+    assert str(user / "docs-verifier.md") in err
+    assert "skipped" not in out
+
+
+def test_a_scripted_adapter_that_seals_names_the_paths_it_looked_in_for_a_missing_agent(tmp_path, home, scripted, capsys):
+    repo = make_repo(tmp_path, "scripted")
+    scripted.checks_setup = True
+
+    code, _, err = dry_run(repo, capsys)
+
+    assert code == 1
+    assert str(repo / ".claude" / "agents" / "python-specialist.md") in err

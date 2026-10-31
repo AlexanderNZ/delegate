@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -21,7 +22,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult, SealedAgent, SealedFile
 
 # The cases read the worktrees and the ticket branches after a run, so the workflow keeps them: a run that ends built
 # removes them by default (#167). `CLEANED_WORKFLOW` is the same workflow without the field.
@@ -227,7 +228,9 @@ class ScriptedAdapter:
     break the repository, or to start another command while the run holds its lock.
 
     `agent_file` gives the agent file that the harness would find for a directory: the project file under
-    `.claude/agents`, then the file in `user_agents`.
+    `.claude/agents`, then the file in `user_agents`. `seal` copies that file into the seal directory, and `agent_paths`
+    gives the two paths of the search. `permits` gives the reason that `denials` holds for a command, and `None` for any
+    other command. The adapter takes part in the setup check of the dry run only when `checks_setup` is true.
 
     `report_checks` holds, for each request, the role (`specialist`, `fix-up`
     or `verifier`), the `idle_timeout` of the request, and the answer of its
@@ -285,6 +288,26 @@ class ScriptedAdapter:
     report_checks: list[tuple[str, float | None, bool | None, bool | None]] = field(default_factory=list)
     refusals: dict[str, tuple[tuple[str, str], ...]] = field(default_factory=dict)
     user_agents: Path | None = None
+    checks_setup: bool = False
+    denials: dict[str, str] = field(default_factory=dict)
+
+    def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
+        """The paths where the harness would look for `agent`: under `.claude/agents` of `source`, then in `user_agents`."""
+        return tuple(directory / f"{agent}.md" for directory in (source / ".claude" / "agents", self.user_agents) if directory is not None)
+
+    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+        """Copy the agent file that `agent_file` finds into `into`. The handle is the agent name. None when there is no file."""
+        found = self.agent_file(agent, source)
+        if found is None:
+            return None
+        into.mkdir(parents=True, exist_ok=True)
+        sealed = into / found.name
+        shutil.copyfile(found, sealed)
+        return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),))
+
+    def permits(self, sealed: SealedAgent, command: str) -> str | None:
+        """None, or the reason that `denials` gives for `command`."""
+        return self.denials.get(command)
 
     def agent_file(self, agent: str, directory: Path) -> Path | None:
         """Where the agent file of `agent` is for `directory`: `.claude/agents/<agent>.md` in it, else in `user_agents`, else nowhere."""

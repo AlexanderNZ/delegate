@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Changed
+
+- The harness port seals an agent and judges a command against its guard (#216). Before, the setup check of `delegate run --dry-run` held its own table of agent directories and one branch for each guard format, so knowledge of each harness was outside the adapters. Now the port has `seal(agent, source, into)`, which writes a copy of the agent file into a directory and gives a `SealedAgent` (the name, the handle of the session, the seal directory, and the SHA-256 of each file), and `permits(sealed, command)`, which gives `None` or the reason of the denial. The `claude-code` and `opencode` adapters implement both, and the setup check calls them. Its output does not change. No session changes. See `docs/reference/layout.md`.
+
 ## [1.13.0] - 2026-10-31
 
 ### Added

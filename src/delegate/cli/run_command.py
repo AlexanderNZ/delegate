@@ -449,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(f"  {line}" if line.strip() else "" for line in notes.strip().splitlines()))
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
-    setup = check_setup(workflow, args.repo, Path.home())
+    setup = check_setup(workflow, adapters.get(workflow.adapter), args.repo)
     for line in setup.lines:
         print(line)
     for problem in setup.problems:

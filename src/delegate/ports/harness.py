@@ -159,6 +159,30 @@ class Activity:
     last_event: datetime | None
 
 
+@dataclass(frozen=True)
+class SealedFile:
+    """One file of a seal: its path, and the SHA-256 of its content as a hex string."""
+
+    path: Path
+    sha256: str
+
+
+@dataclass(frozen=True)
+class SealedAgent:
+    """An agent that an adapter sealed (#216): a copy of its definition in a directory that the adapter chose.
+
+    `agent` is the name of the agent. `handle` is the name that the harness gets for the session, and the adapter
+    chooses it. `directory` is the seal directory, and `files` are the files of the seal, each with its path and its
+    SHA-256. The guard of the agent is in these files, so `Adapter.permits` judges a command against them, and a change
+    of the source file after the seal does not change the seal.
+    """
+
+    agent: str
+    handle: str
+    directory: Path
+    files: tuple[SealedFile, ...]
+
+
 class Adapter(Protocol):
     """The interface of a harness adapter.
 
@@ -175,6 +199,21 @@ class Adapter(Protocol):
     user directory (outside the repository), as the harness does. The engine hashes the file at the start of a run, and
     again in each tree before each agent session (#205). It changes nothing.
 
+    `seal` finds the agent file of `agent` for the directory `source`, as `agent_file` does (the project directory
+    first, then the user directory), and writes the seal into the directory `into`. It gives the `SealedAgent`, or `None`
+    when it finds no agent file. It changes nothing outside `into`. Today each adapter seals by a copy of the agent file,
+    and the handle is the agent name.
+
+    `permits` runs the guard of a sealed agent on one command. It gives `None` when the guard permits the command, else
+    the reason of the denial, as text. It reads the files of the seal, so it judges the seal and not the source.
+
+    `agent_paths` gives the paths where the harness looks for the agent file of `agent` for the directory `source`, in
+    the order of its search. A caller names them when `seal` finds nothing.
+
+    `checks_setup` is true when `seal` and `permits` can serve the setup check of `delegate run --dry-run`. An adapter
+    that has no such guard (a scripted adapter of a test) leaves it false, and the setup check says that it skipped the
+    check. An adapter that does not have the attribute counts as false.
+
     `activity` reads a stream that this adapter captured. A live stream can end
     in half a line, which it ignores. It raises AdapterError when the file is
     missing or a line before the last one is not JSON, and the error of the file
@@ -184,9 +223,16 @@ class Adapter(Protocol):
 
     tier_column: str
     supports_resume: bool
+    checks_setup: bool
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
 
     def agent_file(self, agent: str, directory: Path) -> Path | None: ...
+
+    def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]: ...
+
+    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None: ...
+
+    def permits(self, sealed: SealedAgent, command: str) -> str | None: ...
 
     def activity(self, stream: Path) -> Activity: ...

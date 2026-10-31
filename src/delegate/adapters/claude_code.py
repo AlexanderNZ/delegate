@@ -42,11 +42,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
-from .agent_files import find_agent_file
+from ..ports.harness import (
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent,
+)
+from .agent_files import agent_search_paths, find_agent_file, seal_agent_file, sealed_frontmatter
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -56,6 +60,9 @@ COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
 TIER_COLUMN: str = "claude-code"
+
+# The time that one run of a hook can take.
+HOOK_TIMEOUT: float = 30.0
 
 # The directory of the agent files, in the project and in the user directory.
 AGENT_DIRECTORY: Path = Path(".claude") / "agents"
@@ -182,6 +189,7 @@ class ClaudeCodeAdapter:
     """Run one agent through `claude --print`."""
 
     tier_column: str = TIER_COLUMN
+    checks_setup: bool = True
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
@@ -223,6 +231,40 @@ class ClaudeCodeAdapter:
         """The file `.claude/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.claude/agents`)."""
         return find_agent_file(agent, directory, AGENT_DIRECTORY, AGENT_DIRECTORY)
 
+    def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
+        """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
+        return agent_search_paths(agent, source, AGENT_DIRECTORY, AGENT_DIRECTORY)
+
+    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+        """Copy the agent file of `agent` for `source` into `into`. The handle is the agent name. None when there is no file."""
+        return seal_agent_file(agent, source, AGENT_DIRECTORY, AGENT_DIRECTORY, into)
+
+    def permits(self, sealed: SealedAgent, command: str) -> str | None:
+        """Run each Bash hook of the sealed file with `command` on standard input, as the harness does.
+
+        A hook that exits 0 permits the command. Any other exit status denies it: the guard blocks with status 2.
+        The reason names the exit status and the message of the hook. A sealed file that lists tools but not `Bash`
+        denies every command.
+        """
+        frontmatter, problem = sealed_frontmatter(sealed)
+        if frontmatter is None:
+            return problem
+        tools = frontmatter.get("tools")
+        listed = [t.strip() for t in tools.split(",")] if isinstance(tools, str) else list(tools or [])
+        if tools is not None and "Bash" not in listed:
+            return "the agent does not list the Bash tool"
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+        shell = shutil.which("bash") or shutil.which("sh") or "sh"
+        for hook in _bash_hooks(frontmatter):
+            try:
+                process = subprocess.run([shell, "-c", hook], input=payload, capture_output=True, text=True, timeout=HOOK_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired) as failure:
+                return f"its Bash hook could not run: {failure}"
+            if process.returncode != 0:
+                message = " ".join(process.stderr.split())
+                return f"its Bash hook exits {process.returncode}" + (f" and says: {message}" if message else "")
+        return None
+
     def activity(self, stream: Path) -> Activity:
         new = cache = 0
         usage_of: dict[str, dict[str, object]] = {}  # the turns of the session after the last `result` event
@@ -244,3 +286,16 @@ class ClaudeCodeAdapter:
             more, read = _tokens_of(usage)
             new, cache = new + more, cache + read
         return Activity(new, cache, last)
+
+
+def _bash_hooks(frontmatter: dict) -> list[str]:
+    """The commands of the `PreToolUse` hooks on `Bash` in the frontmatter of an agent."""
+    hooks = frontmatter.get("hooks")
+    commands: list[str] = []
+    if not isinstance(hooks, dict):
+        return commands
+    for entry in hooks.get("PreToolUse") or []:
+        if not isinstance(entry, dict) or entry.get("matcher") != "Bash":
+            continue
+        commands.extend(str(h["command"]) for h in entry.get("hooks") or [] if isinstance(h, dict) and "command" in h)
+    return commands

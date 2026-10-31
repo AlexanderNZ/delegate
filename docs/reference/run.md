@@ -755,6 +755,8 @@ The adapter has the method `run(request)`.
 
 The adapter also has the method `agent_file(agent, directory)`. It gives the path of the agent file that the harness finds for the agent `agent` when it runs in `directory`, or `None` when it finds none. It looks in the project directory of `directory` first, then in the user directory. The engine calls it for the main checkout at the start of a run, and for the tree of an agent before each session. See [the agent check](#the-agent-check). The `claude-code` adapter looks in `.claude/agents` and in `~/.claude/agents`. The `opencode` adapter looks in `.opencode/agents` and in `~/.config/opencode/agents`.
 
+The adapter also has the methods `seal(agent, source, into)` and `permits(sealed, command)`, and `agent_paths(agent, source)`, which gives the paths where the harness looks for the agent file. `seal` finds the agent file as `agent_file` does and writes a copy into the directory `into`. It gives a `SealedAgent`, or `None` when the harness finds no agent file. `permits` gives `None` when the guard of the sealed agent permits the command, else the reason of the denial. An adapter whose attribute `checks_setup` is true takes part in [the setup check](workflow.md#the-setup-check-of-the-dry-run) of the dry run.
+
 The adapter also has the method `activity(stream)`. It reads an event stream that the adapter captured, and returns an `Activity` with three fields. The stream can be the partial stream of an agent that still runs. `delegate status` uses it, in each form. See [the snapshot](status-and-watch.md#the-snapshot).
 
 | `Activity` field | Meaning |

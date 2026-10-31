@@ -38,8 +38,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.harness import CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer
-from .agent_files import find_agent_file
+from ..definitions.validate import opencode_bash_action
+from ..ports.harness import (
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent,
+)
+from .agent_files import agent_search_paths, find_agent_file, seal_agent_file, sealed_frontmatter
 from .environment import process_environment
 from .process import run_harness
 from .streams import read_events
@@ -143,6 +146,7 @@ class OpenCodeAdapter:
     """Run one agent through `opencode run`."""
 
     tier_column: str = TIER_COLUMN
+    checks_setup: bool = True
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
@@ -180,6 +184,26 @@ class OpenCodeAdapter:
     def agent_file(self, agent: str, directory: Path) -> Path | None:
         """The file `.opencode/agents/<agent>.md` of `directory`, else the one of the user directory (`~/.config/opencode/agents`)."""
         return find_agent_file(agent, directory, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY)
+
+    def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
+        """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
+        return agent_search_paths(agent, source, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY)
+
+    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+        """Copy the agent file of `agent` for `source` into `into`. The handle is the agent name. None when there is no file."""
+        return seal_agent_file(agent, source, PROJECT_AGENT_DIRECTORY, USER_AGENT_DIRECTORY, into)
+
+    def permits(self, sealed: SealedAgent, command: str) -> str | None:
+        """Resolve `command` against the `permission.bash` map of the sealed file with the matcher of the validator.
+
+        The map permits the command when it resolves to `allow`. A file with no permission map permits every command.
+        """
+        frontmatter, problem = sealed_frontmatter(sealed)
+        if frontmatter is None:
+            return problem
+        permission = frontmatter.get("permission")
+        action = opencode_bash_action(permission, command) if isinstance(permission, dict) else "allow"
+        return None if action == "allow" else f"its permission.bash map resolves the command to {action or 'no rule'}"
 
     def activity(self, stream: Path) -> Activity:
         new = cache = 0
