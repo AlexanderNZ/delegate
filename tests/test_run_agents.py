@@ -43,7 +43,8 @@ blocked-by = []
 
 
 def make_repo(
-    tmp_path: Path, *, stacks: tuple[str, ...] = ("python",), second_ticket: bool = False, mode: str = "assure"
+    tmp_path: Path, *, stacks: tuple[str, ...] = ("python",), second_ticket: bool = False, mode: str = "assure",
+    second_stack: str = "python",
 ) -> Path:
     """A real git repository whose `.claude/` is ignored, with an agent file of each stack in the main checkout.
 
@@ -58,10 +59,10 @@ def make_repo(
     if "web" in stacks:
         text = text.replace(
             "[[tickets]]",
-            '[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nhotspots = ["LICENSE"]\n\n[[tickets]]',
+            f'[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nprepare = ["cp -R {repo}/.claude ."]\nhotspots = ["LICENSE"]\n\n[[tickets]]',
         )
     text = text.replace('mode = "assure"', f'mode = "{mode}"')
-    (repo / "workflow.toml").write_text(text + (SECOND_TICKET if second_ticket else ""))
+    (repo / "workflow.toml").write_text(text + (SECOND_TICKET.replace('"python"', f'"{second_stack}"') if second_ticket else ""))
     (repo / ".gitignore").write_text(".claude/\n")
     (repo / "seed.txt").write_text("seed\n")
     for name in NAMES[: 2 * len(stacks)]:
@@ -364,6 +365,8 @@ def test_a_change_of_the_specialist_file_after_a_reject_stops_the_step_before_th
 
     assert code == 1
     assert adapter.fixup_calls == []
+    # The stop is no fix-up round: the journal holds no `fixup-start`, so a retry runs the round again.
+    assert [e for e in events if e["event"] == "fixup-start"] == []
     (changed,) = [e for e in events if e["event"] == "agents-changed"]
     assert (changed["ticket"], changed["role"], changed["round"], changed["tree"]) == (ticket, "fix-up", 1, "worktree")
     assert f"--retry {ticket} --agents-changed" in err
@@ -455,3 +458,79 @@ def test_a_retry_with_the_flag_goes_on_at_the_scoped_verifier_after_a_change_of_
     assert len(adapter.fixup_calls) == 1 and len(adapter.verifier_calls) == 2
     assert [e["verdict"] for e in after if e["event"] == "verdict"] == ["REJECT", "ACCEPT"]
     assert [e["result"] for e in after if e["event"] == "run-end"][-1] == "built"
+
+
+def test_a_retry_after_a_stop_before_the_chain_fixup_of_a_stack_that_is_not_the_last_goes_on(tmp_path, capsys):
+    # Chain a (stack python) then b (stack web). The python verifier rejects, and the python specialist file changes before its fix-up.
+    repo = make_repo(tmp_path, stacks=("python", "web"), second_ticket=True, mode="economy", second_stack="web")
+    adapter = ScriptedAdapter(
+        verdict_sequence=["REJECT", "ACCEPT"], verdict_findings=["[a] The CSV file is empty."],
+        files_by_ticket={"b": {"b.txt": "b\n"}},
+    )
+
+    def change(request) -> None:
+        if len(adapter.verifier_calls) == 1:
+            for target in [agent_path(repo, "python-specialist"), *(agent_path(call.cwd, "python-specialist") for call in adapter.calls)]:
+                target.write_text(NEW_TEXT)
+
+    adapter.during_verifier = change
+    adapters.register("scripted", adapter)
+    try:
+        code, out, err, events = start_run(repo, capsys)
+        run_id = next(e for e in events if e["event"] == "run-start")["run_id"]
+        assert code == 1
+        assert "--retry a --agents-changed" in err
+        assert adapter.fixup_calls == []
+
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--agents-changed")
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    after = read_journal_file(repo, run_id)
+    (start,) = [e for e in after if e["event"] == "fixup-start"]
+    assert start["round"] == 1
+    assert len(adapter.fixup_calls) == 1
+    assert [e["result"] for e in after if e["event"] == "run-end"][-1] == "built"
+    assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-b").strip()
+
+
+def test_a_retry_after_a_stop_before_a_fixup_goes_on_when_the_run_branch_moved_after_the_stop(tmp_path, capsys):
+    # Tickets a and b are independent. Ticket a stops before its fix-up, ticket b is built and moves the run branch.
+    repo = make_repo(tmp_path, second_ticket=True)
+    original = agent_path(repo, "python-specialist").read_text()
+    adapter = ScriptedAdapter(
+        verdict_sequence=["REJECT", "ACCEPT"], verdict_findings=[FINDING],
+        files_by_ticket={"b": {"feature.txt": "feature\n", "b.txt": "b\n"}},
+    )
+
+    def change(request) -> None:
+        # Only the tree of ticket a changes: the verifier of ticket b finds the file as the run recorded it.
+        if len(adapter.verifier_calls) == 1:
+            agent_path(adapter.calls[0].cwd, "python-specialist").write_text(NEW_TEXT)
+
+    adapter.during_verifier = change
+    adapters.register("scripted", adapter)
+    try:
+        code, out, err, events = start_run(repo, capsys)
+        run_id = next(e for e in events if e["event"] == "run-start")["run_id"]
+        assert code == 1
+        assert "--retry a --agents-changed" in err
+        # Ticket b moved the run branch while ticket a stayed stopped.
+        assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-b").strip()
+        # The person restores the file in the worktree of ticket a: the retry does not run `prepare` there again.
+        agent_path(adapter.calls[0].cwd, "python-specialist").write_text(original)
+
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--agents-changed")
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    after = read_journal_file(repo, run_id)
+    (start,) = [e for e in after if e["event"] == "fixup-start"]
+    assert (start["ticket"], start["round"]) == ("a", 1)
+    assert len(adapter.fixup_calls) == 1 and FINDING in adapter.fixup_calls[0].prompt
+    assert [e["state"] for e in after if e["event"] == "step-end" and e["ticket"] == "a"][-1] == "built"
+    # The rebased branch of ticket a holds the fix-up commit and the work of ticket b, and the run branch holds it.
+    assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-a").strip()
+    assert git(repo, "merge-base", "--is-ancestor", "run/demo-b", "run/demo") == ""

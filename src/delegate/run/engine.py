@@ -1320,7 +1320,10 @@ def _execute(
         restart = retry is not None and review.check is not None and retry in review.check.restarted
         plan = _retry_plan(workflow, progress, run_id, retry, restart) if retry is not None else None
         if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
-            _check_chain_start(workflow, order, [*progress.built, *plan.revive], plan, vcs, repo, run_base, run_id)
+            # A ticket of a later stack that the stop failed does not count: the retried ticket starts from the chain before it (#209).
+            before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
+            chain = [*progress.built, *(t for t in plan.revive if t in before)]
+            _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
         # The record of the agent files changes only at the request of the person, or when the journal has none.
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:
@@ -2614,6 +2617,9 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
       scoped verifier of the fix-up round.
     - The gates of a fix-up check the fix-up commit and run the gates, then the
       scoped verifier starts.
+    - The fix-up phase (the agent check stopped the step before the fix-up session) runs that fix-up again, with the
+      gates. On the tip of the run branch, the scoped verifier starts. If the run branch moved, the engine rebases and
+      starts a full verifier at the round of the plan.
 
     In `economy` mode the step goes on as an open step does after a stop, at
     the specialist or at the check of its report (see `_build_ticket`). The phase `chain-fixup` builds nothing: it writes
@@ -2649,14 +2655,25 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     on_tip = _holds(vcs, step.repo, _tip(vcs, step.repo, workflow.run_branch), branch_ref)
     fixup_held = plan.rejected is not None and _holds(vcs, step.repo, plan.rejected, branch_ref)
     goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_GATES
+    if plan.phase == RETRY_FIXUP and fixup_held:
+        goes_on = RETRY_FIXUP  # the fix-up of the round runs first, whether the branch holds the run branch tip or not
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
     made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
         _prepare_ticket_worktree(step.gates, step.journal, step.stack, ticket.id, step.worktree, made)
-        if plan.phase == RETRY_FIXUP and plan.rejected is not None and fixup_held and on_tip:
-            # The fix-up of the round again, on the rejected commit, with the findings of the REJECT: not a new round.
+        if plan.phase == RETRY_FIXUP:
+            # The branch holds no fix-up commit: the stop came before the fix-up session. Run that fix-up again.
+            if plan.rejected is None or not fixup_held:
+                return f"the branch {step.branch} no longer holds the rejected commit of round {plan.round}, so its fix-up cannot run again"
+            # On the rejected commit, with the findings of the REJECT: not a new round.
             findings_text = _fixup_round(step, plan.round, plan.rejected, list(plan.findings))
-            return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
+            if on_tip:
+                return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
+            # The run branch moved after the stop: rebase the branch with its fix-up, then a full verifier, as for any other phase.
+            reason = _rebase_onto_run_branch(step)
+            if reason:
+                return reason
+            return _advance_run_branch(step, _accepted_commit(step, plan.round))
         if plan.rejected is not None and fixup_held:
             findings_text = _findings_text(list(plan.findings))
             _checked_fixup_brief(step, plan.round, plan.rejected, findings_text)
