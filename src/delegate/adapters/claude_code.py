@@ -30,7 +30,9 @@ and the project skills of its tree, so a file that a specialist commits in a tre
 agent (measured on 2.1.287, see issue 213). A skill that the `skills` list names and the project does not hold is a
 user skill, which the session loads by its own name. The files of the seal also hold the user settings
 `~/.claude/settings.json` when it exists, so that a change of them shows. The adapter refuses to seal for a harness
-older than 2.1.287. After a session, it reads the `init` event of the stream: when the agents that it lists do not hold
+older than 2.1.287. The body of the agent file ends with the section `## Instructions of the repository` (#218): the text
+of `CLAUDE.md` and `.claude/CLAUDE.md` of the main checkout, with their `@<path>` imports replaced, because
+`--setting-sources user` does not load them. After a session, it reads the `init` event of the stream: when the agents that it lists do not hold
 the handle, the session ends as failed with a reason.
 
 The activity of a stream comes from the `result` events, the `assistant`
@@ -86,6 +88,16 @@ AGENT_DIRECTORY: Path = Path(".claude") / "agents"
 # The directory of the project skills, and the user settings file under the home directory.
 SKILL_DIRECTORY: Path = Path(".claude") / "skills"
 USER_SETTINGS: Path = Path(".claude") / "settings.json"
+
+# The files of the instructions of a repository, in the order that the seal reads them, the heading of the section that
+# holds them, and the depth to which the seal replaces an import in an imported file.
+INSTRUCTION_FILES: tuple[Path, ...] = (Path("CLAUDE.md"), Path(".claude") / "CLAUDE.md")
+INSTRUCTIONS_HEADING: str = "## Instructions of the repository"
+IMPORT_DEPTH: int = 5
+
+# A line that is one import: `@` and a path, with no other word on the line. A line that opens or closes a code block.
+IMPORT_LINE = re.compile(r"^@(\S+)$")
+CODE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 
 # The name of the plugin of a seal starts with this text. The name ends with the agent name.
 PLUGIN_PREFIX: str = "delegate-seal-"
@@ -304,7 +316,7 @@ class ClaudeCodeAdapter:
             frontmatter["skills"] = _seal_skills(frontmatter["skills"], plugin, source, into)
         (into / "agents").mkdir(exist_ok=True)
         text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True, width=1_000_000, default_flow_style=False)
-        (into / "agents" / f"{agent}.md").write_text(f"---\n{text}---{body}")
+        (into / "agents" / f"{agent}.md").write_text(f"---\n{text}---{body}{_instructions(source)}")
         files = [SealedFile(path, _digest(path)) for path in sorted(into.rglob("*")) if path.is_file()]
         settings = Path.home() / USER_SETTINGS
         if settings.is_file():
@@ -381,6 +393,52 @@ def _bash_hooks(hooks: object) -> list[str]:
             continue
         commands.extend(str(h["command"]) for h in entry.get("hooks") or [] if isinstance(h, dict) and "command" in h)
     return commands
+
+
+def _instructions(source: Path) -> str:
+    """The section of the instructions of the repository of `source`, or an empty text when it has no `CLAUDE.md`.
+
+    The section holds the text of `CLAUDE.md` and of `.claude/CLAUDE.md`, each one that exists, in that order, with the
+    imports replaced (see `_expand`). `CLAUDE.local.md` holds personal settings, so the section never holds it.
+    """
+    texts: list[str] = []
+    for relative in INSTRUCTION_FILES:
+        path = source / relative
+        if not path.is_file():
+            continue
+        try:
+            texts.append(_expand(path.read_text(), path.parent, IMPORT_DEPTH).strip("\n"))
+        except (OSError, UnicodeDecodeError) as failure:
+            raise AdapterError(f"the instructions file {path} cannot be read: {failure}") from None
+    if not texts:
+        return ""
+    return f"\n{INSTRUCTIONS_HEADING}\n\n" + "\n\n".join(texts) + "\n"
+
+
+def _expand(text: str, directory: Path, depth: int) -> str:
+    """Replace each line of `text` that is one import, `@<path>`, with the text of that file.
+
+    A path counts from `directory`, the directory of the file that holds the line. The text of an imported file is
+    expanded in the same way, one level deeper, until `depth` is 0. A file that is missing or cannot be read keeps its
+    import line, and so does a line in a code block.
+    """
+    lines: list[str] = []
+    fence: str | None = None  # the characters that opened the code block that the line is in
+    for line in text.splitlines():
+        marker = CODE_FENCE.match(line.lstrip())
+        if marker is not None and fence is None:
+            fence = marker.group(1)
+        elif marker is not None and fence is not None and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+            fence = None
+        elif fence is None and depth > 0 and (found := IMPORT_LINE.match(line.strip())) is not None:
+            try:
+                target = (directory / Path(found.group(1)).expanduser()).resolve()
+                lines.append(_expand(target.read_text(), target.parent, depth - 1).strip("\n"))
+                continue
+            except (OSError, ValueError, RuntimeError):  # a path with no file, a text that is not UTF-8, no home directory
+                pass
+        lines.append(line)
+    return "\n".join(lines) + "\n"
 
 
 def _digest(path: Path) -> str:

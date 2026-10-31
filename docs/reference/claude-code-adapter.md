@@ -101,13 +101,23 @@ An agent session of a run starts only from the [**sealed agent**](../glossary.md
 | File of the seal | Content |
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin name, `delegate-seal-<agent>`. The name always starts with `delegate-seal-`. |
-| `agents/<agent>.md` | The agent file with no `hooks` field. Each project skill that its `skills` list names becomes `<plugin>:<skill>`. A skill that is not in `.claude/skills/` of the main checkout is a user skill: the session loads the user skills, so its name does not change. |
+| `agents/<agent>.md` | The agent file with no `hooks` field, and at the end of its body the section `## Instructions of the repository` (see [the instructions of the repository](#the-instructions-of-the-repository)). Each project skill that its `skills` list names becomes `<plugin>:<skill>`. A skill that is not in `.claude/skills/` of the main checkout is a user skill: the session loads the user skills, so its name does not change. |
 | `hooks/hooks.json` | The `hooks` field of the agent file, with no change, as `{"hooks": ...}`. The file is absent when the agent file has no `hooks`. |
 | `skills/<skill>/` | A copy of each skill that the `skills` list names and that is in `.claude/skills/` of the main checkout. |
 
 The handle of the sealed agent is `<plugin>:<agent>`. The files of the seal also hold `~/.claude/settings.json` (the path and the hash) when it exists, so that a change of the user settings fails the next step. The adapter finds the agent file in `.claude/agents/` of the main checkout first, then in `~/.claude/agents/`.
 
 The command uses `--setting-sources user --plugin-dir <seal directory> --agent <handle>`. A resumed session gets the same options. Measured on Claude Code 2.1.287 (issue 213): under `--print --agent <name>`, a project agent in the tree replaces a user agent of the same name, and the harness does not run the hooks of a project agent. A committed `.claude/settings.json` with `disableAllHooks: true` turns off a guard that comes from `--agents` or from `--settings` too. With `--setting-sources user`, the session ignores the project settings, the project agents and the project skills of the tree. A plugin from `--plugin-dir` gives its agent as `<plugin>:<agent>`. The plugin ignores `hooks` in the frontmatter of its agent, and it runs the hooks of `hooks/hooks.json`, also in a tree with `disableAllHooks`.
+
+### The instructions of the repository
+
+`--setting-sources user` also stops the session from loading the `CLAUDE.md` of the project. So the seal holds the instructions of the repository as the main checkout has them when the engine seals. The seal adds the section `## Instructions of the repository` at the end of the body of the sealed agent file. The section holds the text of `CLAUDE.md` and then the text of `.claude/CLAUDE.md` of the main checkout, each one that exists.
+
+- **Imports.** A line that is one import, `@<path>`, with no other word on the line, is replaced by the text of that file. The path counts from the directory of the file that holds the line. An import in an imported file is replaced too, to a depth of 5: the imports of the fifth imported file keep their lines. A path that gives no readable file keeps its import line. An import line in a code block (between two lines that start with three backticks or three tildes) is not replaced.
+- **`CLAUDE.local.md`.** The seal does not hold it: it holds personal settings.
+- **No `CLAUDE.md`.** A repository with neither file gets no section, and the sealed file is as it was before.
+- **A change after the seal.** The text is in the sealed agent file, so a change of `CLAUDE.md` or of an imported file after the seal fails no [**step**](../glossary.md#step) and does not reach the session. [`--agents-changed`](run.md#the-agent-check) seals the new text.
+- **An unreadable file.** A `CLAUDE.md` or `.claude/CLAUDE.md` that exists and cannot be read as UTF-8 text makes `seal` raise an `AdapterError`.
 
 The project settings of a repository therefore no longer apply to an engine session. A host gives its settings with `DELEGATE_AGENT_SETTINGS` (see [the settings of a host](#the-settings-of-a-host)).
 
