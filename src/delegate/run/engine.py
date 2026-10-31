@@ -226,6 +226,9 @@ RETRY_SPECIALIST: str = "specialist"
 RETRY_GATES: str = "gates"
 RETRY_VERIFIER: str = "verifier"
 RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
+# The agent check stopped a fix-up session (#209): `assure` mode runs the fix-up of the round again, `economy` mode the chain fix-up.
+RETRY_FIXUP: str = "fixup"
+RETRY_CHAIN_FIXUP: str = "chain-fixup"
 
 # The file in the directory of a run that asks the run to pause at its next step boundary (see `delegate.run.pause`).
 PAUSE_REQUEST_NAME: str = "pause-request"
@@ -916,7 +919,11 @@ class _RetryPlan:
     """Where a failed step goes on: the phase and the verifier round, from the journal events of the step (`prior`).
 
     `rejected` and `findings` are set when the branch holds a fix-up commit: the
-    commit that the last verdict rejected, and the findings of that verdict.
+    commit that the last verdict rejected, and the findings of that verdict. A plan of the phase `fixup` sets them too,
+    although the branch holds no fix-up commit yet.
+
+    `revive` holds the other tickets that the verification of the chain failed with the same stop, for the phase
+    `chain-fixup`: the retry builds them again, because their branches hold their commits (see `_chain_stop`).
     """
 
     ticket: str
@@ -926,6 +933,7 @@ class _RetryPlan:
     rejected: str | None = None
     findings: tuple[str, ...] = ()
     restart: bool = False
+    revive: tuple[str, ...] = ()
 
 
 def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[dict[str, object]]:
@@ -953,8 +961,10 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     - The last verdict is a REJECT, and the fix-up specialist of the next round
       reported committed work: the gates of that fix-up, then its scoped verifier.
 
-    A retry of `assure` mode spawns no specialist, except for a step that the agent check stopped before a specialist
-    session (`_stopped_before_specialist`): the plan is then the specialist. So a step whose specialist,
+    A retry of `assure` mode spawns no specialist, with two exceptions that the agent check (#205) makes. A step that it
+    stopped before a specialist session (`_stopped_before_specialist`) has the plan: the specialist. A step that it stopped
+    before the fix-up session of a round (`_stopped_before_fixup`) has the plan: the fix-up of that round, again, on the same
+    rejected commit with the same findings, and it is not a new round. So a step whose specialist,
     or whose fix-up specialist, gave no valid report that says committed is
     refused. So is a step that the verifier accepted, or rejected after the
     last fix-up round. For `economy` mode, see `_economy_retry_plan`.
@@ -1009,6 +1019,8 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
         return _RetryPlan(ticket_id, RETRY_SCOPED_VERIFIER, round_number, prior, rejected, findings)
     if round_number > domain.fixup_round_limit(workflow.mode):
         raise EngineError(f"{refused}: its verifier rejected it after the last fix-up round")
+    if _stopped_before_fixup(prior, round_number):
+        return _RetryPlan(ticket_id, RETRY_FIXUP, round_number, prior, rejected, findings)
     reports = [e for e in prior if e["event"] == "fixup-report" and e["round"] == round_number]
     if not reports or not reports[-1]["valid"] or reports[-1]["status"] != domain.COMMITTED:
         raise EngineError(
@@ -1028,6 +1040,32 @@ def _stopped_before_specialist(prior: tuple[dict[str, object], ...]) -> bool:
     if not stops or prior[stops[-1]]["role"] != ROLE_SPECIALIST:
         return False
     return not any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :])
+
+
+def _stopped_before_fixup(prior: tuple[dict[str, object], ...], round_number: int) -> bool:
+    """True when the agent check (#205) stopped the step before the fix-up session of `round_number`, and no agent started after it.
+
+    The step then holds no work of that session: the branch holds the rejected commit, and the journal holds no
+    `fixup-start` of the round (see `_run_fixup`). A retry of `assure` mode can run the fix-up of the round again.
+    """
+    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
+    if not stops or prior[stops[-1]]["role"] != ROLE_FIXUP or prior[stops[-1]]["round"] != round_number:
+        return False
+    return not any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :])
+
+
+def _chain_stop(prior: tuple[dict[str, object], ...]) -> dict[str, object] | None:
+    """The `agents-changed` event of a stop before the chain fix-up of an `economy` step, or None (#209).
+
+    The stop is the newest `agents-changed` of the step, for the role `fix-up`, and no agent started after it. The
+    chain verification wrote it with the ticket that ends the stack (see `_ChainRun`), and failed the tickets of the stack.
+    """
+    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
+    if not stops or prior[stops[-1]]["role"] != ROLE_FIXUP:
+        return None
+    if any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :]):
+        return None
+    return prior[stops[-1]]
 
 
 def _refused(ticket_id: str, run_id: str) -> str:
@@ -1059,9 +1097,15 @@ def _economy_retry_plan(
     With `restart` the step starts again from the chain start of now, so the
     phase is the specialist, and the check of the chain start does not apply
     (see `_restart_step`).
+
+    A step that the agent check stopped before the chain fix-up session is the exception to the refusal for the
+    verification of the chain: the phase is `chain-fixup` (see `_chain_fixup_plan`).
     """
     if not any(e["event"] == "step-start" for e in prior):
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that started")
+    stop = None if restart else _chain_stop(prior)
+    if stop is not None:
+        return _chain_fixup_plan(workflow, progress, ticket_id, prior, stop)
     if any(e["event"] == "step-end" and e["state"] == BUILT for e in prior):
         raise EngineError(
             f"{refused}: the verification of the chain failed it; "
@@ -1078,6 +1122,27 @@ def _economy_retry_plan(
         return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
     phase = RETRY_GATES if _specialist_committed(prior) else RETRY_SPECIALIST
     return _RetryPlan(ticket_id, phase, 0, prior)
+
+
+def _chain_fixup_plan(
+    workflow: Workflow, progress: _Progress, ticket_id: str, prior: tuple[dict[str, object], ...], stop: dict[str, object]
+) -> _RetryPlan:
+    """The plan of a retry after the agent check stopped the chain verification before a fix-up session (#209).
+
+    The ticket is the one that ends the stack, the ticket of `stop`. The stop failed each ticket of the stack, and the tickets
+    of the stacks after it, which the chain did not verify. Those tickets, which the journal failed after the stop, go in
+    `revive`: their branches hold their commits, and the chain verification checks them again with the ticket. The round is
+    the round of the stopped fix-up.
+    """
+    stop_index = max(index for index, e in enumerate(progress.events) if e is stop or e == stop)
+    ended = {
+        str(e["ticket"]): (index, e["state"]) for index, e in enumerate(progress.events) if e["event"] == "step-end"
+    }
+    revive = tuple(
+        ticket.id for ticket in plan_order(workflow)
+        if ticket.id != ticket_id and ticket.id in progress.failed and ended[ticket.id][0] > stop_index
+    )
+    return _RetryPlan(ticket_id, RETRY_CHAIN_FIXUP, int(stop["round"]), prior, revive=revive)  # type: ignore[call-overload]
 
 
 def _check_chain_start(
@@ -1255,7 +1320,7 @@ def _execute(
         restart = retry is not None and review.check is not None and retry in review.check.restarted
         plan = _retry_plan(workflow, progress, run_id, retry, restart) if retry is not None else None
         if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
-            _check_chain_start(workflow, order, progress.built, plan, vcs, repo, run_base, run_id)
+            _check_chain_start(workflow, order, [*progress.built, *plan.revive], plan, vcs, repo, run_base, run_id)
         # The record of the agent files changes only at the request of the person, or when the journal has none.
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:
@@ -1281,6 +1346,12 @@ def _execute(
     if plan is not None:
         failed.remove(plan.ticket)
         retried_reason = failures.pop(plan.ticket)
+        for revived in plan.revive:
+            # The stop failed these tickets with the retried ticket, and their branches hold their commits (#209).
+            failed.remove(revived)
+            del failures[revived]
+            built.append(revived)
+            journal.append("step-end", ticket=revived, state=BUILT, reason=None)
         if workflow.mode == domain.ECONOMY:
             # The chain goes on after the step: the skip rule applies again to each ticket after it that was skipped.
             for later in order[[t.id for t in order].index(plan.ticket) + 1 :]:
@@ -1535,13 +1606,15 @@ def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round
 
 
 def _check_agent_file(
-    adapter: Adapter, journal: Journal, agent: str, ticket: str, role: str, round_number: int, tree: str, directory: Path
+    adapter: Adapter, journal: Journal, agent: str, ticket: str, role: str, round_number: int, tree: str, directory: Path,
+    fields: dict[str, object] | None = None,
 ) -> None:
     """Fail the step before an agent session when the agent file in its tree is not the file that the run recorded (#205).
 
     `directory` is the tree where the agent runs, after `prepare`: the worktree of the ticket (TREE_WORKTREE) or the verifier
     copy (TREE_VERIFY_COPY). The journal gets `agents-changed` with the ticket, the role, the round, the tree, the agent, the
-    recorded path of the file, the recorded hash, and the new hash (`None` for a missing file). Raise `_StepFailed`, whose message
+    recorded path of the file, the recorded hash, and the new hash (`None` for a missing file), and `fields` (the fix-up gives
+    the fields that a retry needs to run it again, see `_run_fixup`). Raise `_StepFailed`, whose message
     names the file and both hashes. A run that recorded no file for the agent passes.
     """
     recorded = recorded_agents(read_events(journal.path))
@@ -1550,7 +1623,7 @@ def _check_agent_file(
         return
     journal.append(
         "agents-changed", ticket=ticket, role=role, round=round_number, tree=tree, agent=agent, path=str(change.path),
-        recorded_hash=change.recorded, new_hash=change.found,
+        recorded_hash=change.recorded, new_hash=change.found, **(fields or {}),
     )
     raise _StepFailed(change.message(ticket))
 
@@ -1758,11 +1831,17 @@ def _build_ticket(
     `prior` holds the journal events of this ticket when the step was open in a
     run that stopped. The step then goes on in its own worktree.
 
-    `retried` is the reason a step of `economy` mode failed, when a retry goes
-    on with it (see `_economy_retry_plan`). The step then goes on in its own
+    `retried` is the reason a step failed, when a retry goes on with it. The step then goes on in its own
     worktree with the events of the failed step in `prior`. The specialist
     continues unless its report was valid and said committed, and it has the
-    continuation limit of the mode again.
+    continuation limit of the mode again. A retry uses it in two cases:
+
+    - In `economy` mode, for each retry that goes on in this function: at the specialist, or at the check of its
+      report (see `_economy_retry_plan`). A retry that goes on at the chain fix-up does not call this function.
+    - In `assure` mode, only for a step that the agent check stopped before a specialist session (see
+      `_stopped_before_specialist`): the plan is the specialist. The other retries of `assure` mode go on in
+      `_retry_ticket`, with no specialist: at the gates, at a verifier, or, after a stop before a fix-up session, at the fix-up of
+      the same round (see `_stopped_before_fixup`).
     """
     tier, model = roles["specialist"]
     stack = workflow.stacks[ticket.stack]
@@ -2236,6 +2315,12 @@ def _run_fixup(
     findings_path.parent.mkdir(parents=True, exist_ok=True)
     findings_path.write_text(findings)
     findings_text = findings_path.read_text()
+    # The check comes before `fixup-start`: a stop leaves no `fixup-start`, so the stop is no round (#209), and `agents-changed`
+    # holds what a retry needs to run the fix-up again.
+    _check_agent_file(
+        step.adapter, step.journal, step.stack.specialist, ticket.id, ROLE_FIXUP, round_number, TREE_WORKTREE, step.worktree,
+        {"rejected_commit": rejected, "findings_file": str(findings_path), **(fields or {})},
+    )
     step.journal.append(
         "fixup-start", ticket=ticket.id, round=round_number, rejected_commit=rejected, findings_file=str(findings_path),
         agent=step.stack.specialist, tier=tier, model=model, **(fields or {}),
@@ -2246,9 +2331,6 @@ def _run_fixup(
     prompt = specialist_brief(
         ticket.id, ticket.text, step.worktree, step.stack.all_hotspots, step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes,
-    )
-    _check_agent_file(
-        step.adapter, step.journal, step.stack.specialist, ticket.id, ROLE_FIXUP, round_number, TREE_WORKTREE, step.worktree
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -2534,13 +2616,23 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
       scoped verifier starts.
 
     In `economy` mode the step goes on as an open step does after a stop, at
-    the specialist or at the check of its report (see `_build_ticket`).
+    the specialist or at the check of its report (see `_build_ticket`). The phase `chain-fixup` builds nothing: it writes
+    `retry` and returns, and the chain verification runs the stopped fix-up again (see `_ChainRun`).
+
+    The phase `fixup` of `assure` mode runs the stopped fix-up again (see `_stopped_before_fixup`), with the same rejected
+    commit and the same findings, then goes on to the gates and the scoped verifier of that round.
 
     A plan with `restart` starts the ticket again from its base (see `_restart_step`).
     """
     workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
     if plan.restart:
         return _restart_step(step, failure, start_ref)
+    if plan.phase == RETRY_CHAIN_FIXUP:
+        # No work of this step is left: the chain verification runs the stopped fix-up again (see `_ChainRun`).
+        step.journal.append(
+            "retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure, revived=list(plan.revive)
+        )
+        return None
     if workflow.mode == domain.ECONOMY or plan.phase == RETRY_SPECIALIST:
         step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure)
         return _build_ticket(
@@ -2561,6 +2653,10 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
         _prepare_ticket_worktree(step.gates, step.journal, step.stack, ticket.id, step.worktree, made)
+        if plan.phase == RETRY_FIXUP and plan.rejected is not None and fixup_held and on_tip:
+            # The fix-up of the round again, on the rejected commit, with the findings of the REJECT: not a new round.
+            findings_text = _fixup_round(step, plan.round, plan.rejected, list(plan.findings))
+            return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
         if plan.rejected is not None and fixup_held:
             findings_text = _findings_text(list(plan.findings))
             _checked_fixup_brief(step, plan.round, plan.rejected, findings_text)
@@ -2627,6 +2723,52 @@ def _archive_old_step(run_dir: Path, ticket_id: str, number: int) -> None:
     evidence = run_dir / "verifier" / ticket_id
     if evidence.is_dir():
         shutil.move(str(evidence), run_dir / "verifier" / f"{ticket_id}-failed-{number}")
+
+
+class _ChainRedo(NamedTuple):
+    """The chain fix-up that the agent check stopped, for a retry to run it again (#209).
+
+    `round`, `commit` (the commit that the fix-up starts from) and `findings_text` are those of the stopped fix-up, and
+    `red_gates` tells that red gates started it. `rejected` and `findings` are the state of the verification that the
+    stop cut off: the commit that the last verifier rejected, and its findings, or None and no finding.
+    """
+
+    round: int
+    commit: str
+    findings_text: str
+    red_gates: bool
+    rejected: str | None
+    findings: list[str]
+
+
+def _chain_redo(events: list[dict[str, object]], ticket: str, stack: str) -> _ChainRedo | None:
+    """The fix-up of `stack` that the agent check stopped before its session, when a retry at the chain fix-up follows, else None.
+
+    `events` are the journal events since the last retry that is not a retry at the chain fix-up. `ticket` ends the stack.
+    The stop is the newest `agents-changed` of that ticket, for the role `fix-up`, with no `agent-start` after it, and a
+    `retry` with the phase `chain-fixup` after it (see `_chain_stop`). The event holds the commit, the findings file and the
+    trigger of the stopped fix-up. The state of the verifier comes from the last `verdict` of the stack.
+    """
+    own = [(index, e) for index, e in enumerate(events) if e.get("ticket") == ticket]
+    stops = [(index, e) for index, e in own if e["event"] == "agents-changed" and e["role"] == ROLE_FIXUP]
+    if not stops:
+        return None
+    index, stop = stops[-1]
+    after = [e for _, e in own if _ > index]
+    if any(e["event"] == "agent-start" for e in after) or not any(
+        e["event"] == "retry" and e.get("phase") == RETRY_CHAIN_FIXUP for e in after
+    ):
+        return None
+    verdicts = [i for i, e in enumerate(events[:index]) if e["event"] == "verdict" and e.get("stack") == stack]
+    rejected: str | None = None
+    findings: list[str] = []
+    if verdicts and not domain.is_accepted(str(events[verdicts[-1]]["verdict"])):
+        starts = [e for e in events[: verdicts[-1]] if e["event"] == "verify-start" and e.get("stack") == stack]
+        rejected, findings = str(starts[-1]["commit"]), [str(f) for f in events[verdicts[-1]]["findings"]]  # type: ignore[union-attr]
+    return _ChainRedo(
+        int(stop["round"]), str(stop["rejected_commit"]), Path(str(stop["findings_file"])).read_text(),  # type: ignore[call-overload]
+        stop["trigger"] == TRIGGER_GATES_RED, rejected, findings,
+    )
 
 
 class _ChainRun:
@@ -2727,7 +2869,11 @@ class _ChainRun:
     def _verify_stacks(self) -> list[str]:
         _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
         every_event = read_events(self.journal.path)
-        retries = [index for index, e in enumerate(every_event) if e["event"] in ("retry", "plan-change")]
+        # A retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
+        retries = [
+            index for index, e in enumerate(every_event)
+            if e["event"] == "plan-change" or (e["event"] == "retry" and e.get("phase") != RETRY_CHAIN_FIXUP)
+        ]
         # The verification of the chain since the last retry or plan change.
         events = every_event[retries[-1] + 1 :] if retries else every_event
         if any(e["event"] == "run-branch-advance" for e in events):
@@ -2753,7 +2899,10 @@ class _ChainRun:
             if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
             try:
-                self._verify_stack(step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name], chain_start)
+                self._verify_stack(
+                    step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name], chain_start,
+                    _chain_redo(events, tickets[-1].id, name),
+                )
             except _StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
@@ -2762,7 +2911,9 @@ class _ChainRun:
             self._fail({ticket.id: reason for ticket in self.chain})
         return []
 
-    def _verify_stack(self, step: _Step, fixup_starts: list[dict[str, object]], chain_start: str) -> None:
+    def _verify_stack(
+        self, step: _Step, fixup_starts: list[dict[str, object]], chain_start: str, redo: _ChainRedo | None = None
+    ) -> None:
         """Run the gates of one stack on the chain tip, the fix-up rounds, and the verifiers, until a verifier accepts.
 
         Red gates start a fix-up round with the gate output. Green gates go on to
@@ -2779,6 +2930,10 @@ class _ChainRun:
         The full verifier also sees the fix-up commits of the stacks before this
         stack, from `chain_start` to the start of this stack, when they change a
         file of a ticket of this stack (see `chain_brief`).
+
+        A retry after the agent check stopped a fix-up session gives that fix-up in `redo` (#209). The stop wrote no
+        `fixup-start`, so the round is not in `fixup_starts`. The verification first runs that fix-up again, on the same
+        commit with the same findings, as the round that the stop cut off, and then goes on as after any fix-up.
         """
         mode = self.workflow.mode
         limit = domain.fixup_round_limit(mode)
@@ -2791,6 +2946,9 @@ class _ChainRun:
         earlier = (chain_start, start) if chain_start != start else None
         rejected: str | None = None  # the commit that the last verifier rejected
         findings: list[str] = []
+        if redo is not None:
+            rejected, findings, round_number = redo.rejected, redo.findings, redo.round
+            self._fixup(step, round_number, redo.commit, redo.findings_text, redo.red_gates)
         while True:
             tip = _tip(self.vcs, self.repo, step.branch)
             outcomes = [
