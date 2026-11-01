@@ -182,6 +182,8 @@ class TicketSnapshot:
     runs now cannot be read.
 
     `gate` is the command of the gate that runs now, from its `gate-start`, and None when no gate of the ticket runs.
+    `gate_name` is the `name` of that `gate-start` (#223), or None: the table shows it in place of the short name of the
+    command, and `to_json` leaves it out.
     `gate_idle_seconds` is the seconds since the log file of that gate last changed. It is None when no gate runs, or
     when the log file cannot be read. It needs no reader of the streams.
 
@@ -208,6 +210,7 @@ class TicketSnapshot:
     fixup_round: int = 0
     continuation: tuple[int, int] | None = None
     gate_count: tuple[int, int] | None = None
+    gate_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -225,7 +228,8 @@ class ChainSnapshot:
 
     The last three fields are for the table, and `to_json` leaves them out. `idle_seconds` is the seconds since the
     activity of the agent of the chain that runs now. `fixup_round` is the round of the newest `fixup-start`. `after` is
-    the id of the last ticket of the stack in plan order: the row goes under the rows of that ticket.
+    the id of the last ticket of the stack in plan order: the row goes under the rows of that ticket. `gate_name` is the
+    name that the workflow gives to the gate that runs (#223), and `to_json` leaves it out too.
     """
 
     stack: str
@@ -240,6 +244,7 @@ class ChainSnapshot:
     idle_seconds: int | None = None
     fixup_round: int = 0
     after: str = ""
+    gate_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -384,7 +389,8 @@ def _ticket(
     duration = elapsed if started and ended else None
     gate_command = None if gate is None else str(gate["command"])
     gate_idle = None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now)
-    table = {"reason": reason, "traceback": trace, "fixup_round": fixup_round, "continuation": continuation}
+    gate_name = None if gate is None or not gate.get("name") else str(gate["name"])
+    table = {"reason": reason, "traceback": trace, "fixup_round": fixup_round, "continuation": continuation, "gate_name": gate_name}
     if activity is None:
         return TicketSnapshot(ticket, state, phase, elapsed, None, None, None, gate_command, gate_idle, **table), duration
     new, cache, idle = _agent_counts(streams, totals, live, activity, now)
@@ -600,7 +606,7 @@ def _chain_of(
         elapsed_seconds=_seconds(started, ended or now), gate_command=None if gate is None else str(gate["command"]),
         gate_idle_seconds=None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now), tokens_new=new, tokens_cache=cache,
         verdict=None if running or verdict is None else str(verdict[1]["verdict"]), idle_seconds=idle,
-        fixup_round=fixup_round, after=after,
+        fixup_round=fixup_round, after=after, gate_name=None if gate is None or not gate.get("name") else str(gate["name"]),
     )
 
 
@@ -1136,7 +1142,7 @@ def _rows(
             details[0] = _activity_tail(ticket, idle_limit, glyph, spin)
             if ticket.gate is not None:
                 at = active if 0 < active < len(details) else 0
-                details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(str(ticket.gate), ticket.gate_idle_seconds, idle_limit, glyph)) if part)
+                details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(str(ticket.gate), ticket.gate_idle_seconds, idle_limit, glyph, ticket.gate_name)) if part)
         reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket, live)
         cells = _row(ticket, position, link, glyph)
         tail = reason or details[0]
@@ -1182,7 +1188,7 @@ def _chain_row(
         if chain.idle_seconds is not None:
             parts.append(output.styled(*liveness(chain.idle_seconds, idle_limit, spin)))
         if chain.gate_command is not None:
-            parts.append(_gate_tail(chain.gate_command, chain.gate_idle_seconds, idle_limit, glyph))
+            parts.append(_gate_tail(chain.gate_command, chain.gate_idle_seconds, idle_limit, glyph, chain.gate_name))
     elif live and chain.verdict:
         parts.append(output.styled("ok" if chain.state == ACCEPTED else "bad", f"verdict {chain.verdict}"))
     cells[TAIL] = f" {glyph.pending} ".join(parts)
@@ -1298,9 +1304,9 @@ def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output
     return f" {glyph.pending} ".join(parts)
 
 
-def _gate_tail(command: str, log_idle_seconds: int | None, idle_limit: int | None, glyph: output.Glyphs) -> str:
+def _gate_tail(command: str, log_idle_seconds: int | None, idle_limit: int | None, glyph: output.Glyphs, name: str | None = None) -> str:
     """The detail of the gate that runs: its short name and the age of its log, on the sub-row of its phase (or the chain row)."""
-    gate = f"gate {output.gate_name(command)}"
+    gate = f"gate {output.gate_name(command, name)}"
     if log_idle_seconds is not None:
         gate += f" {glyph.pending} " + _idle(log_idle_seconds, f"log {format_duration(log_idle_seconds)} ago", idle_limit, glyph)
     return gate

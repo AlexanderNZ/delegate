@@ -16,7 +16,7 @@ The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and 
   measured by the cells that it shows.
 * `styled(roles, text)` paints a text in more than one role, as `now bold`, and `cut(text, cells)` cuts a painted
   line to the width of the terminal.
-* The short forms of the words of a frame: `short_run_id`, `gate_name`, and `without_paths`.
+* The short forms of the words of a frame: `short_run_id`, `gate_name`, `gate_name_of`, and `without_paths`.
 """
 
 from __future__ import annotations
@@ -53,6 +53,9 @@ ABSOLUTE_PATH = re.compile(r"(?<![\w.~-])/(?:[^\s/'\"]+/)*([^\s/'\"]*)")
 # The words at the start of a gate command that only start the tool that does the work. A frame names the gate by the
 # first word after them that is not an option and not a variable, so `nix develop -c python3 -m pytest -q` is `pytest`.
 LAUNCHERS: frozenset[str] = frozenset({"nix", "develop", "uvx", "uv", "run", "npx", "env", "exec", "python", "python3"})
+
+# The words that join the commands of a chain. The short name of a gate comes from the last command that is not `cd <dir>`.
+CHAIN_SEPARATORS: frozenset[str] = frozenset({"&&", ";"})
 
 # A word that sets a variable of the environment of a command, as `NAME=value`. A version pin, as `tool==1.0`, is not one.
 VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=(?!=)")
@@ -195,20 +198,41 @@ def short_run_id(run_id: str) -> str:
     return run_id.rsplit("-", 1)[-1] or run_id
 
 
-def gate_name(command: str) -> str:
-    """The short name of a gate command: the name of the first word that is not a launcher, with no version.
+def gate_name(command: str, name: str | None = None) -> str:
+    """The short name of a gate: its `name` when the workflow gives one, else the name of the tool in its command.
 
-    For example `nix develop -c python3 -m pytest -q` is `pytest`, and `uvx "zensical==0.0.2" build` is `zensical`.
+    The tool is the first word that is not a launcher, with no version, in the last part of a `&&` or `;` chain that is
+    not `cd <dir>`. For example `nix develop -c python3 -m pytest -q` is `pytest`, `uvx "zensical==0.0.2" build` is
+    `zensical`, and `cd frontend && npx vitest run --project unit` is `vitest` (#223).
     """
+    if name:
+        return name
     try:
-        words = shlex.split(command)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        words = list(lexer)
     except ValueError:
         words = command.split()
+    parts: list[list[str]] = [[]]
     for word in words:
-        if word in LAUNCHERS or word.startswith("-") or VARIABLE.match(word):
+        if word in CHAIN_SEPARATORS:
+            parts.append([])
+        else:
+            parts[-1].append(word)
+    for part in reversed(parts):
+        if part[:1] == ["cd"]:
             continue
-        return re.split(r"[=<>@]", Path(word).name)[0] or word
+        for word in part:
+            if word in LAUNCHERS or word.startswith("-") or VARIABLE.match(word) or not any(c.isalnum() for c in word):
+                continue
+            return re.split(r"[=<>@]", Path(word).name)[0] or word
     return command
+
+
+def gate_name_of(event: dict[str, object]) -> str:
+    """The short name of the gate of a gate event or a `paused` event: its `name` field, or the short name of its `command`."""
+    name = event.get("name")
+    return gate_name(str(event["command"]), str(name) if name else None)
 
 
 def without_paths(text: str) -> str:

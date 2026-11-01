@@ -449,6 +449,14 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(f"  {line}" if line.strip() else "" for line in notes.strip().splitlines()))
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
+    for stack in workflow.stacks.values():
+        for name, commands in stack.gate_name_clashes():
+            gates = ", ".join(f"`{command}`" for command in commands)
+            print(
+                f"delegate run: warning: stack {stack.name}: the gates {gates} have the same short name {name!r}; "
+                'give each one a name: { name = "<name>", command = "<command>" }',
+                file=sys.stderr,
+            )
     setup = check_setup(workflow, adapters.get(workflow.adapter), args.repo, tiers, vcs)
     for line in setup.lines:
         print(line)

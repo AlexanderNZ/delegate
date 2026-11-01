@@ -10,13 +10,14 @@ import math
 import re
 import tomllib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..ports.harness import McpServer
 from ..shared.tiers import Tiers
 from . import domain
 from .domain import ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
+from .output import gate_name
 
 # The built-in harness adapters. A workflow can name these, and any adapter
 # that the caller of `load_workflow` reports as registered (a test registers a scripted one).
@@ -93,6 +94,20 @@ class Stack:
     # The time limit of one gate run and of one agent session of this stack, in minutes (#179). None: no limit.
     gate_timeout: float | None = None
     agent_timeout: float | None = None
+    # The name that the workflow gives to a gate, by its command (#223). A gate with no entry has no name: the views
+    # show the short name that they find in its command.
+    gate_names: dict[str, str] = field(default_factory=dict)
+
+    def gate_name_clashes(self) -> list[tuple[str, list[str]]]:
+        """The short names that more than one gate of this stack has (#223), each with the commands of those gates.
+
+        The short name of a gate is its `name`, or the name of the tool in its command (see `output.gate_name`). A view
+        that shows two gates by the same short name does not tell them apart. The result is in the order of the gates.
+        """
+        by_name: dict[str, list[str]] = {}
+        for command in self.gates:
+            by_name.setdefault(gate_name(command, self.gate_names.get(command)), []).append(command)
+        return [(name, commands) for name, commands in by_name.items() if len(commands) > 1]
 
     @property
     def all_hotspots(self) -> list[str]:
@@ -256,6 +271,40 @@ class _Reader:
             return None
         return float(value)
 
+    def gates(self, table: dict[str, object], key: str, field: str) -> tuple[list[str], dict[str, str]] | None:
+        """The gates of a stack (#223): each is a command string, or a table `{ name = "...", command = "..." }`.
+
+        Return the commands in order, and the name of each gate that has one by its command. None when the field is
+        missing or has a defect: the defect is in `problems`.
+        """
+        if key not in table:
+            self.problems.append(f"{field}: field is missing")
+            return None
+        value = table[key]
+        if not isinstance(value, list):
+            self.problems.append(f"{field}: must be a list of strings or tables, not {value!r}")
+            return None
+        if not value:
+            self.problems.append(f"{field}: needs at least one entry")
+            return None
+        commands: list[str] = []
+        names: dict[str, str] = {}
+        problems = len(self.problems)
+        for position, item in enumerate(value):
+            at = f"{field}[{position}]"
+            if isinstance(item, str) and item.strip():
+                commands.append(item)
+            elif isinstance(item, dict):
+                self.refuse_unknown(item, GATE_FIELDS, at)
+                name = self.string(item, "name", f"{at}.name")
+                command = self.string(item, "command", f"{at}.command")
+                if name is not None and command is not None:
+                    commands.append(command)
+                    names[command] = name
+            else:
+                self.problems.append(f"{field}: must be a list of strings or tables, not {item!r}")
+        return None if len(self.problems) > problems else (commands, names)
+
     def string_list(self, table: dict[str, object], key: str, field: str, *, at_least_one: bool) -> list[str] | None:
         if key not in table:
             self.problems.append(f"{field}: field is missing")
@@ -277,6 +326,7 @@ STACK_FIELDS: tuple[str, ...] = (
     "specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare",
     "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file", "gate-timeout", "agent-timeout",
 )
+GATE_FIELDS: tuple[str, ...] = ("name", "command")
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
 
@@ -294,7 +344,8 @@ def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]
         reader.refuse_unknown(stack, STACK_FIELDS, field)
         specialist = reader.string(stack, "specialist", f"{field}.specialist")
         verifier = reader.string(stack, "verifier", f"{field}.verifier")
-        gates = reader.string_list(stack, "gates", f"{field}.gates", at_least_one=True)
+        read_gates = reader.gates(stack, "gates", f"{field}.gates")
+        gates, gate_names = read_gates if read_gates is not None else (None, {})
         hotspots = reader.string_list(stack, "hotspots", f"{field}.hotspots", at_least_one=False)
         servers = _read_mcp_servers(reader, stack.get("mcp-servers", {}), f"{field}.mcp-servers")
         # `prepare` is optional. When it is there, the check is the check of `gates`.
@@ -307,7 +358,7 @@ def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]
             stacks[name] = Stack(
                 name, specialist, verifier, gates, hotspots, servers, tuple(prepare),  # type: ignore[arg-type]
                 specialist_notes=notes["specialist"], verifier_notes=notes["verifier"],
-                gate_timeout=gate_timeout, agent_timeout=agent_timeout,
+                gate_timeout=gate_timeout, agent_timeout=agent_timeout, gate_names=gate_names,
             )
     return stacks
 

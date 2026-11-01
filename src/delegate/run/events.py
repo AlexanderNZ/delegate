@@ -200,6 +200,7 @@ class GateStart(TypedDict):
     phase: str
     command: str
     gate_log: str
+    name: NotRequired[str]
 
 
 class GateResult(TypedDict):
@@ -213,6 +214,7 @@ class GateResult(TypedDict):
     timed_out: bool
     output_tail: str
     clean: bool
+    name: NotRequired[str]
 
 
 class GateSkip(TypedDict):
@@ -223,6 +225,7 @@ class GateSkip(TypedDict):
     commit: str
     green_seq: int
     reason: str
+    name: NotRequired[str]
 
 
 class PrepareStart(TypedDict):
@@ -345,6 +348,7 @@ class Paused(TypedDict):
     round: NotRequired[int]
     stack: NotRequired[str]
     tickets: NotRequired[list[str]]
+    name: NotRequired[str]
 
 
 class Halted(TypedDict):

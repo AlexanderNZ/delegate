@@ -758,7 +758,7 @@ def write_project_agents(repo: Path) -> None:
         # The check reads the file of each agent name, so a pair is declared under the key that both names share.
         # A stack that the test made invalid on purpose gets no file.
         if key is not None and verifier == f"{key}-verifier":
-            agents.append(Agent(key=key, description=f"The {name} stack.", gate_commands=list(stack.get("gates", []))))
+            agents.append(Agent(key=key, description=f"The {name} stack.", gate_commands=[g["command"] if isinstance(g, dict) else g for g in stack.get("gates", [])]))
     tiers = load_tiers()
     target = repo / directories[adapter]
     target.mkdir(parents=True, exist_ok=True)

@@ -35,7 +35,7 @@ hotspots = []
 [stacks.docs]
 specialist = "docs-specialist"
 verifier = "docs-verifier"
-gates = ["make docs", "make links"]
+gates = ["make docs", {{ name = "links", command = "make links" }}]
 hotspots = []
 
 [[tickets]]

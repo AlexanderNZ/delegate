@@ -465,9 +465,9 @@ class LiveView:
         started = self._gates.pop((ticket, command), None)
         red = kind == "gate-result" and not event["green"]
         if kind == "gate-skip":
-            item = f"{output.gate_name(command)} skipped"
+            item = f"{output.gate_name_of(event)} skipped"
         else:
-            item = output.gate_name(command) + (f" {duration((when - started).total_seconds())}" if started is not None else "")
+            item = output.gate_name_of(event) + (f" {duration((when - started).total_seconds())}" if started is not None else "")
             item += (" timed out" if event.get("timed_out") else " red") if red else ""
         waiting = self._waiting.get(ticket)
         if waiting is None or waiting.kind != GATES:
@@ -509,7 +509,7 @@ class LiveView:
         """The line of a pause: where the run stopped, and the command that goes on with it."""
         ticket, before = event.get("ticket"), event.get("before")
         if before == "gate" and event.get("command"):
-            where = f"the gate {output.gate_name(str(event['command']))} of ticket {ticket}"
+            where = f"the gate {output.gate_name_of(event)} of ticket {ticket}"
         elif before == "verifier":
             where = "the verifier of " + (f"stack {event['stack']}" if event.get("stack") else f"ticket {ticket}")
         else:

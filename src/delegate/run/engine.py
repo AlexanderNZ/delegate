@@ -2135,7 +2135,7 @@ def _build_with_continuations(
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `_ChainRun`)
                 else:
                     outcomes = [
-                        _run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD, stack.gate_timeout)
+                        _run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD, stack.gate_timeout, stack.gate_names.get(gate))
                         for gate in stack.gates
                     ]
                     red = [outcome for outcome in outcomes if not outcome.green]
@@ -2300,7 +2300,10 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
         )
     red = [
         label for gate in step.stack.gates
-        if (label := _run_gate(step.gates, step.vcs, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE, step.stack.gate_timeout))
+        if (label := _run_gate(
+            step.gates, step.vcs, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE, step.stack.gate_timeout,
+            step.stack.gate_names.get(gate),
+        ))
     ]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
@@ -2499,7 +2502,8 @@ def _fixup_gates(step: _Step, round_number: int) -> None:
     red = [
         label for gate in step.stack.gates
         if (label := _run_gate(
-            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_timeout
+            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_timeout,
+            step.stack.gate_names.get(gate),
         ))
     ]
     if red:
@@ -3066,7 +3070,8 @@ class _ChainRun:
             tip = _tip(self.vcs, self.repo, step.branch)
             outcomes = [
                 _run_gate_with_output(
-                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN, step.stack.gate_timeout
+                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN, step.stack.gate_timeout,
+                    step.stack.gate_names.get(gate),
                 )
                 for gate in step.stack.gates
             ]
@@ -3133,7 +3138,7 @@ def _chain_text(tickets: list[Ticket]) -> str:
 class _GateRun(NamedTuple):
     """The outcome of one gate for the engine: whether it is green, its output, and the name that a reason gives it.
 
-    `label` is the gate command, and a gate that the runner ended at its time limit has `(timed out)` after it.
+    `label` is the name of the gate, or its command when it has no name, and a gate that the runner ended at its time limit has `(timed out)` after it.
     """
 
     command: str
@@ -3144,21 +3149,22 @@ class _GateRun(NamedTuple):
 
 def _run_gate(
     gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    gate_timeout: float | None = None,
+    gate_timeout: float | None = None, name: str | None = None,
 ) -> str | None:
     """Run one gate command in the worktree through `gates`, and record the result. Return None when it is green, else its label.
 
     `round_number` is 0 for the first build and the fix-up round for a later run.
     `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
     `gate_timeout` is the time limit of the gate in minutes, or None (see `_run_gate_with_output`).
+    `name` is the name that the workflow gives to the gate, or None (see `_run_gate_with_output`).
     """
-    outcome = _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase, gate_timeout)
+    outcome = _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase, gate_timeout, name)
     return None if outcome.green else outcome.label
 
 
 def _run_gate_with_output(
     gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    gate_timeout: float | None = None,
+    gate_timeout: float | None = None, name: str | None = None,
 ) -> _GateRun:
     """Run one gate command as `_run_gate` does. Return its outcome: whether it is green, and the tail of its output.
 
@@ -3176,32 +3182,38 @@ def _run_gate_with_output(
     green. A rebase that keeps the commit, and a resume after a stop, so cost no
     second gate run. The output of a skipped gate is the output of that green result.
 
+    `name` is the name that the workflow gives to the gate (#223), or None. A gate with a name has `name` in its
+    `gate-start`, `gate-result` and `gate-skip`, and in the `paused` event before it, and the reason of a red gate gives
+    the name in place of the command. A gate with no name has no such field.
+
     Before a gate runs, the engine makes an empty log file for it and writes
     `gate-start` with the path of the file. The gate runner appends the output
     to the file while the gate runs, so `delegate status` and `delegate watch`
     see the activity of a long gate.
     """
     commit = _head(vcs, worktree)
+    named: dict[str, object] = {} if name is None else {"name": name}
+    shown = name or command
     green = _green_result(journal, command, commit)
     if green is not None:
         green_seq = int(green["seq"])  # type: ignore[call-overload]
         journal.append(
             "gate-skip", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit, green_seq=green_seq,
-            reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})",
+            reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})", **named,
         )
-        return _GateRun(command, True, str(green.get("output_tail", "")), command)
-    _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{command}` of ticket {ticket}", command=command, phase=phase)
+        return _GateRun(command, True, str(green.get("output_tail", "")), shown)
+    _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{shown}` of ticket {ticket}", command=command, phase=phase, **named)
     log = _gate_log_path(journal, ticket, phase, round_number)
-    journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
+    journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log), **named)
     result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout), environment=_worktree_environment(vcs, worktree))
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
     if result.timed_out:
         output += f"\n[delegate: the gate ran past the gate-timeout of {_minutes_text(gate_timeout)} minutes, and the engine ended it]\n"
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
-        exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True,
+        exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True, **named,
     )
-    return _GateRun(command, result.green, output, f"{command} (timed out)" if result.timed_out else command)
+    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown)
 
 
 def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int) -> Path:

@@ -159,7 +159,7 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 |---|---|---|
 | `specialist` | string | The name of the specialist agent for this stack. |
 | `verifier` | string | The name of the verifier agent for this stack. |
-| [**`gates`**](../glossary.md#gate) | list of strings | The gate commands. The engine runs them. At least one is required. |
+| [**`gates`**](../glossary.md#gate) | list of strings or tables | The gates. The engine runs them. At least one is required. A gate is a command string, or a table `{ name = "<name>", command = "<command>" }`. See [Gate names](#gate-names). |
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. The engine adds the built-in hotspots `.claude/agents/` and `.opencode/agents/` to the list of each stack, also when the list is empty. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
@@ -169,6 +169,26 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | `specialist-notes-file` | string | The path of a local file that holds the specialist notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
 | `verifier-notes` | string | The text that the engine adds to each verifier brief of this stack. Give at most one of `verifier-notes` and `verifier-notes-file`. See [Notes](#notes). |
 | `verifier-notes-file` | string | The path of a local file that holds the verifier notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
+
+### Gate names
+
+The views of a run show each gate by a short name: the feed of `delegate watch`, the live view, the gate that runs in the table, and the reason of a red gate. A gate that is a string has the short name of its command: the first word that is not a launcher (such as `nix develop -c`, `uvx`, `npx` or `python3 -m`) in the last part of a `&&` or `;` chain that is not `cd <dir>`, with no version. So `nix develop -c python3 -m pytest -q` is `pytest`, and `cd frontend && npx vitest run --project unit` is `vitest`.
+
+A gate can be a table instead, and its `name` is then its short name in each place. The `command` runs as for a string. A workflow with strings only is valid, and a stack can hold both forms.
+
+```toml
+[stacks.web]
+specialist = "react-specialist"
+verifier = "react-verifier"
+gates = [
+  "nix develop -c python3 -m pytest -q",
+  { name = "unit", command = "cd frontend && npx vitest run --project unit" },
+  { name = "e2e", command = "cd frontend && npx vitest run --project e2e" },
+]
+hotspots = []
+```
+
+The `name` and the `command` are strings that are not empty, and a table has no other field. When two gates of a stack have the same short name, `delegate run --dry-run` prints a warning on stderr that names the gates and says to give each one a `name`. The warning does not refuse the workflow, and the exit code is not changed by it. The journal gets the `name` in `gate-start`, `gate-result` and `gate-skip` of a gate that has one. The verifier guard and the `gateCommands` of the declaration use the commands only.
 
 ### Time limits
 
@@ -291,7 +311,7 @@ The check is in Python and starts no process. For example, the id `a.lock` is a 
 
 | Problem | What the message names |
 |---|---|
-| A field is missing, has the wrong type, or is empty. | The field, for example `stacks.python.gates`. |
+| A field is missing, has the wrong type, or is empty. | The field, for example `stacks.python.gates`. A gate table with no `name` or no `command` names the entry, for example `stacks.python.gates[1].name`. |
 | A field is not in this reference. | The field. |
 | `mode` or `adapter` has an unknown name. | The field, the value, and the valid names. |
 | `ticket-start` has an unknown value. | The field, the value, and the valid values. |
