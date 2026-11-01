@@ -18,10 +18,13 @@ from pathlib import Path
 import delegate
 import pytest
 from delegate import adapters
+from delegate.definitions.declaration import Agent
+from delegate.definitions.render import render
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest, McpServer
 
 from . import harness_fake, opencode_fake
 from .harness_fake import wrote
+from .support import committed_repo, git
 
 
 def request(tmp_path: Path, **changes) -> AdapterRequest:
@@ -474,3 +477,122 @@ def test_the_environment_of_the_request_goes_to_the_session_and_the_other_variab
     (call,) = fake.calls()
     assert {name: call["env"].get(name) for name in entries} == entries
     assert call["env"]["DELEGATE_TEST_MARKER"] == "kept"
+
+
+# The skills of the agent (#234). OpenCode 1.15.10 does not preload a skill for the agent of `opencode run` (#215), so the
+# adapter puts the text of each skill that the agent lists in the prompt of a new session, as the claude-code adapter does.
+# Each case seals with the real adapter, from files that the renderer made, and reads the standard input of the stand-in.
+
+SKILL_BRIEF = "## Task\n\nTicket a: SECRET-BRIEF-TEXT\n"
+
+
+def skill_file(path: Path, name: str, body: str) -> None:
+    """Write the `SKILL.md` of the skill `name` in the directory `path`."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: The skill {name}. Use it in a test.\n---\n\n{body}")
+
+
+def rendered_repository(tmp_path: Path, tiers, skills: list[str]) -> Path:
+    """A real git repository with the pair `python` rendered for OpenCode, and one commit."""
+    agent = Agent(key="python", description="The python stack.", gate_commands=["python3 -m pytest -rs"], skills=skills)
+    files = {f".opencode/agents/{name}": content for name, content in render([agent], tiers)["opencode"].items()}
+    return committed_repo(tmp_path / "repo", {**files, "NOTE.md": "NOTE-ON-MAIN\n"}, message="init")
+
+
+def stdin_of_session(tmp_path: Path, monkeypatch, repo: Path, cwd: Path, *, before_run=None, **changes) -> str:
+    """Seal the specialist of `repo`, start one session in `cwd`, and give the standard input of the harness."""
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    adapter = adapters.get("opencode")
+    sealed = adapter.seal("python-specialist", repo, tmp_path / "seal")
+    assert sealed is not None
+    if before_run is not None:
+        before_run()
+    adapter.run(request(tmp_path, prompt=SKILL_BRIEF, cwd=cwd, sealed=sealed, **changes))
+    (call,) = fake.calls()
+    return str(call["stdin"])
+
+
+def test_a_new_session_gets_the_text_of_the_project_skill_and_of_the_user_skill_before_the_brief(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, ["python-context", "user-rules"])
+    skill_file(repo / ".claude" / "skills" / "python-context", "python-context", "The code word is PELICAN-7731.\n")
+    skill_file(home / ".agents" / "skills" / "user-rules", "user-rules", "The second code word is HERON-4410.\n")
+
+    stdin = stdin_of_session(tmp_path, monkeypatch, repo, repo)
+
+    assert stdin.startswith("# The skills of this session\n")
+    assert stdin.index("PELICAN-7731") < stdin.index("HERON-4410") < stdin.index("SECRET-BRIEF-TEXT")
+    assert stdin.endswith("# The brief\n\n" + SKILL_BRIEF)  # the brief is the last part, with no change
+    assert "description: The skill python-context" not in stdin  # the frontmatter is not the text of the skill
+    assert f"Base directory for this skill: {tmp_path / 'seal' / 'skills' / 'python-context'}" in stdin
+    assert f"Base directory for this skill: {home / '.agents' / 'skills' / 'user-rules'}" in stdin
+
+
+def test_a_resumed_session_gets_the_brief_only_because_it_has_the_skills_already(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, ["python-context"])
+    skill_file(repo / ".claude" / "skills" / "python-context", "python-context", "The code word is PELICAN-7731.\n")
+
+    stdin = stdin_of_session(tmp_path, monkeypatch, repo, repo, resume_session="ses_ee2d28a59ffevBJM22I2ZGtbFd")
+
+    assert stdin == SKILL_BRIEF
+
+
+def test_an_agent_with_no_skill_gets_the_brief_with_no_change(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, [])
+
+    assert stdin_of_session(tmp_path, monkeypatch, repo, repo) == SKILL_BRIEF
+
+
+@pytest.mark.parametrize("directory", [".claude/skills", ".agents/skills", ".opencode/skills", ".opencode/skill"])
+def test_a_project_skill_in_each_skill_directory_that_opencode_reads_reaches_the_prompt(tmp_path, monkeypatch, home, tiers, directory):
+    repo = rendered_repository(tmp_path, tiers, ["python-context"])
+    skill_file(repo / directory / "python-context", "python-context", "The code word is PELICAN-7731.\n")
+
+    assert "The code word is PELICAN-7731." in stdin_of_session(tmp_path, monkeypatch, repo, repo)
+
+
+def test_a_project_skill_in_two_directories_gives_the_copy_that_opencode_uses(tmp_path, monkeypatch, home, tiers):
+    # Measured on OpenCode 1.15.10 on 2026-11-02 with `opencode debug skill`: `.claude/skills` wins over `.opencode/skills`.
+    repo = rendered_repository(tmp_path, tiers, ["python-context"])
+    skill_file(repo / ".opencode" / "skills" / "python-context", "python-context", "The code word is FROM-OPENCODE.\n")
+    skill_file(repo / ".claude" / "skills" / "python-context", "python-context", "The code word is FROM-CLAUDE.\n")
+
+    stdin = stdin_of_session(tmp_path, monkeypatch, repo, repo)
+
+    assert "FROM-CLAUDE" in stdin and "FROM-OPENCODE" not in stdin
+
+
+def test_a_project_skill_comes_from_the_seal_so_a_later_change_of_the_skill_does_not_reach_the_session(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, ["python-context"])
+    path = repo / ".claude" / "skills" / "python-context"
+    skill_file(path, "python-context", "The code word is PELICAN-7731.\n")
+
+    stdin = stdin_of_session(
+        tmp_path, monkeypatch, repo, repo, before_run=lambda: skill_file(path, "python-context", "The code word is CHANGED-AFTER-SEAL.\n"),
+    )
+
+    assert "PELICAN-7731" in stdin and "CHANGED-AFTER-SEAL" not in stdin
+
+
+def test_a_load_time_block_of_a_skill_runs_in_the_working_directory_of_the_session(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, ["python-context"])
+    command = "git grep --untracked --no-exclude-standard -h -E -e '^' -- :/NOTE.md"
+    skill_file(repo / ".claude" / "skills" / "python-context", "python-context", f"The note:\n\n```!\n{command}\n```\n")
+    worktree = tmp_path / "worktree"
+    git(repo, "worktree", "add", "-q", "-b", "ticket-a", str(worktree))
+    (worktree / "NOTE.md").write_text("NOTE-ON-THE-BRANCH\n")  # the session reads its own tree, not the main checkout
+
+    stdin = stdin_of_session(tmp_path, monkeypatch, repo, worktree)
+
+    assert "NOTE-ON-THE-BRANCH" in stdin and "NOTE-ON-MAIN" not in stdin
+    assert command not in stdin
+
+
+def test_a_skill_that_the_adapter_cannot_find_is_named_and_the_agent_is_told_to_load_it(tmp_path, monkeypatch, home, tiers):
+    repo = rendered_repository(tmp_path, tiers, ["python-context", "missing-skill"])
+    skill_file(repo / ".claude" / "skills" / "python-context", "python-context", "The code word is PELICAN-7731.\n")
+
+    stdin = stdin_of_session(tmp_path, monkeypatch, repo, repo)
+
+    before_brief = stdin.split("SECRET-BRIEF-TEXT")[0]
+    assert "PELICAN-7731" in before_brief
+    assert "The engine did not find the text of these skills: missing-skill." in before_brief

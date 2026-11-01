@@ -54,13 +54,22 @@ The agent gets:
 
 - **MCP servers**: the servers of its [**stack**](../glossary.md#stack), and also the MCP servers of the user and of the project. A stack names its servers in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)). The adapter writes them in the `mcp` field of the inline configuration `OPENCODE_CONFIG_CONTENT`: a local server as `type` `local` and `command`, a remote server as `type` `remote` and `url`. The harness merges that configuration with its other configuration. When the environment of the engine already holds `OPENCODE_CONFIG_CONTENT`, the adapter keeps its fields and adds the servers. When it is not a JSON object, the adapter raises `AdapterError`.
 - **Tools and permissions**: the tools and the permission map of the sealed agent. The adapter removes no tool.
-- [**Skills**](../glossary.md#skill): every skill that the harness finds. The agent loads the skills of its definition with the skill tool.
+- [**Skills**](../glossary.md#skill): every skill that the harness finds. The prompt of a new session holds the text of each skill of its definition. See [the skills of the agent](#the-skills-of-the-agent).
 
 The harness gives no way to start an agent without the MCP servers of the user and of the project. Measured on OpenCode 1.15.10 on 2026-10-18: `opencode --help` and `opencode run --help` show no MCP option, and `--pure` removes only the external plugins. The configuration can turn off a server only by its name, and the adapter does not know the names of the servers of the user. With `OPENCODE_CONFIG_CONTENT` that named one server, `opencode mcp list` listed that server and the three servers of the user.
 
 The harness also gives no option that loads only the skills of the agent definition. The skills of an agent definition are in the same skill directories as the other skills, so a variable that turns off a skill directory also removes the skills of the agent. The adapter sets none.
 
-The harness does not preload a skill for the agent of `opencode run`. Measured on OpenCode 1.15.10 on 2026-11-01 (#215), with a `qwen` model of a [**gateway**](../glossary.md#gateway) and a project skill that holds a code word: `opencode run --format json --model <model> --agent <agent> --dir <directory>` with the question on standard input gave `UNKNOWN`, and a prompt that starts with the line `/<skill>` gave `UNKNOWN`. With `--command <skill>`, the agent stated the code word with no tool call, but the option takes one skill only. A rendered OpenCode agent lists its skills only in its body, which tells the agent to load them with the skill tool, so the adapter puts no skill text in the prompt. That is a limit: on OpenCode, the agent loads its skills with a tool call, and the engine does not check that it did.
+### The skills of the agent
+
+The harness does not preload a skill for the agent of `opencode run`. Measured on OpenCode 1.15.10 on 2026-11-01 (#215), with a `qwen` model of a [**gateway**](../glossary.md#gateway) and a project skill that holds a code word: `opencode run --format json --model <model> --agent <agent> --dir <directory>` with the question on standard input gave `UNKNOWN`, and a prompt that starts with the line `/<skill>` gave `UNKNOWN`. With `--command <skill>`, the agent stated the code word with no tool call, but the option takes one skill only. So the adapter puts the text of each skill of the agent at the start of the prompt of a new session, before the [**brief**](../glossary.md#brief), as the [`claude-code` adapter](claude-code-adapter.md#the-skills-of-the-agent) does, with the same helper (#234):
+
+- **The list of skills.** A rendered OpenCode agent has no `skills` field. Its body lists the skills in the sentence "load each of these with the skill tool: <skill>, <skill>.", and the adapter reads the list from that sentence of the sealed `prompt`. A body with no such sentence, or with the list `none declared`, gives no skill, and the prompt is the brief with no change.
+- **Where the adapter finds a skill.** When it seals the agent, the adapter copies each skill of the list that the main checkout holds into `skills/<skill>/` of the seal directory. It looks in `.claude/skills/`, `.agents/skills/`, `.opencode/skills/` and `.opencode/skill/`, in this order: measured with `opencode debug skill` on OpenCode 1.15.10 on 2026-11-02, the harness finds a skill in each of these directories, and with a skill of the same name in more than one, it uses the first of this order. A skill that the seal does not hold comes from the user directory: `~/.claude/skills/`, `~/.agents/skills/`, `~/.config/opencode/skills/` or `~/.config/opencode/skill/`, the first that holds `<skill>/SKILL.md`. A skill that the adapter does not find is named in a line that tells the agent to load it with the skill tool.
+- **The prompt and the load-time blocks.** The prompt and the load-time blocks are as for the `claude-code` adapter: see [the skills of the agent of that adapter](claude-code-adapter.md#the-skills-of-the-agent). Each plain load-time block runs in the working directory of the session.
+- **A resumed session.** A [**continuation**](../glossary.md#continuation) with `--session` gets the brief only, because the session has the skills already.
+
+The skill text is read when the session starts. A project skill comes from the seal, so a change of the skill in the main checkout after the seal, or in a tree, does not reach the session. The engine hashes each file of the seal, also the copied skills, before each session. The body of a rendered OpenCode agent still tells the agent to load its skills with the skill tool, and the prompt tells it that the text is there already.
 
 ## The model
 
@@ -78,11 +87,13 @@ An agent session of a run starts only from the [**sealed agent**](../glossary.md
 - `mode`, always `all`, whatever the file says (see [the mode of the agent](#the-mode-of-the-agent));
 - `prompt`, the body of the agent file.
 
+The seal directory also holds `skills/<skill>/`, a copy of each project skill that the body of the agent lists (see [the skills of the agent](#the-skills-of-the-agent)).
+
 The handle of the sealed agent is the agent name. A file with no usable frontmatter is not sealed: the adapter raises `AdapterError` that names the file.
 
 For the session, the adapter gives that configuration to the harness in `OPENCODE_CONFIG_CONTENT`, the variable that also holds the MCP servers (see [what the agent gets](#what-the-agent-gets)). The configuration of the variable keeps its other fields, its own servers, and its other agents. The sealed agent replaces an agent of the same name in it. Measured with `opencode debug agent` on OpenCode 1.15.10 (#213): the `prompt` of an agent in that variable replaces the prompt of a project agent of the same name in the tree, and its `permission` rules come after the rules of the agent file of the tree and of the `opencode.json` of the tree. So the tree does not change the instructions of the sealed agent, and the sealed rules win a conflict.
 
-The engine hashes the file of the seal before each session, and a difference fails the [**step**](../glossary.md#step). The seal is of the agent file as it is when the run starts, so a later change of the agent file in the main checkout or in a tree does not reach the session.
+The engine hashes each file of the seal before each session, and a difference fails the [**step**](../glossary.md#step). The seal is of the agent file as it is when the run starts, so a later change of the agent file in the main checkout or in a tree does not reach the session.
 
 The command names the agent with the handle, `--agent <handle>`. A request that has no sealed agent names the agent as it is, and the harness finds the agent file itself. The engine seals each agent that has a file, so this case is a test or a harness with no file.
 
@@ -163,7 +174,7 @@ Each form of `delegate status`, and the [live view](status-and-watch.md#the-live
 
 ## The resume
 
-The adapter has `supports_resume` set to true. For a continuation, the engine sets `resume_session` in the request, and the adapter adds `--session <session id>`. The session keeps its first context. The result has the same session id.
+The adapter has `supports_resume` set to true. For a continuation, the engine sets `resume_session` in the request, and the adapter adds `--session <session id>`. The session keeps its first context. The result has the same session id. The prompt of a resumed session holds no skill text (see [the skills of the agent](#the-skills-of-the-agent)).
 
 ## The start failure
 

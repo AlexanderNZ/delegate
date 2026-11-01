@@ -20,6 +20,13 @@ of the permission map in a live session was not measured (no model answered), so
 warning on standard error, runs its default agent, and exits 0. The adapter reads that warning and ends the session as
 failed, with a reason that names the agent.
 
+The harness does not preload a skill for the agent of `opencode run` (measured on 1.15.10, #215). A rendered OpenCode
+agent lists its skills only in its body, in the sentence that tells the agent to load them with the skill tool. So `seal`
+copies each project skill of that list from the main checkout into `skills/<skill>/` of the seal directory, and the
+prompt of a new session starts with the text of each skill of the list, with each plain load-time block run in the
+working directory of the session (see `skill_text.py`, #234). A skill that the seal does not hold comes from the user
+directory. A resumed session gets the brief only.
+
 The adapter does not give the `added_directories` of the request to the
 session: OpenCode 1.15.10 has no option that adds a directory to a session, and
 the `bash` map of a rendered verifier has no `cd` rule (#153).
@@ -43,10 +50,12 @@ no `cache` field has no cache reads and no cache writes.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +66,7 @@ from ..ports.harness import (
 )
 from .environment import process_environment
 from .process import run_harness
+from .skill_text import Skill, with_skills
 from .streams import read_events
 
 # The command that starts the harness.
@@ -81,6 +91,26 @@ CONFIG_VARIABLE: str = "OPENCODE_CONFIG_CONTENT"
 NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
 
 
+# The sentence of a rendered OpenCode agent that lists its skills (the templates `opencode-specialist.md` and
+# `opencode-verifier.md`). The renderer writes NO_SKILL in place of the list for an agent with no skill.
+SKILL_LIST = re.compile(r"load each of these with the skill tool: (?P<names>[^\n]*?)\.(?:\s|$)")
+NO_SKILL: str = "none declared"
+
+# A skill name that the adapter looks for in a skill directory: one directory name.
+SKILL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+# The directories where the harness finds a skill `<directory>/<skill>/SKILL.md`, in the order that wins when two hold a
+# skill of the same name. Measured on OpenCode 1.15.10 on 2026-11-02 with `opencode debug skill` (#234) for the project.
+PROJECT_SKILL_DIRECTORIES: tuple[Path, ...] = (
+    Path(".claude") / "skills", Path(".agents") / "skills", Path(".opencode") / "skills", Path(".opencode") / "skill",
+)
+USER_SKILL_DIRECTORIES: tuple[Path, ...] = (
+    Path(".claude") / "skills", Path(".agents") / "skills", Path(".config") / "opencode" / "skills", Path(".config") / "opencode" / "skill",
+)
+
+# The directory of the seal that holds a copy of each project skill of the agent.
+SEAL_SKILL_DIRECTORY: str = "skills"
+
 # The warning of the harness when it runs another agent than the one that `--agent` names. The text before `Falling back`
 # says why: the agent is a subagent, or the harness did not find it (the adapter checks that case first).
 FALL_BACK_WARNING = re.compile(r'agent "(?P<name>[^"\n]*)"[^\n]*Falling back to default agent')
@@ -98,6 +128,28 @@ def _sealed_entry(sealed: SealedAgent) -> dict[str, object]:
     if not isinstance(entry, dict):
         raise AdapterError(f"the sealed file {path} holds no entry of agent {sealed.agent!r}")
     return entry
+
+
+def _skill_names(body: str) -> list[str]:
+    """The skills that the body of a rendered OpenCode agent lists, in its order. An empty list when the body lists none."""
+    found = SKILL_LIST.search(body)
+    if found is None or found["names"].strip() == NO_SKILL:
+        return []
+    return [name.strip() for name in found["names"].split(",") if name.strip()]
+
+
+def _found_skill(name: str, roots: list[Path]) -> Path | None:
+    """The first directory `<root>/<name>` of `roots` that holds a `SKILL.md`, or None."""
+    if not SKILL_NAME.fullmatch(name):
+        return None
+    return next((root / name for root in roots if (root / name / "SKILL.md").is_file()), None)
+
+
+def _skills_of(sealed: SealedAgent) -> list[Skill]:
+    """Each skill that the sealed agent lists, in its order, with its directory: the copy in the seal, else the user directory."""
+    prompt = _sealed_entry(sealed).get("prompt")
+    roots = [sealed.directory / SEAL_SKILL_DIRECTORY, *(Path.home() / directory for directory in USER_SKILL_DIRECTORIES)]
+    return [Skill(name, _found_skill(name, roots)) for name in _skill_names(prompt if isinstance(prompt, str) else "")]
 
 
 def _environment(servers: tuple[McpServer, ...], sealed: SealedAgent | None = None) -> dict[str, str]:
@@ -195,7 +247,12 @@ class OpenCodeAdapter:
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
-        process = run_harness(command, request, env=_environment(request.mcp_servers, sealed))
+        env = _environment(request.mcp_servers, sealed)
+        if request.resume_session is None and sealed is not None:
+            # The harness does not preload the skills of the agent (#215, #234). A resumed session has them already.
+            prompt = with_skills(request.prompt, _skills_of(sealed), request.cwd, {**env, **request.environment})
+            request = dataclasses.replace(request, prompt=prompt)
+        process = run_harness(command, request, env=env)
         # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
         if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
@@ -242,7 +299,8 @@ class OpenCodeAdapter:
         """Write the agent file of `agent` for `source` as an OpenCode configuration in `into`. The handle is the agent name.
 
         The file is `<agent>.json`: the entry of `agent` holds the frontmatter of the agent file with `mode: all`, and the
-        body of the file as `prompt`. None when there is no agent file. Raise AdapterError when the file has no usable frontmatter.
+        body of the file as `prompt`. Each skill that the body lists and that a project skill directory of `source`
+        holds is copied to `skills/<skill>/`. None when there is no agent file. Raise AdapterError when the file has no usable frontmatter.
         """
         found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
@@ -257,7 +315,14 @@ class OpenCodeAdapter:
         sealed = into / f"{agent}.json"
         configuration = {"agent": {agent: {**frontmatter, "mode": "all", "prompt": body.strip()}}}
         sealed.write_text(json.dumps(configuration, indent=2) + "\n")
-        return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),), found)
+        skills = into / SEAL_SKILL_DIRECTORY
+        shutil.rmtree(skills, ignore_errors=True)
+        for name in _skill_names(body):
+            project = _found_skill(name, [source / directory for directory in PROJECT_SKILL_DIRECTORIES])
+            if project is not None:
+                shutil.copytree(project, skills / name)
+        paths = [sealed, *(sorted(path for path in skills.rglob("*") if path.is_file()) if skills.is_dir() else [])]
+        return SealedAgent(agent, agent, into, tuple(SealedFile(path, hashlib.sha256(path.read_bytes()).hexdigest()) for path in paths), found)
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None:
         """Resolve `command` against the `permission.bash` map of the sealed configuration with the matcher of the validator.
