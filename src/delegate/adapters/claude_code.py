@@ -11,7 +11,8 @@ gets only the MCP servers of its stack: none, or the servers that
 a permission mode: `DELEGATE_AGENT_SETTINGS` adds `--settings <path>`, and
 `DELEGATE_PERMISSION_MODE` adds `--permission-mode <mode>`. With neither set, the
 command does not change. An error tool result that says that a permission mode
-refused a tool goes into `refused` of the result. The prompt goes on standard input, never in
+refused a tool goes into `refused` of the result, and the command and the text of each error result of a `Bash` call
+go into `command_errors`. The prompt goes on standard input, never in
 argv, so a long brief meets no argument limit and shows in no process list. The
 harness writes one JSON event on each line of standard output. The adapter
 copies that stream to the file that the request names, and reads the final
@@ -123,6 +124,9 @@ FOREGROUND_ENVIRONMENT: dict[str, str] = {"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"
 SETTINGS_VARIABLE: str = "DELEGATE_AGENT_SETTINGS"
 PERMISSION_MODE_VARIABLE: str = "DELEGATE_PERMISSION_MODE"
 
+# The name of the shell tool of the harness.
+SHELL_TOOL: str = "Bash"
+
 # The text of a tool result when a permission mode refused the tool, as Claude Code wrote it on 2026-10-18.
 REFUSAL = re.compile(r"Permission to use (\S+) has been denied because Claude Code is running in (.+?) mode")
 
@@ -199,15 +203,45 @@ def _refusals(event: dict[str, object]) -> list[tuple[str, str]]:
     for block in message["content"]:
         if not isinstance(block, dict) or block.get("type") != "tool_result" or block.get("is_error") is not True:
             continue
-        content = block.get("content")
-        if isinstance(content, str):
-            texts = [content]
-        elif isinstance(content, list):
-            texts = [str(part.get("text", "")) for part in content if isinstance(part, dict)]
-        else:
-            texts = []
-        found += [(match.group(1), match.group(2)) for text in texts for match in REFUSAL.finditer(text)]
+        found += [(match.group(1), match.group(2)) for text in _texts_of(block) for match in REFUSAL.finditer(text)]
     return found
+
+
+def _texts_of(block: dict[str, object]) -> list[str]:
+    """The texts of a `tool_result` block: its content as one string, or the `text` of each part of its content."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return [content]
+    if isinstance(content, list):
+        return [str(part.get("text", "")) for part in content if isinstance(part, dict)]
+    return []
+
+
+def _blocks(event: dict[str, object], role: str, kind: str) -> list[dict[str, object]]:
+    """The content blocks of type `kind` in an event of type `role` (`assistant` or `user`)."""
+    message = event.get("message")
+    if event.get("type") != role or not isinstance(message, dict) or not isinstance(message.get("content"), list):
+        return []
+    return [block for block in message["content"] if isinstance(block, dict) and block.get("type") == kind]
+
+
+def _command_errors(events: list[dict[str, object]]) -> tuple[tuple[str, str], ...]:
+    """The (command, text) pair of each `Bash` tool call whose tool result is an error, in the order of the results.
+
+    A result goes with the call whose `id` is its `tool_use_id`. A result with no such call is not in the pairs.
+    """
+    commands: dict[str, str] = {}
+    found: list[tuple[str, str]] = []
+    for event in events:
+        for block in _blocks(event, "assistant", "tool_use"):
+            tool_input = block.get("input")
+            if block.get("name") == SHELL_TOOL and isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str):
+                commands[str(block.get("id"))] = tool_input["command"]
+        for block in _blocks(event, "user", "tool_result"):
+            call = str(block.get("tool_use_id"))
+            if block.get("is_error") is True and call in commands:
+                found.append((commands[call], "\n".join(_texts_of(block))))
+    return tuple(found)
 
 
 def _end_state(result: dict[str, object]) -> str:
@@ -277,10 +311,11 @@ class ClaudeCodeAdapter:
             return AdapterResult(
                 process.returncode, FAILED, None, stream, refused=tuple(refused), final_text=final_text,
                 ended_timeout=process.ended_timeout, reason=f"the harness did not load the sealed agent {sealed.handle}",
+                command_errors=_command_errors(events),
             )
         return AdapterResult(
             process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
-            ended_timeout=process.ended_timeout,
+            ended_timeout=process.ended_timeout, command_errors=_command_errors(events),
         )
 
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:

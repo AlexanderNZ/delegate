@@ -111,7 +111,7 @@ The command uses `--setting-sources user --plugin-dir <seal directory> --agent <
 
 ### The guard probe
 
-The adapter has `probes_guard`, so the engine runs [the guard probe](run.md#the-guard-probe) of each verifier with it. The probe session uses the same command as any session: `--setting-sources user --plugin-dir <seal directory> --agent <handle>`, with the model of the [**tier**](../glossary.md#tier) `cheap`. The working directory is a temporary git repository outside the repository under review. The guard of the sealed verifier must deny the command `touch delegate-guard-probe`. A host whose permission mode refuses the Bash tool gives `inconclusive`, because the guard did not decide.
+The adapter has `probes_guard`, so the engine runs [the guard probe](run.md#the-guard-probe) of each verifier with it. The probe session uses the same command as any session: `--setting-sources user --plugin-dir <seal directory> --agent <handle>`, with the model of the [**tier**](../glossary.md#tier) `cheap`. The working directory is a temporary git repository outside the repository under review. The guard of the sealed verifier must deny the command `touch delegate-guard-probe`. The adapter gives the engine the command and the text of each `Bash` call whose `tool_result` has `is_error` true, in `command_errors` of the result: a `tool_result` goes with the `tool_use` whose `id` is its `tool_use_id`. The probe is `denied` only when one of them is the probe command with a text of a denial. A final text that tells of a denial, with no such call, gives `inconclusive`. A host whose permission mode refuses the Bash tool gives `inconclusive`, because the guard did not decide.
 
 ### The instructions of the repository
 

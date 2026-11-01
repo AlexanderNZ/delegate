@@ -289,11 +289,17 @@ def result_line(text: str) -> str:
     return json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": text, "session_id": "s"})
 
 
-def tool_line(text: str, is_error: bool = True) -> str:
-    block = {"type": "tool_result", "tool_use_id": "t", "is_error": is_error, "content": text}
+def call_line(command: str, tool: str = "Bash", call: str = "t") -> str:
+    block = {"type": "tool_use", "id": call, "name": tool, "input": {"command": command}}
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [block]}, "session_id": "s"})
+
+
+def tool_line(text: str, is_error: bool = True, call: str = "t") -> str:
+    block = {"type": "tool_result", "tool_use_id": call, "is_error": is_error, "content": text}
     return json.dumps({"type": "user", "message": {"role": "user", "content": [block]}, "session_id": "s"})
 
 
+PROBE = "touch delegate-guard-probe"
 REFUSED_BY_MODE = "Permission to use Bash has been denied because Claude Code is running in dontAsk mode"
 RATE_LIMIT = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "overageStatus": "rejected"}})
 
@@ -301,14 +307,22 @@ RATE_LIMIT = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"status
 @pytest.mark.parametrize(
     "lines, result",
     [
-        # The final text does not say it, but a line of the stream does: the tool result names the file and the denial.
-        ([tool_line("hook error: the command [touch delegate-guard-probe] is not permitted"), result_line("Done.")], "denied"),
-        # The agent gives the error of the tool in its final text, and the stream names no file.
-        ([result_line("The tool says: the command is not permitted.")], "denied"),
+        # The session called the tool with the probe command, and the guard gave an error result. The final text does not say it.
+        ([call_line(PROBE), tool_line(f"hook error: the command [{PROBE}] is not permitted"), result_line("Done.")], "denied"),
+        # The agent writes a denial in its final text, and it did not call the tool. A model can decline the command.
+        ([result_line("The tool says: the command is not permitted.")], "inconclusive"),
+        # A tool result names the file and the denial, and no tool call of the probe command goes with it.
+        ([tool_line(f"hook error: the command [{PROBE}] is not permitted"), result_line("Done.")], "inconclusive"),
+        # The guard denied another command, and the final text tells of a denial.
+        ([call_line("touch other-file"), tool_line("hook error: [touch other-file] is not permitted"), result_line("Denied.")], "inconclusive"),
+        # The probe command ran with no error, and the final text tells of a denial.
+        ([call_line(PROBE), tool_line("", is_error=False), result_line("The command was denied.")], "inconclusive"),
+        # The probe command gave an error that is no denial.
+        ([call_line(PROBE), tool_line("touch: no space left on device"), result_line("It did not work.")], "inconclusive"),
         # The stream holds a field that looks like a denial, and the session never tried the command.
         ([RATE_LIMIT, result_line("I did not try the command.")], "inconclusive"),
         # A permission mode of the host refused the tool, so the guard did not decide.
-        ([tool_line(f"{REFUSED_BY_MODE} [touch delegate-guard-probe]"), result_line("The tool was denied.")], "inconclusive"),
+        ([call_line(PROBE), tool_line(f"{REFUSED_BY_MODE} [{PROBE}]"), result_line("The tool was denied.")], "inconclusive"),
         # The session ended with an error of the API.
         ([json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "denied", "session_id": "s"})], "inconclusive"),
     ],

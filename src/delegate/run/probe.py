@@ -9,12 +9,14 @@ brief asks for one command, `touch delegate-guard-probe`, which the guard must d
 The engine decides from facts, not from the opinion of the agent:
 
 - `ran`: the file `delegate-guard-probe` exists after the session. The guard did not stop the command.
-- `denied`: the file does not exist, the session ended `finished` with no permission-mode refusal, and the event stream or
-  the final text shows a denial of the command: a line of the stream that names the file and holds a word of `DENIAL`, or a
-  final text that holds such a word. The stream alone is not searched for a word, because a stream holds fields that look
-  like a denial (the rate-limit event of Claude Code has `"overageStatus":"rejected"`).
-- `inconclusive`: any other result, for example a session that did not try the command, that ended `failed`, that ran past
-  its time limit, or that a permission mode of the host refused (then the guard did not decide).
+- `denied`: the file does not exist, the session ended `finished` with no permission-mode refusal, and the event stream
+  shows that the guard denied the command: a call of the shell tool with the probe command whose tool result is an error
+  that holds a word of `DENIAL` (`AdapterResult.command_errors`). The final text does not count, because a model can decline
+  to call the tool and write "not permitted". A line of the stream with no such call does not count, because a stream holds
+  fields that look like a denial (the rate-limit event of Claude Code has `"overageStatus":"rejected"`).
+- `inconclusive`: any other result, for example a session that did not call the tool with the command, whose final text
+  alone tells of a denial, that ended `failed`, that ran past its time limit, or that a permission mode of the host refused
+  (then the guard did not decide).
 
 The module asks the port for the repository and the adapter for the session. It starts no process itself. `delegate.cli`
 uses it for the dry run, and the engine uses it at the start of a run.
@@ -86,21 +88,14 @@ def stream_path(run_directory: Path, agent: str) -> Path:
     return path
 
 
-def _text_of(path: Path) -> str:
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return ""
-
-
 def _result_of(session: AdapterResult, file_exists: bool) -> str:
     """The result that the facts of the session give: `ran`, `denied` or `inconclusive`."""
     if file_exists:
         return RAN
     if session.end_state != FINISHED or session.ended_timeout or session.reason is not None or session.refused:
         return INCONCLUSIVE
-    in_stream = any(PROBE_FILE in line and DENIAL.search(line) for line in _text_of(session.event_stream).splitlines())
-    return DENIED if in_stream or DENIAL.search(session.final_text or "") else INCONCLUSIVE
+    guard_denied = any(command.strip() == PROBE_COMMAND and DENIAL.search(text) for command, text in session.command_errors)
+    return DENIED if guard_denied else INCONCLUSIVE
 
 
 def probe_guard(adapter: Adapter, vcs: VersionControl, sealed: SealedAgent, model: str, stream: Path) -> Probe:

@@ -137,7 +137,11 @@ class AdapterResult:
     engine reads a missing verdict from it. `reason` is the text that says why
     the adapter ended the session as failed when the stream does not say it, for
     example that the harness did not load the sealed agent (#217), or `None`. The
-    engine puts it in the reason of the failed step.
+    engine puts it in the reason of the failed step. `command_errors` holds a
+    (command, text) pair for each call of the shell tool whose tool result is an
+    error, in the order of the stream: the command of the call and the text of its
+    result. The guard probe reads a denial from it (#219), and never from the final
+    text, because a model can write a denial and not call the tool.
     """
 
     exit_status: int
@@ -149,6 +153,7 @@ class AdapterResult:
     final_text: str | None = None
     ended_timeout: bool = False
     reason: str | None = None
+    command_errors: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.end_state not in END_STATES:
