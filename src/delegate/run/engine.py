@@ -154,7 +154,7 @@ import secrets
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -353,6 +353,12 @@ def _head(vcs: VersionControl, worktree: Path) -> str:
     """The id of the commit that the worktree has checked out."""
     with _vcs_errors():
         return vcs.head_commit(worktree)
+
+
+def _worktree_environment(vcs: VersionControl, worktree: Path) -> dict[str, str]:
+    """The environment entries that carry the settings of the worktree (the push guard, the file watcher off) to a process of its ticket (#221)."""
+    with _vcs_errors():
+        return vcs.worktree_environment(worktree)
 
 
 def _commit_lines(vcs: VersionControl, path: Path, since: str, until: str | None = None) -> list[str]:
@@ -1726,13 +1732,17 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
 def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
     report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
-    sealed: SealedAgent | None = None,
+    sealed: SealedAgent | None = None, environment: Mapping[str, str] | None = None,
 ) -> AdapterRequest:
-    """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack."""
+    """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack.
+
+    `environment` holds the entries of the worktree of the ticket (see `_worktree_environment`).
+    """
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
         added_directories=added_directories, agent_timeout=_seconds(stack.agent_timeout), sealed=sealed,
+        environment=dict(environment or {}),
     )
 
 
@@ -1854,11 +1864,11 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
 
 
 def _run_prepare(
-    gates: GateRunner, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int
+    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int
 ) -> None:
     """Run the `prepare` commands of `stack` in `path`, in order, through the gate runner (#155).
 
-    `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A git tree holds no ignored
+    `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A command in the worktree gets the entries of the worktree (#221). A git tree holds no ignored
     file, so a stack that needs installed dependencies names the commands that
     install them. The engine runs them itself, with the environment of a gate,
     before an agent starts in the tree. The journal records `prepare-start` and
@@ -1867,16 +1877,18 @@ def _run_prepare(
     `_StepFailed` with the reason `prepare failed: <command>`, and run no later command.
     """
     fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
+    # The verifier copy is a repository of its own, which holds its settings itself.
+    environment = _worktree_environment(vcs, path) if tree == TREE_WORKTREE else None
     for command in stack.prepare:
         log = _gate_log_path(journal, ticket, f"prepare-{tree}", round_number)
         journal.append("prepare-start", **fields, command=command, prepare_log=str(log))
-        result = gates.run(command, path, log=log)
+        result = gates.run(command, path, log=log, environment=environment)
         journal.append("prepare-result", **fields, command=command, exit_status=result.exit_status, prepare_log=str(log))
         if not result.green:
             raise _StepFailed(f"prepare failed: {command}")
 
 
-def _prepare_ticket_worktree(gates: GateRunner, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool) -> None:
+def _prepare_ticket_worktree(gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool) -> None:
     """Run the `prepare` commands of `stack` in the worktree of `ticket` when it needs them. Raise `_StepFailed` when one fails.
 
     The worktree needs them when the engine made it now (`made`), or when the
@@ -1893,7 +1905,7 @@ def _prepare_ticket_worktree(gates: GateRunner, journal: Journal, stack: Stack, 
                 last = event
         if last is not None and last["event"] == "prepare-result" and last["exit_status"] == 0 and last["command"] == stack.prepare[-1]:
             return
-    _run_prepare(gates, journal, stack, ticket, TREE_WORKTREE, worktree, 0)
+    _run_prepare(gates, vcs, journal, stack, ticket, TREE_WORKTREE, worktree, 0)
 
 
 def _build_ticket(
@@ -1964,7 +1976,7 @@ def _build_ticket(
         if rebases:
             rebased_onto = str(rebases[-1]["onto_commit"])
     try:
-        _prepare_ticket_worktree(gates, journal, stack, ticket.id, worktree, made)
+        _prepare_ticket_worktree(gates, vcs, journal, stack, ticket.id, worktree, made)
     except _StepFailed as failed:
         return str(failed)
     # The commits of a ticket are the commits beyond the point where its branch started, or, after a rebase,
@@ -2070,7 +2082,10 @@ def _build_with_continuations(
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
             result = _run_agent(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
-                _request(stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed),
+                _request(
+                    stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed,
+                    environment=_worktree_environment(vcs, worktree),
+                ),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             _journal_timeout(journal, result, stack, ticket.id, ROLE_SPECIALIST, 0)
@@ -2416,7 +2431,10 @@ def _run_fixup(
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     result = _run_agent(
         step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
-        _request(step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed),
+        _request(
+            step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed,
+            environment=_worktree_environment(step.vcs, step.worktree),
+        ),
     )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     _journal_timeout(step.journal, result, step.stack, ticket.id, ROLE_FIXUP, round_number)
@@ -2571,7 +2589,7 @@ def _verify_round(
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
-        _run_prepare(step.gates, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
+        _run_prepare(step.gates, step.vcs, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
         sealed = _check_agent_file(step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number)
         added = _make_proof_copy(copy)
         # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
@@ -2589,7 +2607,7 @@ def _verify_round(
             step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
             _request(
                 step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added,
-                sealed=sealed,
+                sealed=sealed, environment=_worktree_environment(step.vcs, step.worktree),
             ),
         )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
@@ -2738,7 +2756,7 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
     made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
-        _prepare_ticket_worktree(step.gates, step.journal, step.stack, ticket.id, step.worktree, made)
+        _prepare_ticket_worktree(step.gates, step.vcs, step.journal, step.stack, ticket.id, step.worktree, made)
         if plan.phase == RETRY_FIXUP:
             # The branch holds no fix-up commit: the stop came before the fix-up session. Run that fix-up again.
             if plan.rejected is None or not fixup_held:
@@ -3175,7 +3193,7 @@ def _run_gate_with_output(
     _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{command}` of ticket {ticket}", command=command, phase=phase)
     log = _gate_log_path(journal, ticket, phase, round_number)
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log))
-    result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout))
+    result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout), environment=_worktree_environment(vcs, worktree))
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
     if result.timed_out:
         output += f"\n[delegate: the gate ran past the gate-timeout of {_minutes_text(gate_timeout)} minutes, and the engine ended it]\n"

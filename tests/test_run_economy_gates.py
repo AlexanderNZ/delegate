@@ -59,9 +59,9 @@ class SpyGates:
         self.adapter = adapter
         self.calls: list[tuple[str, str, int]] = []
 
-    def run(self, command, worktree, log=None, timeout=None):
+    def run(self, command, worktree, log=None, timeout=None, environment=None):
         self.calls.append((command, worktree.name, len(self.adapter.verifier_calls)))
-        return ShellGateRunner().run(command, worktree, log=log, timeout=timeout)
+        return ShellGateRunner().run(command, worktree, log=log, timeout=timeout, environment=environment)
 
 
 def start_run(repo, adapter, gates):

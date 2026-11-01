@@ -12,14 +12,29 @@ which no other directory shares.
 
 A worktree gets its settings (`core.fsmonitor=false`, and the `core.hooksPath`
 of the push guard) in a file of its own, `delegate.config` in the git directory
-of the worktree (`.git/worktrees/<name>/`). The configuration of the repository
-includes that file with an `includeIf "gitdir:<git directory of the worktree>"`
-section, so git reads the file in that worktree only. The backend does not set
-`extensions.worktreeConfig`, because tools that use go-git, such as `tea`,
-refuse a repository with that extension (issue #84). Git ignores an include
-whose file is missing, so the settings go when the worktree goes. The backend
-removes the section of a worktree in `remove_worktree`, and the section of each
-worktree whose file is gone in `ensure_worktree`.
+of the worktree (`.git/worktrees/<name>/`). The backend writes no `includeIf`
+section to the configuration of the repository: Claude Code refuses each
+worktree-isolated agent spawn in a repository whose configuration holds one
+(#221). `worktree_environment` gives the environment entries instead
+(`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>`) that
+include the file with an `includeIf "gitdir:<git directory of the worktree>"`
+condition, so git reads the file in that worktree only. The engine gives the
+entries to each agent session and each gate command of the ticket. The settings
+hold for the processes that the engine starts, and a shell of a person in the
+worktree reads none of them. The entries need git 2.31 or later, the version
+that added `GIT_CONFIG_COUNT`. The backend was tested with git 2.54.0 only.
+
+The git commands of the backend run with `core.fsmonitor=false`, because they
+do not get the entries. The backend does not set `extensions.worktreeConfig`,
+because tools that use go-git, such as `tea`, refuse a repository with that
+extension (issue #84). Git ignores an include whose file is missing, so the
+settings go when the worktree goes.
+
+An earlier version wrote an `includeIf` section for each worktree, with the path
+of its `delegate.config` as the value. `ensure_worktree` and `remove_worktree`
+remove each such section, also when the file exists: the entries of
+`worktree_environment` give the same settings. `prune_worktrees` removes the
+sections whose file went with the worktree. A section of a person stays.
 
 An earlier version set `extensions.worktreeConfig` and wrote the settings to
 the `config.worktree` file of each worktree. `ensure_worktree` moves the
@@ -32,6 +47,7 @@ setting of their own stays.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -43,8 +59,12 @@ _FSMONITOR_STOP_TIMEOUT: int = 30
 
 
 def _run(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in `directory` and return the result, whatever the exit code is."""
-    return subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
+    """Run git in `directory` and return the result, whatever the exit code is.
+
+    The command runs with `core.fsmonitor=false`: a worktree gets its settings through the environment of the processes
+    that the engine starts, and a command of the backend has none of them.
+    """
+    return subprocess.run(["git", "-C", str(directory), "-c", "core.fsmonitor=false", *args], capture_output=True, text=True)
 
 
 def _git_raw(directory: Path, *args: str) -> str:
@@ -80,10 +100,8 @@ def _worktree_git_dir(worktree: Path) -> Path:
 
 
 def _set_worktree_setting(repo: Path, git_dir: Path, key: str, value: str) -> None:
-    """Set `key` for the checkout of `git_dir` alone, through its include file, and leave every other checkout as it was."""
-    include = git_dir / _INCLUDE_NAME
-    _git(repo, "config", "--file", str(include), key, value)
-    _git(repo, "config", "--local", f"includeIf.{_gitdir_pattern(git_dir)}.path", str(include))
+    """Set `key` in the include file of the checkout of `git_dir`. The configuration of the repository stays as it was."""
+    _git(repo, "config", "--file", str(git_dir / _INCLUDE_NAME), key, value)
 
 
 def _entries(file: Path) -> list[tuple[str, str]]:
@@ -92,13 +110,17 @@ def _entries(file: Path) -> list[tuple[str, str]]:
     return [(key, value) for key, _, value in (entry.partition("\n") for entry in out.split("\0") if entry)]
 
 
-def _drop_stale_includes(repo: Path, common: Path) -> None:
-    """Remove each `includeIf` section of this backend whose include file went with its worktree."""
+def _drop_includes(repo: Path, common: Path, *, only_missing: bool) -> None:
+    """Remove each `includeIf` section that an earlier version of this backend wrote to the configuration of the repository.
+
+    Such a section has the value `<git common dir>/worktrees/<name>/delegate.config`. With `only_missing`, a section
+    stays when its file exists. Each other section stays, also one with a file of that name elsewhere.
+    """
     out = _run(repo, "config", "--local", "--null", "--get-regexp", r"^includeif\..*\.path$").stdout
     for entry in filter(None, out.split("\0")):
         key, _, value = entry.partition("\n")
         include = Path(value)
-        if include.name == _INCLUDE_NAME and include.parent.parent == common / "worktrees" and not include.exists():
+        if include.name == _INCLUDE_NAME and include.parent.parent == common / "worktrees" and not (only_missing and include.exists()):
             # The key is `includeif.<condition>.path`, and git keeps the condition as it was written.
             _git(repo, "config", "--local", "--remove-section", "includeIf." + key[len("includeif."):-len(".path")])
 
@@ -183,19 +205,19 @@ class GitVersionControl:
         else:
             _git(repo, "worktree", "prune")
             if self.branch_exists(repo, branch):
-                _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", str(worktree), branch)
+                _git(repo, "worktree", "add", "-q", str(worktree), branch)
             else:
-                _git(repo, "-c", "core.fsmonitor=false", "worktree", "add", "-q", "-b", branch, str(worktree), start)
+                _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), start)
         _set_worktree_setting(repo, _worktree_git_dir(worktree), "core.fsmonitor", "false")
         common = self.shared_data_directory(repo)
         _retire_worktree_extension(repo, common)
-        _drop_stale_includes(repo, common)
+        _drop_includes(repo, common, only_missing=False)
 
     def remove_worktree(self, repo: Path, worktree: Path) -> None:
         worktree = worktree.absolute()
         self.stop_file_watcher(worktree)
         _git(repo, "worktree", "remove", "--force", str(worktree))
-        _drop_stale_includes(repo, self.shared_data_directory(repo))
+        _drop_includes(repo, self.shared_data_directory(repo), only_missing=False)
 
     def delete_branch(self, repo: Path, branch: str, holder: str) -> bool:
         if not self.is_ancestor(repo, f"refs/heads/{branch}", f"refs/heads/{holder}"):
@@ -216,6 +238,7 @@ class GitVersionControl:
 
     def prune_worktrees(self, repo: Path) -> None:
         _git(repo, "worktree", "prune")
+        _drop_includes(repo, self.shared_data_directory(repo), only_missing=True)
 
     def rebase_onto(self, worktree: Path, onto: str) -> RebaseResult:
         rebase = _run(worktree, "rebase", onto)
@@ -259,6 +282,18 @@ class GitVersionControl:
 
     def use_hooks_directory(self, repo: Path, worktree: Path, hooks: Path) -> None:
         _set_worktree_setting(repo, _worktree_git_dir(worktree), "core.hooksPath", str(hooks))
+
+    def worktree_environment(self, worktree: Path) -> dict[str, str]:
+        git_dir = _worktree_git_dir(worktree)
+        text = os.environ.get("GIT_CONFIG_COUNT", "0")
+        if not text.isascii() or not text.isdigit():
+            raise VcsError(f"GIT_CONFIG_COUNT must be a number of entries, not {text!r}")
+        count = int(text)
+        return {
+            "GIT_CONFIG_COUNT": str(count + 1),
+            f"GIT_CONFIG_KEY_{count}": f"includeIf.{_gitdir_pattern(git_dir)}.path",
+            f"GIT_CONFIG_VALUE_{count}": str(git_dir / _INCLUDE_NAME),
+        }
 
     def is_ancestor(self, repo: Path, ancestor: str, descendant: str) -> bool:
         # Exit status 1 means no. Any other failure, such as a name that is no commit, is an error.

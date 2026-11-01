@@ -5,11 +5,13 @@ scripted adapter by name, and calls `delegate.main`. The scripted adapter tries
 the push from inside the worktree, as a specialist in any harness could.
 """
 
+import os
 import subprocess
 
 import pytest
 
 from delegate import adapters
+from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate
 
 from .support import state_dir
@@ -59,7 +61,8 @@ def test_a_push_from_an_engine_worktree_is_refused_and_a_push_from_the_main_chec
 
     def try_to_push(request):
         r = subprocess.run(
-            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True
+            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True,
+            env={**os.environ, **request.environment},
         )
         attempts.append((r.returncode, r.stderr))
 
@@ -106,7 +109,8 @@ def test_a_run_sets_no_worktree_extension_in_the_repository_while_the_push_guard
     def push_and_read_the_extension(request):
         seen.append(worktree_extension(repo))
         r = subprocess.run(
-            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True
+            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True,
+            env={**os.environ, **request.environment},
         )
         seen.append(r.returncode)
 
@@ -132,7 +136,8 @@ def test_the_pre_push_hook_of_the_repository_still_runs_for_a_push_from_the_main
 
     def try_to_push(request):
         r = subprocess.run(
-            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True
+            ["git", "-C", str(request.cwd), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True,
+            env={**os.environ, **request.environment},
         )
         attempts.append(r.returncode)
 
@@ -180,11 +185,18 @@ def test_a_run_removes_the_worktree_extension_that_an_earlier_run_set_and_the_ol
 
     assert (code, err) == (0, "")
     assert worktree_extension(repo) == (1, "")
-    refused = subprocess.run(["git", "-C", str(old), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True)
+    refused = subprocess.run(
+        ["git", "-C", str(old), "push", "origin", "HEAD:refs/heads/stolen"], capture_output=True, text=True,
+        env={**os.environ, **GitVersionControl().worktree_environment(old)},
+    )
     assert refused.returncode != 0
     assert "push refused" in refused.stderr
     assert remote_branches(remote) == []
-    assert git(old, "config", "--get", "core.fsmonitor").strip() == "false"
+    in_old = subprocess.run(
+        ["git", "-C", str(old), "config", "--get", "core.fsmonitor"], capture_output=True, text=True,
+        env={**os.environ, **GitVersionControl().worktree_environment(old)},
+    )
+    assert in_old.stdout.strip() == "false"
     main_push = subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True, text=True)
     assert main_push.returncode == 0, main_push.stderr
 

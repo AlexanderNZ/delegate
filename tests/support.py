@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,13 +60,16 @@ GIT_IDENTITY: dict[str, str] = {
 }
 
 
-def git(repo: Path, *args: str) -> str:
-    """Run one git process in `repo`, and return its stdout. An identity in the environment comes before `GIT_IDENTITY`."""
+def git(repo: Path, *args: str, environment: Mapping[str, str] | None = None) -> str:
+    """Run one git process in `repo`, and return its stdout. An identity in the environment comes before `GIT_IDENTITY`.
+
+    `environment` holds entries added over the environment of the test, for example the settings of an engine worktree.
+    """
     r = subprocess.run(
         ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
         capture_output=True,
         text=True,
-        env={**GIT_IDENTITY, **os.environ},
+        env={**GIT_IDENTITY, **os.environ, **(environment or {})},
     )
     assert r.returncode == 0, (args, r.stdout, r.stderr)
     return r.stdout
@@ -77,15 +80,15 @@ def git(repo: Path, *args: str) -> str:
 COMMIT_SUMMARY = re.compile(r"^\[(?P<branch>\S+)(?: \(root-commit\))? (?P<head>[0-9a-f]{40})\]", re.MULTILINE)
 
 
-def commit_head(repo: Path, *args: str) -> tuple[str, str]:
+def commit_head(repo: Path, *args: str, environment: Mapping[str, str] | None = None) -> tuple[str, str]:
     """Commit in `repo` with the `git commit` arguments `args`, and return the new HEAD and the branch.
 
     The commit and its result are one git process. A summary line that the
     pattern does not match (a detached HEAD) costs one `rev-parse` more.
     """
-    match = COMMIT_SUMMARY.search(git(repo, "-c", "core.abbrev=40", "commit", *args))
+    match = COMMIT_SUMMARY.search(git(repo, "-c", "core.abbrev=40", "commit", *args, environment=environment))
     if match is None:
-        head, branch = git(repo, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()
+        head, branch = git(repo, "rev-parse", "HEAD", "--abbrev-ref", "HEAD", environment=environment).split()
         return head, branch
     return match["head"], match["branch"]
 
@@ -375,13 +378,14 @@ class ScriptedAdapter:
         if files:
             for name, content in files.items():
                 (request.cwd / name).write_text(content)
-            git(request.cwd, "add", "-A")
+            git(request.cwd, "add", "-A", environment=request.environment)
         if is_fixup and self.fixup_amend:
-            head, branch = commit_head(request.cwd, "--amend", "-m", "amended work")
+            head, branch = commit_head(request.cwd, "--amend", "-m", "amended work", environment=request.environment)
         elif (self.fixup_commit if is_fixup else self.commit) and files:
-            head, branch = commit_head(request.cwd, "-m", f"scripted work ({request.agent})")
+            head, branch = commit_head(request.cwd, "-m", f"scripted work ({request.agent})", environment=request.environment)
         else:
-            head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()  # one process for both
+            # One process for both.
+            head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD", environment=request.environment).split()
         before = self._report_check(request)
         role = "fix-up" if is_fixup else "specialist"
         if (self.fixup_write_report if is_fixup else self.write_report):

@@ -37,6 +37,20 @@ def git_status(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
 
 
+def with_entries(vcs: VersionControl, worktree: Path, directory: Path | None = None, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git in `directory` (the worktree by default) with the entries that the port gives for `worktree`, whatever the exit code is."""
+    return subprocess.run(
+        ["git", "-C", str(directory or worktree), *args], capture_output=True, text=True,
+        env={**os.environ, **vcs.worktree_environment(worktree)},
+    )
+
+
+def hooks_with_entries(vcs: VersionControl, worktree: Path, directory: Path) -> Path:
+    """The hooks directory that git reads in `directory` with the entries that the port gives for `worktree`."""
+    out = with_entries(vcs, worktree, directory, "rev-parse", "--path-format=absolute", "--git-path", "hooks").stdout
+    return Path(out.strip()).resolve()
+
+
 def commit(repo: Path, name: str, content: str, message: str) -> str:
     """Write a file in a checkout, commit it, and return the id of the new commit."""
     (repo / name).write_text(content)
@@ -317,7 +331,7 @@ def test_the_worktree_runs_with_fsmonitor_off_when_the_user_turns_it_on(tmp_path
 
     vcs.ensure_worktree(repo, worktree, "feature", "main")
 
-    assert git(worktree, "config", "core.fsmonitor").strip() == "false"
+    assert with_entries(vcs, worktree, None, "config", "core.fsmonitor").stdout.strip() == "false"
     assert git_status(worktree, "fsmonitor--daemon", "status").returncode != 0
 
 
@@ -330,7 +344,7 @@ def test_the_fsmonitor_rule_holds_for_a_worktree_that_is_reused(tmp_path, vcs, m
 
     vcs.ensure_worktree(repo, worktree, "feature", "main")
 
-    assert git(worktree, "config", "core.fsmonitor").strip() == "false"
+    assert with_entries(vcs, worktree, None, "config", "core.fsmonitor").stdout.strip() == "false"
 
 
 def test_the_fsmonitor_setting_of_a_worktree_leaves_the_repository_and_the_user_as_they_were(
@@ -872,8 +886,10 @@ def test_a_worktree_uses_the_hooks_directory_that_was_set_for_it_and_no_other_ch
 
     vcs.use_hooks_directory(repo, worktree, mine)
 
-    assert vcs.hooks_directory(worktree).resolve() == mine.resolve()
-    assert vcs.hooks_directory(repo).resolve() == (repo / ".git" / "hooks").resolve()
+    assert hooks_with_entries(vcs, worktree, worktree) == mine.resolve()
+    assert hooks_with_entries(vcs, worktree, repo) == (repo / ".git" / "hooks").resolve()
+    # Without the entries, the worktree reads the hooks of the repository: a shell of a person gets no guard.
+    assert vcs.hooks_directory(worktree).resolve() == (repo / ".git" / "hooks").resolve()
 
 
 def test_a_hook_in_the_directory_that_was_set_runs_in_the_worktree(tmp_path, vcs):
@@ -889,7 +905,7 @@ def test_a_hook_in_the_directory_that_was_set_runs_in_the_worktree(tmp_path, vcs
     (worktree / "x.txt").write_text("x\n")
     git(worktree, "add", "x.txt")
 
-    refused = git_status(worktree, "commit", "-q", "-m", "x")
+    refused = with_entries(vcs, worktree, None, "commit", "-q", "-m", "x")
 
     assert refused.returncode != 0
 
@@ -904,9 +920,9 @@ def test_the_settings_of_a_worktree_hold_for_it_alone_when_the_path_of_the_repos
 
     vcs.use_hooks_directory(repo, worktree, mine)
 
-    assert vcs.hooks_directory(worktree).resolve() == mine.resolve()
-    assert vcs.hooks_directory(tmp_path / "other").resolve() == (repo / ".git" / "hooks").resolve()
-    assert vcs.hooks_directory(repo).resolve() == (repo / ".git" / "hooks").resolve()
+    assert hooks_with_entries(vcs, worktree, worktree) == mine.resolve()
+    assert hooks_with_entries(vcs, worktree, tmp_path / "other") == (repo / ".git" / "hooks").resolve()
+    assert hooks_with_entries(vcs, worktree, repo) == (repo / ".git" / "hooks").resolve()
 
 
 def test_the_settings_of_a_worktree_need_no_extension_of_the_repository(tmp_path, vcs):
@@ -930,14 +946,14 @@ def test_remove_worktree_leaves_the_configuration_of_the_repository_as_it_was(tm
     hooks.mkdir()
     vcs.ensure_worktree(repo, worktree, "feature", "main")
     vcs.use_hooks_directory(repo, worktree, hooks)
-    assert (repo / ".git" / "config").read_text() != before
+    assert (repo / ".git" / "config").read_text() == before
 
     vcs.remove_worktree(repo, worktree)
 
     assert (repo / ".git" / "config").read_text() == before
 
 
-def test_ensure_worktree_drops_the_settings_of_a_worktree_that_git_removed_and_keeps_an_include_of_a_person(tmp_path, vcs):
+def test_ensure_worktree_drops_the_section_of_a_worktree_that_git_removed_and_keeps_an_include_of_a_person(tmp_path, vcs):
     repo = make_repo(tmp_path)
     person = tmp_path / "person.config"
     person.write_text("[person]\n\tsetting = kept\n")
@@ -945,17 +961,17 @@ def test_ensure_worktree_drops_the_settings_of_a_worktree_that_git_removed_and_k
     git(repo, "config", "include.path", str(tmp_path / "missing.config"))
     gone = tmp_path / "gone"
     vcs.ensure_worktree(repo, gone, "gone", "main")
+    gone_git_dir = Path(git(gone, "rev-parse", "--absolute-git-dir").strip()).resolve()
+    # The section that an earlier version wrote for the worktree.
+    git(repo, "config", f"includeIf.gitdir:{gone_git_dir}.path", str(gone_git_dir / "delegate.config"))
     git(repo, "worktree", "remove", "--force", str(gone))
     worktree = tmp_path / "wt"
 
     vcs.ensure_worktree(repo, worktree, "feature", "main")
 
     includes = git(repo, "config", "--local", "--name-only", "--get-regexp", r"^include").split()
-    assert len(includes) == 3
-    assert "includeif.gitdir:/no/such/place/.path" in includes
-    assert "include.path" in includes
-    assert not any(name.endswith("/gone.path") for name in includes)
-    assert git(worktree, "config", "core.fsmonitor").strip() == "false"
+    assert sorted(includes) == ["include.path", "includeif.gitdir:/no/such/place/.path"]
+    assert with_entries(vcs, worktree, None, "config", "core.fsmonitor").stdout.strip() == "false"
 
 
 def test_setting_the_hooks_directory_of_a_path_that_is_no_worktree_is_an_error(tmp_path, vcs, monkeypatch):

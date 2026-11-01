@@ -18,7 +18,8 @@ A caller can give a time limit (#179). When the command runs longer, the backend
 the output up to that point, and returns a result with `timed_out` set. That result is not green.
 
 The command gets the process environment of `delegate.adapters.environment`,
-the same environment that each agent gets.
+the same environment that each agent gets, with the entries that the caller gives
+added over it (#221): the settings of the worktree.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, BinaryIO
 
@@ -58,7 +60,10 @@ def _text(parts: list[bytes]) -> str:
 class ShellGateRunner:
     """Runs a gate command through `bash -c`."""
 
-    def run(self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None) -> GateResult:
+    def run(
+        self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> GateResult:
         out: list[bytes] = []
         err: list[bytes] = []
         lock = threading.Lock()
@@ -66,7 +71,7 @@ class ShellGateRunner:
         try:
             process = subprocess.Popen(
                 ["bash", "-c", command], cwd=worktree, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                env=process_environment(), start_new_session=True,
+                env={**process_environment(), **(environment or {})}, start_new_session=True,
             )
             try:
                 readers = [

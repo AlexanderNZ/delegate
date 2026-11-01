@@ -209,7 +209,22 @@ class VersionControl(Protocol):
         ...
 
     def use_hooks_directory(self, repo: Path, worktree: Path, hooks: Path) -> None:
-        """Make the hooks in the directory `hooks` run for `worktree`, and for no other checkout of the repository."""
+        """Keep the setting that makes the hooks in the directory `hooks` run for `worktree`, and for no other checkout of the repository.
+
+        The port writes the setting to a file of the worktree and not to the configuration of the repository. It takes
+        effect for a process that gets `worktree_environment(worktree)`.
+        """
+        ...
+
+    def worktree_environment(self, worktree: Path) -> dict[str, str]:
+        """The environment entries that make the settings of `worktree` hold for a process that the engine starts for it (#221).
+
+        A process that gets the entries, added to the environment of the engine, reads the settings of the worktree:
+        no watcher of the file system, and the hooks of `use_hooks_directory`. A process in another checkout reads
+        none of them. The entries go after the entries of the same kind that the environment of the engine holds, and
+        they do not replace them. The port writes nothing to the configuration of the repository. Raise VcsError when
+        the environment of the engine holds an entry of this kind that the tool cannot read.
+        """
         ...
 
     def is_ancestor(self, repo: Path, ancestor: str, descendant: str) -> bool:

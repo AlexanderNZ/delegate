@@ -713,3 +713,15 @@ def test_a_session_that_ends_before_the_agent_timeout_is_not_timed_out(tmp_path,
     result = adapters.get("claude-code").run(request(tmp_path, agent_timeout=60))
 
     assert (result.ended_timeout, result.exit_status, result.end_state) == (False, 0, "finished")
+
+
+def test_the_environment_of_the_request_goes_to_the_session_and_the_other_variables_stay(tmp_path, monkeypatch):
+    monkeypatch.setenv("DELEGATE_TEST_MARKER", "kept")
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    entries = {"GIT_CONFIG_COUNT": "7", "GIT_CONFIG_KEY_6": "some.key", "GIT_CONFIG_VALUE_6": "some-value"}
+
+    adapters.get("claude-code").run(request(tmp_path, environment=entries))
+
+    (call,) = fake.calls()
+    assert {name: call["env"].get(name) for name in entries} == entries
+    assert call["env"]["DELEGATE_TEST_MARKER"] == "kept"

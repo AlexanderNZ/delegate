@@ -195,3 +195,11 @@ def test_a_gate_with_no_time_limit_waits_for_the_gate(tmp_path):
     result = ShellGateRunner().run("sleep 1; echo late", tmp_path, timeout=None)
 
     assert (result.green, result.timed_out, result.output) == (True, False, "late\n")
+
+
+def test_a_gate_command_gets_the_environment_that_the_caller_gives_and_keeps_the_other_variables(tmp_path, monkeypatch):
+    monkeypatch.setenv("DELEGATE_TEST_MARKER", "kept")
+
+    result = ShellGateRunner().run('echo "$DELEGATE_TEST_MARKER $DELEGATE_TEST_GIVEN"', tmp_path, environment={"DELEGATE_TEST_GIVEN": "given"})
+
+    assert result == GateResult(exit_status=0, output="kept given\n")

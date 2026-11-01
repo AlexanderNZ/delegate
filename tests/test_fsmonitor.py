@@ -23,9 +23,9 @@ from delegate.cli import delegate
 from .support import ScriptedAdapter, git, make_repo
 
 
-def git_status(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in `path` and return the result, whatever the exit code is."""
-    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
+def git_status(path: Path, *args: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """Run git in `path`, with the entries of `environment` added to the environment of the test, and return the result, whatever the exit code is."""
+    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, env={**os.environ, **(environment or {})})
 
 
 GLOBAL_CONFIG: str = "[core]\n\tfsmonitor = true\n"
@@ -159,7 +159,8 @@ def test_the_ticket_worktree_runs_with_fsmonitor_off_when_the_user_turns_it_on(
     (call,) = registered.calls
     no_daemon_survives.append(call.cwd)
     assert (code, err) == (0, "")
-    assert git(call.cwd, "config", "core.fsmonitor").strip() == "false"
+    assert git_status(call.cwd, "config", "core.fsmonitor").stdout.strip() == "true"
+    assert git_status(call.cwd, "config", "core.fsmonitor", environment=call.environment).stdout.strip() == "false"
     assert git_status(call.cwd, "fsmonitor--daemon", "status").returncode != 0
 
 

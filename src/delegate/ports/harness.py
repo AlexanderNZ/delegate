@@ -19,8 +19,8 @@ end with no model.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -91,6 +91,11 @@ class AdapterRequest:
     read and change, for example the proof copy of a verifier (#153). An
     adapter adds them to the session where its harness allows that.
 
+    `environment` holds the environment entries that the engine adds to the environment of the session, as a mapping of
+    names to values (#221). They come from the version-control port, for the worktree of the ticket, and they carry the
+    settings of that worktree. An adapter adds them over the environment that it gives its harness, and it changes none
+    of them. The mapping is empty when the session has no worktree of its own.
+
     `sealed` is the sealed agent of the run for `agent` (#217): the copy that the engine made at the start of the run,
     outside each tree. The engine hashed its files against the record of the journal before it made this request, and
     an adapter starts the session from the seal only. It is `None` when the run sealed no agent of this name. An
@@ -110,6 +115,7 @@ class AdapterRequest:
     added_directories: tuple[Path, ...] = ()
     agent_timeout: float | None = None
     sealed: SealedAgent | None = None
+    environment: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

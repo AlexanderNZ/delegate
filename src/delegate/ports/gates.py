@@ -12,6 +12,7 @@ same method.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -41,8 +42,14 @@ class GateResult:
 class GateRunner(Protocol):
     """Runs a gate command in a directory."""
 
-    def run(self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None) -> GateResult:
+    def run(
+        self, command: str, worktree: Path, log: Path | None = None, timeout: float | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> GateResult:
         """Run `command` with `worktree` as its working directory, wait for it, and return the result.
+
+        `environment` holds entries that the runner adds over the environment of the command (#221): the settings of the
+        worktree, which the version-control port gives. With None, the runner adds none.
 
         `timeout` (seconds) is the time limit of the command. When the command
         runs longer, the runner ends the process group of the command, keeps

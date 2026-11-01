@@ -31,6 +31,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ..ports.harness import AdapterRequest
+from .environment import process_environment
 
 # The seconds that a process has to exit after SIGTERM, before SIGKILL.
 TERMINATE_GRACE_SECONDS: float = 10.0
@@ -75,7 +76,12 @@ class HarnessExit:
 
 
 def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[str, str] | None = None) -> HarnessExit:
-    """Run `command` in `request.cwd` with the prompt on standard input, and write its output to the event stream."""
+    """Run `command` in `request.cwd` with the prompt on standard input, and write its output to the event stream.
+
+    The process gets `env` (the process environment of the engine when it is None), with the entries of `request.environment` added over it (#221).
+    """
+    if request.environment:
+        env = {**(process_environment() if env is None else env), **request.environment}
     with tempfile.TemporaryFile("w+") as prompt, tempfile.TemporaryFile("w+") as stderr, request.event_stream.open("w") as out:
         prompt.write(request.prompt)
         prompt.seek(0)

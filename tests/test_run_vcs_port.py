@@ -6,6 +6,7 @@ repository, and checks what the engine asked of the port and what came of it.
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -81,8 +82,9 @@ def test_the_worktree_of_the_ticket_keeps_the_file_watcher_off(tmp_path, scripte
     start_run(repo, vcs, scripted_adapter)
 
     worktree = next(args[1] for name, args in vcs.calls if name == "ensure_worktree")
-    # The suite sets the value for every command in the environment, so the case reads the configuration of the repository alone.
-    assert git(worktree, "config", "--local", "--includes", "--get", "core.fsmonitor").strip() == "false"
+    # The suite sets the value for every command in the environment, so the case reads the files of the settings alone.
+    git_dir = Path(git(worktree, "rev-parse", "--absolute-git-dir").strip())
+    assert git(worktree, "config", "--file", str(git_dir / "delegate.config"), "--get", "core.fsmonitor").strip() == "false"
     main = subprocess.run(["git", "-C", str(repo), "config", "--local", "--includes", "--get", "core.fsmonitor"], capture_output=True)
     assert main.returncode == 1
 

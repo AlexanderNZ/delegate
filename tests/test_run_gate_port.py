@@ -29,9 +29,9 @@ class SpyGates:
         self._answer = answer
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, command, worktree, log=None, timeout=None):
+    def run(self, command, worktree, log=None, timeout=None, environment=None):
         self.calls.append((command, worktree.name))
-        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log, timeout=timeout)
+        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log, timeout=timeout, environment=environment)
 
 
 @pytest.fixture
