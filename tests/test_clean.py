@@ -207,6 +207,36 @@ def test_a_ticket_branch_whose_worktree_directory_a_person_removed_is_deleted(tm
     assert read_journal_file(repo, run_id)[-1]["branches_deleted"] == ["run/built-a"]
 
 
+def include_sections(repo: Path) -> list[str]:
+    """The names of the `includeIf` entries in the configuration of the repository."""
+    return git(repo, "config", "--local", "--name-only", "--get-regexp", r"^includeif\.").split()
+
+
+def test_clean_removes_the_include_section_of_an_earlier_version_for_a_worktree_that_a_person_removed_and_keeps_a_section_of_a_person(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    assert code == 0
+    worktree = ticket_worktree(repo, run_id)
+    # An earlier version wrote this section for the worktree of the ticket (#221).
+    git_dir = Path(git(worktree, "rev-parse", "--absolute-git-dir").strip()).resolve()
+    git(repo, "config", "--local", f"includeIf.gitdir:{git_dir}.path", str(git_dir / "delegate.config"))
+    person = tmp_path / "person.config"
+    person.write_text("[person]\n\tsetting = kept\n")
+    git(repo, "config", "--local", "includeIf.gitdir:/no/such/place/.path", str(person))
+    # A person removes the directory by hand, and `git worktree prune` then removes its git directory.
+    shutil.rmtree(worktree)
+    git(repo, "worktree", "prune")
+    assert not git_dir.exists() and len(include_sections(repo)) == 2
+
+    code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert include_sections(repo) == ["includeif.gitdir:/no/such/place/.path"]
+    assert git(repo, "config", "--local", "--get", "includeIf.gitdir:/no/such/place/.path").strip() == str(person)
+
+
 def test_clean_removes_a_verify_copy_and_a_proof_copy_that_a_run_left(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path)
     code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
