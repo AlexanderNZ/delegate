@@ -268,16 +268,16 @@ The `chains` list of `status --json` has one object for each chain row:
 ## `delegate watch`
 
 ```
-delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--max-minutes N] [--from <position>] [--poll-seconds N] [--raw | --json]
+delegate watch [run-id] [--repo <dir>] [--until verdict] [--stall-minutes N] [--max-minutes N] [--from <position>] [--poll-seconds N] [--follow] [--raw | --json]
 ```
 
-`watch` follows the run: it reads the journal at each poll, shows each new event, and exits when it has a reason. The form of the output depends on standard output:
+`watch` follows the run: it reads the journal at each poll, shows each new event, and exits when it has a reason. When a run is active, the live view always follows it: a [problem](#the-problem-events) does not end it, and it exits only when the run ends or stops, or at a limit that the person sets. The raw lines and the JSON lines are for agents: they end at a new problem, unless `--follow` is set. The form of the output depends on standard output:
 
 - When standard output is a terminal, `watch` shows [the live view](#the-live-view): the run line and a table of the tickets at the top, and below them a short line for each event of the ticket that runs now.
 - When standard output is not a terminal, or with `--raw`, `watch` prints [the raw lines](#the-raw-lines): one line for each event. A [**coordinator**](../glossary.md#coordinator) can run `watch` as a background task, read the lines, and act on the exit code.
 - With `--json`, `watch` prints [the JSON lines](#the-json-lines): one JSON object on one line for each event. A script reads the objects and needs no other tool than a JSON reader. `--json` and `--raw` cannot be used together: the parser refuses both and exits 2.
 
-The exit codes and the options are the same in the three forms. The last line `position <seq>` is the same in the two forms that print text; `--json` prints no such line. The position is the `seq` of the last event that `watch` reported.
+The exit codes and the options are the same in the three forms, except that a problem ends the watch only in the raw lines and the JSON lines, and only without `--follow`. See [the exit codes](#exit-codes). The last line `position <seq>` is the same in the two forms that print text; `--json` prints no such line. The position is the `seq` of the last event that `watch` reported.
 
 With no run id, `watch` follows the one active run of the repository, also with `--from`. When no run is active, it prints one line for the newest run, and no event. With `--from`, it replays the journal of the newest run from the position. When more than one run is active, it shows [the run picker](#the-run-picker) on a terminal. Otherwise it prints one line on stderr that names each active run, follows none, and exits 2. See [the run with no run id](#the-run-with-no-run-id).
 
@@ -295,6 +295,7 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 | `--max-minutes <n>` | Exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0. |
 | `--from <position>` | Go on after the event with this position, which an earlier watch printed; no event is reported twice. |
 | `--poll-seconds <poll-seconds>` | How often to read the journal; default 1. |
+| `--follow` | Do not exit at a problem: with --raw, --json or no terminal, follow the run as the live view does, to its end; the live view always does. |
 | `--raw` | Print the raw line of each event, as to a standard output that is not a terminal; default on a terminal is the live view. |
 | `--json` | Print each event as one JSON object on one line, and a last object for a reason of the watch to end; cannot be used with --raw. |
 
@@ -622,7 +623,10 @@ The live tail of the row of a running ticket, and the end of the line of its age
 |---|---|
 | Less than 30 seconds | A spinner in cyan. Its frames are `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`, one step in approximately 125 ms. |
 | From 30 seconds to the stall time | `quiet <time>` in faint text, with no animation. An agent can be quiet during a long test run. |
+| `✗ #a the step continued 2 times (limit 2, trigger gates-red)` | A [problem](#the-problem-events), in the warning colour (yellow), with the same text as the raw line `watch: problem`. It has no ticket track: its text starts on the track of the ticket, as the line of any event with no ticket. It comes after the line of the result of an agent, when the problem is that result. The run goes on. |
 | The stall time or more | `⚠ idle <time>` in the warning colour. |
+
+A problem never ends the live view. The row of the ticket of the problem keeps the warning mark `⚠` at the start of its live tail, in the warning colour, until the next event of that ticket. The live view ends only at `run-end` (exit 0 for `built`, 1 for `failed` or `abandoned`), `paused` (7) and `halted` (8), and at the limits that a person sets: `--until verdict`, `--stall-minutes`, `--max-minutes`, and Ctrl-C (130). A halted run process does not go on without a resume, so `halted` ends the watch as `paused` does. The `--follow` option has no effect on the live view, which always follows the run.
 
 The stall time is `--stall-minutes`, or 5 minutes. With a locale that is not UTF-8, the frames of the spinner are the ASCII characters `|`, `/`, `-` and `\`. The spinner turns only while the agent is active, so a spinner that stops does not hide an agent that hangs. Between two reads of the journal, `watch` draws the frame again from the snapshot that it has, so the spinner turns. The time between two reads of the journal does not change.
 
@@ -630,7 +634,7 @@ With `NO_COLOR` set, there is no animation. Before the stall time, the liveness 
 
 ### The raw lines
 
-When standard output is not a terminal, or with `--raw`, `watch` prints one line for each event. A line has the position (`seq`), the time, the event name, and then each field of the event that is not a list or an object, as `name=value`. The field `output_tail` is not printed. When a problem, a verdict, a stall or the time limit ends the watch, `watch` prints the reason on a line that starts with `watch:`. At `run-end` and at `paused`, the line of that event is the last event line. Then `watch` prints the line `position <seq>`. An error and Ctrl-C give no line `position <seq>`.
+When standard output is not a terminal, or with `--raw`, `watch` prints one line for each event. A line has the position (`seq`), the time, the event name, and then each field of the event that is not a list or an object, as `name=value`. The field `output_tail` is not printed. When a problem, a verdict, a stall or the time limit ends the watch, `watch` prints the reason on a line that starts with `watch:`. With `--follow`, a problem ends no watch, but `watch` still prints its line `watch: problem: ...` after the line of the event. At `run-end` and at `paused`, the line of that event is the last event line. Then `watch` prints the line `position <seq>`. An error and Ctrl-C give no line `position <seq>`.
 
 ### The JSON lines
 
@@ -644,12 +648,12 @@ When the watch ends for a reason of its own, `watch` prints one last object afte
 
 | `reason` | The watch ended because | `exit_code` |
 |---|---|---|
-| `problem` | An event is a [problem](#the-problem-events). | 3 |
+| `problem` | An event is a [problem](#the-problem-events), and `--follow` is not set. | 3 |
 | `verdict` | `--until verdict` is set and the journal holds a `verdict` event. | 4 |
 | `stall` | `--stall-minutes` is set and nothing changed for that time. | 5 |
 | `time-limit` | `--max-minutes` is set and the time is used. | 6 |
 
-The run itself ends the watch at `run-end`, `paused` and `halted`. Then the last object is that event, and there is no `watch-end` object: the exit code is the code of the result. An error and Ctrl-C also give no `watch-end` object.
+The run itself ends the watch at `run-end`, `paused` and `halted`. Then the last object is that event, and there is no `watch-end` object: the exit code is the code of the result. An error and Ctrl-C also give no `watch-end` object. With `--follow`, a problem is an event like any other: the watch goes on, and a later end of the run, not the problem, gives the last line.
 
 Standard output holds JSON objects only. So `--json` prints no line `position <seq>`, no run picker, no live view and no title of the terminal: each object has its `seq`, and `--from <seq>` goes on after it. With more than one active run, `--json` never asks: it prints the names of the active runs on stderr and exits 2, as for a standard output that is not a terminal. With no run id, no active run and no `--from`, `--json` replays the journal of the newest run, and does not print the one line of [the newest run](#the-run-with-no-run-id). A newest run that stopped with no pause and no halt, and a newest run that failed at start, have no events to follow: `--json` prints their line on stderr and exits with the same code as the other forms.
 
@@ -669,7 +673,7 @@ delegate watch --json --until verdict | jq -r '[.seq // "-", .event] | @tsv'
 | 0 | run succeeded | The journal holds `run-end` with the result `built`. |
 | 1 | run failed | The journal holds `run-end` with the result `failed` or `abandoned`, or, with no run id, [the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active. |
 | 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active, or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, or no answer at the prompt. |
-| 3 | problem | An event is a problem. See [the problem events](#the-problem-events). |
+| 3 | problem | An event is a problem, in the raw lines and the JSON lines, and with no `--follow`. The live view never ends at a problem. See [the problem events](#the-problem-events). |
 | 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |
 | 6 | time limit | `--max-minutes` is set and the time is used. |
@@ -681,11 +685,11 @@ delegate watch --json --until verdict | jq -r '[.seq // "-", .event] | @tsv'
 
 Code 2 is also the code that `argparse` gives for a usage error.
 
-`watch` checks the events in order. The first event that gives a reason ends the watch, so a run that failed exits 3 at the first problem that the run did not go past, and not 1. The code 1 follows when `watch` goes on from the position of that problem. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result, [the newest run that stopped](#the-newest-run-that-stopped) exits 7 or 2, and [the newest run that failed at start](#the-newest-run-that-failed-at-start) exits 1.
+`watch` checks the events in order. The first event that gives a reason ends the watch. In the raw lines and the JSON lines, with no `--follow`, a problem is such a reason, so a run that failed exits 3 at the first problem that the run did not go past, and not 1. The code 1 follows when `watch` goes on from the position of that problem. In the live view, and with `--follow`, a problem is no reason: only the end of the run (`run-end`, `paused` and `halted`) and the limits that a person sets (`--until verdict`, `--stall-minutes`, `--max-minutes` and Ctrl-C) end the watch. This rule is for a run that `watch` follows or replays. With no run id, [the newest run that ended](#the-newest-run-that-ended) exits with the code of its result, [the newest run that stopped](#the-newest-run-that-stopped) exits 7 or 2, and [the newest run that failed at start](#the-newest-run-that-failed-at-start) exits 1.
 
-A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the first `resume` after its newest `run-end` that a `resume` follows are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still ends the watch, when the run did not go past it. `watch` then follows the resumed run to its new `run-end`.
+A run that ended and was resumed has a `resume` event after its old `run-end`. The events before the first `resume` after its newest `run-end` that a `resume` follows are the history of the run: `watch` prints them, but a problem, a `verdict` for `--until verdict`, or a `run-end` there does not end the watch. A run that stopped with no `run-end` and was resumed has no such history, so a problem before its `resume` still counts, when the run did not go past it. `watch` then follows the resumed run to its new `run-end`.
 
-The replay is the events that the journal holds when `watch` starts. A problem in the replay ends the watch only when the run did not go past it. The run went past a problem when a later event of the replay handles it: a `continuation` or a `retry` of the ticket of the problem, or a `step-start`, a `step-end` or a `run-end`. `watch` shows a problem that the run went past as history: the feed gives the line of its event, and the watch goes on. The raw lines are the same, and `watch` prints no line `watch: problem`. For example, the specialist of a ticket ends `failed` with the exit status 143, a `continuation` follows, and the step ends `built`: `watch` follows the run that goes on, and does not exit 3. The rule is the same when the last event of the replay is a `run-end` or a `paused`, and the run is at its end. That last event is the end of the run, and it does not go past a problem. So `watch` replays a run that ended to its end, past each problem that a later event went past, and exits with the code of the end: 0 for a `run-end` with the result `built`, 1 for `failed`, and 7 for a `paused`. A problem that only the end follows ends the watch with the code 3. For example, when a step fails, its `step-end` goes past each earlier problem of the step, so `watch` stops at that `step-end`, and its reason gives the cause. A problem that arrives after `watch` starts ends the watch, also when a later event handles it.
+The replay is the events that the journal holds when `watch` starts. In the raw lines and the JSON lines, a problem in the replay ends the watch only when the run did not go past it. The run went past a problem when any later event of the replay follows it, whatever the event is: a `watch` that starts again with no `--from` then follows the active run, and does not stop at an old problem. A problem that is the newest event of the journal is gone past by no event, so it still ends the watch. `watch` shows a problem that the run went past as history: the feed gives the line of its event, and the watch goes on. The raw lines are the same, and `watch` prints no line `watch: problem`. For example, the specialist of a ticket ends `failed` with the exit status 143, a `continuation` follows, and the step ends `built`: `watch` follows the run that goes on, and does not exit 3. A second `continuation` that a session, a gate and a verdict of the same ticket follow is a problem that the run went past, so a `watch` that starts then follows the run too. The rule is the same when the last event of the replay is a `run-end` or a `paused`, and the run is at its end. That last event is the end of the run, and it does not go past a problem. So `watch` replays a run that ended to its end, past each problem that a later event went past, and exits with the code of the end: 0 for a `run-end` with the result `built`, 1 for `failed`, and 7 for a `paused`. A problem that only the end follows ends the watch with the code 3. For example, when a step fails, its `step-end` goes past each earlier problem of the step, so `watch` stops at that `step-end`, and its reason gives the cause. A problem that arrives after `watch` starts ends the watch, also when a later event handles it. The live view and `--follow` have no such end: they show the problem and go on.
 
 A `paused` event ends the watch with the code 7: a pause request stopped the run process at a step boundary. See [the pause](run.md#the-pause). A `halted` event ends the watch with the code 8: a failure of the harness stopped the run process. See [a failure of the harness](run.md#a-failure-of-the-harness). A `paused` or a `halted` that another event follows, for example the `resume` of the run, is history, and it does not end the watch.
 

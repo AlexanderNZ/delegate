@@ -686,6 +686,12 @@ end.
    `watch` prints one raw line for each event, as with `--raw`. On a terminal,
    `watch` shows a live view for a person. When it exits at a limit, start it
    again with `--from <position>`, the position that its last line gives.
+   A new problem in the journal ends that watch with the code 3: use the exit
+   as the signal to run `delegate status` and look at the run. A watch that
+   starts again with no `--from` follows the active run past an old problem
+   that a later event follows. A problem that is the newest event of the
+   journal still ends the watch with 3. `--follow` makes the watch go on at a
+   problem, as the live view does.
    With no run id, `watch` follows the one active run, also with `--from`. An
    active run has no `run-end` after its newest `resume`, and a live process
    holds the lock of its run branch. With more than one active run and no

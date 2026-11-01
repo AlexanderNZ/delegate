@@ -161,6 +161,7 @@ class LiveView:
         self._waiting: dict[str, _Waiting] = {}  # by ticket id, in the order the lines started
         # The start and the event stream of the agent that runs, by ticket and role.
         self._agents: dict[tuple[str, str], tuple[datetime, object]] = {}
+        self._warned: set[str] = set()  # the tickets whose newest event is a problem: their rows have the warning mark (#222)
         self._timed_out: set[tuple[str, str]] = set()  # the (ticket, role) of an agent that the engine ended at the agent timeout
         self._gates: dict[tuple[str, str], datetime] = {}  # the start of the gate that runs, by ticket and command
         self._chain: dict[str, str] = {}  # the stack of the chain verification, by the ticket that its events name
@@ -251,7 +252,9 @@ class LiveView:
         block: list[str] = []
         if snap is not None:
             height = room - 1 - FEED_LINES if known else None
-            block = status.view_lines(snap, status.plan_links(self._events), width, height, self._idle_limit, spin)
+            block = status.view_lines(
+                snap, status.plan_links(self._events), width, height, self._idle_limit, spin, frozenset(self._warned),
+            )
         id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
         lines = [line.painted(id_cells) for line in feed]
         if not final and known:
@@ -385,10 +388,21 @@ class LiveView:
                 del self._agents[key]  # a crash ends the step with no result event
         elif kind in ("run-end", "paused", "halted"):
             self._agents.clear()
+        # A problem has the warning line in the place of the line of its event, which the warning says again. The result of
+        # an agent is the exception: its line ends the agent that ran, and the warning comes below it.
+        if problem is None or kind in AGENT_OF_RESULT:
+            self._line(kind, event, ticket, subject, when)
+        if "ticket" in event:
+            self._warned.discard(ticket)  # the next event of the ticket takes the mark of its warning away
         if problem is not None:
+            # The run goes on past a problem (#222): a warning, in `warn`, and a mark on the row of its ticket.
             self._flush(ticket)
-            self._add(when, "", [("", f"{output.glyphs().failed} " + (f"{subject} " if subject else "") + problem)], role="bad")
-            return
+            self._add(when, "", [("", f"{output.glyphs().failed} " + (f"{subject} " if subject else "") + problem)], role="warn")
+            if "ticket" in event:
+                self._warned.add(ticket)
+
+    def _line(self, kind: str, event: dict[str, object], ticket: str, subject: str, when: datetime) -> None:
+        """Add the lines that an event ends to the feed, and keep the line that waits for the next event."""
         if kind in SILENT:
             return
         if kind in AGENT_OF_RESULT:

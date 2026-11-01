@@ -109,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="go on after the event with this position, which an earlier watch printed; no event is reported twice",
     )
     parser.add_argument("--poll-seconds", type=_positive, default=1.0, help="how often to read the journal; default 1")
+    parser.add_argument(
+        "--follow", action="store_true",
+        help="do not exit at a problem: with --raw, --json or no terminal, follow the run as the live view does, to its end; "
+        "the live view always does",
+    )
     form = parser.add_mutually_exclusive_group()
     form.add_argument(
         "--raw", action="store_true",
@@ -263,7 +268,11 @@ def _pick(runs: list[status.ActiveRun], raw: bool) -> status.ActiveRun | None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     from_position = 0 if args.from_position is None else args.from_position
-    options = watch.WatchOptions(args.until, args.stall_minutes, args.max_minutes, from_position, args.poll_seconds)
+    live_view = not args.raw and not args.json and sys.stdout.isatty()
+    # The live view and `--follow` follow the run through a problem; the raw and JSON forms end at a new problem (#222).
+    options = watch.WatchOptions(
+        args.until, args.stall_minutes, args.max_minutes, from_position, args.poll_seconds, through_problems=live_view or args.follow,
+    )
     try:
         if args.run_id is None:
             runs = runs_of(args.repo, GitVersionControl())
@@ -305,7 +314,6 @@ def main(argv: list[str] | None = None) -> int:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)
         json_sink = watch.JsonSink(_emit)
-        live_view = not args.raw and not args.json and sys.stdout.isatty()
         if args.json:
             sink = json_sink
         elif live_view:

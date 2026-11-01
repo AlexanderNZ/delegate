@@ -68,7 +68,10 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
         "or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, "
         "or no answer at the prompt."
     ),
-    EXIT_PROBLEM: "An event is a problem. See [the problem events](#the-problem-events).",
+    EXIT_PROBLEM: (
+        "An event is a problem, in the raw lines and the JSON lines, and with no `--follow`. "
+        "The live view never ends at a problem. See [the problem events](#the-problem-events)."
+    ),
     EXIT_VERDICT: "`--until verdict` is set and the journal holds a `verdict` event.",
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
@@ -107,13 +110,18 @@ LONG_FIELDS: frozenset[str] = frozenset({"output_tail"})
 
 @dataclass(frozen=True)
 class WatchOptions:
-    """How to follow a run. `from_position` is the `seq` of the last event that an earlier watch reported."""
+    """How to follow a run. `from_position` is the `seq` of the last event that an earlier watch reported.
+
+    `through_problems` makes a problem no reason to end the watch (#222): the live view and `--follow` set it. The
+    sink still gets the problem. Then only the end of the run (`RUN_STOPS`) and the limits of the person end the watch.
+    """
 
     until: str | None = None
     stall_minutes: float | None = None
     max_minutes: float | None = None
     from_position: int = 0
     poll_seconds: float = 1.0
+    through_problems: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,36 +277,20 @@ def _superseded(events: list[dict[str, object]]) -> set[object]:
     return superseded
 
 
-# The events after a problem in the replay that show that the run went past it (#146): the engine continued or retried
-# the step of the ticket of the problem, or a step started or ended, or the run ended, after the problem.
-PAST_STEP: tuple[str, ...] = ("continuation", "retry")
-PAST_RUN: tuple[str, ...] = ("step-start", "step-end", "run-end")
-
-
 def _gone_past(replay: list[dict[str, object]]) -> set[object]:
-    """The `seq` of each event of the replay that the run went past: a problem there does not end the watch (#146).
+    """The `seq` of each event of the replay that the run went past: a problem there does not end the watch (#146, #222).
 
-    The replay is the events of the journal when the watch starts. An event is gone past when a later event of the
-    replay is a `continuation` or a `retry` of its ticket, or a `step-start`, a `step-end` or a `run-end`. The rule is
-    the same for a replay whose last event is a `run-end` or a `paused`, a run at its end (#151), but that last event is
-    the end, not an event that goes past a problem. So the watch of an ended run stops at a problem that only the end
-    follows, and replays to the end past each other problem.
+    The replay is the events of the journal when the watch starts. An event is gone past when any later event of the
+    replay follows it: the run went on after it, so a watch that starts again follows the run and does not stop at an
+    old problem. The rule is the same for a replay whose last event is a `run-end` or a `paused`, a run at its end (#151),
+    but that last event is the end, not an event that goes past a problem. So the watch of an ended run stops at a
+    problem that only the end follows, and replays to the end past each other problem. A problem that is the newest
+    event of the journal is gone past by no event, so it still ends the watch.
     """
     replay = before_after_end(replay)
     if replay and replay[-1]["event"] in RUN_STOPS:
         replay = replay[:-1]
-    past: set[object] = set()
-    run_later = False
-    step_later: set[str] = set()
-    for event in reversed(replay):
-        kind, ticket = event["event"], str(event.get("ticket"))
-        if run_later or ticket in step_later:
-            past.add(event["seq"])
-        if kind in PAST_RUN:
-            run_later = True
-        elif kind in PAST_STEP:
-            step_later.add(ticket)
-    return past
+    return {event["seq"] for event in replay[:-1]}
 
 
 def _result_code(result: object) -> int:
@@ -401,7 +393,8 @@ class Sink(Protocol):
 
     def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
         """An event of the journal, in order. `reported` is false for an event at or before `--from`, which the sink
-        only reads. `problem` is the reason that a reported event is a problem, or None. A problem ends the watch."""
+        only reads. `problem` is the reason that a reported event is a problem, or None. A problem ends the watch,
+        unless `WatchOptions.through_problems` is set (#222)."""
 
     def verdict(self, event: dict[str, object]) -> None:
         """`--until verdict` ends the watch at this verdict event, which `event` gave first."""
@@ -496,6 +489,8 @@ class JsonSink:
         if not reported:
             return
         self._emit(json.dumps(event))
+        if self.reason == REASON_PROBLEM:
+            self.reason = None  # a watch that follows through problems went on: the problem did not end it
         if problem is not None:
             self.reason = REASON_PROBLEM
 
@@ -592,7 +587,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                 history = seq < resumed_at or seq in superseded
                 # A problem in the replay that a later event of the replay handles is history too, but only for the
                 # problem: a verdict or a stop there keeps its rule.
-                if history or seq in past:
+                if history or (seq in past and not options.through_problems):
                     problem = None
                 ends = event["event"] in RUN_STOPS and not history
                 if seq <= options.from_position:
@@ -602,7 +597,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                     continue
                 sink.event(event, True, problem)
                 position = seq  # after the sink reported the event, so Ctrl-C during the report does not skip it
-                if problem is not None:
+                if problem is not None and not options.through_problems:
                     return WatchResult(EXIT_PROBLEM, position)
                 if options.until == UNTIL_VERDICT and event["event"] == "verdict" and not history:
                     sink.verdict(event)

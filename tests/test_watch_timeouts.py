@@ -7,13 +7,14 @@ the run through `delegate.main`. The raw lines and the problem lines are the int
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, WORKFLOW, bare_repo, frames, make_repo, read_journal, write_journal
+from .support import ScriptedAdapter, WORKFLOW, append_events, bare_repo, frames, make_repo, read_journal, write_journal
 from .support import run_end, run_start, step_end, step_start
 from .test_watch_live import PYTEST, Run, at, local_zone, watch  # noqa: F401 - a fixture, used by name
 
@@ -34,9 +35,11 @@ def agent_events(role: str = "specialist", seconds: float = 600.0) -> list[tuple
     ]
 
 
-def test_a_specialist_session_that_ran_past_the_agent_timeout_is_a_problem_that_names_the_time_limit(tmp_path, capsys):
+def test_a_specialist_session_that_ran_past_the_agent_timeout_is_a_problem_that_names_the_time_limit(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), *agent_events())
+    path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), agent_events()[0])
+    # The timeout and the failed result arrive after the watch starts (#222: a replay takes a problem that a later event follows as history).
+    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, *agent_events()[1:]))
 
     code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
     out = capsys.readouterr().out
@@ -50,7 +53,7 @@ def test_a_specialist_session_that_ran_past_the_agent_timeout_is_a_problem_that_
 
 def test_the_agent_timeout_names_the_role_and_a_fraction_of_a_minute(tmp_path, capsys):
     repo = bare_repo(tmp_path)
-    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), *agent_events("verifier", 90.0))
+    write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), *agent_events("verifier", 90.0)[:2])
 
     delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
 
@@ -123,13 +126,15 @@ def test_the_live_feed_gives_the_problem_line_of_a_session_that_timed_out_and_na
     add_timeout(run, 600, "specialist", 600.0)
     run.add(600, "adapter-result", ticket="a", exit_status=-15, end_state="failed", session_id="s", event_stream=run.stream("b.stream.jsonl"))
 
-    code, out = watch(repo, monkeypatch)
+    # The problem does not end the live view (#222): the run ends, and the first frame has the warning line.
+    code, out = watch(repo, monkeypatch, then=lambda: run.add(601, "run-end", result="failed", built=[], failed=["a"], skipped=[]))
 
-    assert code == PROBLEM
-    (last,) = frames(out)
+    assert code == 1
+    last = frames(out)[0]
     assert last[last.index("─" * 200) + 1:] == [
         "16:00  #a   started · python-specialist",
         "16:10  ✗ #a the specialist session ran past the agent-timeout of 10 minutes",
+        "16:10  #a   specialist timed out · 10m · tokens 19k new, 0 cache",
     ]
 
 
@@ -171,10 +176,10 @@ def test_the_live_feed_gives_a_timed_out_gate_the_words_timed_out_in_the_place_o
             timed_out=False, output_tail="", clean=True)
     run.add(182, "step-end", ticket="a", state="failed", reason=f"gates red: {PYTEST} (timed out); ruff check")
 
-    code, out = watch(repo, monkeypatch)
+    code, out = watch(repo, monkeypatch, then=lambda: run.add(183, "run-end", result="failed", built=[], failed=["a"], skipped=[]))
 
-    assert code == PROBLEM
-    (last,) = frames(out)
+    assert code == 1  # the problem does not end the live view (#222)
+    last = frames(out)[0]
     assert last[last.index("─" * 200) + 1:] == [
         "16:00  #a   started · python-specialist",
         "16:03  #a   gates red (pytest 3m timed out, ruff 2s red)",

@@ -81,7 +81,7 @@ See [the newest run that ended](../reference/status-and-watch.md#the-newest-run-
 
 ### 3. Act on the exit code
 
-The exit code of `watch` tells you why it stopped. For example, the run succeeded, failed or paused, a [**step**](../glossary.md#step) has a problem, or a limit is reached. See [the exit codes of `watch`](../reference/status-and-watch.md#exit-codes) for each code.
+The exit code of `watch` tells you why it stopped. For example, the run succeeded, failed, paused or halted, a [**step**](../glossary.md#step) has a problem (only in the raw lines and the JSON lines: the live view shows a problem as a warning line, and goes on), or a limit is reached. See [the exit codes of `watch`](../reference/status-and-watch.md#exit-codes) for each code.
 
 You can run `watch` as a background task in your harness. The harness then alerts you when the command exits.
 

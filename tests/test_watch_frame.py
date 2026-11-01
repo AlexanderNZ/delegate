@@ -429,10 +429,12 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
         if clock.seconds != 1270:  # the fix-up is active, so the wait has steps that draw its spinner (#147)
             fixup_accepted_and_b_continues_twice(run)
             clock.seconds = 1270
+        elif "the step continued 2 times" in sys.stdout.getvalue():
+            raise KeyboardInterrupt  # Ctrl-C: a problem does not end the live view, so the person ends it (#222)
 
-    # 1d: the REJECT and the fix-up. Then 1e: the second continuation is a problem, and the watch exits.
+    # 1d: the REJECT and the fix-up. Then 1e: the second continuation is a problem, and the watch goes on past it.
     code, out = watch(repo, monkeypatch, "r1", sleep=next_events)
-    assert code == 3
+    assert code == 130
     drawn = frames(out)
     fixup, problem = drawn[0], drawn[-1]
     assert fixup == [
@@ -461,7 +463,7 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
         "",
         "  #      plan    state       phase          after        used    new   cache",
         "  1      ● a     ✓ built                               11m40s    77k       0",
-        "  2  │   ▶ b     running     specialist ●               9m30s    19k       0  cont 2/2",
+        "  2  │   ▶ b     running     specialist ●               9m30s    19k       0  ⚠ cont 2/2",
         "     │                       gates ○",
         "     │                       verifier ○",
         "     │                       fix-up ○",
@@ -475,20 +477,24 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
         "16:21  #b   gates red (pytest 1m red)",
         "16:21  ✗ #b the step continued 2 times (limit 2, trigger gates-red)",
     ]
-    position = int(out.splitlines()[-1].split()[1])
+    position = run.seq
 
     # 1e: the step fails on red gates, which is a problem. The live tail of the row of b gives the reason, cut at the
     # width of the terminal, and the ticket that runs next has no line yet, so the lines of b stay.
     b_fails(run)
     clock.seconds = 1560
-    code, out = watch(repo, monkeypatch, "r1", "--from", str(position))
-    assert code == 3
-    assert frames(out) == [[
+
+    def ctrl_c(seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    code, out = watch(repo, monkeypatch, "r1", "--from", str(position), sleep=ctrl_c)
+    assert code == 130
+    assert frames(out)[-1:] == [[
         "run r1  running  ████████░░░░░░░░ 50%  2/4 ended  26m00s used  ETA 26m00s  97k new · 0 cache",
         "",
         "  #      plan    state       phase          after        used    new   cache",
         "  1      ● a     ✓ built                               11m40s    77k       0",
-        ("  2  │   ✗ b     failed                                14m20s    19k       0  " + f"gates red: {PYTEST}")[:120],
+        ("  2  │   ✗ b     failed                                14m20s    19k       0  " + f"⚠ gates red: {PYTEST}")[:120],
         "  3  │   · c     pending",
         "  4      · d     pending",
         "─" * 120,
@@ -496,7 +502,7 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
         "16:26  #b   gates red (pytest 1m red)",
         "16:26  ✗ #b the gates are not green: nix develop -c python3 -m pytest -q",
     ]]
-    position = int(out.splitlines()[-1].split()[1])
+    position = run.seq
 
     # 1f: c is skipped, and the run pauses before the step of d. A paused run has no ETA.
     c_is_skipped_and_the_run_pauses_before_d(run)
@@ -577,7 +583,7 @@ def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch)
     assert feed[7] == "\x1b[36m17:59  #70  fix-up running · 1m · \x1b[0m\x1b[2m0 new · 0 cache\x1b[0m\x1b[36m · \x1b[0m\x1b[2mquiet 1m20s\x1b[0m"
 
 
-def test_a_problem_line_is_bad_and_an_accept_has_a_check_in_ok_and_a_bold_word(tmp_path, monkeypatch):
+def test_a_problem_line_is_warn_and_an_accept_has_a_check_in_ok_and_a_bold_word(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = Run(repo, "a")
     built(run, "a", 0)
@@ -585,11 +591,11 @@ def test_a_problem_line_is_bad_and_an_accept_has_a_check_in_ok_and_a_bold_word(t
     run.add(600, "step-end", ticket="b", state="failed", reason="crashed: OSError: disk full")
     Clock(monkeypatch, 700)
 
-    code, out = watch(repo, monkeypatch, "r1")
+    code, out = watch(repo, monkeypatch, "r1", sleep=ends_at_first_poll(run))
 
-    assert code == 3
-    (frame,) = painted_frames(out)
-    assert frame[-1] == "\x1b[31m16:10  ✗ #b the step failed: crashed: OSError: disk full\x1b[0m"
+    assert code == 1  # a problem does not end the live view (#222); the warning line is yellow, as the run goes on
+    frame = painted_frames(out)[0]
+    assert frame[-1] == "\x1b[33m16:10  ✗ #b the step failed: crashed: OSError: disk full\x1b[0m"
 
 
 def test_with_no_color_set_the_live_view_writes_no_sgr_code(tmp_path, monkeypatch):

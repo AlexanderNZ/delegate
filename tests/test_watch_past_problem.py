@@ -1,8 +1,8 @@
 """`delegate watch` goes on past a problem in the replay that the run already went past (#146).
 
 The replay is the part of the journal that exists when `watch` starts. A problem there stops the watch only when no
-later event of the run handles it: a `continuation` or a `retry` of its ticket, or a later `step-start`, `step-end` or
-`run-end`. A problem that arrives after the watch starts stops the watch, as before.
+later event of the run follows it (#222; before, only a `continuation` or a `retry` of its ticket, a `step-start`, a
+`step-end` or a `run-end` counted, #146). A problem that arrives after the watch starts stops the watch, as before.
 
 A case writes the journal with the journal class of the engine in a real temporary git repository, holds the lock of
 the run branch as the process of a run that goes on does, and calls `delegate.main(["watch", ...])` with no run id. The
@@ -161,7 +161,9 @@ def test_watch_replays_an_ended_run_past_a_problem_that_the_run_went_past(tmp_pa
 
 
 @pytest.mark.parametrize("extra", [(), ("--raw",)], ids=["not-a-terminal", "raw"])
-@pytest.mark.parametrize("end", [(run_end("failed", [], ["a"]),), PAUSED], ids=["run-end-failed", "paused"])
+@pytest.mark.parametrize(
+    "end", [(run_end("failed", [], ["a"]),), (PAUSED[-1],)], ids=["run-end-failed", "paused"],
+)
 def test_watch_stops_an_ended_run_at_its_last_problem_when_no_later_event_goes_past_it(tmp_path, capsys, monkeypatch, extra, end):
     # The step-end goes past the problem of the specialist, but only the end of the run follows the failed step.
     repo = bare_repo(tmp_path)

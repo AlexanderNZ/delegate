@@ -180,12 +180,14 @@ def test_the_reason_of_a_failed_and_of_a_skipped_row_is_in_the_live_tail_not_in_
 
     code, out = watch(repo, monkeypatch, run.dir.name)
 
-    assert code == 3  # the failed step is a problem
+    assert code == 1  # the live view follows the run past the failed step, which is a problem, to its end (#222)
     frame = frames(out)[0]
     failed = frame[4]
-    # The reason does not make the columns drop: the cut at the width of the terminal ends it.
+    # The reason does not make the columns drop: the cut at the width of the terminal ends it. The warning mark of the
+    # problem is before it, until the next event of the ticket.
     assert failed == line_of(**{
-        "#": "2", "rail": "│", "plan": "✗ b", "state": "failed", "used": "1m40s", "new": "0", "cache": "0", "tail": f"gates red: {PYTEST}",
+        "#": "2", "rail": "│", "plan": "✗ b", "state": "failed", "used": "1m40s", "new": "0", "cache": "0",
+        "tail": f"⚠ gates red: {PYTEST}",
     })[:120]
     position = int(out.splitlines()[-1].split()[1])
     _, out = watch(repo, monkeypatch, run.dir.name, "--from", str(position))

@@ -915,7 +915,7 @@ class _Row:
 
 def view_lines(
     snap: Snapshot, links: Sequence[PlanLink], width: int, height: int | None = None, idle_limit: int | None = None,
-    spin: int | None = None,
+    spin: int | None = None, warned: frozenset[str] = frozenset(),
 ) -> list[str]:
     """The lines of the live view of a snapshot: the run line, a blank line, and the ticket table, each cut to `width`.
 
@@ -925,11 +925,12 @@ def view_lines(
     the tail, then the rows in the middle. With no `height`, no row folds. When a line of the table is wider than
     `width`, the columns drop in the order of `FIT_STEPS`. An agent or a gate log that has not changed for
     `idle_limit` seconds or more shows a warning in the live tail. `spin` is the frame of the spinner of a live view
-    that animates, or None for the text of a snapshot (`liveness`). The view names only the run id, the ticket ids, the
+    that animates, or None for the text of a snapshot (`liveness`). `warned` gives the ids of the tickets whose newest
+    event is a problem: the live tail of their rows starts with the warning mark (#222). The view names only the run id, the ticket ids, the
     states, the phases, the reasons with no path, and the numbers. It shows no tool call.
     """
     glyph = output.glyphs()
-    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True, spin=spin), None if height is None else height - 3)
+    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True, spin=spin, warned=warned), None if height is None else height - 3)
     for dropped in FIT_STEPS:
         table, measured = _table(snap, rows, TABLE_COLUMNS, TRACKS, dropped, glyph)
         if measured <= width:
@@ -1111,7 +1112,7 @@ def _fold_line(snap: Snapshot, fold: _Fold, names: list[str], widths: list[int],
 
 def _rows(
     snap: Snapshot, links: Sequence[PlanLink], idle_limit: int | None, glyph: output.Glyphs, live: bool,
-    facts: dict[str, dict[str, str]] | None = None, spin: int | None = None,
+    facts: dict[str, dict[str, str]] | None = None, spin: int | None = None, warned: frozenset[str] = frozenset(),
 ) -> list[_Row]:
     """The rows of the ticket table in plan order: one row for each ticket, and under the row of a running ticket a
     sub-row for each phase after its first.
@@ -1121,7 +1122,7 @@ def _rows(
     running ticket on its row, and the gate that runs on the sub-row of its phase. Without it, as in `delegate status`,
     the tail has only the reason of a row. While the run is pausing, the live tail of the next row gives
     `PAUSING_CELL` (`_pausing_before`). `facts` gives, for each ticket id, the cells of the columns that the live
-    view does not have: `verdict`, `branch` and `last event` of `delegate status`. `spin` is as for `view_lines`.
+    view does not have: `verdict`, `branch` and `last event` of `delegate status`. `spin` and `warned` are as for `view_lines`.
     """
     by_id = {link.id: link for link in links}
     pausing = _pausing_before(snap) if live else None
@@ -1138,7 +1139,10 @@ def _rows(
                 details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(str(ticket.gate), ticket.gate_idle_seconds, idle_limit, glyph)) if part)
         reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket, live)
         cells = _row(ticket, position, link, glyph)
-        cells.update(phase=phases[0] if phases else "", **{TAIL: reason or details[0]})
+        tail = reason or details[0]
+        if ticket.id in warned:
+            tail = f"{output.styled('warn', glyph.idle)} {tail}".rstrip()  # a problem is the newest event of the ticket (#222)
+        cells.update(phase=phases[0] if phases else "", **{TAIL: tail})
         cells.update((facts or {}).get(ticket.id, {}))
         rows.append(_Row(ticket.id, ticket.state, cells, measured=not reason))
         rail = output.styled("plan", glyph.rail) if below is not None and below.rail else ""

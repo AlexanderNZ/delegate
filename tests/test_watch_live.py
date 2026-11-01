@@ -300,15 +300,17 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
     run.agent(0, 2160, "a", "specialist", run.stream("a.specialist.stream.jsonl"))
     run.report(2160, "a", valid=False, reason=f"report missing: {run.dir}/reports/a.specialist.json")
 
-    code, out = watch(repo, monkeypatch)
+    # A problem does not end the live view (#222): the run ends, and the feed keeps the warning line.
+    code, out = watch(repo, monkeypatch, then=lambda: run.add(2161, "run-end", result="failed", built=[], failed=["a"], skipped=[]))
 
-    assert code == 3
-    (last,) = frames(out)
-    assert last[-2:] == [
+    assert code == 1
+    first, last = frames(out)
+    assert first[-2:] == [
         "16:36  #a   specialist finished · 36m · tokens 19k new, 0 cache",
         "16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json",
     ]
-    assert out.splitlines()[-1] == "position 5"
+    assert last[-3:-1] == first[-2:]
+    assert out.splitlines()[-1] == "position 6"
 
 
 def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its_stack_and_joins_the_end_of_the_run(
@@ -371,10 +373,10 @@ def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_t
     run.gate(2400, 2460, "a", PYTEST, green=False)
     run.add(2460, "continuation", ticket="a", count=2, limit=2, trigger="gates-red", mode="resume", resume_session="s", commits=[], reason="red")
 
-    code, out = watch(repo, monkeypatch)
+    code, out = watch(repo, monkeypatch, then=lambda: run.add(2461, "run-end", result="failed", built=[], failed=["a"], skipped=[]))
 
-    assert code == 3
-    (last,) = frames(out)
+    assert code == 1  # the run goes on past the problem (#222)
+    last = frames(out)[0]  # the first frame, before the end of the run
     assert last[last.index("─" * 200) + 1:] == [
         "16:00  #a   started · python-specialist",
         "16:36  #a   specialist capped · 36m · tokens 19k new, 0 cache",
@@ -383,6 +385,7 @@ def test_a_capped_specialist_a_continuation_and_red_gates_each_have_a_line_and_t
         "16:41  #a   gates red (pytest 1m red)",
         "16:41  ✗ #a the step continued 2 times (limit 2, trigger gates-red)",
     ]
+    assert " ⚠" in next(line for line in last if line.lstrip().startswith("1 "))  # the row of the ticket has the warning mark
 
 
 # The raw lines of each case below are the output of `delegate watch` before the live view existed (commit 42cf836).
@@ -491,8 +494,6 @@ def a_run_that_goes_on(run: Run) -> None:
 END_REASONS = [
     pytest.param(ended_built, (), 0, None, r"16:00  run built · 1s · tokens 0 new, 0 cache", id="run-succeeded"),
     pytest.param(ended_failed, (), 1, None, r"16:00  run failed · 1s · tokens 0 new, 0 cache", id="run-failed"),
-    pytest.param(a_problem, (), 3, RAW_OF_A_PROBLEM, r"16:00  ✗ #a the step failed: crashed: OSError: disk full", id="problem"),
-    pytest.param(a_problem_with_no_reason, (), 3, None, r"16:00  ✗ #a the step failed", id="problem-with-no-reason"),
     pytest.param(a_verdict, ("--until", "verdict"), 4, RAW_OF_A_VERDICT, r"17:00  #a   REJECT · 1 finding", id="verdict"),
     pytest.param(a_stall, ("--stall-minutes", "5"), 5, None, r"\d\d:\d\d  ✗ stall · no change for 5m", id="stall"),
     pytest.param(
@@ -522,6 +523,30 @@ def test_each_end_reason_has_the_exit_code_and_the_position_of_before_on_a_termi
     if raw is not None:
         assert raw_out == raw.format(dir=run.dir)
     assert re.fullmatch(feed_end, frames(live_out)[-1][-1]), frames(live_out)[-1]
+
+
+@pytest.mark.parametrize(
+    ("journal", "raw", "feed_end"),
+    [
+        pytest.param(a_problem, RAW_OF_A_PROBLEM, r"16:00  ✗ #a the step failed: crashed: OSError: disk full", id="problem"),
+        pytest.param(a_problem_with_no_reason, None, r"16:00  ✗ #a the step failed", id="problem-with-no-reason"),
+    ],
+)
+def test_a_problem_ends_a_watch_to_a_pipe_with_3_and_does_not_end_the_live_view(tmp_path, monkeypatch, local_zone, journal, raw, feed_end):
+    local_zone("NZT-13")
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a")
+    journal(run)
+
+    piped, raw_out = watch(repo, monkeypatch, terminal=False)
+    live, live_out = watch(repo, monkeypatch, terminal=True, then=lambda: ended_failed(run))  # the run goes on to its end (#222)
+
+    assert (piped, live) == (3, 1)
+    assert raw_out.splitlines()[-1] == f"position {run.seq - 1}"
+    if raw is not None:
+        assert raw_out == raw.format(dir=run.dir)
+    assert re.fullmatch(feed_end, frames(live_out)[0][-1]), frames(live_out)[0]  # the warning line of the first frame
+    assert "\x1b[33m" in next(line for line in live_out.splitlines() if "the step failed" in line)  # in yellow
 
 
 def test_watch_with_no_run_id_of_a_newest_run_that_ended_draws_no_frame_on_a_terminal_and_prints_one_line(
