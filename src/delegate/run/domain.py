@@ -329,16 +329,26 @@ REVIEWED_ALL: str = "all"
 
 
 class PlanTicket(NamedTuple):
-    """One ticket of a plan, as the journal records it: the id, the stack, the blockers, and the SHA-256 of the text."""
+    """One ticket of a plan, as the journal records it: the id, the stack, the blockers, the SHA-256 of the text, and the tier.
+
+    `tier` is the tier of the specialist that the ticket sets (#231), or None when the ticket has none.
+    """
 
     id: str
     stack: str
     blocked_by: tuple[str, ...]
     text_sha256: str
+    tier: str | None = None
 
 
 # The fields of a ticket that a plan change compares, with the name that a message gives each one.
-PLAN_FIELDS: tuple[tuple[str, str], ...] = (("text_sha256", "text"), ("stack", "stack"), ("blocked_by", "blocked-by"))
+PLAN_FIELDS: tuple[tuple[str, str], ...] = (
+    ("text_sha256", "text"), ("stack", "stack"), ("blocked_by", "blocked-by"), ("tier", "tier"),
+)
+
+# The fields of a ticket that change who does the work, not the work. A ticket whose other fields stay the same
+# moves no later ticket: the later tickets need no review, and their briefs get no section "Plan change".
+NO_WORK_FIELDS: frozenset[str] = frozenset({"tier"})
 
 
 class PlanCheck(NamedTuple):
@@ -417,7 +427,7 @@ def check_plan_change(
             ]
         else:
             problems[2] = [f"the new order {', '.join(new_ids)} does not start with the built part {', '.join(fixed)}"]
-    moved = [i for i in new_ids if i in added or i in changed]
+    moved = [i for i in new_ids if i in added or (i in changed and not set(changed[i]) <= NO_WORK_FIELDS)]
     later: list[str] = []
     if moved:
         first = new_ids.index(moved[0])

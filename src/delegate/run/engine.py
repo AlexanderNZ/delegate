@@ -184,7 +184,7 @@ from .journal import Journal, JournalError, abandoned_end, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, probe_guard, refusal, stream_path
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
-from .workflow import Stack, Ticket, Workflow, plan_order
+from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, strongest_tier
 
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
@@ -323,15 +323,40 @@ def new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
 
 
-def _role_model(workflow: Workflow, tiers: Tiers, column: str, role: str) -> tuple[str, str]:
-    """The tier of a role and its model from the adapter's own tier column."""
-    tier = domain.role_tier(workflow.mode, role, workflow.tier_overrides)
+def _tier_model(tiers: Tiers, column: str, tier: str, who: str) -> tuple[str, str]:
+    """The tier and its model from the adapter's own tier column. `who` names what needs the tier in the message."""
     try:
         return tier, tiers.model_for(tier, column)
     except KeyError:
         raise EngineError(f"the tier table has no {column!r} column for tier {tier!r}") from None
     except ValueError:
-        raise EngineError(f"the tier table has no tier {tier!r}, which the {role} needs") from None
+        raise EngineError(f"the tier table has no tier {tier!r}, which {who} needs") from None
+
+
+def _roles(workflow: Workflow, tiers: Tiers, column: str) -> dict[str, tuple[str, str]]:
+    """The tier and the model of each role, by role, and of each specialist tier of the run, by `_specialist_key`.
+
+    The specialist tiers of the run are the tier of the specialist role and the tier of each ticket that has one (#231).
+    Raise EngineError when the tier table has no model for one of them in the column of the adapter.
+    """
+    roles = {
+        role: _tier_model(tiers, column, domain.role_tier(workflow.mode, role, workflow.tier_overrides), f"the {role}")
+        for role in ("specialist", "verifier")
+    }
+    for ticket in workflow.tickets:
+        tier = specialist_tier(workflow, ticket)
+        roles.setdefault(_specialist_key(tier), _tier_model(tiers, column, tier, f"the specialist of ticket {ticket.id!r}"))
+    return roles
+
+
+def _specialist_key(tier: str) -> str:
+    """The key of the specialist tier `tier` in the roles of a run (see `_roles`)."""
+    return f"specialist:{tier}"
+
+
+def _specialist_model(roles: dict[str, tuple[str, str]], workflow: Workflow, ticket: Ticket) -> tuple[str, str]:
+    """The tier and the model of the specialist of `ticket`, of its continuations and of its fix-ups."""
+    return roles[_specialist_key(specialist_tier(workflow, ticket))]
 
 
 @contextmanager
@@ -739,16 +764,22 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
 
 
 def _plan_of(workflow: Workflow) -> list[domain.PlanTicket]:
-    """The plan of a workflow: each ticket in plan order, with its stack, its blockers and the SHA-256 of its text."""
+    """The plan of a workflow: each ticket in plan order, with its stack, its blockers, the SHA-256 of its text, and its tier."""
     return [
-        domain.PlanTicket(t.id, t.stack, tuple(t.blocked_by), hashlib.sha256(t.text.encode()).hexdigest())
+        domain.PlanTicket(t.id, t.stack, tuple(t.blocked_by), hashlib.sha256(t.text.encode()).hexdigest(), t.tier)
         for t in plan_order(workflow)
     ]
 
 
 def _plan_record(plan: list[domain.PlanTicket]) -> list[dict[str, object]]:
-    """The plan as the journal records it, in the field `plan` of `run-start` and of `plan-change`."""
-    return [{"id": t.id, "stack": t.stack, "blocked_by": list(t.blocked_by), "text_sha256": t.text_sha256} for t in plan]
+    """The plan as the journal records it, in the field `plan` of `run-start` and of `plan-change`.
+
+    A ticket with no `tier` has no `tier` in the record, as in a journal from before #231.
+    """
+    return [
+        {"id": t.id, "stack": t.stack, "blocked_by": list(t.blocked_by), "text_sha256": t.text_sha256, **({"tier": t.tier} if t.tier else {})}
+        for t in plan
+    ]
 
 
 def _recorded_plan(events: list[dict[str, object]]) -> list[domain.PlanTicket] | None:
@@ -760,7 +791,10 @@ def _recorded_plan(events: list[dict[str, object]]) -> list[domain.PlanTicket] |
     if records[-1] is None:
         return None
     return [
-        domain.PlanTicket(str(r["id"]), str(r["stack"]), tuple(str(b) for b in r["blocked_by"]), str(r["text_sha256"]))  # type: ignore[index, union-attr]
+        domain.PlanTicket(
+            str(r["id"]), str(r["stack"]), tuple(str(b) for b in r["blocked_by"]), str(r["text_sha256"]),  # type: ignore[index, union-attr]
+            None if r.get("tier") is None else str(r["tier"]),  # type: ignore[union-attr]
+        )
         for r in records[-1]  # type: ignore[union-attr]
     ]
 
@@ -1196,8 +1230,7 @@ def check_start(
     stderr and exits non-zero, as in the foreground.
     """
     repo, state_dir = state_directory(repo, vcs, run_id)
-    for role in ("specialist", "verifier"):
-        _role_model(workflow, tiers, adapter.tier_column, role)
+    _roles(workflow, tiers, adapter.tier_column)
     try:
         # The lock of a run that started before #200 is in `<git common dir>/delegate`, so a run there counts too.
         for directory in _state_directories(repo, vcs)[1]:
@@ -1263,7 +1296,7 @@ def run_workflow(
     )
     repo, state_dir = state_directory(repo, vcs, run_id)
     record_state_root(repo, vcs, state_dir)
-    roles = {role: _role_model(workflow, tiers, adapter.tier_column, role) for role in ("specialist", "verifier")}
+    roles = _roles(workflow, tiers, adapter.tier_column)
     try:
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
             try:
@@ -1948,7 +1981,7 @@ def _build_ticket(
       `_retry_ticket`, with no specialist: at the gates, at a verifier, or, after a stop before a fix-up session, at the fix-up of
       the same round (see `_stopped_before_fixup`).
     """
-    tier, model = roles["specialist"]
+    tier, model = _specialist_model(roles, workflow, ticket)
     stack = workflow.stacks[ticket.stack]
     branch = _ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
@@ -2421,7 +2454,7 @@ def _run_fixup(
     a valid report that says committed.
     """
     ticket = step.ticket
-    tier, model = step.roles["specialist"]
+    tier, model = _specialist_model(step.roles, step.workflow, ticket)
     findings_path = step.run_dir / "findings" / f"{ticket.id}.fixup-{round_number}.md"
     findings_path.parent.mkdir(parents=True, exist_ok=True)
     findings_path.write_text(findings)
@@ -3021,8 +3054,10 @@ class _ChainRun:
         for position, name in enumerate(stacks):
             tickets = [ticket for ticket in self.chain if ticket.stack == name]
             verdicts = [e["verdict"] for e in events if e["event"] == "verdict" and e.get("stack") == name]
+            # A fix-up of the stack uses the strongest specialist tier of the tickets that the verification covers (#231).
+            tier = strongest_tier(specialist_tier(self.workflow, ticket) for ticket in tickets)
             step = _Step(
-                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, []), self.adapter, self.vcs, self.gates, self.roles,
+                self.workflow, Ticket(tickets[-1].id, _chain_text(tickets), name, [], tier), self.adapter, self.vcs, self.gates, self.roles,
                 self.repo, self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
             )
             last = step

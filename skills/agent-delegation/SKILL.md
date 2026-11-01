@@ -612,6 +612,22 @@ differs between them.
 - The verifier tier is the same in both modes. A cheaper mode never means a
   weaker verifier.
 
+### Give a ticket a stronger tier
+The mode gives the specialist tier of the whole run. A ticket can set its own
+specialist tier with `tier = "<tier name>"` in the workflow. The tier applies
+to the specialist of the ticket, its continuations, and its fix-ups. It never
+changes the verifier. Give a ticket a stronger tier than the role when:
+
+- other tickets build on its work, for example the ticket that lays the base
+  of a feature. A defect there spoils each ticket after it.
+- it has a measurement or a security rule. A weak specialist can give an
+  approximate number, or miss a case of the rule.
+
+Give the tickets that depend on it the tier of the role. In `economy` mode, a
+fix-up of the chain uses the strongest specialist tier of the tickets of the
+stack. A plan change can set the `tier` of a ticket that has not started. See
+`docs/reference/workflow.md`, the section "The tier of a ticket".
+
 ### The invariants of every mode
 These seven rules hold in every mode. No setting in the table changes them.
 

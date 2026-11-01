@@ -69,7 +69,7 @@ from ..run.engine import (
 from ..run.output import glyphs, short_run_id, styled
 from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
-from ..run.workflow import WorkflowError, load_workflow, plan_order
+from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .setup_check import check_setup
@@ -439,7 +439,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"each ticket starts from the run branch {workflow.run_branch}")
     for number, ticket in enumerate(plan_order(workflow), start=1):
         blocked = ", ".join(ticket.blocked_by) or "none"
-        print(f"ticket {ticket.id} ({number}/{len(workflow.tickets)}): stack {ticket.stack}, blocked by {blocked}")
+        print(
+            f"ticket {ticket.id} ({number}/{len(workflow.tickets)}): stack {ticket.stack}, blocked by {blocked}, "
+            f"specialist tier {specialist_tier(workflow, ticket)}"
+        )
     for stack in workflow.stacks.values():
         for command in stack.prepare:
             print(f"stack {stack.name} prepare: {command}")

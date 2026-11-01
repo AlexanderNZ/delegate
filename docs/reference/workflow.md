@@ -151,6 +151,20 @@ A model identifier in place of a tier name is an error. The message names the fi
 
 The verifier tier never goes down, in any mode. The `verifier` entry must name a tier that is as strong as the tier `verifier`: `strong` or `verifier`. A weaker tier (`standard` or `cheap`) is an error, and so is a tier that is not in the strength order of the bundled table. The message names the field, `tier-overrides.verifier`. The engine finds this error when it loads the file, so `--dry-run` reports it too.
 
+## The tier of a ticket
+
+The field `tier` of a ticket sets the tier of the specialist of that ticket, by tier name. A ticket with no `tier` uses the tier of the specialist role: the tier that the mode gives it, or the `specialist` entry of `tier-overrides`.
+
+- The tier applies to the first specialist of the ticket, to each [**continuation**](../glossary.md#continuation), and to each [**fix-up**](../glossary.md#fix-up) specialist of the ticket.
+- The value is a tier name of the tier table, as for `tier-overrides`. A model identifier in place of a tier name is an error. The message names the ticket and the field, for example `ticket 'a': tier: 'opus' is a model identifier, not a tier name`.
+- The `tier` of a ticket does not change the verifier. The verifier tier never goes down.
+- In `economy` mode, a fix-up of the [chain verification](run.md#the-chain-verification) runs in the worktree of the last ticket of the stack. It uses the strongest specialist tier of the tickets of the stack that the chain verification covers. A ticket with no `tier` counts with the tier of the specialist role. The strength order is `cheap`, `standard`, then `strong` and `verifier`, which have the same strength. When two tiers have the same strength, the tier of the first ticket in plan order wins.
+- In `economy` mode, each ticket `tier` must have a place in this order. When a ticket has a `tier`, the tier of the specialist role must have a place in it too. A tier of your own tier file that is not in the order is an error, because the engine cannot pick the strongest tier. `assure` mode has no such rule.
+- `step-start` and `fixup-start` record the tier and the model of the specialist. `delegate run --dry-run` prints the specialist tier of each ticket at the end of the line of the ticket, for example `ticket a (1/2): stack python, blocked by none, specialist tier strong`.
+- A plan change can set or change the `tier` of a ticket that has not started. The `tier` of a ticket that has started is fixed, as its other fields are. See [change the workflow between resumes](#change-the-workflow-between-resumes).
+
+Give a ticket a stronger tier when other tickets build on its work, or when it has a measurement or a security rule. Give the tickets that depend on it the tier of the role.
+
 ## Stacks
 
 Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `gate-timeout`, `agent-timeout`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
@@ -281,6 +295,7 @@ Each `[[tickets]]` table describes one ticket. The tickets can be in any order i
 | `text-file` | string | The path of a local file that holds the ticket text. The path is relative to the directory of the workflow file. The file must exist. |
 | `stack` | string | The name of a stack in `stacks`. |
 | `blocked-by` | list of strings | The ids of the tickets that must be done first. Use `[]` for none. |
+| `tier` | string | Optional. The tier of the specialist of this ticket, by tier name. See [The tier of a ticket](#the-tier-of-a-ticket). |
 
 The engine never contacts an issue tracker. The agent that invokes the engine writes any tracker content to disk first.
 
@@ -293,6 +308,7 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 - `mode`, `adapter`, `base-branch` and `run-branch` must not change. If one of them changes, the resume exits 1, and the message names the field.
 - The tickets can change. This is a plan change. The built part of the run is fixed. A new ticket goes at the end, or before a ticket that has not started. A ticket that has not started can change, move or go. A new ticket before built work, and a change to a built ticket, are refused, and the message names the ticket and the field.
 - A later ticket has not started, and comes after an added or changed ticket. Read each later ticket against the new work, then give `--reviewed <ids>` or `--reviewed all`. Without it, the resume is refused.
+- A change to the `tier` of a ticket that has not started changes no work. A ticket whose only change is its `tier` makes no later ticket, so it needs no `--reviewed`.
 
 `delegate run --resume <run-id> --dry-run` prints the old order, the new order, the [**verdict**](../glossary.md#verdict) of each rule and the tickets to review, and changes nothing. See [the plan change](run.md#the-plan-change).
 
@@ -320,6 +336,8 @@ The check is in Python and starts no process. For example, the id `a.lock` is a 
 | `ticket-start` is `run-branch` in `economy` mode. | The field and the value. |
 | `keep-worktrees` is not `true` or `false`. | The field and the value. |
 | A tier override is not a tier name. | The field `tier-overrides.<role>`, the value, and the valid tier names. |
+| The `tier` of a ticket is not a tier name, for example a model identifier. | The ticket, the field `tier`, the value, and the valid tier names. |
+| In `economy` mode, the `tier` of a ticket has no place in the strength order of the tiers. | The ticket, the field `tier`, the value, and the tiers of the order. |
 | A ticket names a stack that does not exist. | The ticket and the stack. |
 | A ticket is blocked by an id that no ticket has. | The ticket and the blocker. |
 | Tickets wait on each other. | Every ticket in the cycle. A ticket that blocks itself is a cycle. |

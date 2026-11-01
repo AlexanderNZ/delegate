@@ -75,6 +75,7 @@ class PlanTicket(TypedDict):
     stack: str
     blocked_by: list[str]
     text_sha256: str
+    tier: NotRequired[str]
 
 
 class Refusal(TypedDict):

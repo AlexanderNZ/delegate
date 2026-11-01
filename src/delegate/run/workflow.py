@@ -121,6 +121,8 @@ class Ticket:
     text: str
     stack: str
     blocked_by: list[str]
+    # The tier of the specialist of this ticket, of its continuations and of its fix-ups (#231). None: the tier of the role.
+    tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,25 +188,69 @@ def _cycles(tickets: list[Ticket]) -> list[list[str]]:
     return found
 
 
-def _tier_override_problems(overrides: dict[str, str], tiers: Tiers) -> list[str]:
-    """One message for each override whose role or value is not valid.
+def _tier_name_problem(field: str, value: str, tiers: Tiers) -> str | None:
+    """The message when `value` is not a tier name of the table, or None.
 
-    A value must be a tier name of the table. A model identifier is a different
-    thing, and the message says so: the workflow names strengths, never models.
+    A model identifier is a different thing, and the message says so: the
+    workflow names strengths, never models.
     """
+    if value in tiers.tiers:
+        return None
     models = {model for columns in tiers.tiers.values() for model in columns.values()}
     models.update(model for allowed in tiers.allowed_models.values() for model in allowed)
+    kind = "a model identifier, not a tier name" if value in models or "/" in value else "not a tier name"
+    return f"{field}: {value!r} is {kind}; known tiers: {', '.join(sorted(tiers.tiers))}"
+
+
+def _tier_override_problems(overrides: dict[str, str], tiers: Tiers) -> list[str]:
+    """One message for each override whose role or value is not valid. A value must be a tier name of the table."""
     problems: list[str] = []
     for role, value in overrides.items():
         field = f"tier-overrides.{role}"
+        name_problem = _tier_name_problem(field, value, tiers)
         if role not in ROLES:
             problems.append(f"{field}: unknown role {role!r}; known roles: {', '.join(ROLES)}")
-        elif value not in tiers.tiers:
-            kind = "a model identifier, not a tier name" if value in models or "/" in value else "not a tier name"
-            problems.append(f"{field}: {value!r} is {kind}; known tiers: {', '.join(sorted(tiers.tiers))}")
+        elif name_problem is not None:
+            problems.append(name_problem)
         elif role == "verifier":
             problems.extend(_verifier_floor_problems(field, value))
     return problems
+
+
+def _ticket_tier_order_problems(mode: str, overrides: dict[str, str], tickets: list[Ticket], tiers: Tiers) -> list[str]:
+    """In `economy` mode, one message for each ticket tier, and for the tier of the specialist role, with no rank.
+
+    The fix-up of the chain verification uses the strongest specialist tier of
+    the tickets that it covers (see `strongest_tier`). A tier that is not in
+    `TIER_RANK` has no place in the strength order, so the engine cannot pick
+    the strongest tier. `assure` mode has no such fix-up, and needs no rank.
+    A tier that is not a tier name of the table has its message already, so it gets none here.
+    """
+    if mode != ECONOMY or all(ticket.tier is None for ticket in tickets):
+        return []
+    allowed = ", ".join(sorted(TIER_RANK))
+    reason = "has no place in the tier order, so the fix-up of the chain verification cannot pick the strongest tier"
+    problems = [
+        f"ticket {ticket.id!r}: tier: {ticket.tier!r} {reason}; allowed: {allowed}"
+        for ticket in tickets if ticket.tier in tiers.tiers and ticket.tier not in TIER_RANK
+    ]
+    role = domain.role_tier(mode, "specialist", overrides)
+    if role in tiers.tiers and role not in TIER_RANK:
+        problems.append(f"tier-overrides.specialist: {role!r} {reason} of a ticket with a tier; allowed: {allowed}")
+    return problems
+
+
+def specialist_tier(workflow: Workflow, ticket: Ticket) -> str:
+    """The tier of the specialist of `ticket`: the tier of the ticket, or the tier of the specialist role (#231)."""
+    return ticket.tier if ticket.tier is not None else domain.role_tier(workflow.mode, "specialist", workflow.tier_overrides)
+
+
+def strongest_tier(names: Iterable[str]) -> str:
+    """The strongest of the tier names `names`, by `TIER_RANK`. On a tie, the first one wins.
+
+    `load_workflow` refuses an `economy` workflow whose ticket tiers have no rank, so each name has one.
+    """
+    return max(names, key=lambda name: TIER_RANK[name])
 
 
 def _verifier_floor_problems(field: str, tier: str) -> list[str]:
@@ -328,7 +374,7 @@ STACK_FIELDS: tuple[str, ...] = (
 )
 GATE_FIELDS: tuple[str, ...] = ("name", "command")
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
-TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by")
+TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by", "tier")
 
 
 def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]:
@@ -424,7 +470,7 @@ def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpSe
     return tuple(servers) if len(reader.problems) == problems else None
 
 
-def _read_tickets(reader: _Reader, value: object, root: Path) -> list[Ticket]:
+def _read_tickets(reader: _Reader, value: object, root: Path, tiers: Tiers) -> list[Ticket]:
     if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
         reader.problems.append("tickets: needs at least one [[tickets]] table")
         return []
@@ -444,8 +490,13 @@ def _read_tickets(reader: _Reader, value: object, root: Path) -> list[Ticket]:
         text = _read_ticket_text(reader, raw, label, root)
         stack = reader.string(raw, "stack", f"{label}: stack")
         blocked_by = reader.string_list(raw, "blocked-by", f"{label}: blocked-by", at_least_one=False)
+        # A bad tier is a problem of its own: the ticket stays, so a ticket that it blocks gets no second message.
+        tier = reader.string(raw, "tier", f"{label}: tier") if "tier" in raw else None
+        name_problem = _tier_name_problem(f"{label}: tier", tier, tiers) if tier is not None else None
+        if name_problem is not None:
+            reader.problems.append(name_problem)
         if None not in (ticket_id, text, stack, blocked_by):
-            tickets.append(Ticket(ticket_id, text, stack, blocked_by))  # type: ignore[arg-type]
+            tickets.append(Ticket(ticket_id, text, stack, blocked_by, tier))  # type: ignore[arg-type]
     return tickets
 
 
@@ -512,7 +563,9 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
     reader.problems.extend(_tier_override_problems(overrides, tiers))
 
     stacks = _read_stacks(reader, data.get("stacks"), Path(path).parent)
-    tickets = _read_tickets(reader, data.get("tickets"), Path(path).parent)
+    tickets = _read_tickets(reader, data.get("tickets"), Path(path).parent, tiers)
+    if mode in MODES:
+        reader.problems.extend(_ticket_tier_order_problems(mode, overrides, tickets, tiers))
     known_ids = {t.id for t in tickets}
     run_branch_valid = run_branch is not None and ref_name_problem(run_branch) is None
     for ticket in tickets:
