@@ -34,7 +34,7 @@ from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 #: Each shell that runs the Bash guard: bash, /bin/sh and zsh (a comment on #121 asks for zsh cases).
 SHELLS = (
@@ -73,10 +73,9 @@ HOOK = _hook()
 @pytest.fixture
 def repo(tmp_path, git_identity) -> Path:
     """A git repository with the stack directories api/ and app/, and a directory beside it."""
-    root = Path(os.path.realpath(tmp_path)) / "repo"
+    root = committed_repo(Path(os.path.realpath(tmp_path)) / "repo", {})
     for stack in ("api", "app/src"):
         (root / stack).mkdir(parents=True)
-    git(root, "init", "-q", "-b", "main")
     (tmp_path / "outside").mkdir()
     return root
 

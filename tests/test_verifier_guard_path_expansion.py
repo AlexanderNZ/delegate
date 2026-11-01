@@ -37,7 +37,7 @@ from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
 from .pages import ROOT, outside_the_package
-from .support import git
+from .support import committed_repo
 
 #: Each shell that runs the Bash guard.
 SHELLS = (
@@ -89,13 +89,7 @@ class Place:
 
     def __init__(self, base: Path):
         self.base = base
-        self.main = base / "main"
-        (self.main / "src").mkdir(parents=True)
-        (self.main / "a.txt").write_text("x\n")
-        (self.main / "src" / "x.py").write_text("x = 1\n")
-        git(self.main, "init", "-q", "-b", "main")
-        git(self.main, "add", ".")
-        git(self.main, "commit", "-q", "-m", "seed")
+        self.main = committed_repo(base / "main", {"a.txt": "x\n", "src/x.py": "x = 1\n"})
         (base / "empty").mkdir()
         self.empty = _without_private(base / "empty")
 

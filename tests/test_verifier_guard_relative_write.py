@@ -30,7 +30,7 @@ from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo, git
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -71,12 +71,7 @@ class Trees:
 
     def __init__(self, base: Path):
         self.base = base
-        self.main = base / "main"
-        (self.main / "app").mkdir(parents=True)
-        git(self.main, "init", "-q", "-b", "main")
-        (self.main / "app" / "a.py").write_text("print('hi')\n")
-        git(self.main, "add", "app/a.py")
-        git(self.main, "commit", "-q", "-m", "seed")
+        self.main = committed_repo(base / "main", {"app/a.py": "print('hi')\n"})
         self.worktree = base / "wt"
         git(self.main, "worktree", "add", "-q", "-b", "feature", str(self.worktree))
         assert (self.worktree / ".git").is_file(), "a worktree has a .git pointer file"
@@ -184,9 +179,7 @@ def test_a_relative_write_in_a_subdirectory_of_a_git_worktree_is_denied(trees, s
 @pytest.mark.parametrize("shell", SHELLS)
 def test_a_relative_write_into_a_git_tree_in_the_copy_is_denied(trees, shell):
     # The copy holds a nested repository. A write into it, or a removal of a directory that holds it, is a deny.
-    nested = trees.copy / "vendor" / "lib"
-    nested.mkdir(parents=True)
-    git(nested, "init", "-q", "-b", "main")
+    nested = committed_repo(trees.copy / "vendor" / "lib", {})
     for command in ("touch vendor/lib/x", "echo x > vendor/lib/x", "rm -rf vendor", "rm -rf .", "mv vendor gone"):
         result = _guard(trees, command, shell, trees.copy)
 

@@ -38,7 +38,7 @@ from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
 from .pages import ROOT, outside_the_package
-from .support import git
+from .support import committed_repo
 
 SHELLS = (
     "bash",
@@ -93,13 +93,7 @@ def _guard(command: str, shell: str, cwd: Path, tmpdir: Path | None = None) -> s
 @pytest.fixture
 def repo(tmp_path, git_identity) -> Path:
     """A git repository with one tracked file."""
-    root = Path(os.path.realpath(tmp_path)) / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    (root / "a.txt").write_text("a\n")
-    git(root, "add", "a.txt")
-    git(root, "commit", "-q", "-m", "a")
-    return root
+    return committed_repo(Path(os.path.realpath(tmp_path)) / "repo", {"a.txt": "a\n"}, message="a")
 
 
 @pytest.fixture

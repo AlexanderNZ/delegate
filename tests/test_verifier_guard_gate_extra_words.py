@@ -31,7 +31,7 @@ from delegate.definitions.render import render_claude_code, render_opencode
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 #: Each shell that runs the Bash guard.
 SHELLS = (
@@ -94,13 +94,7 @@ class Repo:
 
     def __init__(self, base: Path):
         self.base = base
-        self.main = base / "main"
-        for name in ("app/src/a.test.ts", "api/build.gradle", "tests/test_x.py"):
-            (self.main / name).parent.mkdir(parents=True, exist_ok=True)
-            (self.main / name).write_text("x\n")
-        git(self.main, "init", "-q", "-b", "main")
-        git(self.main, "add", ".")
-        git(self.main, "commit", "-q", "-m", "seed")
+        self.main = committed_repo(base / "main", dict.fromkeys(("app/src/a.test.ts", "api/build.gradle", "tests/test_x.py"), "x\n"))
         self.copy = base / "proof"
         shutil.copytree(self.main, self.copy, symlinks=True, ignore=shutil.ignore_patterns(".git"))
 

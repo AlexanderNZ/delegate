@@ -126,20 +126,30 @@ def copy_of(dest: Path, key: tuple[object, ...], build: Callable[[Path], None]) 
     return dest
 
 
-def _seeded(workflow: str) -> Callable[[Path], None]:
-    def build(repo: Path) -> None:
-        (repo / "seed.txt").write_text("seed\n")
-        (repo / "workflow.toml").write_text(workflow)
-        git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
-        git(repo, *TEMPLATE_GIT, "add", "-A")
-        git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", "seed")
+def committed_repo(dest: Path, files: Mapping[str, str], message: str = "seed") -> Path:
+    """A real git repository on `main` at `dest`, with `files` (path: text) in one first commit, and return `dest`.
 
-    return build
+    With no files, the repository has no commit. The process makes each
+    repository once and copies it (see `copy_of`), so a call starts no git
+    process after the first call with the same files and message. A test that
+    needs its own history adds it to the copy.
+    """
+
+    def build(repo: Path) -> None:
+        for name, text in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(text)
+        git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+        if files:
+            git(repo, *TEMPLATE_GIT, "add", "-A")
+            git(repo, *TEMPLATE_GIT, "commit", "-q", "-m", message)
+
+    return copy_of(dest, ("committed_repo", tuple(sorted(files.items())), message), build)
 
 
 def make_repo(tmp_path: Path, workflow: str = WORKFLOW) -> Path:
     """A real git repository on `main` that holds `workflow.toml` and one seed file."""
-    return copy_of(tmp_path / "repo", ("make_repo", workflow), _seeded(workflow))
+    return committed_repo(tmp_path / "repo", {"seed.txt": "seed\n", "workflow.toml": workflow})
 
 
 def valid_report(ticket: str, branch: str, head_sha: str, **changes: object) -> dict[str, object]:
@@ -599,13 +609,9 @@ def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
         journal.append(name, **fields)
 
 
-def _empty(repo: Path) -> None:
-    git(repo, *TEMPLATE_GIT, "init", "-q", "-b", "main")
-
-
 def bare_repo(tmp_path: Path) -> Path:
     """A git repository with no commit and no run. `delegate status` and `delegate watch` need only the state directory."""
-    return copy_of(tmp_path / "repo", ("bare_repo",), _empty)
+    return committed_repo(tmp_path / "repo", {})
 
 
 def run_start(run_id: str, *tickets: str, mode: str = "assure", run_branch: str = "run/demo") -> tuple[str, dict[str, object]]:

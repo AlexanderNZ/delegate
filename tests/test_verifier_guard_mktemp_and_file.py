@@ -42,7 +42,7 @@ from delegate.definitions.render import render_claude_code, render_opencode
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 SHELLS = (
     "bash",
@@ -76,13 +76,7 @@ HOOK = _hook()
 @pytest.fixture
 def repo(tmp_path, git_identity) -> Path:
     """A git repository with one tracked file."""
-    root = Path(os.path.realpath(tmp_path)) / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    (root / "a.txt").write_text("foo\n")
-    git(root, "add", "a.txt")
-    git(root, "commit", "-q", "-m", "a")
-    return root
+    return committed_repo(Path(os.path.realpath(tmp_path)) / "repo", {"a.txt": "foo\n"}, message="a")
 
 
 #: The fixed temp prefixes of the guard, without a /private prefix.
@@ -208,9 +202,7 @@ def test_a_mktemp_directory_outside_a_temp_directory_is_denied(repo, shell, comm
 def test_a_mktemp_file_in_a_git_tree_is_denied_also_in_a_temp_directory(temp_base, git_identity, shell, form):
     # The repository is in a temp directory. A file that mktemp makes in it is
     # a write in the tree.
-    repo = temp_base / "repo"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "main")
+    repo = committed_repo(temp_base / "repo", {})
     command = form.format(repo=_without_private(repo))
     r = _guard(command, shell, repo)
     assert r.returncode == 2, (shell, command, r.stderr)
@@ -310,8 +302,7 @@ def test_a_mktemp_template_with_a_slash_after_a_directory_option_is_denied(temp_
     # for "-t sub/f". Before this fix, the guard tested the template against
     # the working directory, and permitted each form.
     par = temp_base / "par"
-    (par / "wt" / "src").mkdir(parents=True)
-    git(par / "wt", "init", "-q", "-b", "main")
+    (committed_repo(par / "wt", {}) / "src").mkdir()
     copy = temp_base / "copy"
     (copy / "wt" / "src").mkdir(parents=True)
     command = form.format(par=_without_private(par))
@@ -326,8 +317,7 @@ def test_a_mktemp_template_with_a_slash_after_a_directory_option_is_denied(temp_
 def test_a_mktemp_name_with_no_slash_after_a_directory_option_is_permitted(temp_base, git_identity, shell, form):
     # The file is {par}/f<random> or $TMPDIR/f.<random>: next to the git tree, not in it.
     par = temp_base / "par"
-    (par / "wt").mkdir(parents=True)
-    git(par / "wt", "init", "-q", "-b", "main")
+    committed_repo(par / "wt", {})
     copy = temp_base / "copy"
     copy.mkdir()
     command = form.format(par=_without_private(par))

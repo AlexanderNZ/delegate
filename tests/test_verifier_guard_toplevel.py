@@ -30,7 +30,7 @@ from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo, git
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -71,12 +71,7 @@ class Tree:
 
     def __init__(self, base: Path):
         self.base = base
-        main = base / "main"
-        main.mkdir()
-        git(main, "init", "-q", "-b", "main")
-        (main / "app.py").write_text("print('hi')\n")
-        git(main, "add", "app.py")
-        git(main, "commit", "-q", "-m", "seed")
+        main = committed_repo(base / "main", {"app.py": "print('hi')\n"})
         self.worktree = base / "wt"
         git(main, "worktree", "add", "-q", "-b", "feature", str(self.worktree))
         (self.worktree / "src").mkdir()

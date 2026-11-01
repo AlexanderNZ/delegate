@@ -17,7 +17,7 @@ from delegate.definitions.render import render
 from delegate.ports.harness import AdapterRequest
 
 from . import claude_fake
-from .support import git
+from .support import committed_repo, git
 
 BRIEF = "## Task\n\nTicket a: SECRET-BRIEF-TEXT\n"
 AGENT = "python-specialist"
@@ -38,15 +38,9 @@ def block(command: str) -> str:
 
 def repository(tmp_path: Path, tiers, skills: list[str]) -> Path:
     """A real git repository with the pair `python` rendered for Claude Code, and one commit."""
-    repo = tmp_path / "repo"
     agent = Agent(key="python", description="The python stack.", gate_commands=["python3 -m pytest -rs"], skills=skills)
-    for name, content in render([agent], tiers)["claude-code"].items():
-        write(repo / ".claude" / "agents" / name, content)
-    write(repo / "NOTE.md", "NOTE-ON-MAIN\n")
-    git(repo, "init", "-q", "-b", "main")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "init")
-    return repo
+    files = {f".claude/agents/{name}": content for name, content in render([agent], tiers)["claude-code"].items()}
+    return committed_repo(tmp_path / "repo", {**files, "NOTE.md": "NOTE-ON-MAIN\n"}, message="init")
 
 
 def start(tmp_path: Path, monkeypatch, repo: Path, cwd: Path, **changes) -> str:

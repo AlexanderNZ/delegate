@@ -34,7 +34,7 @@ from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -75,14 +75,10 @@ class Host:
         self.tmp = base / "agent" / ".tmp"
         (self.tmp / "x").mkdir(parents=True)
         (self.tmp / "x" / "f").write_text("f\n")
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        git(self.repo, "init", "-q", "-b", "main")
-        (self.tmp / "hold" / "inner").mkdir(parents=True)
-        git(self.tmp / "hold" / "inner", "init", "-q", "-b", "main")
-        self.outer = base / "outer"
+        self.repo = committed_repo(self.tmp / "repo", {})
+        committed_repo(self.tmp / "hold" / "inner", {})
+        self.outer = committed_repo(base / "outer", {})
         (self.outer / "tmp" / "x").mkdir(parents=True)
-        git(self.outer, "init", "-q", "-b", "main")
 
     def env(self, tmpdir: str | Path | None = None, home: str | Path | None = None) -> dict[str, str]:
         return {

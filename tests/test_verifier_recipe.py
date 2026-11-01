@@ -48,7 +48,7 @@ from delegate.definitions.validate import split_frontmatter
 from delegate.run.brief import red_proof_copy, verifier_run_sections
 
 from .pages import outside_the_package
-from .support import ScriptedAdapter, git, make_repo, read_journal
+from .support import ScriptedAdapter, committed_repo, git, make_repo, read_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 ENFORCEMENT_PAGE = ROOT / "docs" / "explanation" / "the-enforcement-model-and-its-limits.md"
@@ -121,13 +121,7 @@ def base(tmp_path):
 
 
 def _repository(base: Path) -> Path:
-    main = base / "main"
-    main.mkdir()
-    git(main, "init", "-q", "-b", "main")
-    (main / "app.py").write_text("print('hi')\n")
-    git(main, "add", "app.py")
-    git(main, "commit", "-q", "-m", "seed")
-    return main
+    return committed_repo(base / "main", {"app.py": "print('hi')\n"})
 
 
 def _guard(hook: str, shell: str, command: str, cwd: Path, base: Path) -> subprocess.CompletedProcess:

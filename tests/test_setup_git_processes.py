@@ -9,7 +9,7 @@ they hold the budget of the shared helpers.
 from delegate.cli import delegate
 
 from . import git_processes
-from .support import git, make_repo
+from .support import committed_repo, git, make_repo
 
 
 def test_the_count_holds_each_git_process_that_the_test_code_starts(tmp_path):
@@ -30,6 +30,42 @@ def test_a_second_repository_from_the_same_template_starts_no_git_process(tmp_pa
 
     assert git_processes.started() - before == 0
     assert git(repo, "log", "--format=%an <%ae> %s") == "Scratch <scratch@example.invalid> seed\n"
+
+
+def test_a_second_repository_with_the_same_files_starts_no_git_process_and_holds_the_files_in_one_commit(tmp_path):
+    files = {"a.txt": "a\n", "src/x.py": "x = 1\n"}
+    committed_repo(tmp_path / "first", files, message="seed")
+    before = git_processes.started()
+
+    repo = committed_repo(tmp_path / "second", files, message="seed")
+
+    assert git_processes.started() - before == 0
+    assert git(repo, "log", "--format=%an <%ae> %s") == "Scratch <scratch@example.invalid> seed\n"
+    assert git(repo, "ls-files") == "a.txt\nsrc/x.py\n"
+    assert git(repo, "status", "--porcelain") == ""
+    assert git(repo, "branch", "--show-current") == "main\n"
+    assert (repo / "src" / "x.py").read_text() == "x = 1\n"
+
+
+def test_a_repository_with_no_files_has_no_commit_and_other_files_give_another_template(tmp_path):
+    empty = committed_repo(tmp_path / "empty", {})
+    other = committed_repo(tmp_path / "other", {"b.txt": "b\n"}, message="b")
+
+    assert git(empty, "rev-parse", "--is-inside-work-tree") == "true\n"
+    assert git(empty, "rev-list", "--all") == ""
+    assert git(other, "log", "--format=%s") == "b\n"
+    assert git(other, "ls-files") == "b.txt\n"
+
+
+def test_a_worktree_of_a_copied_repository_is_a_git_worktree_of_the_copy(tmp_path):
+    committed_repo(tmp_path / "first" / "main", {"app.py": "print('hi')\n"})
+    main = committed_repo(tmp_path / "second" / "main", {"app.py": "print('hi')\n"})
+
+    git(main, "worktree", "add", "-q", "-b", "feature", str(tmp_path / "second" / "wt"))
+
+    assert git(tmp_path / "second" / "wt", "rev-parse", "--show-toplevel").strip() == str((tmp_path / "second" / "wt").resolve())
+    assert git(tmp_path / "second" / "wt", "ls-files") == "app.py\n"
+    assert not (tmp_path / "first" / "main" / ".git" / "worktrees").exists()
 
 
 def test_the_scripted_adapter_starts_only_the_add_and_the_commit_of_its_work_in_a_run_of_one_ticket(tmp_path, capsys, scripted):

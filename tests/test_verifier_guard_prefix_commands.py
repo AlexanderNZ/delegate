@@ -44,7 +44,7 @@ from delegate.definitions.render import render_claude_code, render_opencode
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 SHELLS = (
     "bash",
@@ -73,13 +73,7 @@ HOOK = _hook()
 @pytest.fixture
 def repo(tmp_path, git_identity) -> Path:
     """A git repository with one tracked file."""
-    root = Path(os.path.realpath(tmp_path)) / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    (root / "a.txt").write_text("foo\n")
-    git(root, "add", "a.txt")
-    git(root, "commit", "-q", "-m", "a")
-    return root
+    return committed_repo(Path(os.path.realpath(tmp_path)) / "repo", {"a.txt": "foo\n"}, message="a")
 
 
 def _guard(command: str, shell: str, cwd: Path) -> subprocess.CompletedProcess:

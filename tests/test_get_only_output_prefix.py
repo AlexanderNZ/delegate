@@ -27,7 +27,7 @@ from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import git
+from .support import committed_repo
 
 SHELLS = (
     "bash",
@@ -54,13 +54,7 @@ HOOK = _hook()
 @pytest.fixture
 def worktree(tmp_path, git_identity) -> Path:
     """A git repository with one commit, in the role of the worktree under review."""
-    root = Path(os.path.realpath(tmp_path)) / "worktree"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    (root / "a.txt").write_text("a\n")
-    git(root, "add", "a.txt")
-    git(root, "commit", "-q", "-m", "a")
-    return root
+    return committed_repo(Path(os.path.realpath(tmp_path)) / "worktree", {"a.txt": "a\n"}, message="a")
 
 
 def _guard(command: str, shell: str, cwd: Path, tmpdir: Path | None = None) -> subprocess.CompletedProcess:
