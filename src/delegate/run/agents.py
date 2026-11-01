@@ -114,6 +114,19 @@ def recorded_agents(events: list[dict[str, object]]) -> list[dict[str, object]] 
     return found
 
 
+def denied_agents(events: list[dict[str, object]]) -> set[str]:
+    """The agents whose guard probe showed a denial after the newest record of seals in the journal (#219).
+
+    A resume that seals again writes a newer record, so the probes before it do not count and each verifier is probed
+    again. A resume that seals nothing leaves the record and its probes as they were.
+    """
+    since = -1
+    for index, event in enumerate(events):
+        if event["event"] in ("run-start", "resume") and _is_record(event.get("agents")):
+            since = index
+    return {str(e["agent"]) for e in events[since + 1 :] if e["event"] == "guard-probe" and e.get("result") == "denied"}
+
+
 def sealed_agent(entry: dict[str, object]) -> SealedAgent:
     """The sealed agent that a record entry describes, as the adapter gets it in a request."""
     source = entry.get("source")

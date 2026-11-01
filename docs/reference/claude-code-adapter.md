@@ -109,6 +109,10 @@ The handle of the sealed agent is `<plugin>:<agent>`. The files of the seal also
 
 The command uses `--setting-sources user --plugin-dir <seal directory> --agent <handle>`. A resumed session gets the same options. Measured on Claude Code 2.1.287 (issue 213): under `--print --agent <name>`, a project agent in the tree replaces a user agent of the same name, and the harness does not run the hooks of a project agent. A committed `.claude/settings.json` with `disableAllHooks: true` turns off a guard that comes from `--agents` or from `--settings` too. With `--setting-sources user`, the session ignores the project settings, the project agents and the project skills of the tree. A plugin from `--plugin-dir` gives its agent as `<plugin>:<agent>`. The plugin ignores `hooks` in the frontmatter of its agent, and it runs the hooks of `hooks/hooks.json`, also in a tree with `disableAllHooks`.
 
+### The guard probe
+
+The adapter has `probes_guard`, so the engine runs [the guard probe](run.md#the-guard-probe) of each verifier with it. The probe session uses the same command as any session: `--setting-sources user --plugin-dir <seal directory> --agent <handle>`, with the model of the [**tier**](../glossary.md#tier) `cheap`. The working directory is a temporary git repository outside the repository under review. The guard of the sealed verifier must deny the command `touch delegate-guard-probe`. A host whose permission mode refuses the Bash tool gives `inconclusive`, because the guard did not decide.
+
 ### The instructions of the repository
 
 `--setting-sources user` also stops the session from loading the `CLAUDE.md` of the project. So the seal holds the instructions of the repository as the main checkout has them when the engine seals. The seal adds the section `## Instructions of the repository` at the end of the body of the sealed agent file. The section holds the text of `CLAUDE.md` and then the text of `.claude/CLAUDE.md` of the main checkout, each one that exists.
@@ -190,6 +194,8 @@ The directory `tests/fixtures/claude-code/` holds one recorded stream for each e
 Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC). In the `init` event of each stream, the list of agents holds the handles of the two sealed agents of the tests, `delegate-seal-python-specialist:python-specialist` and `delegate-seal-python-verifier:python-verifier`. The recording listed no agent, so the lists were set for the tests of the sealed agent. A request that seals another agent gets the failure `the harness did not load the sealed agent`.
 
 The directory `tests/fixtures/claude-code-progress/` holds parts of a stream of a real run, with their own `manifest.json`: `heartbeats.jsonl` holds four `tool_progress` heartbeat events, and `thinking.jsonl` holds two `thinking_tokens` events. These events have no `timestamp`. A test puts a part after the timed events of a recorded stream, to check [the activity](#the-activity) of a stream that ends with them. Version: Claude Code 2.1.287. Recorded: 2026-10-16 (UTC).
+
+The directory `tests/fixtures/claude-code-probe/` holds `denied.jsonl`, a stream that a session of the [**guard probe**](../glossary.md#guard-probe) writes when the guard denies the command, with its own `manifest.json`. It is written by hand in the form of the recorded streams, and it is not a recording. It has no `init` event.
 
 The [**contract tests**](../glossary.md#contract-test) replay these streams through a stand-in `claude` command and check the result fields. A test also checks that each fixture names the version of the manifest.
 

@@ -148,6 +148,9 @@ class OpenCodeAdapter:
 
     tier_column: str = TIER_COLUMN
     checks_setup: bool = True
+    # The guard probe needs a session from the sealed agent in a directory outside the repository. This adapter does not
+    # run from its seal yet (#214), so it has no probe.
+    probes_guard: bool = False
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:

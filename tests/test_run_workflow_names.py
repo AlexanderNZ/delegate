@@ -14,7 +14,7 @@ from delegate.cli import delegate
 from .support import state_dir
 from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
 
-pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
 WORKFLOW = """\
 base-branch = "main"

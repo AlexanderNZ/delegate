@@ -222,6 +222,12 @@ The git backend is the code that implements the version-control port with real g
 
 `grilling` is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made. The decisions are settled before a spec exists, so no agent guesses them. See [the `grilling` skill](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md) and [the idea](overview.md#the-idea).
 
+## Guard probe
+
+A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent. It asks for one command that the guard must deny. See [the guard probe](reference/run.md#the-guard-probe).
+
+Not: canary, guard check.
+
 ## Harness
 
 A harness is the tool that runs a coding agent, for example Claude Code or OpenCode. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [what a harness is](explanation/the-concepts-behind-the-words.md#harness) and [the adapters](reference/workflow.md#adapters).
@@ -372,7 +378,7 @@ The run lock is a file that stops a second run on one run branch. Two runs canno
 
 ## Sealed agent
 
-The sealed agent is the copy of an agent file, its harness hooks and its project skills that the engine makes from the main checkout at the start of a run, outside each tree. Each session of the run uses it, and only when the files of the seal match the record in the journal. See [the agent check](reference/run.md#the-agent-check).
+The sealed agent is the copy of an agent file, its harness hooks and its project skills. The engine makes it from the main checkout at the start of a run, outside each tree. Each session of the run uses it, and only when the files of the seal match the record in the journal. See [the agent check](reference/run.md#the-agent-check).
 
 Not: bundle, plugin, snapshot.
 

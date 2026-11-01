@@ -1111,3 +1111,40 @@ def test_the_port_does_not_name_a_git_word(word):
 
 def test_the_port_holds_no_command_line_flag():
     assert re.findall(r"(?<![\w-])--?[a-z][\w-]*", PORT_TEXT) == []
+
+
+# The scratch repository of the guard probe (#219).
+
+
+def test_a_scratch_repository_has_one_commit_no_remote_and_no_file(tmp_path, vcs, monkeypatch):
+    for role in ("AUTHOR", "COMMITTER"):
+        for key in ("NAME", "EMAIL"):
+            monkeypatch.delenv(f"GIT_{role}_{key}", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)  # the user has no identity, and the commit needs none
+    path = tmp_path / "scratch"
+
+    vcs.make_scratch_repository(path)
+
+    assert git(path, "rev-list", "--count", "HEAD").strip() == "1"
+    assert git(path, "remote").strip() == ""
+    assert git(path, "ls-files").strip() == ""
+    assert git(path, "status", "--porcelain").strip() == ""
+
+
+def test_a_scratch_repository_is_made_in_an_empty_directory_that_is_there_already(tmp_path, vcs):
+    path = tmp_path / "scratch"
+    path.mkdir()
+
+    vcs.make_scratch_repository(path)
+
+    assert vcs.head_commit(path) == sha(path, "HEAD")
+
+
+def test_a_scratch_repository_that_cannot_be_made_is_a_vcs_error_and_leaves_nothing(tmp_path, vcs):
+    blocked = tmp_path / "file"
+    blocked.write_text("a file, not a directory\n")
+
+    with pytest.raises(VcsError):
+        vcs.make_scratch_repository(blocked / "scratch")
+
+    assert not (blocked / "scratch").exists()

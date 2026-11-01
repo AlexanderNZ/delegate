@@ -225,6 +225,12 @@ class Adapter(Protocol):
     that has no such guard (a scripted adapter of a test) leaves it false, and the setup check says that it skipped the
     check. An adapter that does not have the attribute counts as false.
 
+    `probes_guard` is true when the engine can start the guard probe through `run` (#219): a session from the sealed
+    agent, in a temporary directory outside the repository, which runs the command `touch delegate-guard-probe` that the
+    guard of a verifier must deny. The engine probes each verifier at the start of a run and in the dry run, and a result
+    other than a denial ends the run. An adapter whose harness cannot run an agent from its seal outside the repository
+    leaves it false, and an adapter that does not have the attribute counts as false.
+
     `activity` reads a stream that this adapter captured. A live stream can end
     in half a line, which it ignores. It raises AdapterError when the file is
     missing or a line before the last one is not JSON, and the error of the file
@@ -235,6 +241,7 @@ class Adapter(Protocol):
     tier_column: str
     supports_resume: bool
     checks_setup: bool
+    probes_guard: bool
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
 

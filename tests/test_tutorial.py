@@ -114,7 +114,7 @@ def test_an_agent_that_follows_the_tutorial_word_for_word_reaches_an_accept_verd
 
 
 @outside_the_package
-def test_the_sample_workflow_passes_the_dry_run(tmp_path, home, capsys):
+def test_the_sample_workflow_passes_the_dry_run(tmp_path, home, claude_stand_in, capsys):
     sample = tmp_path / "sample"
     shutil.copytree(SAMPLE, sample)
     write_project_agents(sample)  # the tutorial writes these files with `delegate bootstrap`; the home of the machine takes no part

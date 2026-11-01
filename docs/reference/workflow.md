@@ -28,14 +28,16 @@ Two errors of setup show late in a [**run**](../glossary.md#run). An agent file 
 
 The check prints `stack <name>: checked` on stdout for each stack with no problem. It prints each problem on stderr, one for each line, and the command exits 1. A stack with a missing agent file gets no gate check for that file.
 
-An adapter with no check prints one line on stdout: `setup check skipped: ...`, with the reason. Only `claude-code` and `opencode` have a check. The check starts the hook of the verifier only, and it changes nothing on disk except its temporary directory, which it removes. `--resume <run-id> --dry-run` makes no setup check.
+3. For each stack with no problem, the check runs the [**guard probe**](../glossary.md#guard-probe) of its verifier, when the adapter has one (`claude-code` has one, `opencode` has none yet). The probe is a short [**session**](../glossary.md#session) of the sealed verifier on the tier `cheap`, in a temporary repository outside the repository under check. It must show that the guard denies the command `touch delegate-guard-probe`. The check prints `stack <name>: guard probe denied` on stdout when it does. It prints each other result, `ran` or `inconclusive`, on stderr with the stack, the verifier and the limits page, and the command exits 1. A verifier that two stacks name gets one probe. The probe starts a session of the harness, so it costs a little, and no option turns it off. See [the guard probe](run.md#the-guard-probe).
+
+An adapter with no check prints one line on stdout: `setup check skipped: ...`, with the reason, and it gets no probe. Only `claude-code` and `opencode` have a check. The check starts the hook of the verifier, and the probe session of a `claude-code` stack. It changes nothing on disk except its temporary directories, which it removes. `--resume <run-id> --dry-run` makes no setup check.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | The workflow is valid, and the setup check found no problem. The plan is on stdout. |
-| 1 | The workflow or the tier file is not valid, or it cannot be read, or the [setup check](#the-setup-check-of-the-dry-run) found a missing agent file or a gate that the verifier denies. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
+| 1 | The workflow or the tier file is not valid, or it cannot be read, or the [setup check](#the-setup-check-of-the-dry-run) found a missing agent file, a gate that the verifier denies, or a guard probe that did not show a denial. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
 | 2 | A usage error. |
 
 The command reports the problems of a file in one run, not only the first. A ticket or a stack with a problem is left out of the later checks, so correct the problems and check the file again.

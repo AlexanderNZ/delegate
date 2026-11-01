@@ -34,7 +34,7 @@ def test_the_reference_names_each_workflow_field_mode_role_and_adapter(name):
 
 
 @outside_the_package
-def test_the_reference_example_workflow_passes_the_dry_run(tmp_path, home, capsys):
+def test_the_reference_example_workflow_passes_the_dry_run(tmp_path, home, claude_stand_in, capsys):
     blocks = re.findall(r"```toml\n(.*?)```", REFERENCE.read_text(), flags=re.DOTALL)
     assert blocks, "the reference must hold a toml example"
     workflow = tmp_path / "workflow.toml"

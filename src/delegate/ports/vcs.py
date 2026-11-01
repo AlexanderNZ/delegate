@@ -235,6 +235,15 @@ class VersionControl(Protocol):
         """
         ...
 
+    def make_scratch_repository(self, path: Path) -> None:
+        """Make `path` a new repository with one commit (#219), for a session that needs a working directory and no work.
+
+        The commit holds no file, and it needs no identity of the user. The repository has no remote and no link to
+        another repository, and it starts no background watcher of the file system. `path` is empty or absent when it is
+        called. A failure leaves nothing behind that the call made.
+        """
+        ...
+
     def stop_file_watcher(self, path: Path) -> None:
         """Stop the background watcher of the file system for the checkout at `path`, before its directory goes.
 

@@ -17,6 +17,9 @@ from delegate.definitions.render import render
 
 from .support import TEMPLATE_GIT, git
 
+# The dry run starts the guard probe of each verifier of a `claude-code` workflow (#219), so a stand-in answers it.
+pytestmark = pytest.mark.usefixtures("claude_stand_in")
+
 WORKFLOW = """\
 base-branch = "main"
 run-branch = "run/demo"

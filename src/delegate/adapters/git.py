@@ -297,6 +297,25 @@ class GitVersionControl:
                 shutil.rmtree(copy, ignore_errors=True)
             raise
 
+    def make_scratch_repository(self, path: Path) -> None:
+        path = path.absolute()
+        existed = path.exists()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            _git(path, "init", "-q", "-b", "main")
+            _git(path, "config", "core.fsmonitor", "false")
+            _git(
+                path, "-c", "user.name=delegate", "-c", "user.email=delegate@example.invalid", "-c", "commit.gpgsign=false",
+                "commit", "-q", "--allow-empty", "-m", "scratch",
+            )
+        except (VcsError, OSError) as error:
+            if not existed:
+                self.stop_file_watcher(path)
+                shutil.rmtree(path, ignore_errors=True)
+            if isinstance(error, OSError):
+                raise VcsError(f"the scratch repository {path} cannot be made: {error}", directory=path, cause=str(error)) from None
+            raise
+
     def stop_file_watcher(self, path: Path) -> None:
         # Git exits with an error when no daemon runs, or when the directory is not a repository. Both are fine.
         try:

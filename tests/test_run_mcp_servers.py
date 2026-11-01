@@ -19,7 +19,7 @@ from delegate.ports.harness import McpServer
 from . import claude_fake
 from .support import WORKFLOW, ScriptedAdapter, make_repo, run_main, write_project_agents
 
-pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
 BROWSER = McpServer("browser", command=("npx", "@playwright/mcp@latest"))
 TRACKER = McpServer("tracker", url="https://mcp.example.invalid/mcp")

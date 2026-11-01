@@ -41,6 +41,7 @@ CONTINUATION: str = "continuation"
 CONTINUATION_LIMIT: str = "continuation-limit"
 RESUME: str = "resume"
 AGENTS_CHANGED: str = "agents-changed"
+GUARD_PROBE: str = "guard-probe"
 PLAN_CHANGE: str = "plan-change"
 RETRY: str = "retry"
 LOCK_BROKEN: str = "lock-broken"
@@ -292,6 +293,15 @@ class AgentsChanged(TypedDict):
     trigger: NotRequired[str]
 
 
+class GuardProbe(TypedDict):
+    """The result of a guard probe (#219): the verifier, its handle, `denied`, `ran` or `inconclusive`, and the event stream of the session."""
+
+    agent: str
+    handle: str
+    result: str
+    event_stream: str
+
+
 class PlanChange(TypedDict):
     added: list[str]
     changed: list[str]
@@ -531,6 +541,7 @@ EVENTS: dict[str, type] = {
     CONTINUATION_LIMIT: ContinuationLimit,
     RESUME: Resume,
     AGENTS_CHANGED: AgentsChanged,
+    GUARD_PROBE: GuardProbe,
     PLAN_CHANGE: PlanChange,
     RETRY: Retry,
     LOCK_BROKEN: LockBroken,

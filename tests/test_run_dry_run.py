@@ -13,7 +13,7 @@ from delegate.cli import delegate
 
 from .support import TEMPLATE_GIT, copy_of, git, write_project_agents
 
-pytestmark = pytest.mark.usefixtures("home")  # the dry run looks in the user directory for agent files (#182)
+pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run probes the guard of each verifier  # the dry run looks in the user directory for agent files (#182)
 
 VALID = """\
 base-branch = "main"
@@ -240,6 +240,7 @@ def test_a_tier_name_override_is_accepted_and_shown_in_the_plan(tmp_path, capsys
 
 
 def test_a_tier_file_of_the_user_defines_the_valid_tier_names(tmp_path, capsys):
+    # The file holds the tier `cheap` too, because the guard probe of the dry run runs on that tier (#219).
     repo = make_repo(tmp_path, with_overrides(specialist="gateway-fast"))
     tiers = tmp_path / "my-tiers.toml"
     tiers.write_text(
@@ -249,6 +250,9 @@ levels = ["low"]
 [effort.opencode]
 variants = ["high"]
 [tiers.gateway-fast]
+claude-code = "inherit"
+opencode = "gateway/fast-1"
+[tiers.cheap]
 claude-code = "inherit"
 opencode = "gateway/fast-1"
 [allowed-models]

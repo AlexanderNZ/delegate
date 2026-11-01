@@ -117,6 +117,12 @@ from the record, or a missing file, fails the step before the agent starts, and 
 with the tree `seal` (see `_check_agent_file`). It reads no agent file in the tree of the agent. A resume with
 `--agents-changed` seals again from the main checkout, and records the new seal in `resume`.
 
+A run starts no agent session before the guard probe of each verifier shows a denial (#219, see `probe.py`). After
+`run-start` or `resume` and before the first step, the engine starts one probe session for each verifier whose seal has no
+denied `guard-probe` yet, and the journal records the result. A result other than `denied` raises an `EngineError` that
+names the agent, the result and the limits page. The run has no `run-end`, and a resume probes again. A resume that seals
+nothing, with a denied probe for each verifier, probes nothing (see `_probe_guards`).
+
 A failure of the harness halts the run. An `AdapterError` from `Adapter.run` is a
 failure of the harness, not of the work: a harness that is not logged in, a CLI
 that is gone, a rate limit. The engine writes `halted` (the ticket, the role,
@@ -162,7 +168,7 @@ from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
-from .agents import agent_names, check_agent, recorded_agents, seal_agents
+from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents
 from .brief import (
     BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
     notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
@@ -176,6 +182,7 @@ from .guards import (
 )
 from .journal import Journal, JournalError, abandoned_end, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
+from .probe import PROBE_TIER, DENIED, probe_guard, refusal, stream_path
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order
 
@@ -1256,7 +1263,7 @@ def run_workflow(
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start, agents_changed,
+                    reviewed, on_start, agents_changed, tiers,
                 )
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
@@ -1281,7 +1288,7 @@ def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
     retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
-    agents_changed: bool = False,
+    agents_changed: bool = False, tiers: Tiers | None = None,
 ) -> RunResult:
     order = plan_order(workflow)
     agents_note: str | None = None
@@ -1349,6 +1356,8 @@ def _execute(
         on_start(run_id, journal.path)
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
+    if tiers is not None:
+        _probe_guards(adapter, vcs, tiers, journal, workflow, state_dir / "runs" / run_id, run_id)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
     retried_reason = ""
     if plan is not None:
@@ -1622,6 +1631,54 @@ def _seal_agents(adapter: Adapter, repo: Path, run_dir: Path, workflow: Workflow
         return seal_agents(adapter, repo, run_dir, agent_names(workflow))
     except AdapterError as error:
         raise EngineError(f"the agents of the run cannot be sealed: {error}") from None
+
+
+def _probe_guards(
+    adapter: Adapter, vcs: VersionControl, tiers: Tiers, journal: Journal, workflow: Workflow, run_dir: Path, run_id: str
+) -> None:
+    """Start the guard probe of each verifier whose seal has no denied probe, and end the run for a result other than `denied` (#219).
+
+    It runs before the first agent session of the run or of the resume. An adapter whose `probes_guard` is not true gets
+    no probe. A verifier that the run did not seal gets none either: a session of an agent with no seal does not run from
+    a guard of the run. The journal gets `guard-probe` with the agent, the handle, the result and the event stream. A
+    result other than `denied` raises an `EngineError` that names the agent, the result, the limits page and the command
+    that goes on. A resume probes again, because no denied probe follows the newest seal. A failure of the harness or of
+    the repository of the probe is an `EngineError` too, and the journal gets no event for it.
+    """
+    if not getattr(adapter, "probes_guard", False):
+        return
+    events = read_events(journal.path)
+    recorded = recorded_agents(events) or []
+    done = denied_agents(events)
+    verifiers = list(dict.fromkeys(stack.verifier for stack in workflow.stacks.values()))
+    pending = [entry for name in verifiers if name not in done for entry in recorded if entry["agent"] == name]
+    if not pending:
+        return
+    try:
+        model = tiers.model_for(PROBE_TIER, adapter.tier_column)
+    except KeyError:
+        raise EngineError(f"the tier table has no {adapter.tier_column!r} column for tier {PROBE_TIER!r}, which the guard probe needs") from None
+    except ValueError:
+        raise EngineError(f"the tier table has no tier {PROBE_TIER!r}, which the guard probe needs") from None
+    for entry in pending:
+        agent = str(entry["agent"])
+        sealed, change = check_agent(recorded, agent)
+        if change is not None:
+            raise EngineError(
+                f"sealed file {change.path} of agent {agent} is not the file that the run sealed: recorded sha256 {change.recorded}, "
+                f"now {change.found or 'missing'}; the guard probe did not run; "
+                f"if the change is meant, go on with delegate run --resume {run_id} --agents-changed"
+            )
+        if sealed is None:
+            continue  # the entry comes from the record, so this cannot happen
+        stream = stream_path(run_dir, agent)
+        try:
+            probe = probe_guard(adapter, vcs, sealed, model, stream)
+        except (AdapterError, VcsError) as error:
+            raise EngineError(f"the guard probe of the verifier {agent!r} could not run: {error}") from None
+        journal.append("guard-probe", agent=probe.agent, handle=probe.handle, result=probe.result, event_stream=str(probe.event_stream))
+        if probe.result != DENIED:
+            raise EngineError(f"{refusal(agent, probe.result)}; the run started no agent session; a resume with delegate run --resume {run_id} probes again")
 
 
 def _check_agent_file(

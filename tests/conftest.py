@@ -102,6 +102,19 @@ def home(tmp_path_factory, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture
+def claude_stand_in(tmp_path_factory, monkeypatch):
+    """A `claude` command on PATH that replays a recorded stream, and answers a guard probe (#219) with a denial.
+
+    The dry run of a workflow for the `claude-code` adapter starts the guard probe of each verifier, so a test of it
+    needs the stand-in at the boundary of the harness. The directory is not the `tmp_path` of the test, so the files
+    that the stand-in writes are not files that a test of the disk state finds.
+    """
+    from . import claude_fake
+
+    return claude_fake.install(tmp_path_factory.mktemp("claude-stand-in"), monkeypatch, "finished.jsonl")
+
+
 @pytest.fixture(scope="session")
 def tiers():
     return load_tiers()

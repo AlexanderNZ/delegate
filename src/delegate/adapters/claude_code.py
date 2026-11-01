@@ -229,6 +229,7 @@ class ClaudeCodeAdapter:
 
     tier_column: str = TIER_COLUMN
     checks_setup: bool = True
+    probes_guard: bool = True
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:

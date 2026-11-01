@@ -37,6 +37,11 @@ if sys.argv[1:] == ["--version"]:
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 role = "verifier" if any("verifier" in argument for argument in sys.argv) else "specialist"
 prompt = sys.stdin.read()
+if "touch delegate-guard-probe" in prompt:
+    # The guard probe (#219) comes before the first session of the run: a denial, and no hold.
+    with open(os.environ["FAKE_PROBE_STREAM"]) as stream:
+        sys.stdout.write(stream.read())
+    sys.exit(0)
 if role == os.environ["FAKE_HOLD_IN"]:
     with open(os.environ["FAKE_PIDS"], "a") as pids:
         pids.write(str(os.getpid()) + "\\n")
@@ -91,6 +96,7 @@ def stop_with_sigint(tmp_path: Path, monkeypatch, hold_in: str) -> tuple[Path, s
     monkeypatch.setenv("FAKE_HOLD_IN", hold_in)
     monkeypatch.setenv("FAKE_PIDS", str(pids_file))
     monkeypatch.setenv("FAKE_STREAM", str(claude_fake.FIXTURES / "finished.jsonl"))
+    monkeypatch.setenv("FAKE_PROBE_STREAM", str(claude_fake.PROBE_FIXTURES / "denied.jsonl"))
     repo = make_repo(tmp_path, CLAUDE_CODE)
     write_project_agents(repo)
     started = tmp_path / "started.txt"

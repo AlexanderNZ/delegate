@@ -77,6 +77,10 @@ Two cases need care:
 - **An agent that the harness does not find.** The harness does not fail. It writes `agent "<name>" not found. Falling back to default agent` on standard error, runs its default agent, and exits 0. The rules of the pair would not apply. The adapter finds this text and raises `AdapterError` that names the agent.
 - **A project that the harness does not find.** See [the working directory](#the-working-directory).
 
+## The guard probe
+
+The adapter has no [guard probe](run.md#the-guard-probe) yet: `probes_guard` is false. The probe needs a session from the [**sealed agent**](../glossary.md#sealed-agent) in a directory outside the repository, and this adapter does not run an agent from its seal yet. A run with this adapter starts as before, and the dry run prints no probe line for it.
+
 ## The working directory
 
 The harness takes its project directory from the `PWD` variable that the caller inherits, not from the working directory of the process. A caller that sets the working directory and leaves `PWD` from its own shell makes the harness search the agents of the caller's directory, and run its tools there. Measured on OpenCode 1.15.10 on 2026-10-08: a run started in a scratch directory with the inherited `PWD` of another directory ended with the error `Agent not found`, and a run with `PWD` set to the scratch directory ran its tool in that directory. The adapter therefore always passes `--dir <directory>`, and a run with `--dir` ran its tool in the directory. The adapter also starts the process in that directory.

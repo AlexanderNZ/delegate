@@ -11,16 +11,21 @@ from . import harness_fake
 from .harness_fake import FakeHarness as FakeClaude
 
 FIXTURES: Path = Path(__file__).parent / "fixtures" / "claude-code"
+PROBE_FIXTURES: Path = Path(__file__).parent / "fixtures" / "claude-code-probe"
 
 
 def install(
     tmp_path: Path, monkeypatch, fixture: str, *, exit_status: int = 0, stderr: str = "", drip_seconds: float = 0,
-    hold_seconds: float = 0, start_seconds: float = 0,
+    hold_seconds: float = 0, start_seconds: float = 0, probe: str = "denied.jsonl", probe_touches: bool = False,
 ) -> FakeClaude:
-    """Put a `claude` command that replays `fixture` first on PATH. See `harness_fake.install` for the options."""
+    """Put a `claude` command that replays `fixture` first on PATH. See `harness_fake.install` for the options.
+
+    A guard probe (#219) replays `probe` of `PROBE_FIXTURES`: the form of a session whose guard denied the command.
+    """
     return harness_fake.install(
         tmp_path, monkeypatch, "claude", FIXTURES, fixture, exit_status=exit_status, stderr=stderr,
         drip_seconds=drip_seconds, hold_seconds=hold_seconds, start_seconds=start_seconds,
+        probe=str(PROBE_FIXTURES / probe) if probe else "", probe_touches=probe_touches,
     )
 
 

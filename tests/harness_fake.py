@@ -32,9 +32,20 @@ if sys.argv[1:] == ["--version"]:
     # The version query of an adapter that seals an agent: no session, no log entry, and no stream.
     print(os.environ.get("FAKE_HARNESS_VERSION", "2.1.287 (Claude Code)"))
     sys.exit(0)
+stdin = sys.stdin.read()
+probe = os.environ.get("FAKE_HARNESS_PROBE")
+if probe and "touch delegate-guard-probe" in stdin:
+    # A guard probe (#219): a separate log, and a recorded stream of its own, whatever the options of the test say.
+    with open(os.environ["FAKE_HARNESS_PROBE_LOG"], "a") as log:
+        log.write(json.dumps({{"argv": sys.argv[1:], "stdin": stdin, "cwd": os.getcwd()}}) + "\\n")
+    if os.environ.get("FAKE_HARNESS_PROBE_TOUCH"):
+        open("delegate-guard-probe", "w").close()
+    with open(probe) as stream:
+        sys.stdout.write(stream.read())
+    sys.exit(0)
 time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))
 with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
-    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read(), "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0), "pid": os.getpid()}}) + "\\n")
+    log.write(json.dumps({{"argv": sys.argv[1:], "stdin": stdin, "cwd": os.getcwd(), "env": dict(os.environ), "sid": os.getsid(0), "pid": os.getpid()}}) + "\\n")
 if os.environ.get("FAKE_HARNESS_CHILD"):
     # A child of the harness, as a tool process of a real harness is: it stays alive until something ends its group.
     with open(os.environ["FAKE_HARNESS_CHILD"], "w") as child_pid:
@@ -67,18 +78,32 @@ class FakeHarness:
     """The installed stand-in. `calls()` returns what each start of the command received."""
 
     log: Path
+    probe_log: Path | None = None
 
     def calls(self) -> list[dict[str, object]]:
         if not self.log.exists():
             return []
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
+    def probe_calls(self) -> list[dict[str, object]]:
+        """The guard probes (#219) that the command received: its arguments, its standard input and its working directory."""
+        if self.probe_log is None or not self.probe_log.exists():
+            return []
+        return [json.loads(line) for line in self.probe_log.read_text().splitlines()]
+
 
 def install(
     tmp_path: Path, monkeypatch, command: str, fixtures: Path, fixture: str, *, exit_status: int = 0, stderr: str = "",
-    drip_seconds: float = 0, hold_seconds: float = 0, start_seconds: float = 0,
+    drip_seconds: float = 0, hold_seconds: float = 0, start_seconds: float = 0, probe: str = "",
+    probe_touches: bool = False,
 ) -> FakeHarness:
-    """Put a `command` that replays `fixture` first on PATH. An empty `fixture` replays nothing."""
+    """Put a `command` that replays `fixture` first on PATH. An empty `fixture` replays nothing.
+
+    A session whose prompt asks for the guard probe command (#219) replays the stream file `probe` (an absolute path) instead, and
+    exits 0. It writes the probe file into its working directory when `probe_touches` is set, as a harness whose guard did
+    not run does. An empty `probe`, or a file that does not exist, makes the stand-in treat a probe as any
+    other session.
+    """
     bin_dir = tmp_path / "fake-bin"
     bin_dir.mkdir()
     executable = bin_dir / command
@@ -93,4 +118,9 @@ def install(
     monkeypatch.setenv("FAKE_HARNESS_DRIP", str(drip_seconds))
     monkeypatch.setenv("FAKE_HARNESS_HOLD", str(hold_seconds))
     monkeypatch.setenv("FAKE_HARNESS_START", str(start_seconds))
-    return FakeHarness(log)
+    probe_log = tmp_path / "fake-harness-probe.log"
+    if probe and Path(probe).is_file():
+        monkeypatch.setenv("FAKE_HARNESS_PROBE", probe)
+        monkeypatch.setenv("FAKE_HARNESS_PROBE_LOG", str(probe_log))
+        monkeypatch.setenv("FAKE_HARNESS_PROBE_TOUCH", "1" if probe_touches else "")
+    return FakeHarness(log, probe_log)
