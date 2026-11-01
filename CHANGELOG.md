@@ -8,6 +8,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 - Each command prints the version of the package with `--version` (#236). A consumer on the agent host asked for "the version of delegate as it reports it", and `delegate --version` gave `delegate: error: unrecognized arguments: --version`, so the version was only in the store path of the package. Now `delegate --version`, `agent-definitions --version` and `verifier-brief --version` print the name of the command and the version, for example `delegate 1.16.0`, and exit 0. The version comes from the package metadata, or from the `version` field of `pyproject.toml` when the package runs from a source tree that is not installed, so the release step changes only that field. See `docs/reference/commands.md`.
 
+### Fixed
+
+- The adapter how-to names each part of the adapter interface, and its test reads the parts from the protocol (#232). The page `docs/how-to/add-a-harness-adapter.md` said that the adapter class has "two attributes", but the port has four: it also has `checks_setup` and `probes_guard`. The page now names the four attributes and the five methods (`run`, `activity`, `seal`, `permits` and `agent_paths`), and says what each one does and when the engine reads it. The test of the interface parts in `tests/test_howto_adapter.py` takes each public attribute and method from the `Adapter` protocol of `ports/harness.py`, so a new part fails the test until the page names it.
+
 ### Changed
 
 - The scratch section of each brief tells the agent to write a scratch file with the file-write tool of its harness, not with a shell redirect (#235). Since #227 each brief names a scratch directory and says "Write each scratch file there". The measurement in the reference of the `claude-code` adapter shows that Claude Code 2.1.287 in `dontAsk` mode refuses a shell redirect into the added directory, so an agent that obeyed the brief with `>` got a refusal. The rule is in `scratch_rule`, the one place that makes the section for the specialist brief, the continuation briefs, the fix-up brief and the verifier brief. See `docs/reference/run.md`.

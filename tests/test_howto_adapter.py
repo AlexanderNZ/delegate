@@ -6,6 +6,7 @@ contributor does.
 """
 
 import dataclasses
+import inspect
 import os
 import re
 import subprocess
@@ -21,6 +22,16 @@ from .pages import HOW_TO, file_block, outside_the_package, write_files
 PAGE = HOW_TO / "add-a-harness-adapter.md"
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 
+# Each public attribute of the `Adapter` protocol: the annotated attributes, and the methods. A new one of either
+# kind adds a case, so the page must name it before the test passes.
+PROTOCOL_ATTRIBUTES: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        name
+        for name in [*harness.Adapter.__annotations__, *(n for n, v in vars(harness.Adapter).items() if inspect.isfunction(v))]
+        if not name.startswith("_")
+    )
+)
+
 
 @outside_the_package
 @pytest.mark.parametrize(
@@ -29,8 +40,9 @@ SOURCE = Path(__file__).resolve().parents[1] / "src"
         *(field.name for field in dataclasses.fields(harness.AdapterRequest)),  # the request
         *(field.name for field in dataclasses.fields(harness.AdapterResult)),  # the result
         *harness.END_STATES,
-        "tier_column", "supports_resume", "run", "AdapterRequest", "AdapterResult", "AdapterError",
-        "register", "read_events", "activity", "Activity", "tokens_new", "tokens_cache", "last_event",
+        *PROTOCOL_ATTRIBUTES,  # the interface: each attribute and method that the port declares
+        "AdapterRequest", "AdapterResult", "AdapterError",
+        "register", "read_events", "Activity", "tokens_new", "tokens_cache", "last_event",
     ],
 )
 def test_the_page_names_each_part_of_the_adapter_interface(part):

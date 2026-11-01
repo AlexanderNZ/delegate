@@ -39,12 +39,22 @@ The adapter gives back an `AdapterResult`. It has these fields:
 - `reason`: the text that says why you ended the session as `failed` when the stream does not say it. For example, the harness did not load the sealed agent. The engine puts it in the reason of the failed step. Leave it `None` otherwise.
 - `command_errors`: one pair for each call of the shell tool whose tool result is an error, in the order of the stream: the command of the call, and the text of its result. Read the pairs from the tool calls and the tool results of the stream, not from the final text. The [**guard probe**](../glossary.md#guard-probe) reads a denial of the guard from these pairs. Leave it empty when your harness stream does not show the tool results. Then a guard probe through your adapter is never `denied`.
 
-The adapter class has two attributes and two methods:
+The adapter class has four attributes and five methods. The example in step 2 writes the first two attributes, `run` and `activity`. The other parts serve the sealed agent, the setup check and the guard probe. Read them before you register an adapter for a real run.
 
-- `tier_column`: the name of the column of the [**tier table**](../glossary.md#tier-table) that holds the models of this harness.
-- `supports_resume`: true when the harness can resume a session. The engine then sets `resume_session` for a [**continuation**](../glossary.md#continuation).
+The attributes:
+
+- `tier_column`: the name of the column of the [**tier table**](../glossary.md#tier-table) that holds the models of this harness. The engine reads it each time it resolves the model of an agent.
+- `supports_resume`: true when the harness can resume a session. The engine reads it when it starts a [**continuation**](../glossary.md#continuation). When it is true, the engine sets `resume_session`. Otherwise it starts a new agent.
+- `checks_setup`: true when `seal` and `permits` can serve the setup check of `delegate run --dry-run`. The engine reads it in the dry run. When it is false, the setup check says that it skipped the check. An adapter that has no such guard, as a scripted adapter of a test, leaves it false. An adapter that does not have the attribute counts as false.
+- `probes_guard`: true when the engine can start the [**guard probe**](../glossary.md#guard-probe) through `run`: a session from the sealed agent that tries a command which the guard of a verifier must deny. The engine reads it at the start of a [**run**](../glossary.md#run), at a [**resume**](../glossary.md#resume), and in the dry run. When it is false, the engine runs no probe. An adapter that does not have the attribute counts as false. Set it to true only when your harness runs an agent from its seal outside the repository, and your adapter fills `command_errors`.
+
+The methods:
+
 - `run`: takes the request and returns the result.
 - `activity`: takes the path of a stream that the adapter wrote, and returns an `Activity` with three fields. `tokens_new` is the new tokens that the agent used so far: the input, the cache writes, and the output. `tokens_cache` is the cache reads so far. `last_event` is the time (UTC) of the newest event that has a time, or `None`. The stream can be the stream of an agent that still runs, so it can end in half a line.
+- `seal`: takes the agent name, the directory `source` and the directory `into`. It finds the agent file, writes the seal into `into`, and returns a `SealedAgent`, or `None` when it finds no agent file. The engine calls it for each agent at the start of a run, and again at a resume with `--agents-changed`. It can raise `AdapterError` to refuse to seal.
+- `permits`: takes a `SealedAgent` and a command. It returns `None` when the guard of the sealed agent permits the command, else the reason of the denial as text. The setup check of the dry run calls it, for an adapter whose `checks_setup` is true.
+- `agent_paths`: takes the agent name and the directory `source`. It returns the paths where the harness looks for the agent file, in the order of its search. The setup check names them when `seal` finds no agent file.
 
 The port module also gives you `AdapterError`, for a harness that cannot run the agent at all. The module `delegate/adapters/process.py` gives you the helper `run_harness`. It starts the command with the prompt on standard input, and writes the standard output to the event stream of the request. It also ends an idle session after a valid report. It returns the exit status, the standard error, and `ended_idle`. The module `delegate/adapters/streams.py` gives you the helper `read_events`. It reads a line-delimited JSON stream, and ignores half a line at the end. A missing file, or a bad line before the end, raises `AdapterError`. The package `delegate.adapters` holds the registry: `register` adds an adapter under a name, as the tests of the engine do. See [the adapter interface](../reference/run.md#the-adapter-interface) for the rules of each part.
 
