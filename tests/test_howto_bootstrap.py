@@ -1,7 +1,9 @@
 """The bootstrap how-to pages: a reader who follows a page word for word gets a pair that validates.
 
 Each case writes the files of the page into a real temporary git repository
-and runs the commands of the page.
+and runs the commands of the page. The page runs `delegate run --dry-run`, which
+starts the guard probe of each verifier (#219), so each case puts the Claude Code
+stand-in on PATH, and no case starts the real harness.
 """
 
 import subprocess
@@ -15,7 +17,7 @@ SINGLE = HOW_TO / "bootstrap-a-single-stack-repository.md"
 
 @outside_the_package
 def test_following_the_single_stack_page_gives_one_pair_that_may_run_the_gate_and_a_workflow_that_passes_the_dry_run(
-    tmp_path, monkeypatch, git_identity
+    tmp_path, monkeypatch, git_identity, claude_stand_in
 ):
     repo = new_repo(tmp_path / "repo")
     write_files(SINGLE, repo)
@@ -39,7 +41,7 @@ MONOREPO = HOW_TO / "bootstrap-a-monorepo.md"
 
 @outside_the_package
 def test_following_the_monorepo_page_gives_one_pair_for_each_stack_and_a_brief_that_carries_only_the_gate_of_the_stack_that_changed(
-    tmp_path, monkeypatch, capsys, git_identity
+    tmp_path, monkeypatch, capsys, git_identity, claude_stand_in
 ):
     repo = new_repo(tmp_path / "repo")
     write_files(MONOREPO, repo)
