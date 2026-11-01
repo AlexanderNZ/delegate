@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from ..definitions import bootstrap
 from ..definitions.bootstrap import DEFAULT_SKILLS_ROOT
 from ..definitions.declaration import load_declaration
-from ..definitions.render import render
+from ..definitions.render import guard_sets, render
 from ..definitions.validate import validate_set
 from ..shared.tiers import Tiers, load_tiers
 from ..shared.version import package_version
@@ -73,6 +74,9 @@ def tiers_from_args(args: argparse.Namespace) -> Tiers:
 def cmd_render(args: argparse.Namespace) -> int:
     tiers = tiers_from_args(args)
     agents = load_declaration(Path(args.declaration))
+    if args.sets_json:
+        print(json.dumps(guard_sets(agents), indent=2))
+        return 0
     out = Path(args.out)
     written = []
     for harness, files in render(agents, tiers).items():
@@ -153,7 +157,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("render", help="render a declaration into <out>/claude-code and <out>/opencode")
     r.add_argument("declaration", help="the declaration file (TOML) to render")
-    r.add_argument("-o", "--out", required=True, help="the output directory; it receives the subdirectories claude-code and opencode")
+    output = r.add_mutually_exclusive_group(required=True)
+    output.add_argument("-o", "--out", help="the output directory; it receives the subdirectories claude-code and opencode")
+    output.add_argument(
+        "--sets-json",
+        action="store_true",
+        help="write no file; print the gate set, the free gates and the read set of each verifier as JSON",
+    )
     add_opencode_override_flags(r)
     r.set_defaults(fn=cmd_render)
     v = sub.add_parser("validate", help="validate rendered agent directories")

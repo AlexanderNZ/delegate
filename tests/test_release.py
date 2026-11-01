@@ -379,7 +379,14 @@ def test_apply_fails_for_a_date_that_is_not_a_real_date_in_the_form_year_month_d
     assert git(repo, "status", "--porcelain") == ""
 
 
-@pytest.mark.parametrize("unreleased", ["", "### Added\n\n- A thing.\n\n"], ids=["notes-from-commits", "unreleased-body"])
+IMPACT = "### Consumer impact\n\n- Render your committed pairs again.\n\n### Added\n\n- A thing.\n\n"
+
+
+@pytest.mark.parametrize(
+    "unreleased",
+    ["", "### Added\n\n- A thing.\n\n", IMPACT],
+    ids=["notes-from-commits", "unreleased-body", "consumer-impact"],
+)
 def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_after_apply_on_a_copy_of_the_real_files(tmp_path, monkeypatch, unreleased):
     repo = make_repo(tmp_path)
     changelog = (repo / "CHANGELOG.md")
@@ -401,7 +408,33 @@ def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_af
     test_changelog.test_the_changelog_has_an_entry_with_a_date_for_the_version_of_the_package()
     test_changelog.test_the_first_release_is_the_oldest_entry_and_an_unreleased_section_comes_before_it()
     test_changelog.test_the_entry_for_the_first_release_names_each_part_of_the_kit_that_a_user_can_run()
+    test_changelog.test_each_subsection_of_an_entry_is_a_type_of_keep_a_changelog_or_consumer_impact()
+    test_changelog.test_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry()
     assert ("A thing." if unreleased else "a change for the next release") in test_changelog.entry("0.2.0")
+    if unreleased == IMPACT:
+        assert test_changelog.entry("0.2.0").startswith("\n" + IMPACT)
+
+
+def test_the_notes_start_with_the_consumer_impact_subsection_of_the_unreleased_section_and_leave_out_its_other_subsections(tmp_path):
+    repo = make_repo(tmp_path, unreleased="\n" + IMPACT)
+    git(repo, "tag", "v0.1.0")
+    feat = commit(repo, "feat: add the export")
+
+    done = release(repo, "notes", "--version", "0.2.0")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == f"### Consumer impact\n\n- Render your committed pairs again.\n\n### Features\n\n- feat: add the export ({feat})\n"
+
+
+def test_the_notes_take_the_consumer_impact_subsection_also_when_it_ends_the_unreleased_section(tmp_path):
+    repo = make_repo(tmp_path, unreleased="\n### Added\n\n- A thing.\n\n### Consumer impact\n\n- Run validate again.\n\n")
+    git(repo, "tag", "v0.1.0")
+    fix = commit(repo, "fix: stop the crash")
+
+    done = release(repo, "notes", "--version", "0.2.0")
+
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == f"### Consumer impact\n\n- Run validate again.\n\n### Fixes\n\n- fix: stop the crash ({fix})\n"
 
 
 def test_apply_writes_no_file_when_the_notes_for_an_empty_unreleased_body_cannot_be_made(tmp_path):

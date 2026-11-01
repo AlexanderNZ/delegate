@@ -124,6 +124,7 @@ A question that fits none of them is welcome as a blank issue.
 - Keep each change to one purpose. Put the test and the code that it covers in the same change.
 - Run the whole suite, as the [setup](#set-up) shows. Run `delegate docs --check` too.
 - List the change in `CHANGELOG.md`, under the `Unreleased` heading, in one line.
+- When a consumer must do something for the change, for example render its committed pairs again, also write that action under `### Consumer impact`, the first subsection of the `Unreleased` section.
 - Write the commit subject as a statement of what the change does.
 
 ## Cut a release
@@ -139,7 +140,7 @@ The workflow runs the test suite first. When a test fails, the workflow makes no
 
 - `next-version` raises the newest tag of the form `vX.Y.Z` by the bump. The first release keeps the version in `pyproject.toml`.
 - `apply` sets the version in `pyproject.toml`. It also moves the text under `Unreleased` in `CHANGELOG.md` into a dated entry. When that text is empty, the entry holds the release notes. The `Unreleased` heading stays.
-- `notes` writes the release notes from the commits since the previous tag. It leaves out merge commits. It groups the rest by the prefix of the subject.
+- `notes` writes the release notes from the commits since the previous tag. It leaves out merge commits. It groups the rest by the prefix of the subject. When the text under `Unreleased` holds a `### Consumer impact` subsection, the notes start with that subsection.
 
 When `apply` changes a file, the workflow commits `release: vX.Y.Z`. Then it pushes, tags the commit `vX.Y.Z`, and creates the GitHub release with the notes.
 

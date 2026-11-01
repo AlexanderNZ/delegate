@@ -61,3 +61,42 @@ def test_contributing_tells_a_contributor_to_list_a_change_under_unreleased():
 @outside_the_package
 def test_the_readme_links_the_changelog():
     assert "CHANGELOG.md" in re.findall(r"\]\(([^)\s]+)\)", (ROOT / "README.md").read_text())
+
+
+# The subsections that an entry can hold: `Consumer impact` for the actions
+# that a consumer must take (#237), the types of Keep a Changelog, and the
+# groups of the release notes, which `scripts/release.py apply` writes into an
+# entry when the Unreleased section is empty.
+SUBSECTIONS = (
+    "Consumer impact",
+    "Added", "Changed", "Deprecated", "Removed", "Fixed", "Security",
+    "Features", "Fixes", "Documentation", "Tests", "CI", "Other changes",
+)
+
+
+def entries() -> dict[str, str]:
+    """The body of each `## ` section of the CHANGELOG, by its heading."""
+    parts = re.split(r"^## (.+)\n", CHANGELOG.read_text(), flags=re.MULTILINE)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+@outside_the_package
+def test_each_subsection_of_an_entry_is_a_type_of_keep_a_changelog_or_consumer_impact():
+    found = {(heading, sub) for heading, body in entries().items() for sub in re.findall(r"^### (.+)$", body, flags=re.MULTILINE)}
+
+    assert {(heading, sub) for heading, sub in found if sub not in SUBSECTIONS} == set()
+
+
+@outside_the_package
+def test_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry():
+    late = [heading for heading, body in entries().items() if re.findall(r"^### (.+)$", body, flags=re.MULTILINE)[1:].count("Consumer impact")]
+
+    assert late == [], "a consumer reads the entry from the top, so `### Consumer impact` comes first"
+
+
+@outside_the_package
+def test_the_preamble_of_the_changelog_tells_when_an_entry_has_a_consumer_impact_subsection():
+    preamble = CHANGELOG.read_text().split("\n## ", 1)[0]
+
+    assert "### Consumer impact" in preamble
+    assert "render" in preamble and "validate" in preamble

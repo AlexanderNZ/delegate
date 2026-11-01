@@ -1724,6 +1724,44 @@ def render_opencode(agent: Agent, tiers: Tiers) -> dict[str, str]:
     return files
 
 
+#: The version of the format of `guard_sets`. Increase it when a field changes
+#: its meaning or goes away. A new field does not change the version.
+GUARD_SETS_VERSION = 1
+
+
+def guard_sets(agents: list[Agent]) -> dict:
+    """The command sets of the guard of each verifier, as data (#237).
+
+    The shell text of the guard is no interface: its form changed in v1.14.0,
+    and a consumer that read the sets from it found no gate. This structure is
+    the interface. The key of each agent is the name of the rendered verifier,
+    and an agent that renders no verifier has no entry. Each list keeps the
+    order of the declaration, and holds the words of each entry without the
+    " *" mark:
+
+    - `gates`: each gate (gateCommands): plain, free and exact.
+    - `freeGates`: each gate that takes free arguments (#169).
+    - `reads`: each read command (getOnlyCommands).
+    - `readPrefixes`: each read command that is a prefix (#164).
+    """
+
+    def words(entry: str) -> str:
+        return entry[: -len(READ_PREFIX_MARK)] if entry.endswith(READ_PREFIX_MARK) else entry
+
+    out: dict[str, dict[str, list[str]]] = {}
+    for agent in agents:
+        for name, read_only, _role in _roles(agent):
+            if not read_only:
+                continue
+            out[name] = {
+                "gates": [words(g) for g in agent.gate_commands],
+                "freeGates": list(_free_gates(agent.gate_commands)),
+                "reads": [words(e) for e in agent.get_only_commands],
+                "readPrefixes": [words(e) for e in agent.get_only_commands if e.endswith(READ_PREFIX_MARK)],
+            }
+    return {"version": GUARD_SETS_VERSION, "agents": out}
+
+
 def render(agents: list[Agent], tiers: Tiers) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {"claude-code": {}, "opencode": {}}
     for agent in agents:

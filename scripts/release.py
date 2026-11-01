@@ -108,11 +108,28 @@ def next_version(repo: Path, pyproject: Path, bump: str) -> Version:
     return major, minor, patch + 1
 
 
+def consumer_impact(repo: Path) -> str:
+    """The `### Consumer impact` subsection of the Unreleased section of the CHANGELOG, or "" when it has none.
+
+    The subsection tells a consumer what it must do for the release (#237), so
+    the notes of the release carry it too. A repository with no CHANGELOG, or
+    with no Unreleased heading, has no subsection.
+    """
+    changelog = repo / "CHANGELOG.md"
+    if not changelog.is_file():
+        return ""
+    unreleased = re.search(r"^## \[Unreleased\][ \t]*(?:\n|\Z)(.*?)(?=^## |\Z)", changelog.read_text(), flags=re.MULTILINE | re.DOTALL)
+    impact = unreleased and re.search(r"^### Consumer impact[ \t]*\n.*?(?=^### |\Z)", unreleased[1], flags=re.MULTILINE | re.DOTALL)
+    return impact[0].strip() + "\n\n" if impact else ""
+
+
 def release_notes(repo: Path, version: Version) -> str:
     """The Markdown notes of the commits since the newest release tag below `version`, merges left out.
 
     Without such a tag, the notes cover every commit. A group appears only when
-    it holds a commit. Each group lists its commits oldest first.
+    it holds a commit. Each group lists its commits oldest first. The
+    `### Consumer impact` subsection of the Unreleased section of the
+    CHANGELOG, when there is one, comes before the groups.
     """
     below = [tag for tag in release_tags(repo) if tag < version]
     since = f"v{show(below[-1])}" if below else None
@@ -125,7 +142,7 @@ def release_notes(repo: Path, version: Version) -> str:
         groups[title].append(f"- {subject} ({sha})")
     if not any(groups.values()):
         raise ReleaseError(f"no commits since {since}, so there is nothing to release" if since else "the repository has no commits")
-    return "\n\n".join(f"### {title}\n\n" + "\n".join(lines) for title, lines in groups.items() if lines) + "\n"
+    return consumer_impact(repo) + "\n\n".join(f"### {title}\n\n" + "\n".join(lines) for title, lines in groups.items() if lines) + "\n"
 
 
 def with_version(pyproject_text: str, version: Version, pyproject: Path) -> str:

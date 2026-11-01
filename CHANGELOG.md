@@ -2,10 +2,14 @@
 
 This file lists the changes of each release of `delegate`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The version follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+An entry starts with the subsection `### Consumer impact` when the release needs an action of a consumer: for example, a change of the text form of a rendered agent file, a new finding of `validate` for a pair that an older release rendered, or an order to render the committed pairs again with `render`. The subsection names each action. `scripts/release.py` keeps the subsection in the entry of the release, and puts it first in the notes of the GitHub release. The shell text of a rendered guard is no interface: to read the gate set, the free gates and the read set of each verifier, use `agent-definitions render <declaration> --sets-json`.
+
 ## [Unreleased]
 
 ### Added
 
+- `agent-definitions render <declaration> --sets-json` writes no file, and prints the command sets of the guard of each verifier as JSON with a `version` field: `gates`, `freeGates`, `reads` and `readPrefixes` (#237). The shell text of the guard is no interface. v1.14.0 changed the form of the branch of each gate and each read command, and a check of a consumer that read the gates from the text with a regular expression found no gate. A consumer now reads the sets from the JSON. See the section "The guard sets as JSON" of `docs/reference/commands.md`.
+- An entry of this changelog can start with the subsection `### Consumer impact`, which names each action that a consumer must do for the release (#237). The 1.14.0 entry did not tell a consumer to render its committed pair again. `scripts/release.py notes` puts the subsection first in the notes of the GitHub release, and `apply` keeps it in the entry. A test of the changelog permits the subsection only as the first subsection of an entry.
 - Each command prints the version of the package with `--version` (#236). A consumer on the agent host asked for "the version of delegate as it reports it", and `delegate --version` gave `delegate: error: unrecognized arguments: --version`, so the version was only in the store path of the package. Now `delegate --version`, `agent-definitions --version` and `verifier-brief --version` print the name of the command and the version, for example `delegate 1.16.0`, and exit 0. The version comes from the package metadata, or from the `version` field of `pyproject.toml` when the package runs from a source tree that is not installed, so the release step changes only that field. See `docs/reference/commands.md`.
 
 ### Fixed

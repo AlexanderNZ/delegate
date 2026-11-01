@@ -41,6 +41,8 @@ agent-definitions validate /tmp/agents --skills-dir skills
 
 `render` writes `<out>/claude-code/<name>.md` and `<out>/opencode/<name>.md`. `validate` exits 1 with one line per finding, or prints `ok`. Validate any directory of agent files, rendered or hand-written: `--claude-code DIR`, `--opencode DIR`.
 
+The shell text of the verifier guard is no interface: its form changes between releases. To read the gate set, the free gates and the read set of each verifier, run `agent-definitions render DECL --sets-json`. It writes no file and prints JSON with a `version` field. The fields are in [the reference](../../docs/reference/commands.md#the-guard-sets-as-json).
+
 `render` and `validate` take two more optional flags, both repeatable, that override the OpenCode column of the tier table ([ADR 0003](../../docs/adr/0003-opencode-model-override.md)).
 
 ```bash
