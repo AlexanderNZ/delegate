@@ -145,6 +145,10 @@ FINDING_CODES: dict[str, str] = {
     "NAME_INVALID": "a name that starts with a hyphen or holds a character outside letters, digits, hyphen and underscore, so the harness would skip the file",
     "MISSING_NAME": "a Claude Code file with no name; the harness treats it as documentation",
     "MISSING_DESCRIPTION": "a name with no description; the harness skips the file, and OpenCode needs a description for routing",
+    "SUBAGENT_MODE": (
+        "an OpenCode agent with `mode: subagent`; `opencode run --agent` refuses a subagent and runs its default agent, so the "
+        "engine cannot start the agent. Use `mode: all`"
+    ),
     "BAD_TYPE": "OpenCode `tools` as a string; that aborts config load for the whole session",
     "CROSS_HARNESS_MISMATCH": "an agent present for one harness and absent for the other",
     "MISSING_SKILL": "a preloaded skill absent from `--skills-dir`",
@@ -372,6 +376,11 @@ def validate_opencode_dir(d: Path, tiers: Tiers) -> list[Finding]:
             findings.append(Finding("BAD_MODEL", f.name, f"model {fm['model']!r} is not in the tier table's allowed set"))
         if "variant" in fm and fm["variant"] not in tiers.opencode_variants:
             findings.append(Finding("BAD_EFFORT", f.name, f"variant {fm['variant']!r} is not one of {tiers.opencode_variants}"))
+        if fm.get("mode") == "subagent":
+            findings.append(Finding(
+                "SUBAGENT_MODE", f.name,
+                "mode is 'subagent', so `opencode run --agent` refuses the agent and runs its default agent; use mode: all",
+            ))
         if "tools" in fm and isinstance(fm["tools"], str):
             findings.append(Finding("BAD_TYPE", f.name, "tools must be a map; a string aborts OpenCode config load"))
         if name in seen:

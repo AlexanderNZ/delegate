@@ -9,6 +9,17 @@ The MCP servers of the stack go to the harness in the variable
 with its other configuration. The harness has no option that removes the MCP
 servers of the user or of the project, so the agent also gets those.
 
+A session runs from the sealed agent of its run (#214). `seal` writes the agent file as an OpenCode configuration: a
+JSON file `<agent>.json` in the seal directory, with the agent as an entry of `agent`, with `mode: all`, and with the
+body of the file as its `prompt`. The adapter gives that configuration to the session in `OPENCODE_CONFIG_CONTENT`,
+merged with the MCP servers. Measured on OpenCode 1.15.10 (#213): the prompt of an agent in that variable replaces the
+prompt of a project agent of the same name, and its permission rules come after the rules of the tree. The enforcement
+of the permission map in a live session was not measured (no model answered), so this adapter names it as a limit.
+
+`mode: all` is needed because `opencode run --agent` refuses an agent with `mode: subagent`: the harness writes a
+warning on standard error, runs its default agent, and exits 0. The adapter reads that warning and ends the session as
+failed, with a reason that names the agent.
+
 The adapter does not give the `added_directories` of the request to the
 session: OpenCode 1.15.10 has no option that adds a directory to a session, and
 the `bash` map of a rendered verifier has no `cd` rule (#153).
@@ -35,7 +46,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,24 +81,45 @@ CONFIG_VARIABLE: str = "OPENCODE_CONFIG_CONTENT"
 NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
 
 
-def _environment(servers: tuple[McpServer, ...]) -> dict[str, str]:
-    """The environment of the harness: the process environment of the engine, with the servers added to the inline configuration.
+# The warning of the harness when it runs another agent than the one that `--agent` names. The text before `Falling back`
+# says why: the agent is a subagent, or the harness did not find it (the adapter checks that case first).
+FALL_BACK_WARNING = re.compile(r'agent "(?P<name>[^"\n]*)"[^\n]*Falling back to default agent')
 
-    The process environment of the engine (see `environment.process_environment`), unchanged, when there is no server.
-    An inline configuration that the engine already has keeps its other fields
-    and its own servers. Raise AdapterError when that configuration is not a
-    JSON object.
+
+def _sealed_entry(sealed: SealedAgent) -> dict[str, object]:
+    """The configuration of the seal: the JSON object of its file. Raise AdapterError when the file is not one."""
+    path = sealed.directory / f"{sealed.agent}.json"
+    try:
+        config = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as failure:
+        raise AdapterError(f"the sealed file {path} cannot be read as a JSON configuration: {failure}") from failure
+    agents = config.get("agent") if isinstance(config, dict) else None
+    entry = agents.get(sealed.agent) if isinstance(agents, dict) else None
+    if not isinstance(entry, dict):
+        raise AdapterError(f"the sealed file {path} holds no entry of agent {sealed.agent!r}")
+    return entry
+
+
+def _environment(servers: tuple[McpServer, ...], sealed: SealedAgent | None = None) -> dict[str, str]:
+    """The environment of the harness: the process environment of the engine, with the sealed agent and the servers added to the inline configuration.
+
+    The process environment of the engine (see `environment.process_environment`), unchanged, when there is no server
+    and no sealed agent. An inline configuration that the engine already has keeps its other fields, its own servers
+    and its other agents. The sealed agent replaces an agent of that name in it. Raise AdapterError when that
+    configuration is not a JSON object.
     """
     environment = process_environment()
-    if not servers:
+    if not servers and sealed is None:
         return environment
     try:
         config = json.loads(environment.get(CONFIG_VARIABLE) or "{}")
     except json.JSONDecodeError:
         config = None
-    if not isinstance(config, dict) or not isinstance(config.get("mcp", {}), dict):
-        raise AdapterError(f"{CONFIG_VARIABLE} must hold a JSON object to add the MCP servers of the stack")
-    mcp = config.setdefault("mcp", {})
+    if not isinstance(config, dict) or not all(isinstance(config.get(key, {}), dict) for key in ("mcp", "agent")):
+        raise AdapterError(f"{CONFIG_VARIABLE} must hold a JSON object to add the sealed agent and the MCP servers of the stack")
+    if sealed is not None:
+        config.setdefault("agent", {})[sealed.agent] = _sealed_entry(sealed)
+    mcp = config.setdefault("mcp", {}) if servers else {}
     for server in servers:
         if server.url is not None:
             mcp[server.name] = {"type": "remote", "url": server.url}
@@ -148,18 +180,22 @@ class OpenCodeAdapter:
 
     tier_column: str = TIER_COLUMN
     checks_setup: bool = True
-    # The guard probe needs a session from the sealed agent in a directory outside the repository. This adapter does not
-    # run from its seal yet (#214), so it has no probe.
+    # The guard probe needs a session whose model runs a command that the guard must deny. Nobody measured the
+    # enforcement of the permission map of a sealed agent in a live session (#213, owner decision D-e), so there is no probe.
     probes_guard: bool = False
     supports_resume: bool = True
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         _warn_of_host_settings()
-        command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", request.agent, "--dir", str(request.cwd)]
+        sealed = request.sealed
+        # The harness gets the sealed agent in the inline configuration, and its handle on the command. A request with no
+        # seal runs the agent that the harness finds by the name: the engine seals each agent that has a file.
+        handle = request.agent if sealed is None else sealed.handle
+        command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", handle, "--dir", str(request.cwd)]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
-        process = run_harness(command, request, env=_environment(request.mcp_servers))
+        process = run_harness(command, request, env=_environment(request.mcp_servers, sealed))
         # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
         if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
@@ -172,6 +208,17 @@ class OpenCodeAdapter:
                 f"{COMMAND} did not find agent {request.agent!r} and ran its default agent instead: {process.stderr.strip()}"
             )
         events = read_events(stream)
+        # A subagent is refused for `opencode run` in the same way, and the harness exits 0 and runs its default agent. The
+        # rules of the agent would not apply, so the session fails. It has no session id: a continuation must not resume it.
+        fallen = FALL_BACK_WARNING.search(process.stderr)
+        if fallen is not None:
+            return AdapterResult(
+                process.returncode, FAILED, None, stream, process.ended_idle, ended_timeout=process.ended_timeout,
+                reason=(
+                    f"{COMMAND} did not run agent {fallen['name']!r} and ran its default agent instead: "
+                    f"{fallen.group(0)}; an agent for `{COMMAND} run` needs `mode: all`"
+                ),
+            )
         session_id = next((event["sessionID"] for event in events if "sessionID" in event), None)
         # The last text part of the session is the final text of the agent.
         texts = [
@@ -192,24 +239,36 @@ class OpenCodeAdapter:
         )
 
     def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
-        """Copy the agent file of `agent` for `source` into `into`. The handle is the agent name. None when there is no file."""
+        """Write the agent file of `agent` for `source` as an OpenCode configuration in `into`. The handle is the agent name.
+
+        The file is `<agent>.json`: the entry of `agent` holds the frontmatter of the agent file with `mode: all`, and the
+        body of the file as `prompt`. None when there is no agent file. Raise AdapterError when the file has no usable frontmatter.
+        """
         found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
             return None
+        try:
+            frontmatter, body, error = split_frontmatter(found.read_text())
+        except (OSError, UnicodeDecodeError) as failure:
+            raise AdapterError(f"the agent file {found} cannot be read: {failure}") from failure
+        if error is not None or frontmatter is None:
+            raise AdapterError(f"the agent file {found} has no usable frontmatter: {error}")
         into.mkdir(parents=True, exist_ok=True)
-        sealed = into / f"{agent}.md"
-        shutil.copyfile(found, sealed)
+        sealed = into / f"{agent}.json"
+        configuration = {"agent": {agent: {**frontmatter, "mode": "all", "prompt": body.strip()}}}
+        sealed.write_text(json.dumps(configuration, indent=2) + "\n")
         return SealedAgent(agent, agent, into, (SealedFile(sealed, hashlib.sha256(sealed.read_bytes()).hexdigest()),), found)
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None:
-        """Resolve `command` against the `permission.bash` map of the sealed file with the matcher of the validator.
+        """Resolve `command` against the `permission.bash` map of the sealed configuration with the matcher of the validator.
 
-        The map permits the command when it resolves to `allow`. A file with no permission map permits every command.
+        The map permits the command when it resolves to `allow`. An agent with no permission map permits every command.
         """
-        frontmatter, problem = _sealed_frontmatter(sealed)
-        if frontmatter is None:
-            return problem
-        permission = frontmatter.get("permission")
+        try:
+            entry = _sealed_entry(sealed)
+        except AdapterError as failure:
+            return str(failure)
+        permission = entry.get("permission")
         action = opencode_bash_action(permission, command) if isinstance(permission, dict) else "allow"
         return None if action == "allow" else f"its permission.bash map resolves the command to {action or 'no rule'}"
 
@@ -223,15 +282,3 @@ class OpenCodeAdapter:
                 more, read = _tokens_of(event, stream)
                 new, cache = new + more, cache + read
         return Activity(new, cache, last)
-
-
-def _sealed_frontmatter(sealed: SealedAgent) -> tuple[dict | None, str | None]:
-    """The frontmatter of the sealed file `<agent>.md`, or the reason that it has none: (frontmatter, None) or (None, reason)."""
-    path = sealed.directory / f"{sealed.agent}.md"
-    try:
-        frontmatter, _, error = split_frontmatter(path.read_text())
-    except (OSError, UnicodeDecodeError) as failure:
-        return None, f"the sealed file {path} cannot be read: {failure}"
-    if error is not None or frontmatter is None:
-        return None, f"the sealed file {path} has no usable frontmatter: {error}"
-    return frontmatter, None

@@ -140,6 +140,10 @@
 *[git backend]: The git backend is the code that implements the version-control port with real git commands.
 *[git backends]: The git backend is the code that implements the version-control port with real git commands.
 *[grilling]: grilling is a planning skill of mattpocock/skills that asks you questions, one round at a time, until each decision of a plan is made.
+*[Guard probe]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
+*[Guard probes]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
+*[guard probe]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
+*[guard probes]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
 *[Harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
 *[Harnesses]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
 *[harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
@@ -228,6 +232,10 @@
 *[Run locks]: The run lock is a file that stops a second run on one run branch.
 *[run lock]: The run lock is a file that stops a second run on one run branch.
 *[run locks]: The run lock is a file that stops a second run on one run branch.
+*[Sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
+*[Sealed agents]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
+*[sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
+*[sealed agents]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
 *[Session]: A session is one conversation of a harness with an agent, with a session id.
 *[Sessions]: A session is one conversation of a harness with an agent, with a session id.
 *[session]: A session is one conversation of a harness with an agent, with a session id.

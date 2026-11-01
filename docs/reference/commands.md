@@ -277,6 +277,8 @@ On OpenCode the `edit` permission covers the write, edit and patch tools. OpenCo
 
 The OpenCode `bash` map of the verifier is smaller than the table. It has no `echo` rule, no `printf` rule, no `env` rule, no temp-write command and no [**GET-only command**](../glossary.md#get-only-command). It ends with the deny rules `*>*`, `*| tee *` and `*|tee *`, so it also denies `2>&1` and `2>/dev/null`. A redirection after a group, a subshell, a loop or the last command of a pipeline is not in the text that OpenCode matches, so no rule can deny it. See [the permission rules](opencode-adapter.md#the-permission-rules).
 
+The [**renderer**](../glossary.md#renderer) writes `mode: all` for each OpenCode agent (#214). `opencode run --agent <name>` refuses an agent with `mode: subagent`: the harness writes a warning, runs its default agent, and exits 0, so the prompt and the `permission` map of the agent do not apply. With `mode: all`, the agent works with `opencode run` and as a subagent of a [**coordinator**](../glossary.md#coordinator). `validate` gives the finding `SUBAGENT_MODE` for an OpenCode agent file with `mode: subagent`, and it checks each directory that the command gets. See [the OpenCode adapter](opencode-adapter.md#the-mode-of-the-agent).
+
 ## The finding codes
 
 `validate` writes one line for each finding: the code, the file, and a message. A finding about one line of a file gives the file as `<file>:<line>`. The code is one of these.
@@ -300,6 +302,7 @@ The OpenCode `bash` map of the verifier is smaller than the table. It has no `ec
 | `NAME_INVALID` | a name that starts with a hyphen or holds a character outside letters, digits, hyphen and underscore, so the harness would skip the file |
 | `MISSING_NAME` | a Claude Code file with no name; the harness treats it as documentation |
 | `MISSING_DESCRIPTION` | a name with no description; the harness skips the file, and OpenCode needs a description for routing |
+| `SUBAGENT_MODE` | an OpenCode agent with `mode: subagent`; `opencode run --agent` refuses a subagent and runs its default agent, so the engine cannot start the agent. Use `mode: all` |
 | `BAD_TYPE` | OpenCode `tools` as a string; that aborts config load for the whole session |
 | `CROSS_HARNESS_MISMATCH` | an agent present for one harness and absent for the other |
 | `MISSING_SKILL` | a preloaded skill absent from `--skills-dir` |

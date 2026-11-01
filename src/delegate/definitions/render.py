@@ -1522,7 +1522,8 @@ def render_opencode(agent: Agent, tiers: Tiers) -> dict[str, str]:
                 if read_only
                 else f"{agent.key} specialist. {agent.description} One implementation task. Never pushes."
             ),
-            "mode": "subagent",
+            # `all`, not `subagent`: `opencode run --agent` refuses a subagent and runs its default agent instead (#214).
+            "mode": "all",
             "model": tiers.model_for(tier, "opencode"),
         }
         if agent.effort and agent.effort in tiers.opencode_variants:

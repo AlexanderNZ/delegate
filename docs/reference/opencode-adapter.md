@@ -20,7 +20,7 @@ opencode run --format json --model <model> --agent <agent> --dir <directory> [--
 |---|---|
 | `--format json` | The [**harness**](../glossary.md#harness) writes one JSON event on each line of standard output. |
 | `--model <model>` | The model from the `opencode` column of the [**tier table**](../glossary.md#tier-table), in the form `<provider>/<model>`. The adapter never chooses a model. See [the model](#the-model). |
-| `--agent <agent>` | The agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. |
+| `--agent <agent>` | The handle of the [**sealed agent**](../glossary.md#sealed-agent), which is the agent name from the [**stack**](../glossary.md#stack): the [**`specialist`**](../glossary.md#specialist) field, or the [**`verifier`**](../glossary.md#verifier) field for the verifier. See [the sealed agent](#the-sealed-agent). |
 | `--dir <directory>` | The working directory of the request. See [the working directory](#the-working-directory). |
 | `--session <session id>` | Only for a [**continuation**](../glossary.md#continuation). See [the resume](#the-resume). |
 
@@ -30,7 +30,7 @@ The adapter passes no permission option. The permission rules of the repository 
 
 The adapter does not give the `added_directories` of the request to the [**session**](../glossary.md#session). For a verifier in a `delegate run`, that is the proof copy that the engine made beside the [**temporary copy**](../glossary.md#temporary-copy) (see [the verifier step](run.md#the-verifier-step)). OpenCode has no option that adds a directory to a session: measured on OpenCode 1.15.10 on 2026-10-20, `opencode run --help` shows none. The `external_directory` map of a rendered verifier permits a temp directory, which holds the proof copy, but its `bash` map has no `cd` rule and no `cp` rule, so a test cannot run there. So an OpenCode verifier cannot use the proof copy, and it puts the [**red proof**](../glossary.md#red-proof) in `unverified`, with the refused command and its message (#152, #153).
 
-When the stack names MCP servers, the environment of the command is the environment of the [**engine**](../glossary.md#engine) with the servers added to `OPENCODE_CONFIG_CONTENT`. See [what the agent gets](#what-the-agent-gets). Otherwise the environment is the environment of the engine.
+The environment of the command is the environment of the [**engine**](../glossary.md#engine) with the sealed agent, and the MCP servers when the stack names some, added to `OPENCODE_CONFIG_CONTENT`. See [the sealed agent](#the-sealed-agent) and [what the agent gets](#what-the-agent-gets). Without a sealed agent and without a server, the environment is the environment of the engine.
 
 ## The permission rules
 
@@ -53,7 +53,7 @@ The maps of a rendered verifier cannot follow the runtime value of `$TMPDIR` (#1
 The agent gets:
 
 - **MCP servers**: the servers of its [**stack**](../glossary.md#stack), and also the MCP servers of the user and of the project. A stack names its servers in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)). The adapter writes them in the `mcp` field of the inline configuration `OPENCODE_CONFIG_CONTENT`: a local server as `type` `local` and `command`, a remote server as `type` `remote` and `url`. The harness merges that configuration with its other configuration. When the environment of the engine already holds `OPENCODE_CONFIG_CONTENT`, the adapter keeps its fields and adds the servers. When it is not a JSON object, the adapter raises `AdapterError`.
-- **Tools and permissions**: the tools and the permission map of the agent definition. The adapter removes no tool.
+- **Tools and permissions**: the tools and the permission map of the sealed agent. The adapter removes no tool.
 - [**Skills**](../glossary.md#skill): every skill that the harness finds. The agent loads the skills of its definition with the skill tool.
 
 The harness gives no way to start an agent without the MCP servers of the user and of the project. Measured on OpenCode 1.15.10 on 2026-10-18: `opencode --help` and `opencode run --help` show no MCP option, and `--pure` removes only the external plugins. The configuration can turn off a server only by its name, and the adapter does not know the names of the servers of the user. With `OPENCODE_CONFIG_CONTENT` that named one server, `opencode mcp list` listed that server and the three servers of the user.
@@ -68,18 +68,41 @@ The adapter reads the `opencode` column of the tier table, so a `--tiers` file c
 
 A model that `--opencode-model` names must be in the allowed set, or the command exits 1 and names the model. A [**run**](../glossary.md#run) has no validation step for the rendered agents, so this check stops a model that no provider serves. The options are the same as the options of `render` and `validate`.
 
-## How the adapter selects the agent
+## The sealed agent
 
-The adapter selects the agent with `--agent <agent>`. The harness reads the agent file from the `.opencode/agents/` directory of the project (or from the user agents), and the body of that file becomes the system prompt of the [**session**](../glossary.md#session). The adapter does not put the agent body in the prompt. The [**live smoke run**](../glossary.md#live-smoke-run) below shows it: the reply of the agent follows a rule that only the agent body holds.
+An agent session of a run starts only from the [**sealed agent**](../glossary.md#sealed-agent) of the run (see [the agent check](run.md#the-agent-check)). The adapter seals an agent as an OpenCode configuration. At the start of the run, it finds the agent file in `.opencode/agents/` of the main checkout first, then in `~/.config/opencode/agents/`, and it writes `<agent>.json` in the seal directory, `<run directory>/agents/<agent>/`. The file is a JSON object with one entry of `agent`:
 
-Two cases need care:
+- the fields of the frontmatter of the agent file, for example `description`, `model`, `steps` and `permission`;
+- `mode`, always `all`, whatever the file says (see [the mode of the agent](#the-mode-of-the-agent));
+- `prompt`, the body of the agent file.
+
+The handle of the sealed agent is the agent name. A file with no usable frontmatter is not sealed: the adapter raises `AdapterError` that names the file.
+
+For the session, the adapter gives that configuration to the harness in `OPENCODE_CONFIG_CONTENT`, the variable that also holds the MCP servers (see [what the agent gets](#what-the-agent-gets)). The configuration of the variable keeps its other fields, its own servers, and its other agents. The sealed agent replaces an agent of the same name in it. Measured with `opencode debug agent` on OpenCode 1.15.10 (#213): the `prompt` of an agent in that variable replaces the prompt of a project agent of the same name in the tree, and its `permission` rules come after the rules of the agent file of the tree and of the `opencode.json` of the tree. So the tree does not change the instructions of the sealed agent, and the sealed rules win a conflict.
+
+The engine hashes the file of the seal before each session, and a difference fails the [**step**](../glossary.md#step). The seal is of the agent file as it is when the run starts, so a later change of the agent file in the main checkout or in a tree does not reach the session.
+
+The command names the agent with the handle, `--agent <handle>`. A request that has no sealed agent names the agent as it is, and the harness finds the agent file itself. The engine seals each agent that has a file, so this case is a test or a harness with no file.
+
+**What was not measured.** The enforcement of the `permission` map of a sealed agent in a live session was not measured, because no model answered (owner decision D-e of #213). The adapter judges a command against the map with the matcher of the [**validator**](../glossary.md#validator) (`permits`), and the measurement of `opencode debug agent` shows that the rules are in the resolved agent. Whether the harness refuses a tool call that the map denies is not shown. So the adapter has no [guard probe](#the-guard-probe).
+
+## The mode of the agent
+
+`opencode run --agent <name>` refuses an agent with `mode: subagent`. Measured on OpenCode 1.15.10 on 2026-10-31 (#214): the harness writes `! agent "<name>" is a subagent, not a primary agent. Falling back to default agent` on standard error, runs its default agent, and exits 0. The prompt and the `permission` map of the agent do not apply, and the stream shows no sign. An agent with `mode: all` or `mode: primary` gives no warning. The rule is that an agent that the engine starts with `opencode run` is the agent that the workflow names, or the session fails. Three parts keep it:
+
+- The [**renderer**](../glossary.md#renderer) writes `mode: all` for each OpenCode agent, so the agent works with `opencode run` and as a subagent of a [**coordinator**](../glossary.md#coordinator).
+- The seal writes `mode: all` in the configuration of the sealed agent, also for an agent file that an older render made with `mode: subagent`.
+- `agent-definitions validate` gives the [**finding**](../glossary.md#finding) `SUBAGENT_MODE` for an OpenCode agent file with `mode: subagent`. See [the finding codes](commands.md#the-finding-codes).
+
+Three cases need care:
 
 - **An agent that the harness does not find.** The harness does not fail. It writes `agent "<name>" not found. Falling back to default agent` on standard error, runs its default agent, and exits 0. The rules of the pair would not apply. The adapter finds this text and raises `AdapterError` that names the agent.
+- **An agent that the harness falls back from.** The adapter reads the standard error of each session. When it holds a line `agent "<name>" ... Falling back to default agent`, the session ends as `failed`, with no session id, so a continuation does not resume it. The `reason` of the result names the agent of the warning, says that the harness ran its default agent, and says that the agent needs `mode: all`. The engine puts it in the reason of the failed step. This covers a subagent that the sealed configuration did not change, and any other cause of a fall-back.
 - **A project that the harness does not find.** See [the working directory](#the-working-directory).
 
 ## The guard probe
 
-The adapter has no [guard probe](run.md#the-guard-probe) yet: `probes_guard` is false. The probe needs a session from the [**sealed agent**](../glossary.md#sealed-agent) in a directory outside the repository, and this adapter does not run an agent from its seal yet. A run with this adapter starts as before, and the dry run prints no probe line for it.
+The adapter has no [guard probe](run.md#the-guard-probe): `probes_guard` is false. The probe needs a session whose model runs a command that the guard must deny, and nobody measured the enforcement of the `permission` map of a sealed agent in a live session (see [the sealed agent](#the-sealed-agent)). A run with this adapter starts as before, and the dry run prints no probe line for it.
 
 ## The working directory
 

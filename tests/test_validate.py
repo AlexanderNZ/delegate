@@ -39,8 +39,23 @@ def test_unknown_key_fails_claude_code(rendered, tiers):
 
 def test_unknown_key_fails_opencode(rendered, tiers):
     p = rendered / "opencode" / "java-spring-specialist.md"
-    _rewrite(p, "mode: subagent\n", "mode: subagent\nskills:\n- tdd\n")
+    _rewrite(p, "mode: all\n", "mode: all\nskills:\n- tdd\n")
     assert "UNKNOWN_KEY" in _codes(validate_opencode_dir(rendered / "opencode", tiers))
+
+
+def test_opencode_agent_with_mode_subagent_fails(rendered, tiers):
+    p = rendered / "opencode" / "java-spring-verifier.md"
+    _rewrite(p, "mode: all\n", "mode: subagent\n")
+    findings = [f for f in validate_opencode_dir(rendered / "opencode", tiers) if f.code == "SUBAGENT_MODE"]
+    assert [f.file for f in findings] == ["java-spring-verifier.md"]
+    assert "opencode run" in findings[0].message
+
+
+@pytest.mark.parametrize("mode", ["all", "primary"])
+def test_opencode_agent_that_opencode_run_can_start_has_no_mode_finding(rendered, tiers, mode):
+    p = rendered / "opencode" / "java-spring-verifier.md"
+    _rewrite(p, "mode: all\n", f"mode: {mode}\n")
+    assert "SUBAGENT_MODE" not in _codes(validate_opencode_dir(rendered / "opencode", tiers))
 
 
 def test_invalid_model_fails_claude_code(rendered, tiers):

@@ -160,6 +160,7 @@ The mode is in the template and in a generated brief because a rule in each brie
 | Skills | `skills:` preloads them | cannot preload; the body tells the agent to load them with the skill tool |
 | Verifier read-only | `tools: Read, Grep, Glob, Bash, Write`, plus a `PreToolUse` guard hook on Bash and one on Write | `permission` with `"*": deny` first, then the read tools, then a `bash` pattern map that opens with its own `"*": deny`, an `edit` map that allows only `../*`, and an `external_directory` map that allows only the temp prefixes |
 | Specialist guardrails | `isolation: worktree`; a `PreToolUse` hook on Bash blocks `git push` (exit 2) | `permission.bash` with `"*": allow` first, then `git push*: deny` and `git -C * push*: deny`; the catch-all must come first or the denies are shadowed. Two denies, because an OpenCode pattern is an anchored glob and `git push*` does not cover `git -C <path> push` |
+| Mode | none | `mode: all`: the agent works with `opencode run --agent <name>` and as a subagent of a coordinator. `mode: subagent` is refused by `opencode run`, which runs its default agent instead, so `validate` gives the finding `SUBAGENT_MODE` for it (#214) |
 | Turn cap | `maxTurns` | `steps` |
 | `outputLanguage` | `"ste"` opens the Report section of every agent file with "Write in ASD-STE100 Simplified Technical English."; `"none"` (the default) adds no rule | the same |
 | `trackedFileBuild` | `true` adds "An unstaged file is invisible to a flake." after the specialist's staging rule; `false` (the default) leaves the rule alone | no change: the specialist states the staging rule without a reason |
@@ -271,6 +272,7 @@ Decision of 2026-09-19 ([ADR 0001](../../docs/adr/0001-effort-follows-the-model.
 | `NAME_INVALID` | a name that starts with a hyphen or holds a character outside letters, digits, hyphen and underscore, so the harness would skip the file |
 | `MISSING_NAME` | a Claude Code file with no name; the harness treats it as documentation |
 | `MISSING_DESCRIPTION` | a name with no description; the harness skips the file, and OpenCode needs a description for routing |
+| `SUBAGENT_MODE` | an OpenCode agent with `mode: subagent`; `opencode run --agent` refuses a subagent and runs its default agent, so the engine cannot start the agent. Use `mode: all` |
 | `BAD_TYPE` | OpenCode `tools` as a string; that aborts config load for the whole session |
 | `CROSS_HARNESS_MISMATCH` | an agent present for one harness and absent for the other |
 | `MISSING_SKILL` | a preloaded skill absent from `--skills-dir` |

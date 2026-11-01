@@ -5,14 +5,12 @@ writes the seal into another directory. `permits` runs the guard of the sealed a
 permits it, else the reason of the denial. Each case drives the real adapter on real files that the renderer made.
 """
 
-import hashlib
 from pathlib import Path
 
 import pytest
 from delegate import adapters
 from delegate.definitions.declaration import Agent
 from delegate.definitions.render import render
-from delegate.ports.harness import SealedAgent
 
 pytestmark = pytest.mark.usefixtures("claude_version")
 
@@ -21,9 +19,6 @@ HARNESSES = [
     pytest.param("claude-code", Path(".claude/agents"), Path(".claude/agents"), id="claude-code"),
     pytest.param("opencode", Path(".opencode/agents"), Path(".config/opencode/agents"), id="opencode"),
 ]
-
-# The harnesses that seal by a copy of the agent file. The Claude Code seal is a plugin: see tests/test_claude_code_seal.py.
-COPY_SEALS = [HARNESSES[1]]
 
 GATE = "python3 -m pytest -rs"
 
@@ -35,38 +30,6 @@ def write_pair(root: Path, name: str, directory: Path, tiers) -> Path:
     for file_name, content in render([Agent(key="python", description="The python stack.", gate_commands=[GATE])], tiers)[name].items():
         (target / file_name).write_text(content)
     return target
-
-
-@pytest.mark.parametrize(("name", "project", "user"), COPY_SEALS)
-def test_an_agent_in_the_project_directory_is_sealed_as_a_copy_in_the_seal_directory(tmp_path, home, tiers, name, project, user):
-    repo = tmp_path / "repo"
-    source = write_pair(repo, name, project, tiers) / "python-verifier.md"
-    write_pair(home, name, user, tiers)  # the user directory holds a file too, and the project file wins
-    (home / user / "python-verifier.md").write_text("the user file\n")
-
-    sealed = adapters.get(name).seal("python-verifier", repo, tmp_path / "seal")
-
-    assert isinstance(sealed, SealedAgent)
-    assert (sealed.agent, sealed.handle, sealed.directory) == ("python-verifier", "python-verifier", tmp_path / "seal")
-    [sealed_file] = sealed.files
-    assert sealed_file.path.read_bytes() == source.read_bytes()
-    assert sealed_file.path.is_relative_to(tmp_path / "seal")
-    assert sealed_file.sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
-
-
-@pytest.mark.parametrize(("name", "project", "user"), COPY_SEALS)
-def test_an_agent_in_the_user_directory_is_sealed_when_the_project_has_none(tmp_path, home, tiers, name, project, user):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    source = write_pair(home, name, user, tiers) / "python-verifier.md"
-
-    sealed = adapters.get(name).seal("python-verifier", repo, tmp_path / "seal")
-
-    assert sealed is not None
-    [sealed_file] = sealed.files
-    assert sealed_file.path.read_bytes() == source.read_bytes()
-    assert sealed_file.sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
-    assert source.is_file()  # the seal copies: the source stays
 
 
 @pytest.mark.parametrize(("name", "project", "user"), HARNESSES)

@@ -89,7 +89,7 @@ def test_claude_code_verifier_bash_carries_the_guard_hook(rendered):
 def test_opencode_files_carry_tier_model_and_permissions(rendered, tiers):
     spec, sbody = _fm(rendered / "opencode" / "java-spring-specialist.md")
     ver, vbody = _fm(rendered / "opencode" / "java-spring-verifier.md")
-    assert spec["mode"] == "subagent" and ver["mode"] == "subagent"
+    assert spec["mode"] == "all" and ver["mode"] == "all"
     assert spec["model"] == tiers.model_for("standard", "opencode")
     assert ver["model"] == tiers.model_for("verifier", "opencode")
     assert spec["steps"] == 60
