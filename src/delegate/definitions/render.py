@@ -550,23 +550,76 @@ GATE_PATH_CHECK = " ".join(
 )
 
 
+#: The shell function `qword` (#173). It reads the next word of the text "$qt"
+#: as the shell does, and it removes that word from "$qt". It sets $qa to the
+#: text of the word as the command gives it, and $qu to the word that the
+#: command gets, with the quotes removed. It returns 0 for a word, 1 at the end
+#: of the text, and 2 when a quote is not closed. A single-quoted string is
+#: literal text. In a double-quoted string, a backslash escapes only "$", a
+#: backtick, a double quote, a backslash and a newline. Outside quotes, a
+#: backslash makes the next character a literal, so an escaped space does not
+#: divide, and a backslash-newline is removed. An unquoted space divides the
+#: words. A "#" is a literal character, also at the start of a word: a shell
+#: that reads it as a comment gives fewer words, never more, so each word that
+#: the command can get is tested. An unquoted "<", ">" or "&" starts a
+#: redirection (the divider leaves an "&" in a segment only next to a
+#: redirection sign): the function removes the signs that follow, the word
+#: before them when it is an unquoted file descriptor number, and the next
+#: word, which is the target. The shell removes a redirection before it runs
+#: the command, so a redirection is no word of the command, and the segment
+#: test examined its target. The function does not expand "$", a backtick or a
+#: pattern. It starts no process.
+#:
+#: The shell function `qexp` returns 0 when the word $qu holds "$" or a
+#: backtick after each "$TMPDIR/" is removed. The guard does not expand such a
+#: word, and an expansion can give other words or run a command, so the caller
+#: denies it, also in quotes. "$TMPDIR/" is the temp prefix of the guard
+#: (VERIFIER_TEMP_PATH_PREFIXES), so an output path such as "-o
+#: $TMPDIR/out.json" stays permitted.
+QUOTED_WORD_READER = " ".join(
+    [
+        r"""qword() { qa=; qu=; qn=0; qd=0; qs=0; qq=;""",
+        r"""while [ -n "$qt" ]; do qc=${qt%"${qt#?}"}; qt=${qt#?};""",
+        r"""case "$qq" in""",
+        r"""s) qa+=$qc; if [ "$qc" = "'" ]; then qq=; else qu+=$qc; fi; continue ;;""",
+        r"""d) qa+=$qc; case "$qc" in '"') qq= ;;""",
+        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+=$qc; case "$qc" in '$'|'`'|'"'|'\') qu+=$qc ;; $'\n') ;; *) qu+="\\$qc" ;; esac ;;""",
+        r"""*) qu+=$qc ;; esac; continue ;;""",
+        r"""esac;""",
+        r"""case "$qc" in""",
+        r"""' ') [ "$qn" = 1 ] || continue; [ "$qs" = 1 ] || return 0; qa=; qu=; qn=0; qd=0; qs=0 ;;""",
+        r""""'") qq=s; qa+=$qc; qn=1; qd=1 ;;""",
+        r"""'"') qq=d; qa+=$qc; qn=1; qd=1 ;;""",
+        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+="\\$qc"; [ "$qc" = $'\n' ] || { qu+=$qc; qn=1; qd=1; } ;;""",
+        r"""'<'|'>'|'&') if [ "$qn" = 1 ] && [ "$qs" = 0 ]; then case "$qd$qu" in 0|0*[!0-9]*|1*) qt=$qc$qt; return 0 ;; esac; fi;""",
+        r"""while :; do case "$qt" in '<'*|'>'*|'&'*|'|'*) qt=${qt#?} ;; *) break ;; esac; done;""",
+        r"""qa=; qu=; qn=0; qd=0; qs=1 ;;""",
+        r"""*) qa+=$qc; qu+=$qc; qn=1 ;;""",
+        r"""esac; done;""",
+        r"""[ -z "$qq" ] || return 2; [ "$qn" = 1 ] && [ "$qs" = 0 ] && return 0; return 1; };""",
+        r"""qexp() { qv=$qu; while :; do case "$qv" in *'$TMPDIR/'*) qv=${qv%%'$TMPDIR/'*}${qv#*'$TMPDIR/'} ;; *) break ;; esac; done;""",
+        r"""case "$qv" in *'$'*|*'`'*) return 0 ;; esac; return 1; }""",
+    ]
+)
+
+
 def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
     """The shell function `gwords` (#163). It examines the words after a gate.
 
-    Its first argument is the gate, and each other argument is a word after the
-    gate. The shell removes a redirection before it runs the command, so a
-    redirection is no word of the gate: the segment test examined its target.
-    The text before a redirection sign in a word is a word, unless it is a
-    file descriptor number or "&". After the redirections, each word must be
-    "--", a number (all digits, #169), a path (`gpath`), or a flag of
-    `extra_flags`, the gateExtraFlags of the declaration. A number cannot
-    make a gate write. A flag is permitted alone or with "=" and a value in the
-    same word. A flag with " <value>" in its entry also takes the next word
-    as its value, unless that word starts with "-": a parser such as yargs
-    (Jest) takes no such word as a value, so the function tests it as a word
-    of its own. Each other word denies, and the message names the word and
-    the gate. The function removes each quote and backslash from a word
-    before the test, as the shell does.
+    Its argument is the gate. It reads the words after the gate in the
+    command text "$g" with `qword` (#173), as the shell does: a quoted string
+    is one word, with the quotes removed, and a redirection is no word of the
+    gate (the segment test examined its target). A quote that is not closed
+    denies. A word that holds "$" or a backtick denies, also in quotes
+    (`qexp`): the guard does not expand it, and an expansion can give other
+    words or run a command. Each other word must be "--", a number (all
+    digits, #169), a path (`gpath`), or a flag of `extra_flags`, the
+    gateExtraFlags of the declaration. A number cannot make a gate write. A flag is permitted alone
+    or with "=" and a value in the same word. A flag with " <value>" in its
+    entry also takes the next word as its value, unless that word starts with
+    "-": a parser such as yargs (Jest) takes no such word as a value, so the
+    function tests it as a word of its own. Each other word denies, and the
+    message names the word as the command gives it, and the gate.
     """
     flags = [e.split(" ", 1)[0] for e in extra_flags]
     alone = [f'"{f}"' for f, e in zip(flags, extra_flags) if not e.endswith(f" {GATE_FLAG_VALUE}")]
@@ -580,13 +633,16 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
         "directory, and not a flag of gateExtraFlags. A word after a gate can make the gate write, for example --fix "
         f"or a task name. A gateCommands entry that ends with{READ_PREFIX_MARK} permits each word after the gate."
     )
+    open_quote = "A quote after the gate [$gn] is not closed, so the guard cannot read the words after the gate."
+    expansion = (
+        "The word $a after the gate [$gn] holds \\$ or a backtick. The guard does not expand it, and an expansion "
+        "can give other words or run a command. Only the temp prefix \\$TMPDIR/ is permitted."
+    )
     return " ".join(
         [
-            r"""gwords() { gn=$1; shift; gk=0; gr=0; for a in "$@"; do""",
-            r"""if [ "$gr" = 1 ]; then gr=0; continue; fi;""",
-            r"""case "$a" in *'>'*|*'<'*) case "$a" in *'>'|*'<'|*'>&'|*'<&') gr=1 ;; esac;""",
-            r"""a=${a%%'>'*}; a=${a%%'<'*}; case "$a" in ''|'&') continue ;; *[!0-9]*) ;; *) continue ;; esac ;; esac;""",
-            r"""gu=${a//\"/}; gu=${gu//\'/}; gu=${gu//\\/};""",
+            r"""gwords() { gn=$1; qt=${g#"$gn"}; gk=0; while :; do qword; case $? in 1) break ;;""",
+            f'2) deny "$seg" "{open_quote}" ;; esac; a=$qa; gu=$qu;',
+            f'qexp && deny "$seg" "{expansion}";',
             r"""if [ "$gk" = 1 ]; then gk=0; case "$gu" in -*) ;; *) continue ;; esac; fi;""",
             f'case "$gu" in --) continue ;; {flag_cases}esac;',
             r"""case "$gu" in ''|*[!0-9]*) ;; *) continue ;; esac;""",
@@ -609,7 +665,7 @@ def _gate_branches(gates: tuple[str, ...], free_gates: tuple[str, ...] = ()) -> 
     """
     ordered = sorted(gates, key=lambda g: (-len(g.split(" ")), g))
     free = "".join(f'"{g}"|"{g} "*) ;; ' for g in sorted(free_gates, key=lambda g: (-len(g.split(" ")), g)))
-    return free + "".join(f'"{g}"|"{g} "*) shift {len(g.split(" "))}; gwords "{g}" "$@" ;; ' for g in ordered)
+    return free + "".join(f'"{g}"|"{g} "*) gwords "{g}" ;; ' for g in ordered)
 
 
 def _is_free_gate(gate: str) -> bool:
@@ -625,30 +681,35 @@ def _free_gates(gates: tuple[str, ...] | list[str]) -> tuple[str, ...]:
 def _read_word_check() -> str:
     """The shell function `rwords` (#164). It examines the words after a read command of the declaration.
 
-    Its first argument is the read command, and each other argument is a word
-    after it. A redirection is no word of the command, by the rule of
-    `_gate_word_check`. After the redirections, the function permits an option
-    (a word that starts with "-"), the word after an option that has no "=",
-    which can be the value of the option, a number, and a word with a "/",
-    which is a path and no subcommand. "--" and "-" take no value. Each other
-    word can be a subcommand that writes ("tea issues create"), and it denies,
-    with a message that names the word and the read command. The function
-    removes each quote and backslash from a word before the test, as the shell
-    does. The function cannot tell an option that takes a value from one that
-    takes none, so the word after each option counts as a value.
+    Its argument is the read command. It reads the words after the command in
+    the command text "$g" with `qword` (#173), as the shell does: a quoted
+    string is one word, with the quotes removed, and a redirection is no word
+    of the command. A quote that is not closed denies, and so does a word that
+    holds "$" or a backtick, by the rule of `_gate_word_check`. The function
+    permits an option (a word that starts with "-"), the word after an option
+    that has no "=", which can be the value of the option, a number, and a
+    word with a "/", which is a path and no subcommand. "--" and "-" take no
+    value. Each other word can be a subcommand that writes ("tea issues
+    create"), and it denies, with a message that names the word, with the
+    quotes removed, and the read command. The function cannot tell an option
+    that takes a value from one that takes none, so the word after each option
+    counts as a value.
     """
     message = (
         "The word $ru after the read command [$rn] is not an option, the value of an option, a number or a path. "
         "Such a word can be a subcommand that writes, for example create or close. "
         f"A getOnlyCommands entry that ends with{READ_PREFIX_MARK} permits each word after it."
     )
+    open_quote = "A quote after the read command [$rn] is not closed, so the guard cannot read the words after it."
+    expansion = (
+        "The word $qa after the read command [$rn] holds \\$ or a backtick. The guard does not expand it, and an "
+        "expansion can give other words or run a command. Only the temp prefix \\$TMPDIR/ is permitted."
+    )
     return " ".join(
         [
-            r"""rwords() { rn=$1; shift; rv=0; rr=0; for a in "$@"; do""",
-            r"""if [ "$rr" = 1 ]; then rr=0; continue; fi;""",
-            r"""case "$a" in *'>'*|*'<'*) case "$a" in *'>'|*'<'|*'>&'|*'<&') rr=1 ;; esac;""",
-            r"""a=${a%%'>'*}; a=${a%%'<'*}; case "$a" in ''|'&') continue ;; *[!0-9]*) ;; *) continue ;; esac ;; esac;""",
-            r"""ru=${a//\"/}; ru=${ru//\'/}; ru=${ru//\\/};""",
+            r"""rwords() { rn=$1; qt=${g#"$rn"}; rv=0; while :; do qword; case $? in 1) break ;;""",
+            f'2) deny "$seg" "{open_quote}" ;; esac; ru=$qu;',
+            f'qexp && deny "$seg" "{expansion}";',
             r"""case "$ru" in --|-|-*=*) rv=0; continue ;; -*) rv=1; continue ;; esac;""",
             r"""if [ "$rv" = 1 ]; then rv=0; continue; fi;""",
             r"""case "$ru" in */*) continue ;; ''|*[!0-9]*) ;; *) continue ;; esac;""",
@@ -669,7 +730,7 @@ def _get_only_branches(get_only: tuple[str, ...]) -> str:
     ordered = sorted(entries, key=lambda e: (-len(e[0].split(" ")), e[0], not e[1]))
     return "".join(
         f'"{w}"|"{w} "*) {GET_ONLY_ARGUMENT_CHECK}'
-        + ("" if prefix else f'; shift {len(w.split(" "))}; rwords "{w}" "$@"')
+        + ("" if prefix else f'; rwords "{w}"')
         + " ;; "
         for w, prefix in ordered
     )
@@ -1013,6 +1074,7 @@ def _verifier_bash_hook(
         f'deny "$seg" "{sed_only_range}" ;; esac; done ;; '
     )
     get_only_branch = _get_only_branches(get_only)
+    read_words = any(not g.endswith(READ_PREFIX_MARK) for g in get_only)
     git_reads = tuple(c for c in VERIFIER_READ_COMMANDS if c.startswith("git ") and c != "git grep")
     other_reads = tuple(c for c in VERIFIER_READ_COMMANDS if not c.startswith("git "))
     segment = (
@@ -1128,10 +1190,12 @@ def _verifier_bash_hook(
             # The directory of mktemp -p or --tmpdir (#161). mktemp makes a new name in it, so the guard tests that name,
             # the directory, a "/" and the default template of GNU mktemp: the directory itself may hold a git tree.
             f'mdir() {{ istmp "${{1%/}}/tmp.XXXXXXXXXX" || deny "$seg" "{MKTEMP_DIRECTORY_MESSAGE}"; }}',
+            # The reader of the words after a gate or a read command, as the shell reads them (#173).
+            *([QUOTED_WORD_READER] if prefix_gates or read_words else []),
             # The words after a plain gate (#163).
             *([GATE_PATH_CHECK, _gate_word_check(extra_flags)] if prefix_gates else []),
             # The words after a read command of the declaration (#164).
-            *([_read_word_check()] if any(not g.endswith(READ_PREFIX_MARK) for g in get_only) else []),
+            *([_read_word_check()] if read_words else []),
             # The target of a redirection: a temp path, or exactly /dev/null, which discards the output and writes no
             # file. Only a redirection accepts /dev/null; a write command keeps the temp rule.
             f'isout() {{ [ "$1" = /dev/null ] || istmp "$1" || tdeny "$1" "{redirect}"; }}',

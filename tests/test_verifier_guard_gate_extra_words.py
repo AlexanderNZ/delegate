@@ -459,3 +459,83 @@ def test_the_validator_accepts_a_rendered_pair_with_a_star_gate(tmp_path):
     out = tmp_path / "rendered"
     assert agent_definitions_main(["render", str(declaration), "-o", str(out)]) == 0
     assert agent_definitions_main(["validate", str(out)]) == 0
+
+
+# --- A quoted value with spaces is one word (#173) ------------------------------
+#
+# The guard of 1.10.0 divided the words after a gate at each space, also inside
+# quotes. With `-t <value>` in gateExtraFlags, `npm test -- -t "renames the gift"`
+# gave the words `"renames`, `the` and `gift"`, and the guard denied `the`. The
+# guard now reads the words as the shell does: a quoted string is one word, and
+# a backslash-escaped space does not divide.
+
+
+@pytest.fixture(scope="module")
+def value_hook() -> str:
+    """The hook of a declaration with the gateExtraFlags entry `-t <value>`."""
+    return _hook(_declaration(gateExtraFlags=["-t <value>"]))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cd app && npm test -- -t "renames the gift"',
+        'npm test -- -t "renames the gift"',
+        "npm test -- -t 'a b'",
+        "npm test -- -t renames\\ the\\ gift",
+        "npm test -- -t \"it's done\" app/src/a.test.ts",
+        'npm test -- -t "a b" 2>&1',
+        'npm test -- -t "a b" > /dev/null',
+        'npm test -- -t="a b"',
+        'nix develop -c npm test -- -t "a b"',
+        # "$TMPDIR/" is the temp prefix of the guard, and no other expansion.
+        "npm test -- -t $TMPDIR/x",
+    ],
+)
+def test_a_quoted_value_with_spaces_is_one_word(value_hook, repo, shell, command):
+    _assert_permitted(_guard(value_hook, repo, command, shell, repo.main), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [
+        ('npm test -- -t "a b" -u', "-u"),
+        ("npm test -- -t 'a b' --fix", "--fix"),
+        ('npm test -- -t "a b" "c d"', '"c d"'),
+    ],
+)
+def test_a_word_after_a_quoted_value_is_tested_as_a_word(value_hook, repo, shell, command, word):
+    result = _guard(value_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert f"The word {word} after the gate [npm test]" in result.stderr, (shell, command, result.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        'npm test -- -t "$(touch x)"',
+        'npm test -- -t "$HOME"',
+        "npm test -- -t '$HOME'",
+        "npm test -- -t \\$HOME",
+        'npm test -- -t "`id`"',
+        "npm test -- -t $TMPDIRX/x",
+        "npm test -- -t $TMPDIR/$HOME",
+        'npm test -- -t "a b',
+        "npm test -- -t 'a b",
+    ],
+)
+def test_a_quoted_value_cannot_hide_an_expansion_and_an_open_quote_is_denied(value_hook, repo, shell, command):
+    _assert_denied(_guard(value_hook, repo, command, shell, repo.main), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_value_with_an_expansion_names_the_word(value_hook, repo, shell):
+    command = 'npm test -- -t "$HOME"'
+    result = _guard(value_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert 'The word "$HOME" after the gate [npm test] holds $ or a backtick' in result.stderr, (shell, result.stderr)

@@ -199,3 +199,52 @@ def test_a_gate_command_takes_a_star_only_at_the_end():
     for bad in ("npm test*", "npm * test", "npm test * *"):
         with pytest.raises(ValueError, match="gateCommands"):
             parse_declaration({"agents": {"web": {"description": "d", "gateCommands": [bad]}}})
+
+
+# --- A quoted value with spaces is one word (#173) ------------------------------
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        'tea issues --search "two words"',
+        "tea issues --search 'two words' --limit 5",
+        "tea issues --search two\\ words",
+        'tea issues --search="two words" 12',
+        'tea issues --search "two words" 2>&1',
+    ],
+)
+def test_a_quoted_value_with_spaces_is_one_word_after_a_read_command(read_hook, worktree, shell, command):
+    r = _guard(read_hook, command, shell, worktree)
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [
+        ('tea issues --search "two words" create', "create"),
+        ("tea issues --search 'a b' close 12", "close"),
+    ],
+)
+def test_a_word_after_a_quoted_value_of_a_read_command_is_tested(read_hook, worktree, shell, command, word):
+    r = _guard(read_hook, command, shell, worktree)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+    assert f"The word {word} after the read command [tea issues]" in r.stderr, (shell, command, r.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        'tea issues --search "$(touch x)"',
+        'tea issues --search "$HOME"',
+        'tea issues --search "`id`"',
+        'tea issues --search "two words',
+    ],
+)
+def test_a_quoted_value_of_a_read_command_cannot_hide_an_expansion(read_hook, worktree, shell, command):
+    r = _guard(read_hook, command, shell, worktree)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+    assert "verifier guard" in r.stderr, (shell, command, r.stderr)
