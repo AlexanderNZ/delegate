@@ -41,6 +41,11 @@ each verifier run, the engine also makes the proof copy beside the temporary
 copy: the tree of the copy with no `.git` entry, where the verifier breaks a
 check for a red proof. The engine removes both copies after every verifier run.
 
+Each agent session gets a scratch directory in the directory of the run, `scratch/<ticket>/<role>/` (#227). The engine
+makes it before the session, adds it to the session, sets `TMPDIR` to it, and the brief names it. A host can refuse a
+write to `/tmp`, and a scratch file in the tree changes the work, so the agent writes its scratch files there. The
+directories stay after the run, and `delegate clean` removes them.
+
 In `economy` mode each ticket branch starts from the tip of the previous built
 ticket, and the engine runs no gate and no verifier for a ticket by itself: a
 valid report that says committed, on a branch with a commit, builds the step.
@@ -209,6 +214,15 @@ SKIPPED: str = "skipped"
 ROLE_SPECIALIST: str = "specialist"
 ROLE_FIXUP: str = "fix-up"
 ROLE_VERIFIER: str = "verifier"
+
+# The directory of the run that holds the scratch directory of each agent session: `<run dir>/scratch/<ticket>/<role>/` (#227).
+SCRATCH_DIRECTORY: str = "scratch"
+
+# The temp prefixes that each verifier guard permits, whatever the value of `TMPDIR` (`VERIFIER_TEMP_PATH_PREFIXES` of
+# the definitions context; a `/private` before them counts as no prefix). The run context does not import that context,
+# so the prefixes are text here, and a test of the scratch directory checks them on a host whose temp directory is
+# outside them.
+GUARD_TEMP_PREFIXES: tuple[str, ...] = ("/tmp/", "/var/folders/")
 
 # The `phase` of a gate result in the journal: the gates after the specialist
 # built the ticket, after the rebase onto the run branch, after a fix-up, and on
@@ -1949,18 +1963,46 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
 def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
     report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
-    sealed: SealedAgent | None = None, environment: Mapping[str, str] | None = None,
+    sealed: SealedAgent | None = None, environment: Mapping[str, str] | None = None, *, scratch: Path,
 ) -> AdapterRequest:
     """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack.
 
-    `environment` holds the entries of the worktree of the ticket (see `_worktree_environment`).
+    `environment` holds the entries of the worktree of the ticket (see `_worktree_environment`). `scratch` is the
+    scratch directory of the session (see `_scratch_directory`): the request adds it to `added_directories`, and sets
+    `TMPDIR` to it in the environment (#227).
     """
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
-        added_directories=added_directories, agent_timeout=_seconds(stack.agent_timeout), sealed=sealed,
-        environment=dict(environment or {}),
+        added_directories=(*added_directories, scratch), agent_timeout=_seconds(stack.agent_timeout), sealed=sealed,
+        environment={**(environment or {}), "TMPDIR": str(scratch)},
     )
+
+
+def _scratch_directory(run_dir: Path, ticket: str, role: str) -> Path:
+    """Make the scratch directory of a session of `role` for `ticket`, `<run dir>/scratch/<ticket>/<role>/`, and give it (#227).
+
+    The sessions of one role share the directory: a continuation and each fix-up round find the files of the session
+    before them. The directory can exist already.
+    """
+    path = run_dir / SCRATCH_DIRECTORY / ticket / role
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _verifier_temp_parent(scratch: Path) -> Path | None:
+    """The directory where the engine makes the temporary copy of a verifier: None for the temp directory of the host.
+
+    The session of a verifier gets `TMPDIR` set to its scratch directory, so its guard permits a write under the scratch
+    directory and under the fixed prefixes (`GUARD_TEMP_PREFIXES`), and nowhere else. The copy, the proof copy and the
+    report stay in the temp directory of the host when that directory is under a fixed prefix: an OpenCode verifier can
+    write outside its copy only there. On a host whose temp directory is outside them, for example `/home/agent/.tmp`
+    (#166), they go in the scratch directory.
+    """
+    host = tempfile.gettempdir()
+    if host.startswith("/private/"):
+        host = host[len("/private"):]
+    return None if (host + "/").startswith(GUARD_TEMP_PREFIXES) else scratch
 
 
 def _make_proof_copy(copy: Path) -> tuple[Path, ...]:
@@ -2215,6 +2257,7 @@ def _build_ticket(
     since = domain.work_starts_at(base_commit, rebased_onto)
     reason = _build_with_continuations(
         workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
+        _scratch_directory(state_dir / "runs" / run_id, ticket.id, ROLE_SPECIALIST),
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
         stop_reason="the run was interrupted" if retried is None else f"the step failed: {retried}",
     )
@@ -2256,13 +2299,15 @@ def _recover_advance(workflow: Workflow, ticket: Ticket, vcs: VersionControl, re
 
 def _build_with_continuations(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, model: str, repo: Path,
-    worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
+    worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, scratch: Path, spawned: bool = False,
+    continuations: int = 0, interrupted: bool = False,
     stop_reason: str = "the run was interrupted",
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
 
     `since` is the commit or branch where the branch of the ticket started: the commits beyond it
-    are the work of this ticket.
+    are the work of this ticket. `scratch` is the scratch directory of the specialist (see `_scratch_directory`): each
+    session gets it, and each brief names it.
 
     A resume sets `spawned` when the journal shows that the specialist finished
     with a valid report, so the first pass does not spawn it again. It sets
@@ -2288,7 +2333,7 @@ def _build_with_continuations(
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
         ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
-        plan_change=plan_change, notes=stack.specialist_notes,
+        plan_change=plan_change, notes=stack.specialist_notes, scratch=scratch,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
@@ -2296,7 +2341,7 @@ def _build_with_continuations(
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
-                notes=stack.specialist_notes,
+                notes=stack.specialist_notes, scratch=scratch,
             )
     resume_session: str | None = None
     leftovers: frozenset[str] = frozenset()  # the paths that red gates left in the worktree (see `_uncommitted_before_gates`)
@@ -2314,7 +2359,7 @@ def _build_with_continuations(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
                 _request(
                     stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed,
-                    environment=_worktree_environment(vcs, worktree),
+                    environment=_worktree_environment(vcs, worktree), scratch=scratch,
                 ),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
@@ -2388,12 +2433,12 @@ def _build_with_continuations(
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
         )
         if trigger in (TRIGGER_REPORT_INVALID, TRIGGER_REPORT_MISSING):
-            prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems)
+            prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems, scratch=scratch)
         else:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
-                plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths,
+                plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths, scratch=scratch,
             )
 
 
@@ -2665,9 +2710,10 @@ def _run_fixup(
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
     # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
     leftovers = frozenset(_uncommitted_paths(step.vcs, step.worktree))
+    scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_FIXUP)
     prompt = specialist_brief(
         ticket.id, ticket.text, step.worktree, step.stack.all_hotspots, step.stack.gates, report_path, rejected, findings_text,
-        red_gates=red_gates, notes=step.stack.specialist_notes,
+        red_gates=red_gates, notes=step.stack.specialist_notes, scratch=scratch,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -2675,7 +2721,7 @@ def _run_fixup(
         step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
         _request(
             step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed,
-            environment=_worktree_environment(step.vcs, step.worktree),
+            environment=_worktree_environment(step.vcs, step.worktree), scratch=scratch,
         ),
     )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
@@ -2804,7 +2850,8 @@ def _verify_round(
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
-    scratch = Path(tempfile.mkdtemp(prefix="delegate-verify-"))
+    own_scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_VERIFIER)
+    scratch = Path(tempfile.mkdtemp(prefix="delegate-verify-", dir=_verifier_temp_parent(own_scratch)))
     try:
         copy = scratch / "copy"
         report_path = scratch / "verdict.json"
@@ -2824,18 +2871,18 @@ def _verify_round(
                 )
                 prompt = (
                     first_pass + coordinator_section(coordinator) + notes
-                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None, scratch=own_scratch)
                 )
             elif fixup_body is None:
                 prompt = verifier_run_brief(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
                     plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
-                    notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator,
+                    notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator, scratch=own_scratch,
                 )
             else:
                 prompt = (
                     fixup_body + coordinator_section(coordinator) + notes
-                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None, scratch=own_scratch)
                 )
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
@@ -2858,7 +2905,7 @@ def _verify_round(
             step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
             _request(
                 step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added,
-                sealed=sealed, environment=_worktree_environment(step.vcs, step.worktree),
+                sealed=sealed, environment=_worktree_environment(step.vcs, step.worktree), scratch=own_scratch,
             ),
         )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.

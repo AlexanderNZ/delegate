@@ -260,7 +260,8 @@ def test_the_engine_makes_the_proof_copy_adds_it_to_the_session_and_removes_it_w
     in_proof, in_copy = seen["files"]
     assert "feature.txt" in in_copy
     assert in_proof == in_copy
-    assert seen["added"] == (seen["proof"],)
+    # The scratch directory of the session follows the proof copy (#227).
+    assert seen["added"][0] == seen["proof"] and len(seen["added"]) == 2
     assert not seen["proof"].exists()
     journal = [line.removeprefix("journal ") for line in out.splitlines() if line.startswith("journal ")]
     evidence = Path(journal[0]).parent / "verifier" / "a"

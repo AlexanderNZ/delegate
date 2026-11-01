@@ -299,6 +299,31 @@ def _commands(tree: str) -> str:
     return FOREGROUND_RULE + "\n\n" + git_rule(tree)
 
 
+SCRATCH_HEADING: str = "## Scratch directory"
+
+
+def scratch_rule(scratch: str | Path, tree: str) -> str:
+    """The rule for the scratch files of a session: write them in `scratch`, never in `/tmp` or in the `tree` (#227).
+
+    A host can refuse a write to `/tmp`, and a file in the tree that no commit holds changes the work under review. So
+    the engine makes a scratch directory for each session in the directory of the run, adds it to the session, and sets
+    `TMPDIR` to it.
+    """
+    return (
+        f"Your scratch directory is `{scratch}`. The engine made it for this session, outside the {tree}. "
+        "Write each scratch file there: the output of a command, a note, or a file that you make only to read it again. "
+        f"Never write a scratch file to `/tmp` or to the {tree}: a host can refuse a write to `/tmp`, "
+        f"and a file in the {tree} changes the work. "
+        "The engine set `TMPDIR` to this directory, so a tool that makes a temporary file makes it there. "
+        "The report and each other path that this brief names are not scratch files. Use them as the brief says."
+    )
+
+
+def _scratch_pairs(scratch: str | Path | None, tree: str) -> list[tuple[str, str]]:
+    """The section "Scratch directory" for `scratch`, or no section when the brief has no scratch directory."""
+    return [] if scratch is None else [(SCRATCH_HEADING, scratch_rule(scratch, tree))]
+
+
 # The text of the `## Gates` section of a specialist brief, before the gate commands. The engine runs the gates
 # after the report. A specialist that runs them too runs the full suite twice for each ticket.
 GATES_RULE = "Do not run a gate command yourself. Run only the tests of the code that you change."
@@ -627,6 +652,7 @@ def specialist_brief(
     gates_at_chain_end: bool = False,
     plan_change: str | None = None,
     notes: str | None = None,
+    scratch: str | Path | None = None,
 ) -> str:
     """The brief the engine sends a specialist: the ticket, the file boundary, the foreground rule, the gates, the report path.
 
@@ -647,7 +673,8 @@ def specialist_brief(
     With `plan_change`, the text of `plan_change_text`, the brief has the
     section "Plan change" after the task. With `notes`, the specialist notes of
     the stack, the brief has the section "Notes of this stack" before the file
-    boundary.
+    boundary. With `scratch`, the scratch directory of the session, the brief has the section "Scratch directory" after
+    the commands (#227).
     """
     if hotspots:
         reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
@@ -681,6 +708,7 @@ def specialist_brief(
     pairs += [
         ("## File boundary", boundary),
         ("## Commands", _commands("worktree")),
+        *_scratch_pairs(scratch, "worktree"),
         ("## Gates", _specialist_gates(gates, gates_at_chain_end)),
         ("## Report", report),
     ]
@@ -702,6 +730,7 @@ def continuation_brief(
     plan_change: str | None = None,
     notes: str | None = None,
     uncommitted: Sequence[str] = (),
+    scratch: str | Path | None = None,
 ) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
@@ -717,6 +746,9 @@ def continuation_brief(
     `uncommitted` names the paths of the worktree that hold a change that is not
     committed (#176). The engine ran no gate because of them. The brief names
     each path, and tells the specialist to commit it or remove it.
+
+    `scratch` is the scratch directory of the session (#227). A resumed brief names it again in the section "Scratch
+    directory", and a new agent gets it in its full specialist brief.
     """
     lines = [
         f"Ticket {ticket}",
@@ -746,11 +778,11 @@ def continuation_brief(
     lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]
     continuation = ("## Continuation", "\n".join(lines))
     if resumed:
-        return _sections(continuation, ("## Gates", _specialist_gates(gates, gates_at_chain_end)))
+        return _sections(continuation, *_scratch_pairs(scratch, "worktree"), ("## Gates", _specialist_gates(gates, gates_at_chain_end)))
     section = _sections(continuation)
     return specialist_brief(
         ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end, plan_change=plan_change,
-        notes=notes,
+        notes=notes, scratch=scratch,
     ) + "\n" + section
 
 
@@ -760,13 +792,15 @@ def report_correction_brief(
     report_path: str | Path,
     commits: Sequence[str],
     problems: Sequence[str],
+    scratch: str | Path | None = None,
 ) -> str:
     """The brief the engine sends a specialist that committed work but wrote a report that is missing or not valid.
 
     It asks only for a corrected report. It holds the ticket id, the commits on
     the branch, each problem of the report check, the report rule, the foreground
     rule, and the shape of the report. It does not give the task again, so a
-    resumed session and a new agent get the same brief.
+    resumed session and a new agent get the same brief. With `scratch`, it names the scratch directory of the session
+    in the section "Scratch directory" (#227).
     """
     lines = [
         f"Ticket {ticket}",
@@ -786,6 +820,7 @@ def report_correction_brief(
     return _sections(
         ("## Continuation", "\n".join(lines)),
         ("## Commands", _commands("worktree")),
+        *_scratch_pairs(scratch, "worktree"),
         ("## Report", _specialist_report_shape(ticket, worktree, report_path)),
     )
 
@@ -801,13 +836,16 @@ def red_proof_copy(copy: str | Path) -> Path:
     return Path(copy).parent / "proof"
 
 
-def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, engine_gates: bool = False) -> str:
+def verifier_run_sections(
+    copy: str | Path, report_path: str | Path, mode: str, engine_gates: bool = False, scratch: str | Path | None = None,
+) -> str:
     """The sections the engine adds to a verifier brief: the working copy, the report rule, the foreground rule, and the report path.
 
     `copy` is the temporary copy of the branch that the engine prepared. `mode`
     is `full` or `fix-up`, and the report must name it. With `engine_gates`, the
     brief gives the output of the gates that the engine ran green, and the
-    verifier does not run them.
+    verifier does not run them. With `scratch`, the scratch directory of the session, the section "Scratch directory"
+    follows the commands (#227).
     """
     # The proof copy goes beside the copy. The engine removes both when the verifier ends, and keeps neither as evidence.
     proof = red_proof_copy(copy)
@@ -854,7 +892,9 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         verifier_example(mode),
     )
     report += "\n\n" + _verdict_write_rule(report_path)
-    return "\n" + _sections(("## Working copy", working_copy), ("## Commands", _commands("copy")), ("## Report", report))
+    return "\n" + _sections(
+        ("## Working copy", working_copy), ("## Commands", _commands("copy")), *_scratch_pairs(scratch, "copy"), ("## Report", report),
+    )
 
 
 def verifier_run_brief(
@@ -862,6 +902,7 @@ def verifier_run_brief(
     copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path,
     plan_change: str | None = None, notes: str | None = None, gates_text: str | None = None,
     coordinator: Sequence[tuple[str, Sequence[str]]] = (),
+    scratch: str | Path | None = None,
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
@@ -874,10 +915,11 @@ def verifier_run_brief(
     commit under verification (see `green_gates_text`), the brief gives that
     output in place of the gate commands, and the verifier does not run the gates. With `coordinator`, each commit of
     the coordinator on the branch and its paths, the section "Commit of the coordinator" comes before the notes (#225).
+    With `scratch`, the brief names the scratch directory of the session (see `verifier_run_sections`).
     """
     return (
         full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text)
         + coordinator_section(coordinator)
         + notes_section(notes)
-        + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None)
+        + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None, scratch=scratch)
     )

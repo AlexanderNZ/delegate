@@ -7,7 +7,8 @@ a verifier also leaves the temporary copy of the verifier and its proof copy.
 `clean` removes them for each run that ended `built`, with the rules of
 `cleanup.clean_tickets`: it stops the file watchers, removes the ticket
 worktrees and their hooks, deletes each ticket branch that the run branch
-holds, and removes the leftover verifier copies and proof copies. With
+holds, and removes the leftover verifier copies and proof copies, and the
+scratch directories of the agent sessions of the run (#227). With
 `merged`, it then deletes the run branch when the base branch holds it. When the
 run branch is gone already, the base branch is the holder of the ticket
 branches with `merged`, and without it every ticket branch stays.
@@ -21,7 +22,7 @@ in the middle. When the clean removes a stale lock of the run, the journal gets 
 process id of the old holder, as for `delegate run --break-lock` (#207), before the clean changes anything else.
 
 The journal of each cleaned run gets one `cleanup` event after its `run-end`,
-with what went, what stayed and why, the copies removed, and the bytes freed.
+with what went, what stayed and why, the copies removed, the scratch directory removed, and the bytes freed.
 A run where nothing went gets no event: a second clean adds no line. `watch` and `status` read a
 `cleanup` and a `lock-broken` after `run-end` as no continuation of the run (`journal.AFTER_END`).
 
@@ -30,7 +31,7 @@ The lines then say what the command would remove and keep.
 
 `abandon` is the other use of the module (#201): it ends a run that is not built for good. It writes `run-end` with the
 result `abandoned` and the reason, and then removes the ticket worktrees, the ticket branches and the hooks directory
-whatever they hold. It keeps the run branch, unless the caller asks to delete it. A stale lock that it removes is
+whatever they hold, and the scratch directories of the run. It keeps the run branch, unless the caller asks to delete it. A stale lock that it removes is
 recorded with `lock-broken` before the `run-end` (#207).
 
 The module starts no process and imports no adapter: the port does the work.
@@ -46,7 +47,7 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
-from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, EngineError, restore_progress, state_directories
+from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, EngineError, restore_progress, state_directories
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
@@ -78,6 +79,7 @@ class RunClean:
     cleanup: Cleanup | None = None
     copies_removed: list[str] = field(default_factory=list)
     tracebacks_removed: list[str] = field(default_factory=list)
+    scratch_removed: list[str] = field(default_factory=list)
     bytes_freed: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -100,6 +102,8 @@ class RunClean:
         kept += [f"branch {k['branch']}: {k['reason']}" for k in c.branches_kept]
         if kept:
             parts.append(f"{verbs[2]} " + "; ".join(kept))
+        if self.scratch_removed:
+            parts.append(f"{verbs[0]} the scratch directory ({', '.join(self.scratch_removed)})")
         if not parts:
             return f"run {self.run_id}: nothing to remove"
         return f"run {self.run_id}: " + "; ".join(parts) + f"; {verbs[3]} {format_size(self.bytes_freed)}"
@@ -235,15 +239,16 @@ def _clean_run(
                 continue
         outcome.tracebacks_removed.append(str(trace))
         outcome.bytes_freed += size
+    _remove_scratch(outcome, journal.parent, dry_run)
     if dry_run:
         return outcome
     remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
     # A run where nothing went gets no event, so a second clean of the same run adds no line to its journal.
-    if outcome.copies_removed or outcome.tracebacks_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
+    if outcome.copies_removed or outcome.tracebacks_removed or outcome.scratch_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
         handle, _ = Journal.reopen(journal)
         handle.append(
             "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed,
-            tracebacks_removed=outcome.tracebacks_removed, bytes_freed=outcome.bytes_freed,
+            tracebacks_removed=outcome.tracebacks_removed, scratch_removed=outcome.scratch_removed, bytes_freed=outcome.bytes_freed,
         )
     return outcome
 
@@ -261,6 +266,25 @@ def _remove_copies(outcome: RunClean, events: list[dict[str, object]], dry_run: 
             remove_empty_directories(copy.parent)
         outcome.copies_removed.append(str(copy))
         outcome.bytes_freed += size
+
+
+def _remove_scratch(outcome: RunClean, run_directory: Path, dry_run: bool) -> None:
+    """Remove the scratch directory of the run, `<run dir>/scratch`, which holds the scratch directory of each agent session (#227).
+
+    Add it to `outcome` with its size. The leftover copies go first (`_remove_copies`), so the file watcher of a copy in
+    it is stopped. With `dry_run`, remove nothing. A run with no scratch directory adds nothing.
+    """
+    scratch = run_directory / SCRATCH_DIRECTORY
+    if not scratch.is_dir():
+        return
+    size = _size(scratch)
+    if not dry_run:
+        shutil.rmtree(scratch, ignore_errors=True)
+        if scratch.exists():
+            outcome.errors.append(f"scratch directory {scratch}: it could not be removed")
+            return
+    outcome.scratch_removed.append(str(scratch))
+    outcome.bytes_freed += size
 
 
 def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
@@ -395,7 +419,7 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
 
     The run is paused, halted, failed, or stopped with no `run-end`, and no live process works on it. The command
     removes the worktree, the branch and the hooks directory of each ticket that started a step, whatever the worktree
-    holds and whether the run branch holds the branch, and the leftover verifier copies. It keeps the run branch, or
+    holds and whether the run branch holds the branch, the leftover verifier copies, and the scratch directories of the run. It keeps the run branch, or
     with `delete_run_branch` deletes it. The journal then gets a `cleanup` event, as for `clean`. A run that was
     abandoned before gets no new `run-end`: the command only removes what is left, so a failed removal can be tried again.
 
@@ -473,6 +497,7 @@ def _abandon_run(
     errors += cleanup.errors
     outcome.bytes_freed = sum(sizes.get(path, 0) for path in cleanup.worktrees_removed)
     _remove_copies(outcome, events, False, vcs)
+    _remove_scratch(outcome, journal.parent, False)
     result = Abandoned(outcome, run_branch, reason, already)
     if delete_run_branch:
         try:
@@ -484,9 +509,10 @@ def _abandon_run(
             errors.append(f"branch {run_branch}: {error}")
     remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
     _prune(vcs, repo, False, errors)
-    if outcome.copies_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
+    if outcome.copies_removed or outcome.scratch_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
         handle.append(
-            "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed, tracebacks_removed=[], bytes_freed=outcome.bytes_freed,
+            "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed, tracebacks_removed=[],
+            scratch_removed=outcome.scratch_removed, bytes_freed=outcome.bytes_freed,
         )
     return result
 

@@ -13,7 +13,7 @@ The `claude-code` [**adapter**](../glossary.md#adapter) drives Claude Code in [*
 For each agent run, the adapter starts this command in the working directory of the request:
 
 ```
-claude --print --output-format stream-json --verbose --model <model> --setting-sources user --plugin-dir <seal directory> --agent <handle> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] [--add-dir <proof copy>] --disallowedTools Monitor,TaskStop [--resume <session id>]
+claude --print --output-format stream-json --verbose --model <model> --setting-sources user --plugin-dir <seal directory> --agent <handle> --strict-mcp-config [--settings <path>] [--permission-mode <mode>] [--mcp-config <servers>] [--add-dir <proof copy>] --add-dir <scratch directory> --disallowedTools Monitor,TaskStop [--resume <session id>]
 ```
 
 The environment of the command is the environment of the [**engine**](../glossary.md#engine), with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` added.
@@ -30,6 +30,7 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--strict-mcp-config` | Ignore every MCP configuration other than `--mcp-config`: the servers of the user, of the project, and of the plugins. See [what the agent gets](#what-the-agent-gets). |
 | `--mcp-config <servers>` | Only when the stack names MCP servers in its `mcp-servers` table. One JSON object, `{"mcpServers": {...}}`: a local server as `command` and `args`, a remote server as `type` `http` and `url`. |
 | `--add-dir <proof copy>` | Only for a verifier: the proof copy that the engine made for a [**red proof**](../glossary.md#red-proof). See [the proof copy of a verifier](#the-proof-copy-of-a-verifier). |
+| `--add-dir <scratch directory>` | For each agent session of a [**ticket**](../glossary.md#ticket): the scratch directory of the session, in the directory of the [**run**](../glossary.md#run). See [the scratch directory](#the-scratch-directory). |
 | `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
 | `--settings <path>` | Only when the host sets `DELEGATE_AGENT_SETTINGS`. See [the settings of a host](#the-settings-of-a-host). |
 | `--permission-mode <mode>` | Only when the host sets `DELEGATE_PERMISSION_MODE`. See [the settings of a host](#the-settings-of-a-host). |
@@ -62,6 +63,20 @@ To prove a test red, a verifier breaks the check in a copy of the tree with no `
 The engine makes the copy because a host in `dontAsk` mode refuses the commands that a verifier needs to make it. Measured on the agent host on 2026-10-20 (Claude Code 2.1.283, `claude -p --permission-mode dontAsk`, the unattended settings of the host): Claude Code refused each recursive `cp` (`cp -r`, `cp -R`, `cp --recursive`, `cp -a`) with any settings, the deny list of the host refused `rm -r`, `rm -rf` and `rm -fr`, and a copy outside the working directory could not be read. With `--add-dir <proof>` and a proof directory with no `.git` entry, `ls`, `cat`, `cd <proof> && grep`, a test command after the `cd`, a Write, a Read and an Edit in the proof directory were each permitted, and the `cd` persisted (#153).
 
 A verifier that a person spawns outside a `delegate run` keeps the recipe of the rendered verifier: it makes the copy itself with `cp -R <tree> <copy> && rm -r <copy>/.git`. On a `dontAsk` host, Claude Code refuses the recursive `cp`, so such a verifier cannot make its own proof copy. It then follows the rule for a copy that it cannot make, and puts the red proof in `unverified` (#152). To make a red proof possible there, the person makes the copy with no `.git` entry before the verifier starts, and adds it to the session with `--add-dir`.
+
+## The scratch directory
+
+In a `delegate run`, each agent session of a ticket gets a scratch directory, `runs/<run id>/scratch/<ticket id>/<role>/`, and the [**brief**](../glossary.md#brief) tells the agent to write each scratch file there and never to `/tmp` or to its tree (#227). See [the scratch directory of a session](run.md#the-scratch-directory-of-a-session). The adapter adds the directory to the session with `--add-dir`, as it adds the proof copy, and the session gets `TMPDIR` set to it.
+
+Measured on Claude Code 2.1.287 on 2026-11-02, with `claude -p --permission-mode <mode> --setting-sources project --settings <rules> --add-dir <scratch>`, in a working directory with no project settings, and with a scratch directory outside the working directory:
+
+| Mode | Allow rules | `echo x` | `echo x > <working directory>/out.txt` | `echo x > <scratch>/out.txt` | `echo x > /tmp/<file>` |
+|---|---|---|---|---|---|
+| `dontAsk` | `Bash(echo:*)` | permitted | refused | refused | refused |
+| `dontAsk` | `Bash(echo:*)`, `Edit`, `Write` | not measured | refused | refused | refused |
+| `acceptEdits` | `Bash(echo:*)` | not measured | permitted | permitted | refused |
+
+So in `dontAsk` mode, Claude Code refuses a shell redirect to a file also in the added directory, also with the allow rules `Edit` and `Write`: a redirect is a write, and the mode refuses it. The added directory does not make a redirect possible there. In `acceptEdits` mode, a redirect into the added directory is permitted, as in the working directory, and a redirect to `/tmp` is refused. So on a `dontAsk` host an agent writes a scratch file with a tool that the allow rules of the host permit, for example the Write tool, and a tool that makes a temporary file uses `TMPDIR`. The measurement did not test a Write tool call into the added directory in `dontAsk` mode.
 
 ## The foreground rule
 

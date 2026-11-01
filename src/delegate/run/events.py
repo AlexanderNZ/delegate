@@ -516,6 +516,8 @@ class Cleanup(TypedDict):
     # Only the event that `delegate clean` writes after `run-end` has these.
     copies_removed: NotRequired[int]
     tracebacks_removed: NotRequired[list[str]]
+    # The scratch directory of the run that `delegate clean` removed, as a list of one path or none (#227).
+    scratch_removed: NotRequired[list[str]]
     bytes_freed: NotRequired[int]
 
 

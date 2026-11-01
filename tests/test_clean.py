@@ -190,8 +190,9 @@ def test_a_worktree_with_a_change_that_is_not_committed_stays_with_its_branch(tm
     assert "run/built-a" in branches(repo)
     line = line_of(out, run_id)
     assert "notes.txt" in line and "branch run/built-a: its worktree is kept" in line
-    # Nothing went, so the journal gets no event.
-    assert read_journal_file(repo, run_id)[-1]["event"] == "run-end"
+    # Only the scratch directory of the run went (#227), so the event names no worktree and no branch.
+    last = read_journal_file(repo, run_id)[-1]
+    assert (last["event"], last["worktrees_removed"], last["branches_deleted"]) == ("cleanup", [], [])
 
 
 def test_a_ticket_branch_whose_worktree_directory_a_person_removed_is_deleted(tmp_path, capsys, scripted):

@@ -287,8 +287,9 @@ def test_the_stand_in_harness_and_a_gate_command_record_the_entries_for_the_work
     specialist, verifier = registered.calls[0], registered.verifier_calls[0]
     worktree = specialist.cwd
     entries = GitVersionControl().worktree_environment(worktree)
-    assert specialist.environment == entries
-    assert verifier.environment == entries
+    # The engine also sets `TMPDIR` to the scratch directory of the session (#227).
+    assert {name: value for name, value in specialist.environment.items() if name != "TMPDIR"} == entries
+    assert {name: value for name, value in verifier.environment.items() if name != "TMPDIR"} == entries
     assert entries["GIT_CONFIG_COUNT"] == str(count + 1)
     assert marker.read_text().split("\n")[:-1] == [entries[name] for name in ("GIT_CONFIG_COUNT", f"GIT_CONFIG_KEY_{count}", f"GIT_CONFIG_VALUE_{count}")]
     assert include_sections(repo) == []
