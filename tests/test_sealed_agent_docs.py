@@ -159,9 +159,9 @@ def test_the_protocol_skill_limits_the_preload_note_to_a_subagent_of_the_agent_t
 
 
 @outside_the_package
-def test_the_unreleased_changelog_has_a_changed_entry_that_names_220_and_187():
-    unreleased = section(CHANGELOG.read_text(), "[Unreleased]")
-    changed = section(unreleased, "Changed", 3)
+def test_the_1_14_0_changelog_has_a_changed_entry_that_names_220_and_187():
+    release = section(CHANGELOG.read_text(), "[1.14.0] - 2026-11-01")
+    changed = section(release, "Changed", 3)
     entries = [entry for entry in re.split(r"^- ", changed, flags=re.MULTILINE) if "(#220" in entry]
     assert len(entries) == 1
     assert "#187" in entries[0]
