@@ -1,6 +1,6 @@
 ---
 description: 'delegate specialist. The delegate kit: a harness-neutral delegation engine, the agent-definitions renderer and validator, and the delegation skills, in Python with a pytest suite. One implementation task. Never pushes.'
-mode: subagent
+mode: all
 model: anthropic/claude-opus-5
 steps: 150
 permission:
