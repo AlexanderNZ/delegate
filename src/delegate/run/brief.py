@@ -307,11 +307,14 @@ def scratch_rule(scratch: str | Path, tree: str) -> str:
 
     A host can refuse a write to `/tmp`, and a file in the tree that no commit holds changes the work under review. So
     the engine makes a scratch directory for each session in the directory of the run, adds it to the session, and sets
-    `TMPDIR` to it.
+    `TMPDIR` to it. Claude Code in `dontAsk` mode refuses a shell redirect into the added directory (#235), so the rule
+    also tells the agent to write a scratch file with the file-write tool of its harness.
     """
     return (
         f"Your scratch directory is `{scratch}`. The engine made it for this session, outside the {tree}. "
         "Write each scratch file there: the output of a command, a note, or a file that you make only to read it again. "
+        "Write a scratch file with the file-write tool of your harness, not with a shell redirect: "
+        "a host in `dontAsk` mode can refuse a shell redirect into this directory. "
         f"Never write a scratch file to `/tmp` or to the {tree}: a host can refuse a write to `/tmp`, "
         f"and a file in the {tree} changes the work. "
         "The engine set `TMPDIR` to this directory, so a tool that makes a temporary file makes it there. "

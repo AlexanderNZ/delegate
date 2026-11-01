@@ -174,6 +174,36 @@ def test_the_brief_says_to_write_each_scratch_file_there_and_never_to_tmp_or_the
         assert "`TMPDIR`" in section
 
 
+REDIRECT_RULE = "Write a scratch file with the file-write tool of your harness, not with a shell redirect"
+
+
+def scratch_section(prompt: str) -> str:
+    return prompt.split("## Scratch directory\n\n", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_scratch_section_of_each_brief_kind_says_to_use_the_file_write_tool_and_not_a_shell_redirect(
+    tmp_path, capsys, scripted
+):
+    # A rejected first verdict gives the fix-up brief; red gates on the first session give the continuation brief.
+    scripted.verdict_sequence = ["REJECT", "ACCEPT"]
+    scripted.verdict_findings = [FINDING]
+    scripted.files = {"other.txt": "other\n"}
+    scripted.continuation_files = [{"feature.txt": "feature\n"}]
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    briefs = {
+        "specialist": scripted.calls[0],
+        "continuation": scripted.continuation_calls[0],
+        "verifier": scripted.verifier_calls[0],
+        "fix-up": scripted.fixup_calls[0],
+    }
+    for kind, request in briefs.items():
+        assert REDIRECT_RULE in scratch_section(request.prompt), kind
+
+
 def test_clean_removes_the_scratch_directories_of_a_run_that_it_cleans(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path)
     code, out, _ = run(repo, capsys)
