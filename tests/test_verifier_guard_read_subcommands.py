@@ -248,3 +248,68 @@ def test_a_quoted_value_of_a_read_command_cannot_hide_an_expansion(read_hook, wo
     r = _guard(read_hook, command, shell, worktree)
     assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
     assert "verifier guard" in r.stderr, (shell, command, r.stderr)
+
+
+# --- A word after a read command cannot expand (#175) ----------------------------
+#
+# The shell expands an unquoted word before it runs the command. With the entry
+# `tea issues`, bash makes `tea issues --search {a,create}` into
+# `tea issues --search a create`, and zsh runs the glob qualifier of
+# `*(e:'touch x':)`. After an option, the word is a value, so #164 did not test
+# it. The guard now denies each unquoted word that can expand after a read
+# command of the declaration, also after a prefix entry.
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word", "entry"),
+    [
+        ("tea issues --search {a,create}", "{a,create}", "tea issues"),
+        ("tea issues --repo {-XPOST,x}", "{-XPOST,x}", "tea issues"),
+        ("tea issues --state *(e:'touch x':)", "*(e:'touch x':)", "tea issues"),
+        ("tea issues --repo o/*", "o/*", "tea issues"),
+        ("tea issues --search ~", "~", "tea issues"),
+        ("tea issues list {a,b}", "{a,b}", "tea issues list"),
+        ("tea issues list {-XPOST,x}", "{-XPOST,x}", "tea issues list"),
+        ("tea issues list *(e:'touch x':)", "*(e:'touch x':)", "tea issues list"),
+        ("tea issues list --limit 1{0,1}", "1{0,1}", "tea issues list"),
+    ],
+)
+def test_a_word_after_a_read_command_that_can_expand_is_denied_and_named(
+    prefix_hook, worktree, shell, command, word, entry
+):
+    r = _guard(prefix_hook, command, shell, worktree)
+    assert r.returncode == 2, (shell, command, r.stdout, r.stderr)
+    assert f"The word {word} after the read command [{entry}] can expand in the shell" in r.stderr, (
+        shell,
+        command,
+        r.stderr,
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_word_with_a_dollar_after_a_prefix_entry_is_denied(prefix_hook, worktree, shell):
+    command = 'tea issues list --search "$HOME"'
+    r = _guard(prefix_hook, command, shell, worktree)
+    assert r.returncode == 2, (shell, r.stdout, r.stderr)
+    assert 'The word "$HOME" after the read command [tea issues list] holds $ or a backtick' in r.stderr, (
+        shell,
+        r.stderr,
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "tea issues --search 'a*'",
+        'tea issues --search "{a,create}"',
+        "tea issues --search a\\*",
+        "tea issues list 'a*'",
+        'tea issues list --state "[ab]"',
+        "tea issues list -o $TMPDIR/x.json",
+    ],
+)
+def test_a_quoted_word_after_a_read_command_is_literal(prefix_hook, worktree, shell, command):
+    r = _guard(prefix_hook, command, shell, worktree)
+    assert r.returncode == 0, (shell, command, r.stdout, r.stderr)

@@ -539,3 +539,122 @@ def test_a_value_with_an_expansion_names_the_word(value_hook, repo, shell):
 
     _assert_denied(result, command, shell)
     assert 'The word "$HOME" after the gate [npm test] holds $ or a backtick' in result.stderr, (shell, result.stderr)
+
+
+# --- A word after a gate cannot expand (#175) -----------------------------------
+#
+# The guard of 1.10.0 and of #173 did not test the value word of `-t <value>`
+# for an expansion. The shell expands an unquoted word before it runs the gate:
+# in bash, `npm test -- -t {a,-u}` becomes `npm test -- -t a -u`, so the
+# snapshot-writing `-u` passed. In zsh, the glob qualifier of
+# `npm test -- -t *(e:'touch x':)` runs `touch x`. The guard now denies each
+# unquoted word after a gate that can expand. A word in quotes is literal.
+
+#: Each command with a word that the shell can expand, and that word as the command gives it.
+EXPANDING_GATE_WORDS = [
+    # The four commands of the issue.
+    ("npm test -- -t {a,-u}", "{a,-u}"),
+    ("npm test -- -t *(e:'touch x':)", "*(e:'touch x':)"),
+    ("npm test -- -t a*", "a*"),
+    ("npm test -- -t [ab]", "[ab]"),
+    # Each other character of the rule.
+    ("npm test -- -t a?", "a?"),
+    ("npm test -- -t a]", "a]"),
+    ("npm test -- -t a}", "a}"),
+    ("npm test -- -t a(b)", "a(b)"),
+    ("npm test -- -t ~", "~"),
+    ("npm test -- -t ~/x", "~/x"),
+    ("npm test -- -t a=~/x", "a=~/x"),
+    ("npm test -- -t =ls", "=ls"),
+    ("npm test -- -t a^b", "a^b"),
+    # A value in the word of the flag, a quoted part next to an unquoted pattern, and a path.
+    ("npm test -- -t={a,-u}", "-t={a,-u}"),
+    ("npm test -- -t=a*", "-t=a*"),
+    ('npm test -- -t "a"*', '"a"*'),
+    ("npm test -- app/src/a.test.{ts,-u}", "app/src/a.test.{ts,-u}"),
+    # The prefixes of a gate.
+    ("cd app && npm test -- -t {a,-u}", "{a,-u}"),
+    ("nix develop -c npm test -- -t [ab]", "[ab]"),
+]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(("command", "word"), EXPANDING_GATE_WORDS)
+def test_a_word_after_a_gate_that_can_expand_is_denied_and_named(value_hook, repo, shell, command, word):
+    result = _guard(value_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert f"The word {word} after the gate [npm test] can expand in the shell" in result.stderr, (
+        shell,
+        command,
+        result.stderr,
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The two commands of the issue.
+        "npm test -- -t 'a*'",
+        'npm test -- -t "renames the gift"',
+        'npm test -- -t "a*"',
+        "npm test -- -t '{a,-u}'",
+        'npm test -- -t "[ab]"',
+        "npm test -- -t a\\*",
+        "npm test -- -t '~'",
+        "npm test -- -t \"*(e:'touch x':)\"",
+        "npm test -- -t a=b",
+        "npm test -- -t='a*'",
+        "npm test -- -t=\\=ls",
+    ],
+)
+def test_a_quoted_or_escaped_word_after_a_gate_is_literal(value_hook, repo, shell, command):
+    _assert_permitted(_guard(value_hook, repo, command, shell, repo.main), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("command", ["npm test -- '-u'", "npm test -- -t 'a b' '--fix'"])
+def test_a_quoted_word_after_a_gate_keeps_the_other_word_tests(value_hook, repo, shell, command):
+    result = _guard(value_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert "is not a number, not a path that exists" in result.stderr, (shell, command, result.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("command", "word", "gate"),
+    [
+        ("./gradlew test *(e:'touch x':)", "*(e:'touch x':)", "./gradlew"),
+        ("./gradlew test --tests {a,b}", "{a,b}", "./gradlew"),
+        ("./gradlew test --tests *IT", "*IT", "./gradlew"),
+        ("nix eval --raw .#x*", ".#x*", "nix eval"),
+    ],
+)
+def test_a_word_after_a_gate_with_free_arguments_cannot_expand(free_hook, repo, shell, command, word, gate):
+    result = _guard(free_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert f"The word {word} after the gate [{gate}] can expand in the shell" in result.stderr, (
+        shell,
+        command,
+        result.stderr,
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_word_with_a_dollar_after_a_gate_with_free_arguments_is_denied(free_hook, repo, shell):
+    command = 'nix eval --raw "$HOME"'
+    result = _guard(free_hook, repo, command, shell, repo.main)
+
+    _assert_denied(result, command, shell)
+    assert 'The word "$HOME" after the gate [nix eval] holds $ or a backtick' in result.stderr, (shell, result.stderr)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command", ["./gradlew test --tests '*IT'", 'nix eval --raw ".#x*"', "./gradlew test -x processTestAot"]
+)
+def test_a_quoted_word_after_a_gate_with_free_arguments_is_permitted(free_hook, repo, shell, command):
+    _assert_permitted(_guard(free_hook, repo, command, shell, repo.main), command, shell)
