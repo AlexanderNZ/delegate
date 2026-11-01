@@ -280,6 +280,25 @@ FOREGROUND_RULE = (
 )
 
 
+def git_rule(tree: str) -> str:
+    """The rule to run `git` in the `tree` where the session starts, with no `cd` (#226).
+
+    A harness can refuse a `cd` followed by `git` in one command with its own
+    approval check, and no allow rule permits it. A note in the repository did
+    not stop a specialist, so each brief that the engine writes holds this rule.
+    """
+    return (
+        f"The session starts in the {tree}. Run `git` there with no `cd`, and never join `cd` and `git` in one command: "
+        "a harness can refuse that command with its own approval check. "
+        f"Use `git -C <path>` only for a path outside the {tree}."
+    )
+
+
+def _commands(tree: str) -> str:
+    """The text of the `## Commands` section of a brief: the foreground rule and the git rule for `tree`."""
+    return FOREGROUND_RULE + "\n\n" + git_rule(tree)
+
+
 # The text of the `## Gates` section of a specialist brief, before the gate commands. The engine runs the gates
 # after the report. A specialist that runs them too runs the full suite twice for each ticket.
 GATES_RULE = "Do not run a gate command yourself. Run only the tests of the code that you change."
@@ -644,7 +663,7 @@ def specialist_brief(
     pairs += _notes_pairs(notes)
     pairs += [
         ("## File boundary", boundary),
-        ("## Commands", FOREGROUND_RULE),
+        ("## Commands", _commands("worktree")),
         ("## Gates", _specialist_gates(gates, gates_at_chain_end)),
         ("## Report", report),
     ]
@@ -749,7 +768,7 @@ def report_correction_brief(
     ]
     return _sections(
         ("## Continuation", "\n".join(lines)),
-        ("## Commands", FOREGROUND_RULE),
+        ("## Commands", _commands("worktree")),
         ("## Report", _specialist_report_shape(ticket, worktree, report_path)),
     )
 
@@ -818,7 +837,7 @@ def verifier_run_sections(copy: str | Path, report_path: str | Path, mode: str, 
         verifier_example(mode),
     )
     report += "\n\n" + _verdict_write_rule(report_path)
-    return "\n" + _sections(("## Working copy", working_copy), ("## Commands", FOREGROUND_RULE), ("## Report", report))
+    return "\n" + _sections(("## Working copy", working_copy), ("## Commands", _commands("copy")), ("## Report", report))
 
 
 def verifier_run_brief(
