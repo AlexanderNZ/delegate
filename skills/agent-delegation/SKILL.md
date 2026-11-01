@@ -119,6 +119,13 @@ Commit the agent files, the context skill, and the declaration with the
 delegation doc. A fresh clone then holds them, and a reviewer sees them. The
 command does not touch `docs/agents/delegation.md`.
 
+A `delegate run` session uses the sealed agent, not the committed files. At the
+start of a run, the engine seals each agent from the main checkout, outside each
+tree, and each session starts from that seal. A project agent in a tree does not
+load its guard under `--print`, so the tree must not choose the agent. The
+committed pair stays for the Agent tool of a coordinator. See
+[ADR 0007](../../docs/adr/0007-the-engine-runs-each-agent-from-a-sealed-agent.md).
+
 A repo that keeps its skills in a different directory is the exception. An
 example is a configuration repo whose deploy step copies a `skills/` directory
 into the home directories. No harness reads that directory as a project skill
@@ -275,6 +282,11 @@ tools. An earlier specialist, spawned with a name and no call `isolation`, ran
 in the primary checkout on `main` (measured 2026-09-19).
 
 ### Confirm the permission mode before you spawn a pair agent
+This section applies to a subagent of the Agent tool, not to a `--agent`
+session of `delegate run`. Measured on Claude Code 2.1.287 (issue 213): the
+`skills` list of an agent did not preload its skills under `--agent`, so the
+load-time blocks of a context skill do not run in an engine session (#215).
+
 A pair agent preloads its context skill, and a context skill can run shell
 blocks at load time. A subagent cannot ask for permission. In a permission
 mode that does not allow those blocks, the agent fails at once with "Shell

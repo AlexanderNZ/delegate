@@ -353,6 +353,7 @@ def test_the_enforcement_page_gives_the_pain_then_the_idea_then_the_mechanism_th
         "Why git, and not the harness",
         "What the engine enforces",
         "What the engine does not stop",
+        "What the harnesses do with a project agent",
         "The limits of the guards",
         "How I read the limits",
     ]

@@ -12,12 +12,13 @@ The ADRs are in `docs/adr/`. They record decisions about the whole kit, so they 
 - [ADR 0004: Gate commands are per repository](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0004-gate-commands-per-repository.md): the global [**verifier guard**](../glossary.md#verifier-guard) list does not grow. A repository names its own [**gates**](../glossary.md#gate), and they are the only extra commands its [**verifier**](../glossary.md#verifier) may run.
 - [ADR 0005: The Claude Code guards read the hook input with python3](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0005-guards-read-the-hook-input-with-python3.md): both guards read the command with `python3`, so they need no `jq` and they [**fail closed**](../glossary.md#fail-closed).
 - [ADR 0006: A load-time block is one plain command](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0006-load-time-blocks-are-one-plain-command.md): each block of a [**context skill**](../glossary.md#context-skill) that Claude Code runs at load time is one plain command. No Claude Code documentation states the rule. The ADR records the measurements: Claude Code 2.1.283 on 2026-09-26, with each of the `--permission-mode` values `default` (manual), `acceptEdits` and `auto`.
+- [ADR 0007: The engine runs each agent from a sealed agent, outside the tree under review](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0007-the-engine-runs-each-agent-from-a-sealed-agent.md): each [**session**](../glossary.md#session) of a `delegate run` starts from a copy of the agent that the [**engine**](../glossary.md#engine) makes at the start of the [**run**](../glossary.md#run), outside each tree, and not from the project agent of the tree. The ADR names the five measured options and the reason for the choice, and it records that the project settings and the project `CLAUDE.md` are dropped on purpose. The measurements are on Claude Code 2.1.287 and OpenCode 1.15.10.
 
 ## How to read an ADR
 
 Each ADR opens with a status, a date and the part of the kit that it applies to. The date matters. A [**harness**](../glossary.md#harness) fact in an ADR is true on the day I measured it, and a new version of the harness can change it. When a decision depends on such a fact, the ADR names the version and the date.
 
-Some ADRs set limits that come up again in [the enforcement model and its limits](the-enforcement-model-and-its-limits.md). ADR 0002 and ADR 0005 do.
+Some ADRs set limits that come up again in [the enforcement model and its limits](the-enforcement-model-and-its-limits.md). ADR 0002, ADR 0005 and ADR 0007 do.
 
 ## How to add an ADR
 
