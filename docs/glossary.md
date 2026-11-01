@@ -224,7 +224,7 @@ The git backend is the code that implements the version-control port with real g
 
 ## Guard probe
 
-A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent. It asks for one command that the guard must deny. The probe is `denied` only when the event stream shows a call of the tool with that command and a tool result that is an error from the guard. A final text that tells of a denial is not enough, because a model can decline the command and write that it is not permitted. See [the guard probe](reference/run.md#the-guard-probe).
+A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent. It asks for one command that the guard must deny. The probe is `denied` only when the event stream shows a tool call of that command with an error result from the guard. A final text that tells of a denial is not enough, because a model can decline the command and write that it is not permitted. See [the guard probe](reference/run.md#the-guard-probe).
 
 Not: canary, guard check.
 
