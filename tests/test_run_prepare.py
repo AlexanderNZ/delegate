@@ -315,3 +315,40 @@ def test_a_prepare_command_that_writes_to_its_log_is_not_a_stall_for_watch(tmp_p
     out = capsys.readouterr().out
     assert exit_code == code
     assert ("watch: stall" in out) == (code == 5)
+
+
+def test_a_prepare_command_that_leaves_an_untracked_file_ends_the_step_before_an_agent_starts(tmp_path, capsys, seen):
+    adapter, found = seen
+    repo = make_repo(tmp_path, workflow('["printf x > left.txt; printf y > also-left.txt"]'))
+
+    code, out, err, events = run(repo, capsys)
+
+    reason = "prepare left also-left.txt, left.txt in the worktree; add them to .gitignore, or make prepare leave the worktree clean"
+    assert code == 1
+    assert f"ticket a: {reason}" in err
+    assert adapter.calls == [] and adapter.verifier_calls == []
+    (end,) = [e for e in events if e["event"] == "step-end"]
+    assert (end["state"], end["reason"]) == ("failed", reason)
+    assert "agent-start" not in event_names(events)
+
+
+def test_a_prepare_command_that_changes_a_tracked_file_ends_the_step_before_an_agent_starts(tmp_path, capsys, seen):
+    adapter, found = seen
+    repo = make_repo(tmp_path, workflow('["printf changed >> workflow.toml"]'))
+
+    code, out, err, events = run(repo, capsys)
+
+    reason = "prepare left workflow.toml in the worktree; add them to .gitignore, or make prepare leave the worktree clean"
+    assert code == 1
+    assert f"ticket a: {reason}" in err
+    assert adapter.calls == []
+
+
+def test_a_prepare_command_that_writes_an_ignored_file_does_not_fail_the_step(tmp_path, capsys, seen):
+    adapter, found = seen
+    repo = make_repo(tmp_path, workflow(f'["{PREPARE}"]'))
+
+    code, out, err, events = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert len(adapter.calls) == 1

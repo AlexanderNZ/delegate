@@ -1875,6 +1875,12 @@ def _run_prepare(
     `prepare-result` for each command, and each command gets its own log file.
     A command that fails is not a red gate: it starts no fix-up round. Raise
     `_StepFailed` with the reason `prepare failed: <command>`, and run no later command.
+
+    In the worktree, after the last command, the worktree must be clean: a
+    changed or untracked path that is not ignored fails the step with the reason
+    `prepare left <paths> in the worktree; ...` (#224), before the specialist
+    starts and so before a check for uncommitted changes can take the path for
+    work of the specialist.
     """
     fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
     # The verifier copy is a repository of its own, which holds its settings itself.
@@ -1886,6 +1892,13 @@ def _run_prepare(
         journal.append("prepare-result", **fields, command=command, exit_status=result.exit_status, prepare_log=str(log))
         if not result.green:
             raise _StepFailed(f"prepare failed: {command}")
+    if tree == TREE_WORKTREE:
+        with _vcs_errors():
+            left = sorted({change.path for change in vcs.uncommitted_changes(path)})
+        if left:
+            raise _StepFailed(
+                f"prepare left {', '.join(left)} in the worktree; add them to .gitignore, or make prepare leave the worktree clean"
+            )
 
 
 def _prepare_ticket_worktree(gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool) -> None:

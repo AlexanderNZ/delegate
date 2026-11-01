@@ -226,7 +226,9 @@ The engine runs the commands in order, with the environment of a gate, in each t
 - In the worktree of a ticket, after the engine makes it and before the specialist starts. When a resume or a retry makes the worktree again, the commands run again before the gates.
 - In the temporary copy of each verifier, before the verifier starts. The engine makes the proof copy after the commands, so the proof copy holds what they made.
 
-A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate, and it starts no fix-up round. See [the prepare commands](run.md#the-prepare-commands). `delegate run --dry-run` prints the line `stack <name> prepare: <command>` for each command.
+A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate, and it starts no fix-up round. See [the prepare commands](run.md#the-prepare-commands).
+
+The worktree of a ticket must be clean after the last command. When `prepare` leaves a changed file or an untracked file that `.gitignore` does not name, the step fails before the specialist starts, with the reason `prepare left <paths> in the worktree; add them to .gitignore, or make prepare leave the worktree clean`. Without this check, the engine would take the path for uncommitted work of the specialist and start a continuation. A file that `.gitignore` names, such as `node_modules`, is not a problem. The check does not apply to the temporary copy of a verifier. `delegate run --dry-run` prints the line `stack <name> prepare: <command>` for each command.
 
 ### Notes
 
