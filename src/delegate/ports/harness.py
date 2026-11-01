@@ -222,9 +222,10 @@ class Adapter(Protocol):
     directory, as the harness does), and writes the seal into the directory `into`. It gives the `SealedAgent`, or
     `None` when it finds no agent file. It changes nothing outside `into`, and `into` is empty or absent when it is
     called. The engine seals each agent of a run at the start of the run, hashes the files of the seal before each agent
-    session (#217), and gives the seal to the session in `AdapterRequest.sealed`. The OpenCode adapter seals by a copy of
-    the agent file, and its handle is the agent name. The Claude Code adapter seals a plugin, and its handle names the
-    plugin and the agent. An adapter can refuse to seal, with an `AdapterError` that says why.
+    session (#217), and gives the seal to the session in `AdapterRequest.sealed`. The OpenCode adapter writes
+    `<agent>.json`, an OpenCode configuration with the agent as an entry of `agent`, and its handle is the agent name.
+    The Claude Code adapter seals a plugin, and its handle is `<plugin>:<agent>`. An adapter can refuse to seal, with an
+    `AdapterError` that says why.
 
     `permits` runs the guard of a sealed agent on one command. It gives `None` when the guard permits the command, else
     the reason of the denial, as text. It reads the files of the seal, so it judges the seal and not the source.
