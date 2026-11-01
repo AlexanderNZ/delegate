@@ -12,6 +12,7 @@ from ..definitions.declaration import load_declaration
 from ..definitions.render import render
 from ..definitions.validate import validate_set
 from ..shared.tiers import Tiers, load_tiers
+from ..shared.version import package_version
 
 
 def opencode_model_pair(text: str) -> tuple[str, str]:
@@ -147,6 +148,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agent-definitions")
+    p.add_argument("--version", action="version", version=f"%(prog)s {package_version()}", help="print the version of the package and exit")
     p.add_argument("--tiers", help="path to a tiers.toml; default is the bundled table")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("render", help="render a declaration into <out>/claude-code and <out>/opencode")

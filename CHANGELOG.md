@@ -4,6 +4,10 @@ This file lists the changes of each release of `delegate`. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- Each command prints the version of the package with `--version` (#236). A consumer on the agent host asked for "the version of delegate as it reports it", and `delegate --version` gave `delegate: error: unrecognized arguments: --version`, so the version was only in the store path of the package. Now `delegate --version`, `agent-definitions --version` and `verifier-brief --version` print the name of the command and the version, for example `delegate 1.16.0`, and exit 0. The version comes from the package metadata, or from the `version` field of `pyproject.toml` when the package runs from a source tree that is not installed, so the release step changes only that field. See `docs/reference/commands.md`.
+
 ## [1.15.0] - 2026-11-01
 
 ### Added

@@ -19,6 +19,8 @@ The [**skill**](../glossary.md#skill) [`agent-definitions`](https://github.com/A
 
 ## Options before the subcommand
 
+`--version` goes before the subcommand, also. `delegate --version`, `agent-definitions --version` and `verifier-brief --version` print the name of the command and the version of the package, for example `delegate 1.16.0`, and exit 0. The version comes from the package metadata, and from the `version` field of `pyproject.toml` when the package runs from a source tree that is not installed. The release step changes only that field.
+
 `--tiers` goes before `render`, `validate` or `bootstrap`. Before `brief`, `run`, [**`pause`**](../glossary.md#pause), `stop`, `status`, `watch`, `clean` or `docs`, `delegate` refuses it and exits 2. `delegate run` takes its own `--tiers` after the subcommand. See [the options of `delegate run`](run.md#options).
 
 <!-- generated:begin agent-definitions-options -->
@@ -26,6 +28,7 @@ The [**skill**](../glossary.md#skill) [`agent-definitions`](https://github.com/A
 
 | Option | Meaning |
 |---|---|
+| `--version` | Print the version of the package and exit. |
 | `--tiers <tiers>` | Path to a tiers.toml; default is the bundled table. |
 
 <!-- generated:end agent-definitions-options -->

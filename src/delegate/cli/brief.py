@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..adapters.git import GitVersionControl
 from ..run.brief import BriefError, fixup_brief, full_brief, read_task
+from ..shared.version import package_version
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="verifier-brief",
         description="Print a verifier's brief. The mode of the brief sets the mode of the verifier.",
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {package_version()}", help="print the version of the package and exit")
     sub = p.add_subparsers(dest="mode", required=True)
 
     f = sub.add_parser("full", help="a first-pass brief: task, three-dot diff, gates")
