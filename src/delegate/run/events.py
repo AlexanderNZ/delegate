@@ -323,8 +323,13 @@ class Retry(TypedDict):
     phase: str
     round: int
     reason: str
-    # Only with `phase` `chain-fixup` (#209): the other tickets that the stop failed and that the retry builds again.
+    # Only with `phase` `chain-fixup` (#209): the other tickets that the stop failed and that the retry builds again. With
+    # `phase` `chain` (#225): the other tickets that the verification of the chain failed and that the retry builds again.
     revived: NotRequired[list[str]]
+    # Only with `--coordinator-commit` (#225): the commit of the coordinator at the tip of the branch, and the paths that it
+    # changes. The hotspot check of the step does not count them.
+    coordinator_commit: NotRequired[str]
+    coordinator_paths: NotRequired[list[str]]
     # Only when the retry changes the text of the ticket and starts it again from its base (#204): `restart` is true,
     # and `failed_branch` is the branch that keeps the old work.
     restart: NotRequired[bool]

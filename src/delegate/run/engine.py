@@ -100,6 +100,12 @@ a plan change): `plan-change` then holds the old and the new `text_sha256`. Such
 the worktree and the commits again: it starts the ticket again from its base, with a new specialist, and
 keeps the old branch as `<branch>-failed-<n>` (see `_restart_step`).
 
+A retry can name a commit of the coordinator (#225): a commit at the tip of the branch of the ticket that changes only
+hotspot paths, for example a new render of the agent pair (see `_coordinator_commit`). The `retry` event records it with
+its paths. The hotspot check of the step does not count its change, and counts each other commit of the step (see
+`_hotspot_stop`). The gates run on it before a verifier, and each verifier brief of the step names it. In `economy`
+mode it also lets the retry of the ticket at the tip of a chain whose verification failed go on (see `_chain_retry_plan`).
+
 A run that ends with a failed step or a skipped ticket ends with the result
 `failed`.
 
@@ -170,7 +176,7 @@ from ..shared.tiers import Tiers
 from . import domain
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents
 from .brief import (
-    BriefError, ChainSegment, chain_brief, continuation_brief, finding_labels_section, fixup_brief, green_gates_text,
+    BriefError, ChainSegment, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief, green_gates_text,
     notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
     verifier_run_brief, verifier_run_sections,
 )
@@ -239,6 +245,8 @@ RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
 # The agent check stopped a fix-up session (#209): `assure` mode runs the fix-up of the round again, `economy` mode the chain fix-up.
 RETRY_FIXUP: str = "fixup"
 RETRY_CHAIN_FIXUP: str = "chain-fixup"
+# A retry with a commit of the coordinator goes on with a chain whose verification failed (#225): `economy` mode only.
+RETRY_CHAIN: str = "chain"
 
 # The file in the directory of a run that asks the run to pause at its next step boundary (see `delegate.run.pause`).
 PAUSE_REQUEST_NAME: str = "pause-request"
@@ -973,7 +981,10 @@ class _RetryPlan:
     although the branch holds no fix-up commit yet.
 
     `revive` holds the other tickets that the verification of the chain failed with the same stop, for the phase
-    `chain-fixup`: the retry builds them again, because their branches hold their commits (see `_chain_stop`).
+    `chain-fixup`: the retry builds them again, because their branches hold their commits (see `_chain_stop`). For the
+    phase `chain` it holds the other tickets that the verification of the chain failed (see `_chain_retry_plan`).
+
+    `coordinator` is the commit of `--coordinator-commit`, when the engine accepted it (see `_coordinator_commit`).
     """
 
     ticket: str
@@ -984,6 +995,22 @@ class _RetryPlan:
     findings: tuple[str, ...] = ()
     restart: bool = False
     revive: tuple[str, ...] = ()
+    coordinator: _CoordinatorCommit | None = None
+
+    @property
+    def coordinator_fields(self) -> dict[str, object]:
+        """The fields of the `retry` event that record the commit of the coordinator. Empty when the retry has none."""
+        if self.coordinator is None:
+            return {}
+        return {"coordinator_commit": self.coordinator.commit, "coordinator_paths": list(self.coordinator.paths)}
+
+
+@dataclass(frozen=True)
+class _CoordinatorCommit:
+    """A commit of the coordinator at the tip of the branch of a failed step, and the paths that it changes (#225)."""
+
+    commit: str
+    paths: tuple[str, ...]
 
 
 def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[dict[str, object]]:
@@ -997,7 +1024,9 @@ def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[
     return own[starts[-1] :] if starts else own
 
 
-def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str, restart: bool = False) -> _RetryPlan:
+def _retry_plan(
+    workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str, restart: bool = False, coordinator: bool = False
+) -> _RetryPlan:
     """The first phase of the failed step of `ticket_id` that did not complete. Raise EngineError when it cannot be retried.
 
     The phase comes from the journal events of the step. The round is the
@@ -1026,6 +1055,9 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
     from its base (see `_restart_step`). It spawns a specialist, so no phase of the
     failed step matters: the plan is the specialist at round 0, and the refusals
     that depend on the phase of the step do not apply.
+
+    `coordinator` tells that the retry has `--coordinator-commit`. Only `economy` mode uses it here: see
+    `_economy_retry_plan`. `_coordinator_commit` checks the commit after the plan.
     """
     refused = _refused(ticket_id, run_id)
     violations = [e for e in progress.events if e["event"] == "invariant-violation"]
@@ -1043,7 +1075,7 @@ def _retry_plan(workflow: Workflow, progress: _Progress, run_id: str, ticket_id:
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that failed")
     prior = tuple(_ticket_events(progress.events, ticket_id))
     if workflow.mode == domain.ECONOMY:
-        return _economy_retry_plan(workflow, progress, refused, ticket_id, prior, restart)
+        return _economy_retry_plan(workflow, progress, refused, ticket_id, prior, restart, coordinator)
     if restart:
         return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
     if _stopped_before_specialist(prior):
@@ -1129,7 +1161,8 @@ def _specialist_committed(prior: tuple[dict[str, object], ...]) -> bool:
 
 
 def _economy_retry_plan(
-    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...], restart: bool = False
+    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...], restart: bool = False,
+    coordinator: bool = False,
 ) -> _RetryPlan:
     """The first phase of a failed step of `economy` mode that did not complete. Raise EngineError when it cannot be retried.
 
@@ -1149,14 +1182,17 @@ def _economy_retry_plan(
     (see `_restart_step`).
 
     A step that the agent check stopped before the chain fix-up session is the exception to the refusal for the
-    verification of the chain: the phase is `chain-fixup` (see `_chain_fixup_plan`).
+    verification of the chain: the phase is `chain-fixup` (see `_chain_fixup_plan`). A retry with a commit of the
+    coordinator (`coordinator`) is the other exception: the phase is `chain` (see `_chain_retry_plan`).
     """
     if not any(e["event"] == "step-start" for e in prior):
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that started")
     stop = None if restart else _chain_stop(prior)
     if stop is not None:
         return _chain_fixup_plan(workflow, progress, ticket_id, prior, stop)
-    if any(e["event"] == "step-end" and e["state"] == BUILT for e in prior):
+    if coordinator and not restart and _chain_failed(prior):
+        return _chain_retry_plan(workflow, progress, refused, ticket_id, prior)
+    if _chain_failed(prior):
         raise EngineError(
             f"{refused}: the verification of the chain failed it; "
             "--retry in economy mode goes on only with a step that failed before the verification of the chain"
@@ -1172,6 +1208,146 @@ def _economy_retry_plan(
         return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior, restart=True)
     phase = RETRY_GATES if _specialist_committed(prior) else RETRY_SPECIALIST
     return _RetryPlan(ticket_id, phase, 0, prior)
+
+
+def _chain_failed(prior: Sequence[dict[str, object]]) -> bool:
+    """True when the verification of the chain failed the step: the step has a `step-end` built before its newest `step-end`."""
+    return any(e["event"] == "step-end" and e["state"] == BUILT for e in prior)
+
+
+def _chain_retry_plan(
+    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...]
+) -> _RetryPlan:
+    """The plan of a retry with a commit of the coordinator, for a step that the verification of the chain failed (#225).
+
+    Red gates on the tip of the chain can need a change of a hotspot path, for example a new render of the agent pair.
+    No specialist can make it, so the chain fails. The coordinator commits the change at the tip of the chain, on the
+    branch of the last ticket of the chain, and retries that ticket. The other tickets that the verification of the chain
+    failed go in `revive`: their branches hold their commits, and the chain verification checks them again with the
+    ticket. The verification of the chain starts again after the `retry` event: the gates run on the new tip.
+
+    Raise EngineError when a ticket after `ticket_id` in the plan is in the chain: the branch of that ticket holds the
+    tip of the chain, so the commit of the coordinator goes on that branch.
+    """
+    order = plan_order(workflow)
+    revive = tuple(
+        ticket.id for ticket in order
+        if ticket.id != ticket_id and ticket.id in progress.failed and _chain_failed(_ticket_events(progress.events, ticket.id))
+    )
+    chain = [ticket.id for ticket in order if ticket.id == ticket_id or ticket.id in revive or ticket.id in progress.built]
+    if chain[-1] != ticket_id:
+        raise EngineError(
+            f"{refused}: ticket {chain[-1]!r} is at the tip of the chain; "
+            f"put the commit of the coordinator on its branch, and retry it with --retry {chain[-1]}"
+        )
+    return _RetryPlan(ticket_id, RETRY_CHAIN, 0, prior, revive=revive)
+
+
+def _step_since(prior: Sequence[dict[str, object]]) -> str:
+    """Where the work of a step starts: its `base_commit`, or the commit of the run branch of its newest rebase."""
+    base = str(next(e for e in prior if e["event"] == "step-start")["base_commit"])
+    rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
+    return domain.work_starts_at(base, str(rebases[-1]["onto_commit"]) if rebases else None)
+
+
+def _coordinator_commit(workflow: Workflow, plan: _RetryPlan, vcs: VersionControl, repo: Path, run_id: str, given: str) -> _CoordinatorCommit:
+    """Check the commit of `--coordinator-commit` for the retry of `plan`, and return it with its paths (#225).
+
+    The commit must be the tip of the branch of the ticket, beyond the start of the work of the step, and each path
+    that it changes must match a hotspot of the stack. Its paths are the paths that differ from the commit before it on
+    the branch. A retry that starts the ticket again from its base keeps no commit of the step, so it is refused. For the
+    phase `chain` the engine also checks the other commits of the step against the hotspots here, before the journal
+    changes: a match refuses the retry. In the other phases the hotspot check of the step does it (see `_hotspot_stop`).
+    Raise EngineError, which names the commit and the cause, when a check fails.
+    """
+    refused = _refused(plan.ticket, run_id)
+    if plan.restart:
+        raise EngineError(
+            f"{refused} with --coordinator-commit: the new text starts the ticket again from its base, "
+            "and the new branch keeps no commit of the old step"
+        )
+    ticket = next(ticket for ticket in workflow.tickets if ticket.id == plan.ticket)
+    stack = workflow.stacks[ticket.stack]
+    branch = _ticket_branch(workflow, ticket)
+    try:
+        commit = vcs.commit_of(repo, given)
+    except VcsError as error:
+        raise EngineError(f"{refused}: --coordinator-commit {given} names no commit: {error}") from None
+    tip = _tip(vcs, repo, branch)
+    if commit != tip:
+        raise EngineError(f"{refused}: the coordinator commit {commit} is not on top of the branch {branch}: the tip of the branch is {tip}")
+    since = _step_since(plan.prior)
+    with _vcs_errors():
+        own = vcs.commits_since(repo, since, commit)
+        if not own:
+            raise EngineError(f"{refused}: the coordinator commit {commit} is not on top of the branch {branch}: it is no commit beyond {since}")
+        paths = vcs.changed_paths(repo, own[1].id if len(own) > 1 else since, commit)
+    outside = [path for path in paths if not hotspot_matches([path], stack.all_hotspots)]
+    if outside:
+        raise EngineError(
+            f"{refused}: the coordinator commit {commit} changes paths that are no hotspot of the stack {ticket.stack}: "
+            + ", ".join(f"`{path}`" for path in outside) + "; a coordinator commit changes only hotspot paths"
+        )
+    if plan.phase == RETRY_CHAIN:
+        with _vcs_errors():
+            matches = hotspot_matches(_paths_without(vcs, repo, since, commit, True, {commit}), stack.all_hotspots)
+        if matches:
+            raise EngineError(
+                f"{refused}: hotspot finding: "
+                + "; ".join(f"{m.path} matches the hotspot {m.pattern!r}" for m in matches)
+                + f"; only the paths of the coordinator commit {commit} are not counted"
+            )
+    return _CoordinatorCommit(commit, tuple(paths))
+
+
+def _paths_without(vcs: VersionControl, path: Path, since: str, until: str | None, merge_base: bool, excluded: set[str]) -> list[str]:
+    """The paths that the commits from `since` to `until` change, with the change of each commit in `excluded` left out.
+
+    `until` None is the commit that `path` has checked out. With `merge_base` the comparison starts at the merge base of
+    `since` and `until`. The change of a commit is the difference from the commit before it in the list of the commits
+    after `since`, or from `since` for the first one. A commit in `excluded` that is not in the range changes nothing.
+    Raise VcsError when the port fails.
+    """
+    commits = [commit.id for commit in vcs.commits_since(path, since, until)]  # newest first
+    if not excluded.intersection(commits):
+        return vcs.changed_paths(path, since, until, from_merge_base=merge_base)
+    found: set[str] = set()
+    upper: str | None = until  # the end of the next part, newest first
+    for index, commit in enumerate(commits):
+        if commit not in excluded:
+            continue
+        if upper != commit:
+            found.update(vcs.changed_paths(path, commit, upper))
+        if index + 1 == len(commits):
+            return sorted(found)  # the oldest commit is excluded: nothing is left before it
+        upper = commits[index + 1]
+    found.update(vcs.changed_paths(path, since, upper, from_merge_base=merge_base))
+    return sorted(found)
+
+
+def _coordinator_commits(vcs: VersionControl, repo: Path, own: Sequence[dict[str, object]]) -> list[tuple[str, tuple[str, ...]]]:
+    """Each commit of the coordinator of a step, as the branch holds it now, with its paths, oldest first (#225).
+
+    `own` are the journal events of the step (see `_ticket_events`). A `retry` with `coordinator_commit` records each
+    one. A rebase onto the run branch writes the commits of the step again, so the engine follows each commit through
+    each rebase after its `retry`: the commit at the same place in the list of the commits of the step. When the rebase
+    changed the number of the commits, the commit is not followed, and the hotspot check counts its paths again.
+    """
+    commits: list[tuple[str, tuple[str, ...]]] = []
+    start = next((str(e["base_commit"]) for e in own if e["event"] == "step-start"), None)
+    for event in own:
+        if event["event"] == "retry" and event.get("coordinator_commit"):
+            commits.append((str(event["coordinator_commit"]), tuple(str(p) for p in event.get("coordinator_paths", []))))  # type: ignore[union-attr]
+        elif event["event"] == "rebase" and event["result"] == "rebased":
+            onto = str(event["onto_commit"])
+            if commits and start is not None:
+                with _vcs_errors():
+                    old = [c.id for c in vcs.commits_since(repo, start, str(event["from_commit"]))]
+                    new = [c.id for c in vcs.commits_since(repo, onto, str(event["to_commit"]))]
+                if len(old) == len(new):
+                    commits = [(new[old.index(commit)] if commit in old else commit, paths) for commit, paths in commits]
+            start = onto
+    return commits
 
 
 def _chain_fixup_plan(
@@ -1247,7 +1423,7 @@ def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False,
     on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
-    agents_changed: bool = False,
+    agents_changed: bool = False, coordinator_commit: str | None = None,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -1288,7 +1464,13 @@ def run_workflow(
     `agents_changed` is for a resume: the engine records the hashes of the agent files of the main checkout again, in
     the `resume` event, and goes on with them as the agents of the run (see `delegate.run.agents`). A resume of a
     journal with no record of the agent files records them too, and the result has `agents_note`.
+
+    `coordinator_commit` goes with `retry`: a commit of the coordinator at the tip of the branch of the ticket that
+    changes only hotspot paths (#225). The `retry` event records it with its paths, and the hotspot check of the step
+    does not count it (see `_coordinator_commit`). Raise EngineError, which names the commit, when it is refused.
     """
+    if coordinator_commit is not None and retry is None:
+        raise EngineError("--coordinator-commit needs --retry TICKET")
     run_id = resume if resume is not None else (run_id or new_run_id())
     check_start(
         workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
@@ -1302,7 +1484,7 @@ def run_workflow(
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start, agents_changed, tiers,
+                    reviewed, on_start, agents_changed, tiers, coordinator_commit,
                 )
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
@@ -1327,7 +1509,7 @@ def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
     retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
-    agents_changed: bool = False, tiers: Tiers | None = None,
+    agents_changed: bool = False, tiers: Tiers | None = None, coordinator_commit: str | None = None,
 ) -> RunResult:
     order = plan_order(workflow)
     agents_note: str | None = None
@@ -1369,12 +1551,14 @@ def _execute(
         _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
         # A step that cannot be retried is refused before the journal changes.
         restart = retry is not None and review.check is not None and retry in review.check.restarted
-        plan = _retry_plan(workflow, progress, run_id, retry, restart) if retry is not None else None
+        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None) if retry is not None else None
         if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
             # A ticket of a later stack that the stop failed does not count: the retried ticket starts from the chain before it (#209).
             before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
             chain = [*progress.built, *(t for t in plan.revive if t in before)]
             _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
+        if plan is not None and coordinator_commit is not None:
+            plan = replace(plan, coordinator=_coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit))
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:
@@ -2253,8 +2437,17 @@ def _hotspot_stop(
     Return None when none matches, or the reason the step fails. A match is
     recorded as `hotspot-finding`. The caller stops the step before any gate
     and any verifier runs.
+
+    The change of a commit of the coordinator that a retry of the step recorded (see `_coordinator_commits`) does not
+    count (#225). Each other commit of the step counts.
     """
-    matches = hotspot_matches(changed_paths(vcs, worktree, since, merge_base=merge_base), stack.all_hotspots)
+    excluded = {commit for commit, _ in _coordinator_commits(vcs, worktree, _ticket_events(read_events(journal.path), ticket))}
+    if excluded:
+        with _vcs_errors():
+            paths = _paths_without(vcs, worktree, since, None, merge_base, excluded)
+    else:
+        paths = changed_paths(vcs, worktree, since, merge_base=merge_base)
+    matches = hotspot_matches(paths, stack.all_hotspots)
     if not matches:
         return None
     journal.append(
@@ -2620,6 +2813,8 @@ def _verify_round(
                 step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
             # Each verifier brief holds the verifier notes of the stack after the gates, before the working copy.
             notes = notes_section(step.stack.verifier_notes)
+            # Each commit of the coordinator on the branch under verification is named, so the verifier checks it too (#225).
+            coordinator = _coordinator_of_step(step)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
@@ -2627,15 +2822,21 @@ def _verify_round(
                     + plan_change_section(_plan_change_note(step.journal, step.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
-                prompt = first_pass + notes + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                prompt = (
+                    first_pass + coordinator_section(coordinator) + notes
+                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                )
             elif fixup_body is None:
                 prompt = verifier_run_brief(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
                     plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
-                    notes=step.stack.verifier_notes, gates_text=gates_text,
+                    notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator,
                 )
             else:
-                prompt = fixup_body + notes + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                prompt = (
+                    fixup_body + coordinator_section(coordinator) + notes
+                    + verifier_run_sections(copy, report_path, mode, engine_gates=gates_text is not None)
+                )
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
@@ -2723,6 +2924,23 @@ def _verify_round(
     return report
 
 
+def _coordinator_of_step(step: _Step) -> list[tuple[str, tuple[str, ...]]]:
+    """Each commit of the coordinator, with its paths, that the branch of the step holds and the run branch does not (#225).
+
+    The commits are those of the ticket whose branch the step verifies: the ticket of the step, or for a chain the
+    ticket at the tip of the chain. A chain step of a stack that does not hold that ticket names none.
+    """
+    owner = step.anchor or step.ticket
+    if step.segments is not None and owner.id not in {segment.ticket for segment in step.segments}:
+        return []
+    own = _ticket_events(read_events(step.journal.path), owner.id)
+    branch, run_branch = f"refs/heads/{step.branch}", f"refs/heads/{step.workflow.run_branch}"
+    return [
+        (commit, paths) for commit, paths in _coordinator_commits(step.vcs, step.repo, own)
+        if _holds(step.vcs, step.repo, commit, branch) and not _holds(step.vcs, step.repo, commit, run_branch)
+    ]
+
+
 def _advance_run_branch(step: _Step, verified: str) -> str | None:
     """Move the run branch to the commit that the verifier accepted, by fast-forward only.
 
@@ -2775,24 +2993,30 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     commit and the same findings, then goes on to the gates and the scoped verifier of that round.
 
     A plan with `restart` starts the ticket again from its base (see `_restart_step`).
+
+    A plan with a commit of the coordinator (#225) records the commit and its paths in `retry`. In `assure` mode a
+    retry at the verifier or at the scoped verifier then goes on at the gates, because the tip of the branch is a new
+    commit: the gates run on it before a verifier starts. The phase `chain` builds nothing, as the phase `chain-fixup`
+    does not: the verification of the chain starts again after the `retry` event, on the new tip.
     """
     workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
+    coordinator = plan.coordinator_fields
     if plan.restart:
         return _restart_step(step, failure, start_ref)
-    if plan.phase == RETRY_CHAIN_FIXUP:
-        # No work of this step is left: the chain verification runs the stopped fix-up again (see `_ChainRun`).
+    if plan.phase in (RETRY_CHAIN_FIXUP, RETRY_CHAIN):
+        # No work of this step is left: the chain verification runs the stopped fix-up again, or starts again (see `_ChainRun`).
         step.journal.append(
-            "retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure, revived=list(plan.revive)
+            "retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure, revived=list(plan.revive), **coordinator
         )
         return None
     if workflow.mode == domain.ECONOMY or plan.phase == RETRY_SPECIALIST:
-        step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure)
+        step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure, **coordinator)
         return _build_ticket(
             workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
             start_ref, list(plan.prior), retried=failure,
         )
     if plan.phase == RETRY_GATES and plan.rejected is None:
-        step.journal.append("retry", ticket=ticket.id, phase=RETRY_GATES, round=plan.round, reason=failure)
+        step.journal.append("retry", ticket=ticket.id, phase=RETRY_GATES, round=plan.round, reason=failure, **coordinator)
         return _build_ticket(
             workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
             start_ref, list(plan.prior),
@@ -2803,7 +3027,9 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_GATES
     if plan.phase == RETRY_FIXUP and fixup_held:
         goes_on = RETRY_FIXUP  # the fix-up of the round runs first, whether the branch holds the run branch tip or not
-    step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure)
+    if plan.coordinator is not None and goes_on in (RETRY_VERIFIER, RETRY_SCOPED_VERIFIER):
+        goes_on = RETRY_GATES  # the commit of the coordinator is a new tip: the gates run on it before a verifier
+    step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure, **coordinator)
     made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
         _prepare_ticket_worktree(step.gates, step.vcs, step.journal, step.stack, ticket.id, step.worktree, made)
@@ -2824,7 +3050,7 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
             findings_text = _findings_text(list(plan.findings))
             _checked_fixup_brief(step, plan.round, plan.rejected, findings_text)
             if on_tip:
-                if plan.phase == RETRY_GATES:
+                if goes_on == RETRY_GATES:
                     _fixup_gates(step, plan.round)
                 return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
         elif goes_on == RETRY_VERIFIER:

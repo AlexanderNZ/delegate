@@ -5,7 +5,8 @@ for each stack, the agent files exist for the adapter, and the verifier permits 
 creates no branch, no worktree and no journal. Without it, the engine builds
 each ticket through the workflow's harness adapter. `--resume <run-id>` goes on
 with a run that stopped or paused, from its journal. `--retry <ticket>` with it goes on
-with one failed step of that run, also when the run ended. A run that `delegate
+with one failed step of that run, also when the run ended, and `--coordinator-commit <sha>` with it names a commit of the
+coordinator that changes only hotspot paths (#225). A run that `delegate
 pause` stopped at a step boundary exits with `EXIT_PAUSED`. A run that a failure of the harness (an `AdapterError`)
 halted exits with `EXIT_HALTED`: it has no `run-end`, and `--resume` goes on at the open step.
 
@@ -165,6 +166,13 @@ def build_parser() -> argparse.ArgumentParser:
         "and keep the old branch as <branch>-failed-<n>",
     )
     parser.add_argument(
+        "--coordinator-commit", metavar="SHA",
+        help="with --retry, a commit of the coordinator at the tip of the branch of TICKET that changes only hotspot paths, "
+        "for example a new render of the agent pair; the hotspot guard does not count its paths, the gates and the verifier "
+        "check it as part of the branch, and in economy mode it lets the retry of the ticket at the tip of the chain go on "
+        "with a chain whose verification failed",
+    )
+    parser.add_argument(
         "--agents-changed", action="store_true",
         help="with --resume, seal each agent again from the main checkout, record the new seal in the resume event, and go on with "
         "it as the agents of the run; without it, a file of a seal that differs from the record of the run fails the step",
@@ -317,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("a workflow file or --resume RUN_ID is required")
     if args.retry is not None and args.resume is None:
         parser.error("--retry needs --resume RUN_ID")
+    if args.coordinator_commit is not None and args.retry is None:
+        parser.error("--coordinator-commit needs --retry TICKET")
     if args.reviewed is not None and args.resume is None:
         parser.error("--reviewed needs --resume RUN_ID")
     if args.agents_changed and args.resume is None:
@@ -386,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_workflow(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
-                    agents_changed=args.agents_changed,
+                    agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit,
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

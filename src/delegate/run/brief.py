@@ -376,6 +376,23 @@ def notes_section(notes: str | None) -> str:
     return "\n" + _sections(*pairs) if pairs else ""
 
 
+# The title of the section that names each commit of the coordinator on the branch under verification (#225).
+COORDINATOR_HEADING: str = "## Commit of the coordinator"
+COORDINATOR_RULE: str = (
+    "The coordinator added each commit below to the branch. Such a commit changes only hotspot paths, which no specialist "
+    "can change, so the hotspot check of the engine did not count its paths. It is part of the work under verification: "
+    "check that its change is correct, and that it agrees with the rest of the branch, as you check each other commit."
+)
+
+
+def coordinator_section(commits: Sequence[tuple[str, Sequence[str]]]) -> str:
+    """The section "Commit of the coordinator" for `commits`, each a commit and its paths. Empty when there is none."""
+    if not commits:
+        return ""
+    lines = "\n".join(f"- `{commit}`: " + ", ".join(f"`{path}`" for path in paths) for commit, paths in commits)
+    return "\n" + _sections((COORDINATOR_HEADING, f"{COORDINATOR_RULE}\n\n{lines}"))
+
+
 def full_brief(
     vcs: VersionControl,
     repo: str | Path,
@@ -844,6 +861,7 @@ def verifier_run_brief(
     vcs: VersionControl,
     copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path,
     plan_change: str | None = None, notes: str | None = None, gates_text: str | None = None,
+    coordinator: Sequence[tuple[str, Sequence[str]]] = (),
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
@@ -854,10 +872,12 @@ def verifier_run_brief(
     the stack, the section "Notes of this stack" comes after the gates. With
     `gates_text`, the output of the gates that the engine ran green on the
     commit under verification (see `green_gates_text`), the brief gives that
-    output in place of the gate commands, and the verifier does not run the gates.
+    output in place of the gate commands, and the verifier does not run the gates. With `coordinator`, each commit of
+    the coordinator on the branch and its paths, the section "Commit of the coordinator" comes before the notes (#225).
     """
     return (
         full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text)
+        + coordinator_section(coordinator)
         + notes_section(notes)
         + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None)
     )
