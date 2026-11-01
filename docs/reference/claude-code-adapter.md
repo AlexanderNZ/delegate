@@ -146,6 +146,18 @@ After a session, the adapter reads the `init` event of the stream. When the agen
 
 A request with no sealed agent starts no session: the adapter raises `AdapterError`.
 
+### The skills of the agent
+
+The harness does not preload a skill for the main agent of a session. Measured on Claude Code 2.1.287 on 2026-11-01 (#215): under `claude --print --agent <name>`, the `skills` list of the agent put the skill in the skill list of the session, but its text was not in the context. A prompt that starts with the line `/<skill>` loads that skill, but only the first such line. So the adapter puts the text of each skill of the `skills` list of the sealed agent file at the start of the prompt of a new session, before the [**brief**](../glossary.md#brief):
+
+- **The prompt.** The prompt starts with the heading `# The skills of this session` and a paragraph that names the skills. Then each skill is between the lines `<skill name="<skill>">` and `</skill>`, with the line `Base directory for this skill: <directory>` and the text of its `SKILL.md` with no frontmatter. Then the heading `# The brief`, and the brief with no change.
+- **Where the adapter finds a skill.** A skill `<plugin>:<skill>` of the seal is in `skills/<skill>/` of the seal, and the prompt names it `<skill>`. A skill with no colon is a user skill, in `~/.claude/skills/<skill>/`. A skill of another plugin, and a skill whose `SKILL.md` is not there, is named in a line that tells the agent to load it with the skill tool.
+- **The load-time blocks.** A load-time block is a fenced block that opens with `` ```! ``, or an inline command `` !`<command>` ``. The adapter runs the command in the working directory of the session, with the environment of the session, and the output goes in the place of the block, as the harness does when it loads a skill. A command that exits with a status other than 0 gives a line with its status, its output and its error. The adapter runs a command only when it is one plain command: one line, with no `$`, backtick, `;`, `&`, `|`, `<`, `>`, parenthesis, brace, bracket, `*`, `?`, `~`, `!` or `#` outside quotes, and with no `$` or backtick in double quotes. It runs the command with no shell, for at most 30 seconds. A block of another form does not run: its text stays, with a line that tells the agent to run the command.
+- **A resumed session.** A [**continuation**](../glossary.md#continuation) with `--resume` gets the brief only, because the session has the skills already.
+- **No skill.** An agent whose `skills` list is empty or absent gets the brief with no change.
+
+The skill text is read when the session starts, not when the engine seals. A project skill comes from the seal, so a change of the skill in a tree does not reach the session. A user skill comes from the user directory.
+
 ## The event stream
 
 The adapter copies standard output to the file that the request names in `event_stream`. The [**engine**](../glossary.md#engine) chooses that file beside the [**report**](../glossary.md#report): `<report name>.stream.jsonl`. A later run with the same report path gets `<report name>.stream-2.jsonl`, then `-3`, and so on, so no [**run**](../glossary.md#run) overwrites an earlier stream. The adapter writes standard error to no file; it uses standard error only in [the start failure](#the-start-failure).
@@ -184,7 +196,7 @@ For example, the recorded stream of a session that finished has one message with
 
 ## The resume
 
-The adapter has `supports_resume` set to true. For a continuation, the [**engine**](../glossary.md#engine) sets `resume_session` in the request, and the adapter adds `--resume <session id>`. The session keeps its first context and its agent. The result has the same session id.
+The adapter has `supports_resume` set to true. For a continuation, the [**engine**](../glossary.md#engine) sets `resume_session` in the request, and the adapter adds `--resume <session id>`. The session keeps its first context and its agent. The result has the same session id. The prompt of a resumed session holds no skill text (see [the skills of the agent](#the-skills-of-the-agent)).
 
 ## The start failure
 

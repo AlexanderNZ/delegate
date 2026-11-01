@@ -284,9 +284,13 @@ in the primary checkout on `main` (measured 2026-09-19).
 ### Confirm the permission mode before you spawn a pair agent
 
 This section applies to a subagent of the Agent tool, not to a `--agent`
-session of `delegate run`. Measured on Claude Code 2.1.287 (issue 213): the
-`skills` list of an agent did not preload its skills under `--agent`, so the
-load-time blocks of a context skill do not run in an engine session (#215).
+session of `delegate run`. Measured on Claude Code 2.1.287 (#215): the `skills`
+list of an agent does not preload its skills under `--agent`. So the
+`claude-code` adapter puts the text of each listed skill in the prompt of a new
+session, before the brief. It runs each load-time block that is one plain
+command in the working directory of the session, with no shell, and it leaves
+each other block for the agent to run. On OpenCode, the agent loads its skills
+with the skill tool.
 
 A pair agent preloads its context skill, and a context skill can run shell
 blocks at load time. A subagent cannot ask for permission. In a permission

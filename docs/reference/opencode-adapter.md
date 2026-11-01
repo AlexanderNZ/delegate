@@ -60,6 +60,8 @@ The harness gives no way to start an agent without the MCP servers of the user a
 
 The harness also gives no option that loads only the skills of the agent definition. The skills of an agent definition are in the same skill directories as the other skills, so a variable that turns off a skill directory also removes the skills of the agent. The adapter sets none.
 
+The harness does not preload a skill for the agent of `opencode run`. Measured on OpenCode 1.15.10 on 2026-11-01 (#215), with a `qwen` model of a gateway provider and a project skill that holds a code word: `opencode run --format json --model <model> --agent <agent> --dir <directory>` with the question on standard input gave `UNKNOWN`, and a prompt that starts with the line `/<skill>` gave `UNKNOWN`. With `--command <skill>`, the agent stated the code word with no tool call, but the option takes one skill only. A rendered OpenCode agent lists its skills only in its body, which tells the agent to load them with the skill tool, so the adapter puts no skill text in the prompt. That is a limit: on OpenCode, the agent loads its skills with a tool call, and the engine does not check that it did.
+
 ## The model
 
 The adapter reads the `opencode` column of the tier table, so a `--tiers` file changes the model for this adapter. Two options change the column from the command line: `--opencode-model` and `--opencode-allow`. Put them after `run`. Both can be repeated. [The options of the run reference](run.md#options) list them.

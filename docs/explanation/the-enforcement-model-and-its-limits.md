@@ -75,6 +75,17 @@ Measured on 2026-10-31 on OpenCode 1.15.10 on macOS. The free models of the `ope
 
 The limit: the resolution of the sealed agent was measured, and the enforcement of its permission map in a session was not.
 
+### The skills of an agent
+
+A rendered agent lists its [**skills**](../glossary.md#skill), with the [**context skill**](../glossary.md#context-skill) of the repository first, and the context skill reads the reference documents of the repository at load time. A subagent of the Agent tool preloads them. The engine does not start a subagent: it starts each agent as the main agent of a session. I measured whether a harness preloads a skill for that agent (#215). The probe was an agent that lists a project skill whose text holds a code word, and a question for the code word with no tool call.
+
+- **Claude Code 2.1.287**, on 2026-11-01, with the model `haiku`: `echo "<question>" | claude --print --output-format stream-json --verbose --model haiku --agent probe --disallowedTools Bash,Read,Grep,Glob,Skill` gave `UNKNOWN`. The skill was in the skill list of the `init` event, but its text was not in the context. A prompt that starts with the line `/<skill>` gave the code word with no tool call, but with two such lines, only the first skill loaded. In the default permission mode, the load-time block of a skill that the line loads failed with `Shell command permission check failed`.
+- **OpenCode 1.15.10**, on 2026-11-01, with a `qwen` model of a gateway provider: `echo "<question>" | opencode run --format json --model <provider>/qwen --agent probe --dir <directory>` gave `UNKNOWN`, and so did a prompt that starts with `/<skill>`. `opencode run --command <skill> "<question>"` gave the code word with no tool call, but the option takes one skill only.
+
+No option of either harness preloads each skill that an agent lists. So the `claude-code` adapter puts the text of each skill of the sealed agent in the prompt of a new session, before the [**brief**](../glossary.md#brief). It runs each load-time block in the working directory of the session and puts the output in the place of the block, as the harness does when it loads a skill. Through the adapter, a `haiku` session of this repository's specialist listed the hotspot paths of `docs/agents/delegation.md`, which only the load-time block of its context skill holds, in one turn and with no tool call. See [the skills of the agent](../reference/claude-code-adapter.md#the-skills-of-the-agent).
+
+Two limits stay. The adapter runs a load-time block itself, so the permission rules of the harness do not apply to it. It runs only one plain command with no shell, from a skill of the seal or of the user directory, never from the tree under review, and it leaves each other block for the agent. And a rendered OpenCode agent lists its skills only in its body, which tells the agent to load them with the skill tool. So on OpenCode the agent loads its skills with a tool call, and the engine does not check that it did.
+
 ## The limits of the guards
 
 The command guards of the harnesses have limits of their own. The [**skill**](../glossary.md#skill) that renders the agents lists them, and I list every one here, in the order of the skill, with the reason I accept it. The full text is in [the Limits section of the agent-definitions skill](https://github.com/AlexanderNZ/delegate/blob/main/skills/agent-definitions/SKILL.md#limits).

@@ -33,7 +33,9 @@ user skill, which the session loads by its own name. The files of the seal also 
 `~/.claude/settings.json` when it exists, so that a change of them shows. The adapter refuses to seal for a harness
 older than 2.1.287. The body of the agent file ends with the section `## Instructions of the repository` (#218): the text
 of `CLAUDE.md` and `.claude/CLAUDE.md` of the main checkout, with their `@<path>` imports replaced, because
-`--setting-sources user` does not load them. After a session, it reads the `init` event of the stream: when the agents that it lists do not hold
+`--setting-sources user` does not load them. The harness does not preload the skills of the `skills` list under
+`--agent` (measured on 2.1.287, #215), so the prompt of a new session starts with the text of each of these skills, with
+each plain load-time block run in the working directory of the session (see `skill_text.py`). After a session, it reads the `init` event of the stream: when the agents that it lists do not hold
 the handle, the session ends as failed with a reason.
 
 The activity of a stream comes from the `result` events, the `assistant`
@@ -55,6 +57,7 @@ the cache writes, and the output) and the cache reads.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -72,6 +75,7 @@ from ..ports.harness import (
 )
 from .environment import process_environment
 from .process import run_harness
+from .skill_text import Skill, with_skills
 from .streams import read_events
 
 # The command that starts the harness.
@@ -290,7 +294,12 @@ class ClaudeCodeAdapter:
         if request.resume_session is not None:
             command += ["--resume", request.resume_session]
         stream = request.event_stream
-        process = run_harness(command, request, env={**process_environment(), **FOREGROUND_ENVIRONMENT})
+        env = {**process_environment(), **FOREGROUND_ENVIRONMENT}
+        if request.resume_session is None:
+            # The harness does not preload the skills of the agent under `--agent` (#215). A resumed session has them already.
+            skills = _skills_of(sealed)
+            request = dataclasses.replace(request, prompt=with_skills(request.prompt, skills, request.cwd, {**env, **request.environment}))
+        process = run_harness(command, request, env=env)
         # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
         if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
@@ -500,6 +509,33 @@ def _seal_skills(skills: object, plugin: str, source: Path, into: Path) -> objec
         else:
             sealed.append(name)
     return sealed
+
+
+def _skills_of(sealed: SealedAgent) -> list[Skill]:
+    """Each skill that the `skills` list of the sealed agent file names, in its order, with its directory.
+
+    A name `<plugin of the seal>:<skill>` is a project skill that the seal copied: its directory is in the seal, and its
+    name is the part after the colon. A name with no colon is a user skill. A name of another plugin has no directory
+    that the adapter knows. No skill when the sealed file cannot be read or lists no skill.
+    """
+    try:
+        frontmatter, _, error = split_frontmatter((sealed.directory / "agents" / f"{sealed.agent}.md").read_text())
+    except (OSError, UnicodeDecodeError):
+        return []
+    listed = frontmatter.get("skills") if error is None and frontmatter is not None else None
+    names = [part.strip() for part in listed.split(",") if part.strip()] if isinstance(listed, str) else listed
+    if not isinstance(names, list):
+        return []
+    plugin = f"{sealed.handle.split(':')[0]}:"
+    skills: list[Skill] = []
+    for name in (str(entry) for entry in names if isinstance(entry, str) and entry):
+        if name.startswith(plugin) and "/" not in name:
+            skills.append(Skill(name[len(plugin):], sealed.directory / "skills" / name[len(plugin):]))
+        elif ":" not in name and "/" not in name:
+            skills.append(Skill(name, Path.home() / SKILL_DIRECTORY / name))
+        else:
+            skills.append(Skill(name, None))
+    return skills
 
 
 def _listed_agents(init: dict[str, object]) -> list[str]:
