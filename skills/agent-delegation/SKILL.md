@@ -282,6 +282,7 @@ tools. An earlier specialist, spawned with a name and no call `isolation`, ran
 in the primary checkout on `main` (measured 2026-09-19).
 
 ### Confirm the permission mode before you spawn a pair agent
+
 This section applies to a subagent of the Agent tool, not to a `--agent`
 session of `delegate run`. Measured on Claude Code 2.1.287 (issue 213): the
 `skills` list of an agent did not preload its skills under `--agent`, so the
