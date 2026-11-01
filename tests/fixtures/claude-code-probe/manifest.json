@@ -1,6 +1,8 @@
 {
   "harness": "Claude Code",
   "harness_version": "2.1.287",
+  "recorded": "2026-11-01",
+  "recorded_note": "Date of the hand-written stream. No harness session wrote it.",
   "command": "claude --print --output-format stream-json --verbose --model <model> --setting-sources user --plugin-dir <seal> --agent <handle>",
   "source": "Written by hand in the form of the recorded streams of tests/fixtures/claude-code, for the guard probe (#219). It is not a recording of a session. The stream has no init event, so the adapter does not check the agent handle against it.",
   "streams": {
