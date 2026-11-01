@@ -566,6 +566,25 @@ WORD_PATTERN_MESSAGE = (
 )
 
 
+#: The deny message of `pcheck` for a word with an unquoted pattern or expansion
+#: character (#230). The guard reads this word as text: a path, the argument
+#: of a read command, an option, or a redirection target.
+SEGMENT_WORD_PATTERN_MESSAGE = (
+    "The word $qa can expand in the shell: it holds an unquoted {, }, *, ?, [, ], (, ), ^ or ~, an unquoted = at "
+    "the start, or the zsh numeric glob <->. The guard reads each path and each argument as text and does not "
+    "expand it, and an expansion can give other words or other paths, or run a command (a zsh glob qualifier). "
+    "Put the word in single quotes."
+)
+
+#: The deny message of `pcheck` for a word with "$" or a backtick outside
+#: single quotes (#230).
+SEGMENT_WORD_EXPANSION_MESSAGE = (
+    "The word $qa holds \\$ or a backtick outside single quotes. The guard does not expand it, and an expansion "
+    "can give other words or other paths. Only the temp prefix \\$TMPDIR/ is permitted. "
+    "Put the word in single quotes."
+)
+
+
 #: The shell function `qword` (#173). It reads the next word of the text "$qt"
 #: as the shell does, and it removes that word from "$qt". It sets $qa to the
 #: text of the word as the command gives it, and $qu to the word that the
@@ -610,26 +629,48 @@ WORD_PATTERN_MESSAGE = (
 #: second argument, with `qword`, and tests it with `qcheck` (#175). It is the
 #: word test of a gate and a read command that take free arguments: they permit
 #: each word, but no word may expand.
+#:
+#: For #230, `qword` also sets $qe: the word that the command gets, as $qu,
+#: with each "$" and backtick in single quotes or after a backslash made "_".
+#: So $qe holds "$" or a backtick only where the shell expands it. A "<" that
+#: starts the zsh numeric glob "<n-m>" (also "<->") is no redirection: the
+#: word keeps it, and $qx is 1. When $qk is 1, `qword` gives each redirection
+#: target as a word, and it does not skip it.
+#:
+#: The shell function `pcheck` tests the word that `qword` read (#230). It
+#: denies a word with $qx set, and a word whose $qe holds "$" or a backtick
+#: after each "$TMPDIR/" and a "$TMPDIR" at the end are removed. A "$" in
+#: single quotes is literal, so `rg 'a$' src` stays permitted.
+#:
+#: The shell function `pwords` reads each word of the segment "$seg" with
+#: `qword`, with $qk set to 1, and tests it with `pcheck` (#230). It is the
+#: expansion test of each path and argument that the branches of the segment
+#: test read as text: a write target, a cp destination, the path of a cd and
+#: of git -C, an option of a git read command, a word of a plain read command,
+#: and a redirection target. A quote that is not closed denies.
 QUOTED_WORD_READER = " ".join(
     [
-        r"""qword() { qa=; qu=; qn=0; qd=0; qs=0; qq=; qx=0;""",
+        r"""qword() { qa=; qu=; qe=; qn=0; qd=0; qs=0; qq=; qx=0;""",
         r"""while [ -n "$qt" ]; do qc=${qt%"${qt#?}"}; qt=${qt#?};""",
         r"""case "$qq" in""",
-        r"""s) qa+=$qc; if [ "$qc" = "'" ]; then qq=; else qu+=$qc; fi; continue ;;""",
+        r"""s) if [ "$qc" = "'" ]; then qa+=$qc; qq=; continue; fi; qw=${qt%%"'"*}; qt=${qt#"$qw"}; qw=$qc$qw;""",
+        r"""qa+=$qw; qu+=$qw; qw=${qw//'$'/_}; qw=${qw//'`'/_}; qe+=$qw; continue ;;""",
         r"""d) qa+=$qc; case "$qc" in '"') qq= ;;""",
-        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+=$qc; case "$qc" in '$'|'`'|'"'|'\') qu+=$qc ;; $'\n') ;; *) qu+="\\$qc" ;; esac ;;""",
-        r"""*) qu+=$qc ;; esac; continue ;;""",
+        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+=$qc; case "$qc" in '$'|'`') qu+=$qc; qe+=_ ;; '"'|'\') qu+=$qc; qe+=$qc ;; $'\n') ;; *) qu+="\\$qc"; qe+="\\$qc" ;; esac ;;""",
+        r"""*) qu+=$qc; qe+=$qc ;; esac; continue ;;""",
         r"""esac;""",
         r"""case "$qc" in""",
-        r"""' ') [ "$qn" = 1 ] || continue; [ "$qs" = 1 ] || return 0; qa=; qu=; qn=0; qd=0; qs=0; qx=0 ;;""",
+        r"""' ') [ "$qn" = 1 ] || continue; [ "$qs" = 1 ] || return 0; qa=; qu=; qe=; qn=0; qd=0; qs=0; qx=0 ;;""",
         r""""'") qq=s; qa+=$qc; qn=1; qd=1 ;;""",
         r"""'"') qq=d; qa+=$qc; qn=1; qd=1 ;;""",
-        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+="\\$qc"; [ "$qc" = $'\n' ] || { qu+=$qc; qn=1; qd=1; } ;;""",
-        r"""'<'|'>'|'&') if [ "$qn" = 1 ] && [ "$qs" = 0 ]; then case "$qd$qu" in 0|0*[!0-9]*|1*) qt=$qc$qt; return 0 ;; esac; fi;""",
+        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+="\\$qc"; [ "$qc" = $'\n' ] || { qu+=$qc; case "$qc" in '$'|'`') qe+=_ ;; *) qe+=$qc ;; esac; qn=1; qd=1; } ;;""",
+        r"""'<'|'>'|'&') if [ "$qc" = '<' ]; then case "$qt" in *'>'*) qg=${qt%%'>'*}; case "$qg" in *[!0-9-]*|*-*-*) ;; *-*)""",
+        r"""qt=${qt#*'>'}; qa+="<$qg>"; qu+="<$qg>"; qe+="<$qg>"; qn=1; qx=1; continue ;; esac ;; esac; fi;""",
+        r"""if [ "$qn" = 1 ] && [ "$qs" = 0 ]; then case "$qd$qu" in 0|0*[!0-9]*|1*) qt=$qc$qt; return 0 ;; esac; fi;""",
         r"""while :; do case "$qt" in '<'*|'>'*|'&'*|'|'*) qt=${qt#?} ;; *) break ;; esac; done;""",
-        r"""qa=; qu=; qn=0; qd=0; qs=1; qx=0 ;;""",
+        r"""qa=; qu=; qe=; qn=0; qd=0; qs=1; [ "$qk" != 1 ] || qs=0; qx=0 ;;""",
         r"""*) case "$qc" in '{'|'}'|'*'|'?'|'['|']'|'('|')'|'^'|'~') qx=1 ;; '=') [ "$qn" = 1 ] || qx=1 ;; esac;""",
-        r"""qa+=$qc; qu+=$qc; qn=1 ;;""",
+        r"""qa+=$qc; qu+=$qc; qe+=$qc; qn=1 ;;""",
         r"""esac; done;""",
         r"""[ -z "$qq" ] || return 2; [ "$qn" = 1 ] && [ "$qs" = 0 ] && return 0; return 1; };""",
         r"""qexp() { qv=$qu; while :; do case "$qv" in *'$TMPDIR/'*) qv=${qv%%'$TMPDIR/'*}${qv#*'$TMPDIR/'} ;; *) break ;; esac; done;""",
@@ -638,7 +679,14 @@ QUOTED_WORD_READER = " ".join(
         f'[ "$qx" = 0 ] || deny "$seg" "{WORD_PATTERN_MESSAGE}"; }};',
         r"""xwords() { qt=${g#"$2"}; while :; do qword; case $? in 1) break ;;""",
         r"""2) deny "$seg" "A quote after the $1 [$2] is not closed, so the guard cannot read the words after it." ;; esac;""",
-        r"""qcheck "$1" "$2"; done; }""",
+        r"""qcheck "$1" "$2"; done; };""",
+        f'pcheck() {{ [ "$qx" = 0 ] || deny "$seg" "{SEGMENT_WORD_PATTERN_MESSAGE}";',
+        r"""qv=$qe; while :; do case "$qv" in *'$TMPDIR/'*) qv=${qv%%'$TMPDIR/'*}${qv#*'$TMPDIR/'} ;; *) break ;; esac; done;""",
+        r"""qv=${qv%'$TMPDIR'};""",
+        f'case "$qv" in *\'$\'*|*\'`\'*) deny "$seg" "{SEGMENT_WORD_EXPANSION_MESSAGE}" ;; esac; }};',
+        r"""pwords() { qk=1; qt=$seg; while :; do qword; case $? in 1) break ;;""",
+        r"""2) deny "$seg" "A quote in the segment is not closed, so the guard cannot read its words." ;; esac;""",
+        r"""pcheck; done; qk=0; }""",
     ]
 )
 
@@ -906,6 +954,12 @@ def _verifier_bash_hook(
     A temp path is a text prefix and a path with no ".." component. The guard
     rejects "..", it does not resolve it, because it reads the command as text
     and a resolution needs the file system.
+
+    After each segment passes and the substitution test passes, the guard
+    reads each word of each segment again with `pwords` (#230). No word may
+    expand in the shell: the branches read each path and argument as text, and
+    an expansion can give other words or other paths, or run a command. A word
+    in single quotes is literal.
 
     The guard fails closed. No python3, no command text, or a shell without the
     bash string operators all end at exit 2, which blocks the call. Under zsh
@@ -1230,8 +1284,8 @@ def _verifier_bash_hook(
             # The directory of mktemp -p or --tmpdir (#161). mktemp makes a new name in it, so the guard tests that name,
             # the directory, a "/" and the default template of GNU mktemp: the directory itself may hold a git tree.
             f'mdir() {{ istmp "${{1%/}}/tmp.XXXXXXXXXX" || deny "$seg" "{MKTEMP_DIRECTORY_MESSAGE}"; }}',
-            # The reader of the words after a gate or a read command, as the shell reads them (#173).
-            *([QUOTED_WORD_READER] if prefix_gates or free_gates or get_only else []),
+            # The reader of the words of a segment, as the shell reads them (#173, #230).
+            QUOTED_WORD_READER,
             # The words after a plain gate (#163).
             *([GATE_PATH_CHECK, _gate_word_check(extra_flags)] if prefix_gates else []),
             # The words after a read command of the declaration (#164).
@@ -1278,13 +1332,19 @@ def _verifier_bash_hook(
             "set -f",
             # No cd came before the first segment, so a relative write target counts from the working directory, and
             # so does a path after a gate.
-            "cdx=0; cdd=$wd",
+            # qword skips each redirection target, unless pwords asks for it (#230).
+            "cdx=0; cdd=$wd; qk=0",
             # The divider keeps the spaces at each end of a segment. The prefix
             # tests match from the first word, so remove them.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
             f"{segment} done",
             "case \"$u\" in *'`'*|*'$('*|*'<('*|*'>('*|*'=('*) "
             f'deny "$x" "{substitution}" ;; esac',
+            # Each word of each segment, also a path, an option, the path of a prefix (git -C) and a redirection target,
+            # cannot expand in the shell (#230). The branches above read these words as text. This loop comes after
+            # the branch test of each segment and the substitution test, so their messages name the segment first.
+            'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
+            '[ -n "$seg" ] || continue; pwords; done',
             f"exit 0 {VERIFIER_GUARD_MARKER}",
         ]
     )

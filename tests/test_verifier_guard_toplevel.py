@@ -257,11 +257,17 @@ def test_the_bash_guard_denies_a_removal_of_a_directory_that_holds_the_worktree(
 @pytest.mark.parametrize("shell", GUARD_SHELLS)
 def test_the_bash_guard_permits_a_write_to_a_temp_path_outside_the_worktree(tree, shell):
     base = _without_private(str(tree.base))
-    for path in (f"{base}/proof/src/app.py", f"{base}/wt2/app.py", "$TMPDIR/proof/app.py", f"{base}/proof/*.py"):
+    for path in (f"{base}/proof/src/app.py", f"{base}/wt2/app.py", "$TMPDIR/proof/app.py"):
         for command in _bash_writes(path):
             result = _bash(tree, command, shell, cwd=str(tree.worktree))
 
             assert result.returncode == 0, (command, result.stderr)
+    # A pattern in a write target can expand to other paths, so the word test of #230 denies it, also in a temp path.
+    for command in _bash_writes(f"{base}/proof/*.py"):
+        result = _bash(tree, command, shell, cwd=str(tree.worktree))
+
+        assert result.returncode == 2, (command, result.stderr)
+        assert f"The word {base}/proof/*.py can expand in the shell" in result.stderr, (command, result.stderr)
 
 
 @pytest.mark.parametrize("shell", GUARD_SHELLS)

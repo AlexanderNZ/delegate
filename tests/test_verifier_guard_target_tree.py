@@ -202,11 +202,16 @@ def test_the_write_guard_denies_a_file_of_a_worktree_when_the_working_directory_
 def test_the_bash_guard_permits_a_write_into_the_copy(trees, shell):
     plain, _private, variable = trees.forms(trees.copy / "src" / "app.py")
     commands = [*_bash_writes(plain), *_bash_writes(variable), f"cd {_without_private(trees.copy)} && echo broken > {plain}"]
-    commands += [f"rm -rf {_without_private(trees.copy)}/*", f"rm -rf {_without_private(trees.copy)}"]
+    commands += [f"rm -rf {_without_private(trees.copy)}"]
     for command in commands:
         result = _bash(trees, command, shell, trees.copy)
 
         assert result.returncode == 0, (command, result.stderr)
+    # A pattern in a write target can expand to other paths, so the word test of #230 denies it, also in the copy.
+    glob = f"{_without_private(trees.copy)}/*"
+    result = _bash(trees, f"rm -rf {glob}", shell, trees.copy)
+    assert result.returncode == 2, result.stderr
+    assert f"The word {glob} can expand in the shell" in result.stderr, result.stderr
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -338,7 +343,12 @@ def test_the_guards_deny_a_target_that_holds_more_directories_than_the_search_re
     write = _write(trees, plain, shell, trees.copy)
     assert write.returncode == 2, write.stderr
     assert WALK_LIMIT_REASON in write.stderr
-    # A pattern limits the walk to the directories that it can match: d1, d1<n>, d1<n><n> and d1<n><n><n>.
-    for command in (f"touch {plain}/d1/app.py", f"ls {plain} && rm -rf {plain}/d1", f"rm -rf {plain}/d1*"):
+    for command in (f"touch {plain}/d1/app.py", f"ls {plain} && rm -rf {plain}/d1"):
         assert _bash(trees, command, shell, trees.copy).returncode == 0, command
+    # A pattern limits the walk to the directories that it can match: d1, d1<n>, d1<n><n> and d1<n><n><n>. So the walk
+    # does not stop at its limit, and the word test of #230 denies the pattern.
+    result = _bash(trees, f"rm -rf {plain}/d1*", shell, trees.copy)
+    assert result.returncode == 2, result.stderr
+    assert WALK_LIMIT_REASON not in result.stderr, result.stderr
+    assert f"The word {plain}/d1* can expand in the shell" in result.stderr, result.stderr
     assert _write(trees, f"{plain}/d1/app.py", shell, trees.copy).returncode == 0
