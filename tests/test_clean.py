@@ -212,7 +212,7 @@ def include_sections(repo: Path) -> list[str]:
     return git(repo, "config", "--local", "--name-only", "--get-regexp", r"^includeif\.").split()
 
 
-def test_clean_removes_the_include_section_of_an_earlier_version_for_a_worktree_that_a_person_removed_and_keeps_a_section_of_a_person(
+def test_clean_removes_the_include_section_of_an_earlier_version_for_a_worktree_that_a_person_removed_and_keeps_the_sections_of_a_person(
     tmp_path, capsys, scripted
 ):
     repo = make_repo(tmp_path)
@@ -225,16 +225,20 @@ def test_clean_removes_the_include_section_of_an_earlier_version_for_a_worktree_
     person = tmp_path / "person.config"
     person.write_text("[person]\n\tsetting = kept\n")
     git(repo, "config", "--local", "includeIf.gitdir:/no/such/place/.path", str(person))
+    # A section of a person whose file is missing: only the name and the directory of its file show that it is not of the engine.
+    missing = tmp_path / "gone" / "delegate.config"
+    git(repo, "config", "--local", "includeIf.gitdir:/no/such/other/place/.path", str(missing))
     # A person removes the directory by hand, and `git worktree prune` then removes its git directory.
     shutil.rmtree(worktree)
     git(repo, "worktree", "prune")
-    assert not git_dir.exists() and len(include_sections(repo)) == 2
+    assert not git_dir.exists() and not missing.exists() and len(include_sections(repo)) == 3
 
     code, out, err = clean(repo, capsys, run_id)
 
     assert (code, err) == (0, "")
-    assert include_sections(repo) == ["includeif.gitdir:/no/such/place/.path"]
+    assert include_sections(repo) == ["includeif.gitdir:/no/such/place/.path", "includeif.gitdir:/no/such/other/place/.path"]
     assert git(repo, "config", "--local", "--get", "includeIf.gitdir:/no/such/place/.path").strip() == str(person)
+    assert git(repo, "config", "--local", "--get", "includeIf.gitdir:/no/such/other/place/.path").strip() == str(missing)
 
 
 def test_clean_removes_a_verify_copy_and_a_proof_copy_that_a_run_left(tmp_path, capsys, scripted):

@@ -315,6 +315,8 @@ RATE_LIMIT = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"status
         ([tool_line(f"hook error: the command [{PROBE}] is not permitted"), result_line("Done.")], "inconclusive"),
         # The guard denied another command, and the final text tells of a denial.
         ([call_line("touch other-file"), tool_line("hook error: [touch other-file] is not permitted"), result_line("Denied.")], "inconclusive"),
+        # A tool other than the shell tool holds the probe command, and its error result has a denial word. The guard is on the shell tool.
+        ([call_line(PROBE, tool="mcp__shell__run"), tool_line(f"the command [{PROBE}] is not permitted"), result_line("Denied.")], "inconclusive"),
         # The probe command ran with no error, and the final text tells of a denial.
         ([call_line(PROBE), tool_line("", is_error=False), result_line("The command was denied.")], "inconclusive"),
         # The probe command gave an error that is no denial.
