@@ -41,8 +41,13 @@ def _write_metadata(directory, kind, version):
 
 
 def _version_printed_from(path_entry):
-    """Run `delegate --version` with only `path_entry` on the module path, and return its stdout."""
-    environment = {**os.environ, "PYTHONPATH": str(path_entry)}
+    """Run `delegate --version` with `path_entry` first on the module path, and return its stdout.
+
+    The entries that were on the path stay after it: a Nix build gives the interpreter its packages
+    (PyYAML) through PYTHONPATH, so a path with one entry would lose them. The entry is first, so its
+    copy of the package, and its metadata directory, win over each other copy on the path."""
+    entries = [str(path_entry), *filter(None, os.environ.get("PYTHONPATH", "").split(os.pathsep))]
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(entries)}
     result = subprocess.run(
         [sys.executable, "-m", "delegate.cli.delegate", "--version"], capture_output=True, text=True, env=environment, check=True
     )

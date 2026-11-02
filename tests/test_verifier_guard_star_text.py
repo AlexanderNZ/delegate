@@ -32,7 +32,7 @@ import pytest
 from delegate.cli.agent_definitions import main as agent_definitions_main
 from delegate.definitions.validate import split_frontmatter
 
-from .pages import ROOT
+from .pages import ROOT, outside_the_package
 from .support import committed_repo
 
 #: Each shell that runs the Bash guard.
@@ -164,6 +164,7 @@ def _documents() -> list[Path]:
     return [p for p in paths if p.is_file()]
 
 
+@outside_the_package
 def test_no_document_of_the_kit_says_that_the_words_after_a_star_entry_are_not_checked():
     found = {str(p.relative_to(ROOT)): _claims(p.read_text()) for p in _documents()}
 
