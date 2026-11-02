@@ -54,10 +54,6 @@ jobs:
             echo "::notice::NEUTRALITY_DENYLIST is empty, so the neutrality test skips."
           fi
 
-      # A red suite stops the job here: no commit, no tag, no release.
-      - name: Run the test suite
-        run: python -m pytest -rs -n auto
-
       - name: Work out the version
         run: |
           version="$(python scripts/release.py next-version --bump "$BUMP")"
@@ -74,6 +70,15 @@ jobs:
 
       - name: Set the version and the CHANGELOG entry
         run: python scripts/release.py apply --version "$VERSION" --date "$(date -u +%F)"
+
+      # The suite runs on the tree of the release commit, after apply and before the push.
+      # The push of the release commit starts no CI run, so this is its only test run.
+      # The package is installed again first, so its metadata holds the new version.
+      # A red suite stops the job here: no commit, no tag, no release.
+      - name: Run the test suite
+        run: |
+          pip install --no-deps .
+          python -m pytest -rs -n auto
 
       # The annotated tag needs the identity too, also when the commit step makes no commit.
       - name: Set the git identity
