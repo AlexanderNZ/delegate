@@ -136,7 +136,7 @@ A maintainer cuts a release from GitHub. No local command is needed.
 3. Choose the `bump` input. Choose `patch` for a fix, `minor` for a new feature, and `major` for a change that breaks a user.
 4. Start the run.
 
-The workflow runs the test suite first. When a test fails, the workflow makes no commit, no tag and no release. Each step after the suite is a command of `scripts/release.py`:
+The workflow uses its own token to push the release commit, and GitHub starts no workflow for a push with that token. So the release commit gets no CI run of its own. The workflow therefore runs the test suite on the tree of the release commit: after `apply` has changed the version and the changelog, and before it pushes. When a test fails, the workflow pushes no commit and no tag, and it creates no release. The steps of the release use three commands of `scripts/release.py`:
 
 - `next-version` raises the newest tag of the form `vX.Y.Z` by the bump. The first release keeps the version in `pyproject.toml`.
 - `apply` sets the version in `pyproject.toml`. It also moves the text under `Unreleased` in `CHANGELOG.md` into a dated entry. When that text is empty, the entry holds the release notes. The `Unreleased` heading stays.

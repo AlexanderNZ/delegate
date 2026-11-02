@@ -446,3 +446,27 @@ def test_apply_writes_no_file_when_the_notes_for_an_empty_unreleased_body_cannot
     assert done.returncode == 1 and done.stdout == ""
     assert "v0.1.0" in done.stderr
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_every_test_that_reads_the_changelog_passes_on_the_tree_that_apply_makes_from_the_real_changelog(tmp_path):
+    # The release commit gets no CI run of its own (#233). A test that read the entry of a ticket from
+    # `[Unreleased]` passed before `apply` and failed after it, and no check showed that. This case runs the
+    # test files that read the real CHANGELOG on a copy of the whole tree after `apply` moved its Unreleased body.
+    tree = tmp_path / "tree"
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True, check=True).stdout.split("\0")
+    for name in filter(None, listed):
+        if (ROOT / name).is_file():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_bytes((ROOT / name).read_bytes())
+    git(tree, *TEMPLATE_GIT, "init", "-q", "-b", "main")
+    git(tree, *TEMPLATE_GIT, "add", "-A")
+    git(tree, *TEMPLATE_GIT, "commit", "-q", "-m", "chore: the real files")
+    readers = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "tests").glob("test_*.py") if "CHANGELOG" in path.read_text() and path.name != "test_release.py")
+    assert "tests/test_changelog.py" in readers
+
+    done = release(tree, "apply", "--version", "99.0.0", "--date", "2099-01-02")
+    assert (done.returncode, done.stderr) == (0, "")
+    assert "## [99.0.0] - 2099-01-02" in (tree / "CHANGELOG.md").read_text()
+    tests = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist", *readers], cwd=tree, capture_output=True, text=True)
+
+    assert tests.returncode == 0, tests.stdout[-3000:]

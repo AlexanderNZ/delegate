@@ -205,3 +205,13 @@ def headings_anchors(markdown: str) -> set[str]:
     """The anchors of the headings of a page, as GitHub builds them."""
     without_code = re.sub(r"^(`{3,}).*?^\1$", "", markdown, flags=re.DOTALL | re.MULTILINE)
     return {re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-") for heading in re.findall(r"^#{1,6} (.+)$", without_code, flags=re.MULTILINE)}
+
+
+@outside_the_package
+def test_cut_a_release_says_that_the_release_commit_gets_no_ci_run_and_that_the_release_workflow_runs_the_suite_for_it():
+    # The workflow pushes the release commit with its own token, and GitHub starts no workflow for such a push (#233).
+    text = " ".join(section("Cut a release").split())
+
+    assert "the release commit gets no CI run of its own" in text
+    assert "runs the test suite on the tree of the release commit" in text
+    assert "before it pushes" in text
