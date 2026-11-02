@@ -19,7 +19,7 @@ import sys
 
 from ..run.watch import EXIT_INTERRUPTED
 from . import agent_definitions, brief, clean, docs_command, pause, run_command, status, stop, watch
-from ..shared.version import package_version
+from ..shared.version import VersionAction
 from .title import Title
 
 # Subcommands that the `agent-definitions` command owns, with the line that
@@ -75,7 +75,7 @@ def _help_parser() -> argparse.ArgumentParser:
         TIERS_OPTION,
         help="path to a tiers.toml; default is the bundled table. Valid before render, validate and bootstrap",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {package_version()}", help="print the version of the package and exit")
+    parser.add_argument("--version", action=VersionAction, help="print the version of the package and exit")
     sub = parser.add_subparsers(dest="command", metavar="command")
     for name, text in AGENT_DEFINITIONS_COMMANDS.items():
         sub.add_parser(name, help=f"{text} (as agent-definitions {name})", add_help=False)

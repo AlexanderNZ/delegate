@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- Every command failed with a `RuntimeError` in a tree with no `pyproject.toml` and no package metadata, for example a copy of `src/` alone that a coordinator uses to pin the engine (#243). v1.16.0 read the version when it built the argument parser of each command, and only `--version` needs it. Now only `--version` reads the version. With no known version, `--version` prints on stderr a message that names the two places it looked, a `pyproject.toml` above the module and the package metadata, and exits 1 with no traceback.
+
 ## [1.16.0] - 2026-11-02
 
 ### Consumer impact

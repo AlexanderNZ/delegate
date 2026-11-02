@@ -72,3 +72,51 @@ def test_an_installed_package_with_no_pyproject_above_it_reads_the_version_from_
     _write_metadata(site, "dist-info", "7.8.9")
 
     assert _version_printed_from(site) == "delegate 7.8.9\n"
+
+
+def _run_from_a_bare_copy(tmp_path, module, *arguments):
+    """Run `python -m <module> <arguments>` from a copy of `src/delegate` alone, as an engine pin of a coordinator does.
+
+    The directory has no `pyproject.toml` above it. The child process also sees no metadata of the distribution, even when
+    the test environment has installed it: the runner hides it, then starts the module as `-m` does. The entries that were
+    on PYTHONPATH stay after the copy, so a Nix build keeps PyYAML."""
+    pin = tmp_path / "pin"
+    pin.mkdir()
+    _copy_package(pin)
+    runner = (
+        "import importlib.metadata as m, runpy, sys\n"
+        "find = m.MetadataPathFinder.find_distributions\n"
+        "m.MetadataPathFinder.find_distributions = classmethod(\n"
+        "    lambda cls, context=None: (d for d in find(context or m.DistributionFinder.Context()) if d.metadata['Name'] != 'agent-definitions')\n"
+        ")\n"
+        f"sys.argv = [{module!r}, *sys.argv[1:]]\n"
+        f"runpy.run_module({module!r}, run_name='__main__')\n"
+    )
+    entries = [str(pin), *filter(None, os.environ.get("PYTHONPATH", "").split(os.pathsep))]
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(entries)}
+    return subprocess.run([sys.executable, "-c", runner, *arguments], capture_output=True, text=True, env=environment, cwd=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("module", "arguments"),
+    [
+        ("delegate.cli.delegate", ["status", "--help"]),
+        ("delegate.cli.delegate", ["run", "--help"]),
+        ("delegate.cli.agent_definitions", ["--help"]),
+    ],
+)
+def test_a_command_works_in_a_tree_that_does_not_know_the_version(tmp_path, module, arguments):
+    result = _run_from_a_bare_copy(tmp_path, module, *arguments)
+
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout
+
+
+def test_the_option_names_the_two_places_it_looked_when_the_version_is_not_known(tmp_path):
+    result = _run_from_a_bare_copy(tmp_path, "delegate.cli.delegate", "--version")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "pyproject.toml" in result.stderr
+    assert "package metadata" in result.stderr
+    assert "Traceback" not in result.stderr
