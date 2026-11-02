@@ -72,13 +72,11 @@ jobs:
         run: python scripts/release.py apply --version "$VERSION" --date "$(date -u +%F)"
 
       # The suite runs on the tree of the release commit, after apply and before the push.
-      # The push of the release commit starts no CI run, so this is its only test run.
-      # The package is installed again first, so its metadata holds the new version.
+      # The push of the release commit starts no CI run, so this is its only test run: an event
+      # of GITHUB_TOKEN starts no new workflow run (GitHub Docs, "Triggering a workflow from a workflow").
       # A red suite stops the job here: no commit, no tag, no release.
       - name: Run the test suite
-        run: |
-          pip install --no-deps .
-          python -m pytest -rs -n auto
+        run: python -m pytest -rs -n auto
 
       # The annotated tag needs the identity too, also when the commit step makes no commit.
       - name: Set the git identity
