@@ -51,13 +51,15 @@ _SUBSTITUTION_BODY = re.compile(r"\$\(([^)]*)\)")
 #: guard permits after the words of the entry only options, option values,
 #: numbers and paths, because another word can be a subcommand that writes
 #: ("tea issues create"). With it, the guard permits each word after the
-#: entry, as it did for each entry before #164.
+#: entry, as it did for each entry before #164, except a word that the shell
+#: can expand (#175).
 #:
 #: A gateCommands entry takes the same mark (#169), for example "./gradlew *":
 #: the gate then takes free arguments. Without it, the guard permits after the
 #: gate only "--", a number, a path that exists and a flag of gateExtraFlags
 #: (#163). With it, the guard permits each word after the gate, as it did for
-#: each gate before #163, and the OpenCode map permits "<gate> *".
+#: each gate before #163, except a word that the shell can expand (#175), and
+#: the OpenCode map permits "<gate> *".
 READ_PREFIX_MARK = " *"
 
 #: The text after a flag of gateExtraFlags that tells that the flag takes a
@@ -129,7 +131,7 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
         exact = not plain and exact_allowed and isinstance(c, str) and EXACT_GATE_COMMAND.fullmatch(c)
         if not plain and not exact:
             extra = (
-                f", optionally with {READ_PREFIX_MARK!r} at the end to permit each word after the gate, "
+                f", optionally with {READ_PREFIX_MARK!r} at the end to take free arguments, "
                 "or such words with words in double quotes that each hold one $(...) of plain words"
                 if exact_allowed
                 else f", optionally with {READ_PREFIX_MARK!r} at the end to make the entry a prefix"

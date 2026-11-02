@@ -402,34 +402,49 @@ def _git_read_argument_check(grep: bool) -> str:
 #: character a literal. An unquoted "#" starts a comment, and a quote or a
 #: backslash in a comment does nothing until the next newline.
 #:
+#: An ANSI-C quote ($'...') starts at a single quote after an unquoted "$"
+#: that no backslash escapes, and it ends at the next single quote that no
+#: backslash escapes (#238). A "$" before the "$" ("$$'a'") also counts, so
+#: the divider can read a single-quoted string as an ANSI-C quote. The guard
+#: denies each word with an unquoted "$", so that word denies in each reading.
+#:
 #: Four forms read quotes in their own way: a command substitution ($( and the
 #: backtick), a parameter expansion with braces, an ANSI-C quote ($') and a
-#: here-document (<<). The divider does not parse them. When the text holds one
-#: of them, it divides at each separator, also inside quotes, as the guard did
-#: before. Each of these differences gives more segments, never fewer, so a
-#: separator that the shell sees always divides the command. The test for the
-#: four forms reads "$u", the command text without each backslash-newline,
-#: because the shell removes a backslash-newline before it reads a form
-#: ($\<newline>( is a command substitution).
+#: here-document (<<). A command substitution, a backtick and a here-document
+#: always make the divider divide at each separator, also inside quotes, as
+#: the guard did before. Each of these differences gives more segments, never
+#: fewer, so a separator that the shell sees always divides the command. The
+#: guard reads the command in two passes (#238). In the first pass ($dp is
+#: "P"), the divider reads "${" and "$'" as above, so a "|", ";" or "&" in
+#: the quotes of a word with "$" does not divide the command, and the deny
+#: message names the full word. When the text holds "${" or "$'", the second
+#: pass ($dp is "L") divides at each separator, also inside quotes, as the
+#: guard did before #238, and it tests each segment again. So each command
+#: that the guard of 1.15.0 denied still denies. The test for the forms reads
+#: "$u", the command text without each backslash-newline, because the shell
+#: removes a backslash-newline before it reads a form ($\<newline>( is a
+#: command substitution).
 #:
-#: At the end, $q holds "s" or "d" when a quote is not closed. The guard then
-#: cannot read the command, and it fails closed.
+#: At the end, $q holds "s", "d" or "a" when a quote is not closed. The guard
+#: then cannot read the command, and it fails closed.
 COMMAND_DIVIDER = " ".join(
     [
-        r"""q=; case "$u" in *'`'*|*'$('*|*'${'*|*"\$'"*|*'<<'*) q=L ;; esac;""",
+        r"""q=; case "$u" in *'`'*|*'$('*|*'<<'*) q=L ;; *'${'*|*"\$'"*) [ "$dp" = P ] || q=L ;; esac;""",
         r"""segs=(); o=; e=0; l=; i=0; n=${#s};""",
         r"""while [ "$i" -lt "$n" ]; do c=${s:$i:1}; i=$((i+1));""",
         r"""if [ "$e" = 1 ]; then e=0; l=1; o+=$c; continue; fi; b=$l; l=;""",
         r"""case "$q" in""",
         r"""s) [ "$c" = "'" ] && q=; o+=$c; continue ;;""",
         r"""d) case "$c" in '\') e=1 ;; '"') q= ;; esac; o+=$c; continue ;;""",
+        r"""a) case "$c" in '\') e=1 ;; "'") q= ;; esac; o+=$c; continue ;;""",
         r"""esac;""",
         r"""case "$c" in""",
         r"""$'\n'|';'|'|') segs+=("$o"); o=; [ "$c$q" = $'\n'c ] && q=; continue ;;""",
         r"""'&') case "${b:-${o#"${o%?}"}}${s:$i:1}" in '>'*|'<'*|*'>') ;;""",
         r"""*) [ "${s:$i:1}" = '&' ] && i=$((i+1)); segs+=("$o"); o=; continue ;; esac ;;""",
         r"""esac;""",
-        r"""[ -n "$q" ] || case "$c" in "'") q=s ;; '"') q=d ;; '\') e=1 ;; '#') q=c ;; esac;""",
+        r"""[ -n "$q" ] || case "$c" in "'") q=s; [ "$b" != 1 ] && [ "${o#"${o%?}"}" = '$' ] && q=a ;;""",
+        r"""'"') q=d ;; '\') e=1 ;; '#') q=c ;; esac;""",
         r"""o+=$c;""",
         r"""done;""",
         r"""segs+=("$o")""",
@@ -602,7 +617,13 @@ SEGMENT_WORD_EXPANSION_MESSAGE = (
 #: before them when it is an unquoted file descriptor number, and the next
 #: word, which is the target. The shell removes a redirection before it runs
 #: the command, so a redirection is no word of the command, and the segment
-#: test examined its target. The function does not expand "$", a backtick or a
+#: test examined its target. An unquoted "$" before a single quote starts an
+#: ANSI-C quote ($'...', #238): in it, a backslash escapes the next character,
+#: also a single quote, and the next single quote that no backslash escapes
+#: ends it. The function keeps the "$", the quotes and each backslash of an
+#: ANSI-C quote in $qa, $qu and $qe, so each test that denies a word with "$"
+#: denies it, and the message names the full word. A "|", ";" or "&" in the
+#: quote is part of the word. The function does not expand "$", a backtick or a
 #: pattern. It sets $qx to 1 when the word holds an unquoted character that the
 #: shell can expand (#175): "{", "}", "*", "?", "[", "]", "(", ")", "^" or "~",
 #: or a "=" at the start of the word. Brace expansion, a glob, a zsh glob
@@ -658,6 +679,8 @@ QUOTED_WORD_READER = " ".join(
         r"""d) qa+=$qc; case "$qc" in '"') qq= ;;""",
         r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+=$qc; case "$qc" in '$'|'`') qu+=$qc; qe+=_ ;; '"'|'\') qu+=$qc; qe+=$qc ;; $'\n') ;; *) qu+="\\$qc"; qe+="\\$qc" ;; esac ;;""",
         r"""*) qu+=$qc; qe+=$qc ;; esac; continue ;;""",
+        r"""a) qa+=$qc; qu+=$qc; qe+=$qc; case "$qc" in "'") qq= ;;""",
+        r"""'\') qc=${qt%"${qt#?}"}; qt=${qt#?}; qa+=$qc; qu+=$qc; qe+=$qc ;; esac; continue ;;""",
         r"""esac;""",
         r"""case "$qc" in""",
         r"""' ') [ "$qn" = 1 ] || continue; [ "$qs" = 1 ] || return 0; qa=; qu=; qe=; qn=0; qd=0; qs=0; qx=0 ;;""",
@@ -669,6 +692,7 @@ QUOTED_WORD_READER = " ".join(
         r"""if [ "$qn" = 1 ] && [ "$qs" = 0 ]; then case "$qd$qu" in 0|0*[!0-9]*|1*) qt=$qc$qt; return 0 ;; esac; fi;""",
         r"""while :; do case "$qt" in '<'*|'>'*|'&'*|'|'*) qt=${qt#?} ;; *) break ;; esac; done;""",
         r"""qa=; qu=; qe=; qn=0; qd=0; qs=1; [ "$qk" != 1 ] || qs=0; qx=0 ;;""",
+        r"""'$') qa+=$qc; qu+=$qc; qe+=$qc; qn=1; case "$qt" in "'"*) qt=${qt#?}; qa+="'"; qu+="'"; qe+="'"; qq=a; qd=1 ;; esac ;;""",
         r"""*) case "$qc" in '{'|'}'|'*'|'?'|'['|']'|'('|')'|'^'|'~') qx=1 ;; '=') [ "$qn" = 1 ] || qx=1 ;; esac;""",
         r"""qa+=$qc; qu+=$qc; qe+=$qc; qn=1 ;;""",
         r"""esac; done;""",
@@ -721,7 +745,8 @@ def _gate_word_check(extra_flags: tuple[str, ...]) -> str:
     message = (
         "The word $a after the gate [$gn] is not a number, not a path that exists in the git toplevel or in a temp "
         "directory, and not a flag of gateExtraFlags. A word after a gate can make the gate write, for example --fix "
-        f"or a task name. A gateCommands entry that ends with{READ_PREFIX_MARK} permits each word after the gate."
+        f"or a task name. A gateCommands entry that ends with{READ_PREFIX_MARK} permits each word after the gate, "
+        "except a word that the shell can expand. Put a word with a pattern character in single quotes."
     )
     open_quote = "A quote after the gate [$gn] is not closed, so the guard cannot read the words after the gate."
     return " ".join(
@@ -788,7 +813,8 @@ def _read_word_check() -> str:
     message = (
         "The word $ru after the read command [$rn] is not an option, the value of an option, a number or a path. "
         "Such a word can be a subcommand that writes, for example create or close. "
-        f"A getOnlyCommands entry that ends with{READ_PREFIX_MARK} permits each word after it."
+        f"A getOnlyCommands entry that ends with{READ_PREFIX_MARK} permits each word after it, "
+        "except a word that the shell can expand. Put a word with a pattern character in single quotes."
     )
     open_quote = "A quote after the read command [$rn] is not closed, so the guard cannot read the words after it."
     return " ".join(
@@ -919,9 +945,8 @@ def _verifier_bash_hook(
     or else from the working directory. A number is permitted too (#169). A
     plain gate that ends with READ_PREFIX_MARK takes free arguments (#169):
     the guard permits each word after it, except a word that the shell can
-    expand (#175), and the rendered verifier states that the guard does not
-    check those words otherwise. Each exact gate is permitted only as the full
-    command.
+    expand (#175), and the rendered verifier states this rule (#238). Each
+    exact gate is permitted only as the full command.
 
     `get_only` are the declaration's commands that read only while they stay a
     GET, such as a tracker API client. Each one is permitted alone or with
@@ -932,7 +957,8 @@ def _verifier_bash_hook(
     (#164, `_read_word_check`): another word can be a subcommand that writes,
     so "tea issues create" denies with the entry "tea issues". An entry that
     ends with READ_PREFIX_MARK is a prefix on purpose, and the guard permits
-    each word after it. With no such command the branch is absent.
+    each word after it, except a word that the shell can expand (#175). With
+    no such command the branch is absent.
 
     A "cd" takes one path argument: a temp path, or a directory in the git
     toplevel of the working directory (IN_TOPLEVEL_CD_CHECK, #121). A relative
@@ -1255,7 +1281,9 @@ def _verifier_bash_hook(
             # zsh does not divide an unquoted expansion into words, so without this line it denies each temp write.
             # In sh emulation zsh divides the words as bash and /bin/sh do, and the guard gives their verdicts.
             '[ -z "${ZSH_VERSION-}" ] || emulate sh',
-            'deny() { echo "verifier guard: the command segment [$1] is not permitted. $2" >&2; exit 2; }',
+            # printf, not echo: the echo of /bin/sh on macOS reads a backslash in the message, and the message must
+            # give each word as the command gives it, for example $'a\tb' (#238).
+            'deny() { printf \'%s\\n\' "verifier guard: the command segment [$1] is not permitted. $2" >&2; exit 2; }',
             f'istp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; '
@@ -1326,8 +1354,11 @@ def _verifier_bash_hook(
             # gate test and for the substitution message.
             'x=${s#"${s%%[! ]*}"}; x=${x%"${x##*[! ]}"}',
             *exact_gate_test,
-            COMMAND_DIVIDER,
-            'case "$q" in s|d) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
+            # The first pass reads "${" and "$'" as quotes, so a deny names the full word. The second pass reads the
+            # command as the guard did before #238, so each command that it denied still denies (COMMAND_DIVIDER).
+            "dp=P",
+            f"while :; do {COMMAND_DIVIDER}",
+            'case "$q" in s|d|a) echo "verifier guard: a quote is not closed, so the guard cannot read the command. '
             'The guard fails closed." >&2; exit 2 ;; esac',
             "set -f",
             # No cd came before the first segment, so a relative write target counts from the working directory, and
@@ -1345,6 +1376,10 @@ def _verifier_bash_hook(
             # the branch test of each segment and the substitution test, so their messages name the segment first.
             'for seg in "${segs[@]}"; do seg=${seg#"${seg%%[! ]*}"}; seg=${seg%"${seg##*[! ]}"}; '
             '[ -n "$seg" ] || continue; pwords; done',
+            # A command substitution, a backtick and a here-document made the first pass divide as the guard of
+            # 1.15.0, so only "${" and "$'" need the second pass.
+            '[ "$dp" = P ] || break; case "$u" in *\'`\'*|*\'$(\'*|*\'<<\'*) break ;; *\'${\'*|*"\\$\'"*) dp=L ;; '
+            '*) break ;; esac; done',
             f"exit 0 {VERIFIER_GUARD_MARKER}",
         ]
     )
@@ -1585,9 +1620,12 @@ def _read_prefixes(agent: Agent) -> str:
 def _free_gate_rule(agent: Agent) -> str:
     """The paragraph of the verifier that names each gate that takes free arguments (#169).
 
-    The guard and the OpenCode map do not check the words after such a gate,
-    so the rule of #124 and #163 is in the text that the verifier reads. It is
-    empty when the declaration has no such gate.
+    The guard permits each word after such a gate, except a word that the
+    shell can expand (#175), and the OpenCode map permits each word after it,
+    also a word that the shell can expand. So the rule of #124 and #163 is in
+    the text that the verifier reads. The text gives the exception of the
+    guard and tells the verifier to put a pattern character in single quotes
+    (#238). It is empty when the declaration has no such gate.
     """
     free = _free_gates(agent.gate_commands)
     if not free:
@@ -1595,7 +1633,10 @@ def _free_gate_rule(agent: Agent) -> str:
     stated = " ".join(f"The gate `{g}` takes free arguments." for g in free)
     return (
         f"\n\n{stated} The declaration marks each such gate with a trailing `{READ_PREFIX_MARK.strip()}`, so the "
-        "guard of your shell permits each word after it. The guard does not check the words after such a gate. "
+        "guard of your shell permits each word after it, except a word that the shell can expand. Such a word holds "
+        "an unquoted `{`, `}`, `*`, `?`, `[`, `]`, `(`, `)`, `^` or `~`, an unquoted `=` at the start, a `$` or a "
+        "backtick. Put a word with a pattern character in single quotes, for example `-t 'a*'`. The guard denies a "
+        "word with a `$` or a backtick also in quotes, except the temp prefix `$TMPDIR/`. "
         "This rule is binding. Do not put a word after such a gate that can make the gate write, for example "
         "`--fix`, `-u`, `--outDir` or a task that formats the source. If you must run such a form, report it under "
         "What you could not verify (the `unverified` list of a JSON verdict), so the coordinator runs it."

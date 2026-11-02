@@ -431,14 +431,14 @@ def test_the_declaration_refuses_a_star_gate_that_opens_a_write(bad):
         parse_declaration({"agents": {"web": {"description": "A web app.", "gateCommands": [bad]}}})
 
 
-def test_the_rendered_verifier_names_each_star_gate_and_says_that_its_words_are_not_checked():
+def test_the_rendered_verifier_names_each_star_gate_and_gives_the_exception_of_the_guard():
     claude_code, opencode = _files(_free_declaration())
     for files in (claude_code, opencode):
         body = split_frontmatter(files["web-verifier.md"])[1]
         assert "The gate `./gradlew` takes free arguments." in body
         assert "The gate `nix eval` takes free arguments." in body
         assert "`npm test` takes free arguments" not in body
-        assert "does not check the words after such a gate" in body
+        assert "permits each word after it, except a word that the shell can expand" in body
         assert "Do not put a word after such a gate that can make the gate write" in body
 
     for files in _files(_declaration()):

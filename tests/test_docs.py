@@ -138,7 +138,7 @@ def test_the_command_writes_the_options_of_render_validate_bootstrap_and_brief_i
     assert (code, err) == (0, "")
     assert (
         "| `--gate-command <cmd>` | A gate the verifier may run, alone or with paths after it; "
-        "end it with ' *' to permit each word after it; repeat it. |"
+        "end it with ' *' to permit each word after it, except a word that the shell can expand; repeat it. |"
     ) in text
     assert "| `-o, --out <out>` | " in text  # render
     assert "| `--skills-dir <skills-dir>` | Check that every preloaded skill exists here. |" in text  # validate

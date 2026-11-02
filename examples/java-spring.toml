@@ -21,7 +21,8 @@ gateExtraFlags = ["--info"]
 # that sends a GET unless -X names another method. The verifier guard denies
 # it with -X, and with a word after it that can be a subcommand: only
 # options, option values, numbers and paths (/health) are permitted. An
-# entry with a trailing " *" permits each word. The OpenCode map leaves it out.
+# entry with a trailing " *" permits each word, except a word that the shell
+# can expand. The OpenCode map leaves it out.
 getOnlyCommands = ["./scripts/api"]
 # The example sets both options to show them. The default is no language
 # rule and no flake reason.
