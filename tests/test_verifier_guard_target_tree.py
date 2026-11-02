@@ -80,7 +80,10 @@ class Trees:
         (self.worktree / "src").mkdir()
         assert (self.worktree / ".git").is_file(), "a worktree has a .git pointer file"
         self.copy = base / "x"
-        subprocess.run(["bash", "-c", f"cp -R {self.worktree} {self.copy} && rm -rf {self.copy}/.git"], check=True)
+        # Step 1 of the recipe: `cp -R` of the worktree, then the removal of its `.git` pointer file. The copy is made in
+        # this process, so the setup of each case starts no shell, `cp` or `rm` process (#229).
+        shutil.copytree(self.worktree, self.copy, symlinks=True)
+        (self.copy / ".git").unlink()
 
     def forms(self, path: Path) -> list[str]:
         """`path` as text without /private, with /private, and with $TMPDIR."""
@@ -268,7 +271,8 @@ def test_a_run_verifier_writes_its_verdict_from_its_copy_and_from_its_second_cop
     proof = scratch / "proof"
     make = f"cp -R {_without_private(copy)} {_without_private(proof)} && rm -rf {_without_private(proof)}/.git"
     assert _bash(trees, make, shell, copy).returncode == 0
-    subprocess.run(["bash", "-c", make], check=True)
+    shutil.copytree(copy, proof, symlinks=True)  # what the command `make` does, made in this process
+    shutil.rmtree(proof / ".git")
     verdict = _without_private(scratch / "verdict.json")
     printf = f"printf '%s\\n' '{{\"verdict\": \"ACCEPT\"}}' > {verdict}"
     for cwd in (copy, proof):

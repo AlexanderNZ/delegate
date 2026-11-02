@@ -1419,11 +1419,11 @@ def check_start(
     `delegate run --detach` does them before it starts the run process, so a run that cannot start gives its error on
     stderr and exits non-zero, as in the foreground.
     """
-    repo, state_dir = state_directory(repo, vcs, run_id)
+    repo, directories = _state_directories(repo, vcs)
     _roles(workflow, tiers, adapter.tier_column)
     try:
         # The lock of a run that started before #200 is in `<git common dir>/delegate`, so a run there counts too.
-        for directory in _state_directories(repo, vcs)[1]:
+        for directory in directories:
             check_free(directory, workflow.run_branch, run_id, break_stale=break_lock)
     except LockError as error:
         raise EngineError(str(error)) from None

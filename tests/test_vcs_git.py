@@ -18,6 +18,7 @@ from delegate.adapters.git import GitVersionControl
 from delegate.ports import vcs as port
 from delegate.ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError, VersionControl
 
+from . import git_processes
 from .support import commit_head, git, make_repo
 from .test_fsmonitor import alive, daemon_pid, why_no_daemon_can_start
 
@@ -112,6 +113,21 @@ def test_the_shared_data_directory_is_the_same_from_the_checkout_and_from_a_work
     assert from_checkout.is_absolute()
     assert from_checkout == from_worktree
     assert from_checkout.resolve() == (repo / ".git").resolve()
+
+
+def test_the_shared_data_directory_from_a_subdirectory_of_a_worktree_costs_one_git_process(tmp_path, vcs):
+    # Each process start is slow on a machine with endpoint security, and the engine asks for this directory many
+    # times in each run (#229).
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    (worktree / "sub").mkdir()
+    before = git_processes.all_started()
+
+    shared = vcs.shared_data_directory(worktree / "sub")
+
+    assert git_processes.all_started() - before == 1
+    assert shared == (repo / ".git").resolve()
 
 
 def test_the_repository_root_of_a_directory_outside_any_repository_is_an_error(tmp_path, vcs, monkeypatch):

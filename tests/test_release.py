@@ -1,10 +1,15 @@
 """`scripts/release.py`: the next version, the release notes, and the CHANGELOG and version edit of a release.
 
 The script sits outside the package source, so a Nix build that copies only the
-package skips these cases with a reason. Each case runs the script as a command
-against a real temporary git repository.
+package skips these cases with a reason. Each case calls `main(argv)` of the
+script in the test process against a real temporary git repository, so a case
+starts no Python process for the script (#229). One case runs the script as a
+command, for the command boundary.
 """
 
+import contextlib
+import importlib.util
+import io
 import subprocess
 import sys
 import tomllib
@@ -19,6 +24,8 @@ from .support import TEMPLATE_GIT, copy_of, git
 pytestmark = outside_the_package
 
 SCRIPT = ROOT / "scripts" / "release.py"
+# The name of the module of the script in this process. The script is outside the package, so no import finds it.
+SCRIPT_MODULE = "delegate_release_script"
 
 PYPROJECT = '[project]\nname = "demo"\nversion = "{version}"\n'
 CHANGELOG = """\
@@ -52,12 +59,20 @@ def commit(repo: Path, subject: str) -> str:
 
 
 def release(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run the script as a command on the repository."""
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), "--repo", str(repo), "--pyproject", "pyproject.toml", *args],
-        capture_output=True,
-        text=True,
-    )
+    """Call `main(argv)` of the script on the repository, and give its exit status and what it wrote, as a command does."""
+    if SCRIPT_MODULE not in sys.modules:
+        spec = importlib.util.spec_from_file_location(SCRIPT_MODULE, SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[SCRIPT_MODULE] = module
+        spec.loader.exec_module(module)
+    argv = ["--repo", str(repo), "--pyproject", "pyproject.toml", *args]
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = sys.modules[SCRIPT_MODULE].main(argv)
+        except SystemExit as stop:  # argparse exits for a usage error
+            code = stop.code if isinstance(stop.code, int) else 1
+    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
 
 def test_the_first_release_is_the_version_of_pyproject_unchanged_when_no_version_tag_exists(tmp_path):

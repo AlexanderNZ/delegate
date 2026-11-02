@@ -164,9 +164,8 @@ def _retire_worktree_extension(repo: Path, common: Path) -> None:
 
 def _rebase_in_progress(worktree: Path) -> bool:
     """Tell whether a rebase is in progress in the worktree. `git rebase --abort` fails when none is."""
-    return any(
-        (worktree / _git(worktree, "rev-parse", "--git-path", name)).exists() for name in ("rebase-merge", "rebase-apply")
-    )
+    paths = _git(worktree, "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply").splitlines()
+    return any((worktree / path).exists() for path in paths)
 
 
 class GitVersionControl:
@@ -176,8 +175,8 @@ class GitVersionControl:
         return Path(_git(path, "rev-parse", "--show-toplevel"))
 
     def shared_data_directory(self, path: Path) -> Path:
-        top = self.repository_root(path)
-        return (top / _git(top, "rev-parse", "--git-common-dir")).resolve()
+        # One git process: the engine asks for this directory many times in each run (#229).
+        return Path(_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
 
     def branch_exists(self, repo: Path, branch: str) -> bool:
         return _run(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
