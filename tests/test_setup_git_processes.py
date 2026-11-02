@@ -6,6 +6,11 @@ On a machine with endpoint security, each program start is slow. The module
 they hold the budget of the shared helpers.
 """
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from delegate.cli import delegate
 
 from . import git_processes
@@ -80,3 +85,37 @@ def test_the_scripted_adapter_starts_only_the_add_and_the_commit_of_its_work_in_
     assert (code, capsys.readouterr().err) == (0, "")
     assert git(repo, "show", "run/demo:feature.txt") == "feature\n"
     assert len(scripted.calls) == len(scripted.verifier_calls) == 1
+
+
+def test_a_process_that_the_test_code_starts_counts_once_in_the_count_of_all_processes(tmp_path):
+    before = git_processes.all_started()
+
+    subprocess.run(["true"], check=True)
+    os.system("true")
+
+    assert git_processes.all_started() - before == 2
+
+
+def test_a_git_process_that_code_outside_the_tests_starts_counts_in_all_processes_but_not_in_the_git_count(tmp_path):
+    git_before, all_before = git_processes.started(), git_processes.all_started()
+
+    with os.popen("git --version") as output:  # `os.popen` is in the `os` module, outside the tests
+        text = output.read()
+
+    assert text.startswith("git version ")
+    assert (git_processes.started() - git_before, git_processes.all_started() - all_before) == (0, 1)
+
+
+def test_the_summary_of_the_suite_gives_the_count_of_all_processes_and_of_the_git_processes_of_the_test_code():
+    # One case of this module that starts two processes, one of them `git`: `git init` and `git status`.
+    case = f"{Path(__file__).name}::test_the_count_holds_each_git_process_that_the_test_code_starts"
+    r = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", case],
+        cwd=Path(__file__).parent,
+        capture_output=True,
+        text=True,
+    )
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "processes that the tests start: 2 in 1 tests\n" in r.stdout
+    assert "git processes of the test code: 2 in 1 tests\n" in r.stdout

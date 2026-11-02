@@ -171,40 +171,45 @@ def no_host_settings(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-# The name of the count of `git` processes that the test code of one test starts (see `tests/git_processes.py`).
+# The names of the counts of one test: the processes that the test process starts, and the `git` processes that its
+# test code starts (see `tests/git_processes.py`).
+ALL_PROCESSES = "processes that the tests start"
 GIT_PROCESSES = "git processes of the test code"
 
-_first_count: int = 0
+_first_counts: tuple[int, int] = (0, 0)
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
-    """Note the count before the setup of the test, so the count of the test holds its fixtures too."""
-    global _first_count
-    _first_count = git_processes.started()
+    """Note the counts before the setup of the test, so the counts of the test hold its fixtures too."""
+    global _first_counts
+    _first_counts = (git_processes.all_started(), git_processes.started())
     yield
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Give the report of the teardown the count of `git` processes that the test code of the test started."""
+    """Give the report of the teardown the counts of the processes that the test started."""
     outcome = yield
     if call.when == "teardown":
-        outcome.get_result().user_properties.append((GIT_PROCESSES, git_processes.started() - _first_count))
+        properties = outcome.get_result().user_properties
+        properties.append((ALL_PROCESSES, git_processes.all_started() - _first_counts[0]))
+        properties.append((GIT_PROCESSES, git_processes.started() - _first_counts[1]))
 
 
 def pytest_terminal_summary(terminalreporter):
-    """Write the sum of the counts, also from each worker of `pytest -n`."""
-    counts = [
-        value
-        for reports in terminalreporter.stats.values()
-        for report in reports
-        if getattr(report, "when", None) == "teardown"
-        for name, value in getattr(report, "user_properties", ())
-        if name == GIT_PROCESSES
-    ]
-    if counts:
-        terminalreporter.write_line(f"{GIT_PROCESSES}: {sum(counts)} in {len(counts)} tests")
+    """Write the sum of each count, also from each worker of `pytest -n`."""
+    for count in (ALL_PROCESSES, GIT_PROCESSES):
+        values = [
+            value
+            for reports in terminalreporter.stats.values()
+            for report in reports
+            if getattr(report, "when", None) == "teardown"
+            for name, value in getattr(report, "user_properties", ())
+            if name == count
+        ]
+        if values:
+            terminalreporter.write_line(f"{count}: {sum(values)} in {len(values)} tests")
 
 
 @pytest.fixture
