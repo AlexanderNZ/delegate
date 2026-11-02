@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-02
+
 ### Consumer impact
 
 - Render each committed agent pair again with `agent-definitions render` (#238). The text of the rendered verifier and the deny messages of its guard changed.
