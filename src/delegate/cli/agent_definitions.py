@@ -1,4 +1,4 @@
-"""The `agent-definitions` command: render a declaration, validate rendered agent directories, or bootstrap a repository."""
+"""The `agent-definitions` command: render a declaration, print its schema, validate rendered agent directories, or bootstrap a repository."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..definitions import bootstrap
 from ..definitions.bootstrap import DEFAULT_SKILLS_ROOT
-from ..definitions.declaration import load_declaration
+from ..definitions.declaration import declaration_schema, load_declaration
 from ..definitions.render import guard_sets, render
 from ..definitions.validate import validate_set
 from ..shared.tiers import Tiers, load_tiers
@@ -90,6 +90,11 @@ def cmd_render(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_schema(args: argparse.Namespace) -> int:
+    print(json.dumps(declaration_schema(), indent=2))
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     tiers = tiers_from_args(args)
     cc = Path(args.claude_code) if args.claude_code else None
@@ -166,6 +171,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_opencode_override_flags(r)
     r.set_defaults(fn=cmd_render)
+    s = sub.add_parser(
+        "schema", help="print the keys of a declaration as JSON: the type, the requirement, the default and the first version of each"
+    )
+    s.set_defaults(fn=cmd_schema)
     v = sub.add_parser("validate", help="validate rendered agent directories")
     v.add_argument("rendered", nargs="?", help="a root with claude-code/ and opencode/ subdirectories")
     v.add_argument("--claude-code", help="a directory of rendered Claude Code agents to validate")

@@ -43,6 +43,8 @@ agent-definitions validate /tmp/agents --skills-dir skills
 
 The shell text of the verifier guard is no interface: its form changes between releases. To read the gate set, the free gates and the read set of each verifier, run `agent-definitions render DECL --sets-json`. It writes no file and prints JSON with a `version` field. The fields are in [the reference](../../docs/reference/commands.md#the-guard-sets-as-json).
 
+To read the keys of a declaration, run `agent-definitions schema`. It prints JSON with the type, the requirement, the default and the first version of each key ([the reference](../../docs/reference/commands.md#delegate-schema)). Check a consumer mirror of the kit against `schema` and `render --sets-json`, not against the shell text of a rendered file.
+
 `render` and `validate` take two more optional flags, both repeatable, that override the OpenCode column of the tier table ([ADR 0003](../../docs/adr/0003-opencode-model-override.md)).
 
 ```bash

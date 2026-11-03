@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..cli import agent_definitions, brief, clean, docs_command, pause, run_command, status, stop, watch
-from ..definitions import render, validate
+from ..definitions import declaration, render, validate
 from ..run import watch as run_watch
 from . import figures
 
@@ -172,6 +172,17 @@ def finding_code_table() -> str:
     return "\n".join(rows)
 
 
+def declaration_keys_table() -> str:
+    """The table of the keys of an agent in a declaration, from the schema that `agent-definitions schema` prints."""
+    rows = ["| Key | Type | Required | Default | Values | Since |", "|---|---|---|---|---|---|"]
+    for name, key in declaration.declaration_schema()["keys"].items():
+        kind = f"array of {key['items']}" if key["type"] == "array" else key["type"]
+        default = "none" if key["required"] else f"`{json.dumps(key['default'])}`"
+        values = ", ".join(f"`{v}`" for v in key["values"]) if "values" in key else ""
+        rows.append(f"| `{name}` | {kind} | {'yes' if key['required'] else 'no'} | {default} | {values} | {key['since']} |")
+    return "\n".join(rows)
+
+
 def generated_sections_table() -> str:
     """The table of every generated section: its page, its id, and what the code builds it from."""
     rows = ["| Page | Section | Built from |", "|---|---|---|"]
@@ -213,6 +224,7 @@ SECTIONS: tuple[Section, ...] = (
         COMMANDS_PAGE, "render-options", "The `render` parser of `agent-definitions`.",
         lambda: options_table(_subparser(agent_definitions.build_parser(), "render")),
     ),
+    Section(COMMANDS_PAGE, "declaration-keys", "The declaration schema of `agent-definitions schema`.", declaration_keys_table),
     Section(
         COMMANDS_PAGE, "validate-options", "The `validate` parser of `agent-definitions`.",
         lambda: options_table(_subparser(agent_definitions.build_parser(), "validate")),

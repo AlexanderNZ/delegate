@@ -26,6 +26,7 @@ from .title import Title
 # `delegate --help` shows for each.
 AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
     "render": "render a declaration into <out>/claude-code and <out>/opencode",
+    "schema": "print the keys of a declaration as JSON",
     "validate": "validate rendered agent directories",
     "bootstrap": "write a repository's context skill, its declaration, and its rendered pair",
 }

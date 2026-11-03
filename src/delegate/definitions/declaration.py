@@ -15,6 +15,70 @@ KNOWN_KEYS = {
     "gateExtraFlags",
 }
 
+#: The version of the format of `declaration_schema`. Increase it when a field
+#: changes its meaning or goes away. A new field does not change the version.
+SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class DeclarationKey:
+    """One key of an agent in a declaration, as data for a consumer (#172).
+
+    `type` is "string", "integer", "boolean" or "array"; an array names the
+    type of its entries in `items`. `values` lists the only values that a
+    string key accepts, when the parser limits them. `since` is the version of
+    the kit that added the key. A key with no value in the declaration has
+    `default`; a required key has none (None).
+    """
+
+    name: str
+    type: str
+    default: object
+    since: str
+    required: bool = False
+    items: str | None = None
+    values: tuple[str, ...] | None = None
+
+
+#: Each key of KNOWN_KEYS, in the order of the documentation. `tier` and
+#: `effort` are checked against the tier table when the agent is rendered, not
+#: by the parser, so they list no values here.
+SCHEMA: tuple[DeclarationKey, ...] = (
+    DeclarationKey("description", "string", None, "0.1.0", required=True),
+    DeclarationKey("tier", "string", "standard", "0.1.0"),
+    DeclarationKey("skills", "array", [], "0.1.0", items="string"),
+    DeclarationKey("prompt", "string", "", "0.1.0"),
+    DeclarationKey("references", "array", [], "0.1.0", items="string"),
+    DeclarationKey("maxTurns", "integer", None, "0.1.0"),
+    DeclarationKey("effort", "string", None, "0.1.0"),
+    DeclarationKey("pair", "boolean", True, "0.1.0"),
+    DeclarationKey("readOnly", "boolean", False, "0.1.0"),
+    DeclarationKey("gateCommands", "array", [], "0.1.0", items="string"),
+    DeclarationKey("getOnlyCommands", "array", [], "0.1.0", items="string"),
+    DeclarationKey("outputLanguage", "string", "none", "0.1.0", values=("none", "ste")),
+    DeclarationKey("trackedFileBuild", "boolean", False, "0.1.0"),
+    DeclarationKey("contextLoad", "string", "blocks", "1.8.0", values=("blocks", "read")),
+    DeclarationKey("gateExtraFlags", "array", [], "1.10.0", items="string"),
+)
+
+
+def declaration_schema() -> dict:
+    """The declaration schema as data: the key of each agent entry, with its type, requirement, default and first version (#172).
+
+    Each key of the result is the name of a key of an agent in a declaration.
+    A field that does not apply to a key is absent: `items` for a key that is
+    not an array, `values` for a key with no fixed values.
+    """
+    keys: dict[str, dict] = {}
+    for key in SCHEMA:
+        entry: dict = {"type": key.type, "required": key.required, "default": key.default, "since": key.since}
+        if key.items is not None:
+            entry["items"] = key.items
+        if key.values is not None:
+            entry["values"] = list(key.values)
+        keys[key.name] = entry
+    return {"version": SCHEMA_VERSION, "keys": keys}
+
 #: The languages an agent can be told to write its report in. "none" adds no
 #: language rule. "ste" adds the ASD-STE100 Simplified Technical English rule.
 OUTPUT_LANGUAGES = ("none", "ste")

@@ -100,6 +100,7 @@ The test suite holds one drift test for each generated section, one for the abbr
 | `docs/reference/status-and-watch.md` | `watch-exit-codes` | The exit codes of `delegate watch`. |
 | `docs/reference/commands.md` | `agent-definitions-options` | The options of `agent-definitions` before its subcommand. |
 | `docs/reference/commands.md` | `render-options` | The `render` parser of `agent-definitions`. |
+| `docs/reference/commands.md` | `declaration-keys` | The declaration schema of `agent-definitions schema`. |
 | `docs/reference/commands.md` | `validate-options` | The `validate` parser of `agent-definitions`. |
 | `docs/reference/commands.md` | `bootstrap-options` | The `bootstrap` parser of `agent-definitions`. |
 | `docs/reference/commands.md` | `brief-full-options` | The `full` parser of `verifier-brief`. |
