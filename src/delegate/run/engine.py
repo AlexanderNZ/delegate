@@ -502,14 +502,15 @@ def _accepted_unrecorded(events: list[dict[str, object]]) -> list[str]:
 
 
 def _check_run_branch_at_resume(
-    journal: Journal, events: list[dict[str, object]], vcs: VersionControl, repo: Path, run_branch: str, built: list[str],
+    journal: Journal | None, events: list[dict[str, object]], vcs: VersionControl, repo: Path, run_branch: str, built: list[str],
     failed: list[str], skipped: dict[str, str],
 ) -> None:
     """Refuse to resume a run whose run branch is not where the journal says (#186).
 
     The tip is also right when it is a commit that a verifier accepted and that the engine moved the run branch to just
     before it stopped, with the new tip holding the tip of the journal. On a difference the engine writes
-    `run-branch-moved` and `run-end` with the result `failed`, and raises EngineError.
+    `run-branch-moved` and `run-end` with the result `failed`, and raises EngineError. With no `journal` the check writes
+    nothing: `check_start` makes it before `delegate run --detach` starts the run process (#240).
     """
     expected = _expected_tip(events)
     if expected is None:
@@ -517,8 +518,9 @@ def _check_run_branch_at_resume(
     found = _tip(vcs, repo, run_branch)
     if found == expected or (found in _accepted_unrecorded(events) and _holds(vcs, repo, expected, found)):
         return
-    journal.append("run-branch-moved", ticket=None, run_branch=run_branch, expected=expected, found=found)
-    journal.append("run-end", result=FAILED, built=built, failed=failed, skipped=list(skipped))
+    if journal is not None:
+        journal.append("run-branch-moved", ticket=None, run_branch=run_branch, expected=expected, found=found)
+        journal.append("run-end", result=FAILED, built=built, failed=failed, skipped=list(skipped))
     raise EngineError(f"run cannot be resumed: {_moved_text(run_branch, expected, found)}; a halted run cannot be resumed: start a new run")
 
 
@@ -1416,6 +1418,7 @@ def _check_chain_start(
 def check_start(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *,
     resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (), retry: str | None = None,
+    coordinator_commit: str | None = None, detach: bool = False,
 ) -> None:
     """The checks of a run that need no agent: the tier of each role, the lock, and the branches or the plan. Create nothing.
 
@@ -1425,6 +1428,10 @@ def check_start(
     tickets in `reviewed`, must accept the workflow. `run_workflow` does these checks before it takes the lock.
     `delegate run --detach` does them before it starts the run process, so a run that cannot start gives its error on
     stderr and exits non-zero, as in the foreground.
+
+    With `detach`, a resume also makes each other check that refuses a resume, a retry or a plan change (see `_resume_checks`):
+    the run branch, and the retry of `retry` with its `coordinator_commit`. They change nothing: a refusal of the run process
+    would be only in its log, and the journal would not show it (#240). The foreground run makes these checks after the lock.
     """
     repo, directories = _state_directories(repo, vcs)
     _roles(workflow, tiers, adapter.tier_column)
@@ -1436,6 +1443,13 @@ def check_start(
         raise EngineError(str(error)) from None
     if resume:
         _refuse_plan_change(review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed, retry), workflow_path, run_id)
+        if detach:
+            _, state_dir = state_directory(repo, vcs, run_id)
+            try:
+                events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
+            except JournalError as error:
+                raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
+            _resume_checks(workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None)
     else:
         _check_branches(workflow, repo, vcs)
 
@@ -1526,6 +1540,48 @@ def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
     return path
 
 
+def _resume_checks(
+    workflow: Workflow, workflow_path: Path, order: list[Ticket], vcs: VersionControl, repo: Path, run_id: str,
+    events: list[dict[str, object]], reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None,
+    journal: Journal | None,
+) -> tuple[PlanReview, _Progress, str, _RetryPlan | None]:
+    """The checks that refuse a resume, a retry or a plan change, in the order of the engine. Return what they find.
+
+    The result is the review of the plan, the progress of the run, the base of the run, and the plan of the retry (None
+    with no `retry`). Raise EngineError when a check refuses. With a `journal`, a run branch that is not where the journal
+    says is also written to it (see `_check_run_branch_at_resume`). With `journal` None the checks change nothing:
+    `check_start` makes them before `delegate run --detach` starts the run process, so a refusal is not only in its log (#240).
+    """
+    moved = [e for e in events if e["event"] == "run-branch-moved"]
+    if moved:
+        raise EngineError(
+            f"run {run_id!r} cannot be resumed: {_moved_text(workflow.run_branch, str(moved[-1]['expected']), str(moved[-1]['found']))}; "
+            "a halted run cannot be resumed: start a new run"
+        )
+    with _vcs_errors():
+        review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry)
+    # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
+    _refuse_plan_change(review, workflow_path, run_id)
+    progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
+    with _vcs_errors():
+        run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
+    if not run_branch_exists:
+        raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
+    run_base = _run_base(vcs, repo, workflow, events)
+    _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
+    # A step that cannot be retried is refused before the journal changes.
+    restart = retry is not None and review.check is not None and retry in review.check.restarted
+    plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None) if retry is not None else None
+    if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
+        # A ticket of a later stack that the stop failed does not count: the retried ticket starts from the chain before it (#209).
+        before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
+        chain = [*progress.built, *(t for t in plan.revive if t in before)]
+        _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
+    if plan is not None and coordinator_commit is not None:
+        plan = replace(plan, coordinator=_coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit))
+    return review, progress, run_base, plan
+
+
 def _execute(
     workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
@@ -1553,33 +1609,9 @@ def _execute(
         progress = _Progress()
     else:
         journal, events = _journal_events(state_dir, run_id)
-        moved = [e for e in events if e["event"] == "run-branch-moved"]
-        if moved:
-            raise EngineError(
-                f"run {run_id!r} cannot be resumed: {_moved_text(workflow.run_branch, str(moved[-1]['expected']), str(moved[-1]['found']))}; "
-                "a halted run cannot be resumed: start a new run"
-            )
-        with _vcs_errors():
-            review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry)
-        # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
-        _refuse_plan_change(review, workflow_path, run_id)
-        progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
-        with _vcs_errors():
-            run_branch_exists = vcs.branch_exists(repo, workflow.run_branch)
-        if not run_branch_exists:
-            raise EngineError(f"run branch {workflow.run_branch!r} of run {run_id!r} is not a branch of the repository {repo}")
-        run_base = _run_base(vcs, repo, workflow, events)
-        _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
-        # A step that cannot be retried is refused before the journal changes.
-        restart = retry is not None and review.check is not None and retry in review.check.restarted
-        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None) if retry is not None else None
-        if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
-            # A ticket of a later stack that the stop failed does not count: the retried ticket starts from the chain before it (#209).
-            before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
-            chain = [*progress.built, *(t for t in plan.revive if t in before)]
-            _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
-        if plan is not None and coordinator_commit is not None:
-            plan = replace(plan, coordinator=_coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit))
+        review, progress, run_base, plan = _resume_checks(
+            workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal
+        )
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:

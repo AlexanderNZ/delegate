@@ -167,3 +167,27 @@ def test_detach_and_dry_run_cannot_go_together(tmp_path, capsys):
     assert stop.value.code == 2
     assert "--detach and --dry-run cannot go together" in capsys.readouterr().err
     assert not state_dir(repo).exists()
+
+
+def test_detach_with_a_retry_that_the_engine_refuses_exits_1_with_the_error_of_the_foreground_and_starts_no_process(
+    tmp_path, monkeypatch, capsys,
+):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    repo = make_repo(tmp_path, CLAUDE_CODE)  # assure mode: a step whose specialist gave no report that says committed cannot be retried
+    write_project_agents(repo)
+    _, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
+    run_id, log = printed(out)
+    wait_for_ends(log, 1)  # the stand-in does no work, so the step of ticket a fails, and the run ends
+    calls_before, log_before = len(fake.calls()), log.read_text()
+    events_before = read_journal_file(repo, run_id)
+
+    code, out, err = run_main(capsys, "--resume", run_id, "--retry", "a", "--repo", str(repo), "--detach")
+    foreground = run_main(capsys, "--resume", run_id, "--retry", "a", "--repo", str(repo))
+
+    assert (code, out) == (1, "")
+    assert "cannot be retried" in err and "gave no valid report that says committed" in err and err.startswith("delegate run: ")
+    assert (foreground[0], foreground[2]) == (1, err), "the detached start and the run in the foreground give different errors"
+    time.sleep(1.0)  # a run process that started would write its output to the log by now
+    assert log.read_text() == log_before
+    assert read_journal_file(repo, run_id) == events_before
+    assert len(fake.calls()) == calls_before

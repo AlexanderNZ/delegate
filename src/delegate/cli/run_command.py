@@ -378,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
                 check_start(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
                     break_lock=args.break_lock, reviewed=reviewed, retry=args.retry,
+                    coordinator_commit=args.coordinator_commit, detach=True,
                 )
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
