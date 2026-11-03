@@ -21,9 +21,10 @@ ECONOMY: str = "economy"
 MODES: tuple[str, ...] = (ASSURE, ECONOMY)
 
 # The values of the workflow field `ticket-start`: the branch that each ticket branch of `assure` mode starts from.
-# `base-branch` is the default: a ticket branch starts from the base of the run, the commit of the base branch at
-# `run-start`. With `run-branch`, a ticket branch starts from the tip of the run branch at the start of its step, so it
-# holds the accepted work of the tickets before it. A ticket with `blocked-by` starts from the run branch with both values.
+# `run-branch` is the default of `assure` mode: a ticket branch starts from the tip of the run branch at the start of its
+# step, so it holds the accepted work of the tickets before it, and its rebase keeps the commit: one gate run for each
+# ticket. With `base-branch`, a ticket branch starts from the base of the run, the commit of the base branch at
+# `run-start`. A ticket with `blocked-by` starts from the run branch with both values.
 START_BASE_BRANCH: str = "base-branch"
 START_RUN_BRANCH: str = "run-branch"
 TICKET_STARTS: tuple[str, ...] = (START_BASE_BRANCH, START_RUN_BRANCH)

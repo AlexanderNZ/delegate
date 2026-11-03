@@ -67,7 +67,7 @@ def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fiel
 
 @outside_the_package
 def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_run_with_each_of_their_fields(tmp_path, capsys, monkeypatch):
-    from .test_run_multi import HEAD, ticket
+    from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
 
     for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
         monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
@@ -77,7 +77,7 @@ def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_
     )
     adapters.register("scripted", scripted)
     try:
-        repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c") + ticket("d"))
+        repo = make_repo(tmp_path, BASE_BRANCH_START + HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c") + ticket("d"))
         delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
     finally:
         adapters.unregister("scripted")

@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Changed
+
+- In `assure` mode, the default of the workflow field `ticket-start` is now `run-branch` (#244). Before, it was `base-branch`, and the second ticket of a run, with no `blocked-by`, ran its gates two times: once after the specialist and once after the rebase onto the run branch, because the accepted work of the first ticket changed the commit. Now each ticket branch starts from the tip of the run branch at its step start, the rebase keeps the commit, the engine writes `gate-skip`, and each ticket runs its gates once, on the exact tree that lands. A workflow that needs each specialist to start from the base of the run sets `ticket-start = "base-branch"`. `economy` mode keeps its chain. See `docs/reference/workflow.md` and `docs/reference/run.md`.
+
 ### Fixed
 
 - `delegate run --resume <id> --retry <ticket> --detach` exited 0 when the run process refused the retry (#240). The refusal was only in `run.log`, and the journal had no event, so a coordinator that trusted the exit code thought that the retry ran, and `delegate status` and `delegate watch` showed the old end of the run. Now `--detach` makes each check that refuses a resume, a retry or a plan change before it starts the run process: the check of a run that ended, the check of the run branch, the checks of `--retry` and the checks of `--coordinator-commit`, with the checks that it made before. A refusal prints the same error on stderr as the foreground command, exits 1, and starts no process. The run process starts only after the checks pass. See "The detached run" in `docs/reference/run.md`.

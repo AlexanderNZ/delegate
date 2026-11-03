@@ -16,7 +16,7 @@ from pathlib import Path
 from ..ports.harness import McpServer
 from ..shared.tiers import Tiers
 from . import domain
-from .domain import ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
+from .domain import ASSURE, ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
 from .output import gate_name
 
 # The built-in harness adapters. A workflow can name these, and any adapter
@@ -540,7 +540,9 @@ def load_workflow(path: Path, tiers: Tiers, registered_adapters: Iterable[str] =
             reader.problems.append(f"{field}: {branch!r} is not a branch name that git takes: it {problem}")
     if mode is not None and mode not in MODES:
         reader.problems.append(f"mode: {mode!r} is not a mode; known modes: {', '.join(MODES)}")
-    ticket_start = reader.string(data, "ticket-start", "ticket-start") if "ticket-start" in data else START_BASE_BRANCH
+    # The default is `run-branch` in `assure` mode, so each ticket runs its gates once (#244). `economy` mode has a chain.
+    default_start = START_RUN_BRANCH if mode == ASSURE else START_BASE_BRANCH
+    ticket_start = reader.string(data, "ticket-start", "ticket-start") if "ticket-start" in data else default_start
     if ticket_start is not None and ticket_start not in TICKET_STARTS:
         reader.problems.append(
             f"ticket-start: {ticket_start!r} is not a ticket start; known values: {', '.join(TICKET_STARTS)}"

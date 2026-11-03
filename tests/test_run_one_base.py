@@ -23,7 +23,7 @@ from delegate.cli import delegate
 from .support import (
     ScriptedAdapter, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree,
 )
-from .test_run_multi import HEAD, ticket
+from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
 
 # The subject of the commits that the scripted specialist makes.
 SPECIALIST_WORK = "scripted work (python-specialist)"
@@ -94,7 +94,7 @@ def test_the_journal_records_the_base_of_the_run_at_run_start(tmp_path, capsys, 
 def test_a_ticket_cut_after_the_base_branch_moved_starts_from_the_base_of_the_run_and_its_verifier_diff_holds_only_its_commits(
     tmp_path, capsys, scripted
 ):
-    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    repo = make_repo(tmp_path, BASE_BRANCH_START + HEAD + ticket("a") + ticket("b"))
     run_base = rev(repo, "main")
     scripted.on_specialist = land_during("a", repo, "landed.txt")
 
@@ -114,7 +114,7 @@ def test_a_ticket_cut_after_the_base_branch_moved_starts_from_the_base_of_the_ru
 
 
 def test_the_rebase_onto_the_run_branch_copies_no_commit_of_the_base_branch_onto_the_ticket_branch(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    repo = make_repo(tmp_path, BASE_BRANCH_START + HEAD + ticket("a") + ticket("b"))
     run_base = rev(repo, "main")
     # LICENSE is a hotspot of the stack. A copy of the commit that lands it would be a hotspot finding of ticket b.
     scripted.on_specialist = land_during("a", repo, "LICENSE")
@@ -176,7 +176,7 @@ def test_a_resume_after_the_rebase_checks_the_hotspots_on_the_files_of_the_ticke
     assert "LICENSE" not in tree(repo, "run/demo")
 
 
-THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
+THREE = BASE_BRANCH_START + HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
 
 
 def test_a_resume_starts_a_ticket_from_the_base_of_the_run_and_not_from_the_tip_of_the_base_branch(tmp_path, capsys, scripted):

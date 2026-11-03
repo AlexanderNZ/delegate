@@ -3,8 +3,10 @@
 With `ticket-start = "run-branch"`, each ticket branch starts from the tip of
 the run branch at the start of its step, so a ticket sees the accepted work of
 the tickets before it. Two tickets that change the same file then do not
-conflict at the rebase onto the run branch. Without the field, a ticket branch
-starts from the base of the run: the commit of the base branch at `run-start`.
+conflict at the rebase onto the run branch. Without the field, `assure` mode
+takes `run-branch`, so each ticket runs its gates once (issue #244). With
+`ticket-start = "base-branch"`, a ticket branch starts from the base of the run:
+the commit of the base branch at `run-start`.
 A ticket with `blocked-by` starts from the run branch with every value of the
 field, so it holds the accepted commits of its blockers (issue #91).
 
@@ -97,11 +99,10 @@ def test_a_ticket_with_blocked_by_starts_from_the_run_branch_after_its_blockers_
     assert git(repo, "show", "run/demo:shared.txt") == "from a\nfrom b\n"
 
 
-@pytest.mark.parametrize("ticket_start", [None, "base-branch"], ids=["no-ticket-start", "ticket-start-base-branch"])
-def test_a_ticket_with_no_blocked_by_starts_from_the_base_of_the_run_and_the_same_file_conflicts_at_the_rebase(
-    tmp_path, capsys, scripted, ticket_start
+def test_with_ticket_start_base_branch_a_ticket_with_no_blocked_by_starts_from_the_base_of_the_run_and_the_same_file_conflicts_at_the_rebase(
+    tmp_path, capsys, scripted
 ):
-    repo = make_repo(tmp_path, workflow(ticket_start, blocked=False))
+    repo = make_repo(tmp_path, workflow("base-branch", blocked=False))
     base_tip = git(repo, "rev-parse", "main").strip()
 
     code, out, err = run(repo, capsys)
@@ -116,8 +117,11 @@ def test_a_ticket_with_no_blocked_by_starts_from_the_base_of_the_run_and_the_sam
     assert git(repo, "show", "run/demo:shared.txt") == "from a\n"
 
 
-def test_with_ticket_start_run_branch_a_ticket_with_no_blocked_by_starts_from_the_run_branch(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path, workflow("run-branch", blocked=False))
+@pytest.mark.parametrize("ticket_start", [None, "run-branch"], ids=["no-ticket-start", "ticket-start-run-branch"])
+def test_in_assure_mode_a_ticket_with_no_blocked_by_starts_from_the_run_branch_by_default_and_with_run_branch(
+    tmp_path, capsys, scripted, ticket_start
+):
+    repo = make_repo(tmp_path, workflow(ticket_start, blocked=False))
 
     code, out, err = run(repo, capsys)
 
@@ -157,8 +161,19 @@ def test_the_dry_run_names_the_run_branch_as_the_start_of_each_ticket(tmp_path, 
     assert "each ticket starts from the run branch run/demo" in out.splitlines()
 
 
-def test_the_dry_run_of_a_workflow_without_ticket_start_does_not_name_a_ticket_start(tmp_path, capsys, scripted):
+def test_the_dry_run_of_an_assure_workflow_without_ticket_start_names_the_run_branch_as_the_default(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, workflow())
+
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+
+    out, err = capsys.readouterr()
+    assert (code, err) == (0, "")
+    assert "each ticket starts from the run branch run/demo" in out.splitlines()
+
+
+@pytest.mark.parametrize("mode, ticket_start", [("assure", "base-branch"), ("economy", None)])
+def test_the_dry_run_does_not_name_a_ticket_start_for_base_branch_or_for_economy_mode(tmp_path, capsys, scripted, mode, ticket_start):
+    repo = make_repo(tmp_path, workflow(ticket_start, mode=mode))
 
     code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
 

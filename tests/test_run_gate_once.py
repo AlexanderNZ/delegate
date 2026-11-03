@@ -74,10 +74,28 @@ def test_a_rebase_that_keeps_the_commit_runs_each_gate_once_and_the_journal_reco
     assert git(repo, "rev-parse", "run/demo").strip() == commit
 
 
-def test_a_rebase_that_changes_the_commit_runs_the_gates_again(tmp_path, scripted):
-    # Ticket b has no blocker, so it starts from the base of the run. The rebase puts the accepted work of ticket a
-    # under it, so its commit changes.
+def test_two_tickets_with_no_ticket_start_run_each_gate_once_and_the_rebase_of_the_second_writes_gate_skip(tmp_path, scripted):
+    # In assure mode the default `ticket-start` is `run-branch`: ticket b starts from the run branch with the accepted
+    # work of ticket a, so its rebase keeps the commit.
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    gates = SpyGates()
+
+    result = start_run(repo, scripted, gates)
+
+    assert result.ok
+    assert gates.calls == [(GATE, "a"), (GATE, "b")]
+    events = read_journal_file(repo, result.run_id)
+    mine = of_ticket(events, "b")
+    rebase = next(e for e in mine if e["event"] == "rebase")
+    assert rebase["from_commit"] == rebase["to_commit"]
+    (skip,) = [e for e in mine if e["event"] == "gate-skip"]
+    assert (skip["phase"], skip["command"], skip["commit"]) == ("rebase", GATE, rebase["to_commit"])
+
+
+def test_a_rebase_that_changes_the_commit_runs_the_gates_again(tmp_path, scripted):
+    # With `ticket-start = "base-branch"`, ticket b has no blocker, so it starts from the base of the run. The rebase
+    # puts the accepted work of ticket a under it, so its commit changes.
+    repo = make_repo(tmp_path, 'ticket-start = "base-branch"\n' + HEAD + ticket("a") + ticket("b"))
     gates = SpyGates()
 
     result = start_run(repo, scripted, gates)

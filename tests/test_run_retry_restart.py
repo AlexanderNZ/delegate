@@ -73,7 +73,8 @@ def test_an_assure_retry_with_a_new_text_spawns_a_new_specialist_on_a_new_branch
         "b", "specialist", 0, True, "run/demo-b-failed-1",
     )
     starts = [e for e in events if e["event"] == "step-start" and e["ticket"] == "b"]
-    assert [e["base_commit"] for e in starts][1] == git(repo, "rev-parse", "main").strip()
+    # The new step starts from the base of the step, as the first `step-start` took it: the run branch after ticket a.
+    assert starts[1]["base_commit"] == starts[0]["base_commit"] == git(repo, "rev-parse", "run/demo-a").strip()
     assert events.index(retry) < events.index(starts[1])
     assert [e["state"] for e in events if e["event"] == "step-end" and e["ticket"] == "b"] == ["failed", "built"]
     assert "b built again" in git(repo, "show", "run/demo:b.txt")
