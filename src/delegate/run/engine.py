@@ -728,6 +728,8 @@ class _Progress:
     failed: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
+    # The skipped tickets that the skip rule skipped: the newest `skip` of each names a blocker that was not built.
+    blocked: set[str] = field(default_factory=set)
     open_ticket: str | None = None
     events: list[dict[str, object]] = field(default_factory=list)
 
@@ -768,6 +770,11 @@ def restore_progress(events: list[dict[str, object]], run_id: str, retrying: boo
                 started = None
         elif kind == "skip":
             progress.skipped[ticket] = str(event.get("reason") or "the journal gives no reason")
+            # A ticket that the run did not reach has no blockers in its `skip`.
+            if event.get("blockers"):
+                progress.blocked.add(ticket)
+            else:
+                progress.blocked.discard(ticket)
     progress.open_ticket = started
     return progress
 
@@ -1614,6 +1621,9 @@ def _execute(
             # The skip rule applies again to each ticket that the failed step made the engine skip.
             for dependant in domain.skipped_because_of(plan.ticket, [(t.id, t.blocked_by) for t in order], skipped):
                 del skipped[dependant]
+    # At each resume the skip rule applies again to each ticket that it skipped, with the blockers of now (#245). A
+    # ticket whose blockers are now built is not skipped, and its step runs. Another gets a new `skip` if its reason changed.
+    before = {blocked: skipped.pop(blocked) for blocked in progress.blocked if blocked in skipped}
     complete = {*built, *failed, *skipped}
     ended_early = False
     paused: str | None = None
@@ -1624,7 +1634,8 @@ def _execute(
         skip = domain.skip_reason(ticket.blocked_by, built, failed)
         if skip:
             skipped[ticket.id] = skip
-            journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
+            if before.get(ticket.id) != skip:
+                journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
         prior = _ticket_events(progress.events, ticket.id) if ticket.id == progress.open_ticket else None
         start = _start_ref(workflow, order, built, ticket, run_base, vcs, repo)

@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- A ticket that a retry made ready stays ready at a later resume (#245). In `assure` mode, a retry removed the dependants of the retried ticket from the skipped tickets in memory only, and no event of the journal recorded it. A retry that stopped before the step of such a dependant, for example at a pause, left the old `skip` in the journal. Each later resume read that `skip` again, so the dependant stayed skipped with the reason "which was skipped", also after its blocker was built. A plain resume was refused because the run had ended, and `--retry` of the dependant was refused because it was skipped. Now each resume applies the skip rule again to each ticket that the rule skipped. A ticket whose blockers are now built is no longer skipped, and its step runs. A ticket with a blocker that is still not built stays skipped, with the reason of the blockers at that time. See "The skip rule" in `docs/reference/run.md`.
+
 ## [1.16.1] - 2026-11-02
 
 ### Fixed
