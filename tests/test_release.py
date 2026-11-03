@@ -16,6 +16,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 from . import test_changelog
 from .pages import ROOT, outside_the_package
@@ -485,3 +486,22 @@ def test_every_test_that_reads_the_changelog_passes_on_the_tree_that_apply_makes
     tests = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist", *readers], cwd=tree, capture_output=True, text=True)
 
     assert tests.returncode == 0, tests.stdout[-3000:]
+
+
+def release_steps() -> list[dict]:
+    """The steps of the release job of `.github/workflows/release.yml`, in order."""
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text())["jobs"]["release"]["steps"]
+
+
+def test_the_release_workflow_runs_the_suite_after_apply_and_before_each_step_that_commits_tags_or_pushes_and_no_step_before_the_push_may_fail_and_go_on():
+    # The release commit gets no CI run of its own (#233), so the suite step is its only test run. A later change
+    # that moves the suite before `apply`, or past the push, or lets a step fail and go on, must fail this case (#242).
+    steps = release_steps()
+    runs = [step.get("run", "") for step in steps]
+    apply = [i for i, run in enumerate(runs) if "release.py apply" in run]
+    suite = [i for i, run in enumerate(runs) if "pytest" in run]
+    writes = [i for i, run in enumerate(runs) if any(word in run for word in ("git commit", "git tag", "git push", "gh release"))]
+
+    assert len(apply) == 1 and len(suite) == 1 and writes, (apply, suite, writes)
+    assert apply[0] < suite[0] < min(writes), (apply, suite, writes)
+    assert [step.get("name") for step in steps[: min(writes)] if step.get("continue-on-error")] == []
