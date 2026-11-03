@@ -60,7 +60,7 @@ def make_repo(
     if "web" in stacks:
         text = text.replace(
             "[[tickets]]",
-            f'[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nprepare = ["cp -R {repo}/.claude ."]\nhotspots = ["LICENSE"]\n\n[[tickets]]',
+            f'[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nprepare = ["cp -R {repo}/.claude ."]\nhotspots = ["LICENSE"]\ngate-timeout = 600\nagent-timeout = 600\n\n[[tickets]]',
         )
     text = text.replace('mode = "assure"', f'mode = "{mode}"')
     (repo / "workflow.toml").write_text(text + (SECOND_TICKET.replace('"python"', f'"{second_stack}"') if second_ticket else ""))
@@ -154,7 +154,7 @@ def make_repo(
     if "web" in stacks:
         text = text.replace(
             "[[tickets]]",
-            f'[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nprepare = ["cp -R {repo}/.claude ."]\nhotspots = ["LICENSE"]\n\n[[tickets]]',
+            f'[stacks.web]\nspecialist = "web-specialist"\nverifier = "web-verifier"\ngates = ["test -f feature.txt"]\nprepare = ["cp -R {repo}/.claude ."]\nhotspots = ["LICENSE"]\ngate-timeout = 600\nagent-timeout = 600\n\n[[tickets]]',
         )
     text = text.replace('mode = "assure"', f'mode = "{mode}"')
     (repo / "workflow.toml").write_text(text + (SECOND_TICKET.replace('"python"', f'"{second_stack}"') if second_ticket else ""))

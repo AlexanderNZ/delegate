@@ -142,43 +142,50 @@ def dry_run(repo, capsys) -> tuple[int, str, str]:
     return code, captured.out, captured.err
 
 
+def gate_names_line(out: str) -> str:
+    """The line of the check `gate-names` in the section `quality check` of the dry run (#247)."""
+    (line,) = [line for line in out.splitlines() if line.startswith(("ok gate-names:", "warn gate-names:"))]
+    return line
+
+
 def test_the_dry_run_warns_about_two_gates_with_the_same_short_name_and_exits_0(tmp_path, capsys):
     repo = make_repo(tmp_path, dry_run_workflow('["cd a && npx vitest run", "cd b && npx vitest run --project unit"]'))
 
-    code, _, err = dry_run(repo, capsys)
+    code, out, err = dry_run(repo, capsys)
 
-    assert code == 0
-    (warning,) = [line for line in err.splitlines() if "warning" in line]
-    assert "stack python" in warning and "vitest" in warning
-    assert "cd a && npx vitest run" in warning and "cd b && npx vitest run --project unit" in warning
-    assert "name" in warning
+    assert (code, err) == (0, "")
+    assert gate_names_line(out) == (
+        "warn gate-names: stack python: the gates `cd a && npx vitest run`, `cd b && npx vitest run --project unit` have the "
+        """same short name 'vitest'; give each one a name: { name = "<name>", command = "<command>" }; """
+        "without it, the views cannot tell the gates apart"
+    )
 
 
 def test_the_dry_run_does_not_warn_when_each_gate_has_its_own_short_name_or_a_name(tmp_path, capsys):
     repo = make_repo(tmp_path, dry_run_workflow('["cd a && npx vitest run", { name = "unit", command = "cd b && npx vitest run" }]'))
 
-    code, _, err = dry_run(repo, capsys)
+    code, out, err = dry_run(repo, capsys)
 
-    assert code == 0
-    assert "warning" not in err
+    assert (code, err) == (0, "")
+    assert gate_names_line(out) == "ok gate-names: stack python: each gate has its own short name: vitest, unit"
 
 
 def test_the_dry_run_warns_when_two_names_are_the_same(tmp_path, capsys):
     repo = make_repo(tmp_path, dry_run_workflow('[{ name = "t", command = "echo a" }, { name = "t", command = "echo b" }]'))
 
-    code, _, err = dry_run(repo, capsys)
+    code, out, _ = dry_run(repo, capsys)
 
     assert code == 0
-    assert "warning" in err and "t" in err
+    assert gate_names_line(out).startswith("warn gate-names: stack python: the gates `echo a`, `echo b` have the same short name 't';")
 
 
 def test_a_workflow_with_strings_only_is_valid_and_has_no_warning(tmp_path, capsys):
     repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"'))
 
-    code, _, err = dry_run(repo, capsys)
+    code, out, err = dry_run(repo, capsys)
 
-    assert code == 0
-    assert "warning" not in err
+    assert (code, err) == (0, "")
+    assert gate_names_line(out) == "ok gate-names: stack python: each gate has its own short name: test"
 
 
 def running_gate(tmp_path, command: str, **extra: object):

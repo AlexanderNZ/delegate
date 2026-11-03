@@ -40,6 +40,8 @@ specialist = "python-specialist"
 verifier = "python-verifier"
 gates = ["test -f feature.txt"]
 hotspots = ["LICENSE", ".github/workflows/*"]
+gate-timeout = 600
+agent-timeout = 600
 
 [[tickets]]
 id = "a"
@@ -49,6 +51,12 @@ blocked-by = []
 """
 
 CLEANED_WORKFLOW: str = WORKFLOW.replace(KEEP_WORKTREES, "")
+
+# The time limits of the stack of `WORKFLOW`. A run of a stack with no limit prints a warning of the quality check on
+# stderr (#247), and the cases check that a run prints nothing on stderr. The limits are far above the time of a case.
+# `NO_TIMEOUTS_WORKFLOW` is the same workflow without the limits, for a case that sets its own limits.
+TIMEOUTS: str = "gate-timeout = 600\nagent-timeout = 600\n"
+NO_TIMEOUTS_WORKFLOW: str = WORKFLOW.replace(TIMEOUTS, "")
 
 
 # The author and the committer of each commit that a test makes. They go to git in the environment: an argument

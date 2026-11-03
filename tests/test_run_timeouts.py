@@ -13,7 +13,7 @@ from delegate import adapters
 from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 
 from . import claude_fake
-from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main, write_project_agents
+from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main, write_project_agents
 
 pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
@@ -81,7 +81,7 @@ def test_a_gate_that_runs_past_gate_timeout_is_red_with_timed_out_and_the_specia
 ):
     # The first run of the gate hangs; the continuation adds the file that makes the gate pass.
     scripted.continuation_files = [{"second.txt": "second\n"}]
-    repo = make_repo(tmp_path, with_limits(gate="0.05", gates='gates = ["test -f second.txt || sleep 30"]'))
+    repo = make_repo(tmp_path, with_limits(gate="0.05", agent="600", gates='gates = ["test -f second.txt || sleep 30"]'))
     started = time.monotonic()
 
     code, out, err = run(repo, capsys)
@@ -113,11 +113,15 @@ def test_a_gate_that_stays_past_its_limit_fails_the_step_and_the_reason_names_th
 
 
 def test_a_workflow_with_no_limit_runs_as_before(tmp_path, capsys, scripted):
-    repo = make_repo(tmp_path)
+    repo = make_repo(tmp_path, WORKFLOW)
 
     code, out, err = run(repo, capsys)
 
-    assert (code, err) == (0, "")
+    assert code == 0
+    # The only lines on stderr are the warnings of the quality check about the two missing limits (#247).
+    assert [line.split()[:4] for line in err.splitlines()] == [
+        ["delegate", "run:", "warn", "gate-timeout:"], ["delegate", "run:", "warn", "agent-timeout:"],
+    ]
     events = read_journal(out)
     assert next(e for e in events if e["event"] == "step-end")["state"] == "built"
     assert [(e["green"], e["timed_out"]) for e in events if e["event"] == "gate-result"] == [(True, False)]
@@ -128,7 +132,7 @@ def test_a_workflow_with_no_limit_runs_as_before(tmp_path, capsys, scripted):
 def test_each_agent_gets_the_agent_timeout_of_its_stack_in_seconds(tmp_path, capsys, scripted):
     scripted.verdict_sequence = ["REJECT", "ACCEPT"]
     scripted.verdict_findings = ["FINDING-1 the header row is missing from feature.txt"]
-    repo = make_repo(tmp_path, with_limits(agent="0.5"))
+    repo = make_repo(tmp_path, with_limits(gate="600", agent="0.5"))
 
     code, out, err = run(repo, capsys)
 

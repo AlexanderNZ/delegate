@@ -68,6 +68,7 @@ from ..run.engine import (
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
+from ..run.quality import quality_checks
 from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
@@ -144,8 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="validate the workflow and print the plan and the state directory of the run, then check that each stack has its agent files and that its verifier "
-        "permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; "
+        help="validate the workflow and print the plan and the state directory of the run, then the quality check of the workflow, then check that each "
+        "stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; "
         "create nothing",
     )
     parser.add_argument(
@@ -384,6 +385,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"delegate run: {error}", file=sys.stderr)
                 return 1
             return _detach(argv, run_id, args.repo, args.resume is not None, vcs)
+        # The run process prints each warning of the quality check at its start; a detached run writes it to its log.
+        for check in quality_checks(workflow):
+            if check.warns:
+                print(f"delegate run: {check.line()}", file=sys.stderr)
         title = Title(sys.stdout)
         started: list[str] = []
 
@@ -463,14 +468,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(f"  {line}" if line.strip() else "" for line in notes.strip().splitlines()))
     for role, tier in workflow.tier_overrides.items():
         print(f"tier override {role}: {tier}")
-    for stack in workflow.stacks.values():
-        for name, commands in stack.gate_name_clashes():
-            gates = ", ".join(f"`{command}`" for command in commands)
-            print(
-                f"delegate run: warning: stack {stack.name}: the gates {gates} have the same short name {name!r}; "
-                'give each one a name: { name = "<name>", command = "<command>" }',
-                file=sys.stderr,
-            )
+    print("quality check")
+    for check in quality_checks(workflow):
+        print(check.line())
     setup = check_setup(workflow, adapters.get(workflow.adapter), args.repo, tiers, vcs)
     for line in setup.lines:
         print(line)

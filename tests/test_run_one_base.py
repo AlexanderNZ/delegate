@@ -23,7 +23,7 @@ from delegate.cli import delegate
 from .support import (
     ScriptedAdapter, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree,
 )
-from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
+from .test_run_multi import BASE_BRANCH_START, HEAD, ticket, warned
 
 # The subject of the commits that the scripted specialist makes.
 SPECIALIST_WORK = "scripted work (python-specialist)"
@@ -100,7 +100,7 @@ def test_a_ticket_cut_after_the_base_branch_moved_starts_from_the_base_of_the_ru
 
     code, out, err = run(repo, capsys)
 
-    assert (code, err) == (0, "")
+    assert (code, warned(err)) == (0, ["ticket-start"])
     assert rev(repo, "main") != run_base  # the base branch moved while the run went on
     events = read_journal(out)
     assert step_start(events, "b")["base_commit"] == run_base
@@ -121,7 +121,7 @@ def test_the_rebase_onto_the_run_branch_copies_no_commit_of_the_base_branch_onto
 
     code, out, err = run(repo, capsys)
 
-    assert (code, err) == (0, "")
+    assert (code, warned(err)) == (0, ["ticket-start"])
     events = read_journal(out)
     rebase_b = next(e for e in events if e["event"] == "rebase" and e["ticket"] == "b")
     assert rebase_b["result"] == "rebased"
@@ -139,6 +139,8 @@ specialist = "docs-specialist"
 verifier = "docs-verifier"
 gates = ["ls *.txt"]
 hotspots = ["LICENSE", "a.txt"]
+gate-timeout = 600
+agent-timeout = 600
 """ + ticket("a") + ticket("b").replace('stack = "python"', 'stack = "docs"')
 
 
@@ -187,7 +189,7 @@ def test_a_resume_starts_a_ticket_from_the_base_of_the_run_and_not_from_the_tip_
 
     code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
-    assert (code, err) == (0, "")
+    assert (code, warned(err)) == (0, ["ticket-start"])
     events = read_journal_file(repo, run_id)
     assert events[0]["base_commit"] == run_base
     assert step_start(events, "c")["base_commit"] == run_base
@@ -209,7 +211,7 @@ def test_a_resume_of_a_journal_with_no_base_commit_takes_the_base_of_the_run_fro
 
     code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
 
-    assert (code, err) == (0, "")
+    assert (code, warned(err)) == (0, ["ticket-start"])
     events = read_journal_file(repo, run_id)
     assert step_start(events, "c")["base_commit"] == run_base
     assert LANDED not in subjects(repo, run_base, "run/demo")

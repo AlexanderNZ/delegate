@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Added
+
+- `delegate run --dry-run` prints a section `quality check` after the plan (#247). A coordinator that copies an older workflow file reads no reference, so a new optional field does not reach it, but it reads the dry run before each launch. The section has one line for each stack or for the workflow, for each check: `gate-timeout`, `agent-timeout`, `ticket-start`, `hotspots`, `verifier-tier` and `gate-names`. An `ok` line names the setting that the workflow uses. A `warn` line names the field to set and the effect of the missing setting, for example `warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit`. A `warn` does not change the exit code. `delegate run` without `--dry-run` prints the `warn` lines on stderr at its start, and a detached run writes them to its log. The warning of two gates with the same short name moved from stderr into the section, as the check `gate-names`. The `agent-delegation` skill says to read the quality check before each launch. See "The quality check" in `docs/reference/run.md`.
+
 ### Changed
 
 - In `assure` mode, the default of the workflow field `ticket-start` is now `run-branch` (#244). Before, it was `base-branch`, and the second ticket of a run, with no `blocked-by`, ran its gates two times: once after the specialist and once after the rebase onto the run branch, because the accepted work of the first ticket changed the commit. Now each ticket branch starts from the tip of the run branch at its step start, the rebase keeps the commit, the engine writes `gate-skip`, and each ticket runs its gates once, on the exact tree that lands. A workflow that needs each specialist to start from the base of the run sets `ticket-start = "base-branch"`. `economy` mode keeps its chain. See `docs/reference/workflow.md` and `docs/reference/run.md`.

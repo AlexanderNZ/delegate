@@ -179,7 +179,7 @@ def test_the_dry_run_does_not_name_a_ticket_start_for_base_branch_or_for_economy
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")
-    assert "starts from" not in out
+    assert not [line for line in out.splitlines() if line.startswith("each ticket starts from")]
 
 
 def test_a_ticket_start_that_is_not_known_is_an_error_that_names_the_field_and_the_values(tmp_path, capsys, scripted):

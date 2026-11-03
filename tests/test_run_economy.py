@@ -149,7 +149,7 @@ def test_specialists_run_on_standard_in_economy_and_the_verifier_tier_is_the_sam
 
 TWO_STACKS = ECONOMY.replace(
     "[[tickets]]",
-    '[stacks.docs]\nspecialist = "docs-specialist"\nverifier = "docs-verifier"\ngates = ["test -f feature.txt"]\nhotspots = []\n\n[[tickets]]',
+    '[stacks.docs]\nspecialist = "docs-specialist"\nverifier = "docs-verifier"\ngates = ["test -f feature.txt"]\nhotspots = ["LICENSE"]\ngate-timeout = 600\nagent-timeout = 600\n\n[[tickets]]',
     1,
 ) + '''
 [[tickets]]

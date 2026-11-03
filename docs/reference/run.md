@@ -14,7 +14,7 @@ A [**coordinator**](../glossary.md#coordinator) can stop a [**run**](../glossary
 
 A workflow can hold many tickets. The engine takes them in dependency order. A failed step does not end the run: a ticket whose [**blocker**](../glossary.md#blocker) failed is skipped, and the independent tickets still run.
 
-To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md). The dry run also checks the setup of the stacks: the agent files, and the gates that the verifier permits. See [the setup check of the dry run](workflow.md#the-setup-check-of-the-dry-run).
+To check a workflow file without a build, use `--dry-run`. See [the workflow reference](workflow.md). The dry run also prints a quality check of the workflow: the features that the workflow uses, and each missing setting that lowers the quality of the run or wastes time. See [the quality check](#the-quality-check). Then it checks the setup of the stacks: the agent files, and the gates that the verifier permits. See [the setup check of the dry run](workflow.md#the-setup-check-of-the-dry-run).
 
 To start a run that the shell or the harness cannot stop, add `--detach`. See [the detached run](#the-detached-run).
 
@@ -26,7 +26,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | Option | Meaning |
 |---|---|
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
-| `--dry-run` | Validate the workflow and print the plan and the state directory of the run, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
+| `--dry-run` | Validate the workflow and print the plan and the state directory of the run, then the quality check of the workflow, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets differ from the newest plan of the run is a plan change. |
 | `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete; when the text of TICKET in the workflow changed, start TICKET again from its base with a new specialist, and keep the old branch as \<branch>-failed-\<n>. |
@@ -133,6 +133,39 @@ A run has one base: the commit of `base-branch` at the start of the run. The jou
 - So the rebase onto the run branch copies no commit of `base-branch` onto a ticket branch, and the verifier diff and the hotspot guard see only the commits of the ticket.
 - A [**resume**](../glossary.md#resume) uses the `base_commit` of `run-start`, not the tip of `base-branch`. A journal from version 1.2.0 or earlier has no `base_commit` in `run-start`. The resume then uses the `from_commit` of the first `run-branch-advance`, or the tip of the run branch when the run branch did not move. The run branch started at the base of the run and moves only by fast-forward, so both are the base of the run.
 - To give a run the newer commits of `base-branch`, start a new run.
+
+### The quality check
+
+A workflow file that you copy from an older workflow does not have the optional fields that a later version added, and a reference does not tell you that they are missing. So `delegate run --dry-run` prints the section `quality check` after the plan and before the setup check. Read the section before each launch and each resume.
+
+The section starts with the line `quality check`. Then it has one line for each check: one line for each [**stack**](../glossary.md#stack), or one line for the workflow. A line has `ok` or `warn`, the id of the check, and the reason:
+
+```
+quality check
+ok gate-timeout: stack python: gate-timeout = 30 minutes
+warn agent-timeout: stack python: set agent-timeout; without it, an agent that hangs stops the run with no limit
+ok ticket-start: ticket-start = "run-branch": each ticket starts from the run branch
+ok hotspots: stack python: hotspots workflow.toml
+ok verifier-tier: the verifier runs on the tier verifier
+ok gate-names: stack python: each gate has its own short name: pytest
+```
+
+- An `ok` line names the setting that the workflow uses, so you see the feature.
+- A `warn` line names the field to set, and the effect of the missing setting on the quality or the time of the run.
+- A `warn` does not refuse the workflow, and it does not change the exit code.
+- Without `--dry-run`, `delegate run` prints only the `warn` lines, on stderr, at its start. Each line starts with `delegate run: `. A [detached run](#the-detached-run) writes them to its log. A resume prints them too.
+- `--resume <run-id> --dry-run` prints the [plan change](#the-dry-run-of-a-resume), and no quality check.
+
+| Id | One line for each | `warn` when | Effect of the missing setting | The field that clears it |
+|---|---|---|---|---|
+| `gate-timeout` | stack | The stack has no `gate-timeout`. | A gate that hangs stops the run with no limit. | `gate-timeout` of the stack. See [time limits](workflow.md#time-limits). |
+| `agent-timeout` | stack | The stack has no `agent-timeout`. | An agent that hangs stops the run with no limit. | `agent-timeout` of the stack. See [time limits](workflow.md#time-limits). |
+| `ticket-start` | workflow | The mode is `assure`, the workflow has `ticket-start = "base-branch"`, and two or more tickets have no `blocked-by`. | Each such ticket after the first runs its gates again after the rebase. This doubles the gate time and the chance of a flaky failure. | `ticket-start = "run-branch"`, or no `ticket-start`. See [ticket start](workflow.md#ticket-start). |
+| `hotspots` | stack | The stack has `hotspots = []`. | Only the built-in agent directories are guarded, so a specialist can change the CI and the configuration. | `hotspots` of the stack, with the paths to guard. See [the hotspot guard](#the-hotspot-guard). |
+| `verifier-tier` | workflow | Never. A `tier-overrides.verifier` below the tier `verifier`, for example `cheap`, is an error of the workflow, and the command exits 1. | The blind verifier is the only review of the work. | `tier-overrides.verifier = "strong"`, `"verifier"`, or no override. See [tier overrides](workflow.md#tier-overrides). |
+| `gate-names` | stack | Two gates of the stack have the same short name. | The views cannot tell the gates apart. | A `name` for each gate: `{ name = "<name>", command = "<command>" }`. See [gate names](workflow.md#gate-names). |
+
+A change that adds an optional field that changes the quality or the time of a run adds its check to this table, in the same change.
 
 ## The continuation
 
@@ -700,6 +733,8 @@ retry with delegate run --resume e9dc --retry a
 The summary gives the result of the run (`built`, `failed`, `paused` or `halted`), the time from the start of the run to its end or its pause, the count of the built, the failed and the skipped tickets, and the two token counts, as in [`delegate status`](status-and-watch.md). When the command knows no reader of the event streams of the adapter, the summary has no token counts. A run that paused also prints `paused <where>; go on with delegate run --resume <run-id>` on stdout, after the summary. The follow line and the retry lines give the short run id: the four hexadecimal characters at the end of the run id. `delegate watch`, `delegate pause` and `--resume` take it. The `paused` line gives the full run id.
 
 On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, `run halted` is red, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
+
+At its start, before the three lines, the command prints each `warn` line of [the quality check](#the-quality-check) on stderr, for example `delegate run: warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit`. A `warn` line does not change the exit code.
 
 With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. A check that fails before the start prints its error on stderr, exits 1, and starts no run process. See [the detached run](#the-detached-run).
 

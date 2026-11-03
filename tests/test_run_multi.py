@@ -25,6 +25,15 @@ HEAD = WORKFLOW.split("[[tickets]]")[0].replace('gates = ["test -f feature.txt"]
 BASE_BRANCH_START = 'ticket-start = "base-branch"\n'
 
 
+def warned(err: str) -> list[str]:
+    """The ids of the checks that print a warning on stderr at the start of a run (#247), one for each line of `err`.
+
+    A workflow with `BASE_BRANCH_START` and two tickets with no `blocked-by` gets the warning `ticket-start`.
+    """
+    prefix = "delegate run: warn "
+    return [line.removeprefix(prefix).split(":")[0] if line.startswith(prefix) else line for line in err.splitlines()]
+
+
 def ticket(ticket_id: str, blocked_by: tuple[str, ...] = ()) -> str:
     blockers = ", ".join(f'"{b}"' for b in blocked_by)
     return f'\n[[tickets]]\nid = "{ticket_id}"\ntext = "Ticket {ticket_id} adds its file."\nstack = "python"\nblocked-by = [{blockers}]\n'
@@ -84,7 +93,7 @@ def test_the_journal_shows_the_gates_before_and_after_the_rebase_for_each_ticket
 
     code, out, err = run(repo, capsys)
 
-    assert (code, err) == (0, "")
+    assert (code, warned(err)) == (0, ["ticket-start"])
     events = read_journal(out)
     # The rebase of ticket a keeps its commit, so its gates do not run again; the rebase of ticket b changes its commit.
     for ticket_id, after in (("a", "gate-skip"), ("b", "gate-result")):

@@ -578,6 +578,12 @@ scopes each fix-up, and records each step in a journal.
   when you need your own judgement between steps.
 - The engine never merges to the base branch, never pushes, and never closes a
   ticket. Those actions stay with the coordinator.
+- Before each launch and each resume, run `delegate run <workflow> --dry-run`
+  and read its section `quality check`. An `ok` line names a feature that the
+  workflow uses. A `warn` line names a missing field that lowers the quality
+  of the run or wastes time, for example `gate-timeout`. Set the field, or
+  tell the owner why the run goes on without it. A workflow that you copy from
+  an older run does not have the fields that a later version added.
 - After you merge a run branch into the base branch, run
   `delegate clean --ended --merged`. It deletes each run branch that the base
   branch holds, and removes the ticket worktrees and the merged ticket

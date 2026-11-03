@@ -18,6 +18,9 @@ verifier = "python-verifier"
 gates = ["python3 -m unittest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
