@@ -181,9 +181,9 @@ from ..shared.tiers import Tiers
 from . import domain
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents
 from .brief import (
-    BriefError, ChainSegment, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief, green_gates_text,
-    notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief,
-    verifier_run_brief, verifier_run_sections,
+    BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
+    gate_log_copies_text, green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
+    specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .events import RUN_START, SCHEMA_VERSION
@@ -2413,6 +2413,7 @@ def _build_with_continuations(
                 **_totals_fields(adapter, result.event_stream),
             )
         gate_output: str | None = None
+        gate_logs: list[GateLogCopy] = []
         problems: tuple[str, ...] = ()
         uncommitted_paths: tuple[str, ...] = ()
         if result is not None and not _session_done(result, report_valid):
@@ -2464,6 +2465,7 @@ def _build_with_continuations(
                     leftovers = frozenset(_uncommitted_paths(vcs, worktree))
                     reason = "gates red: " + "; ".join(outcome.label for outcome in red)
                     gate_output = "\n".join(f"$ {outcome.command}\n{outcome.output.rstrip(chr(10))}" for outcome in red)
+                    gate_logs = _copy_gate_logs(red, scratch)
         if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -2482,6 +2484,7 @@ def _build_with_continuations(
                 ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
                 plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths, scratch=scratch,
+                gate_logs=gate_logs,
             )
 
 
@@ -3444,7 +3447,8 @@ class _ChainRun:
                 if round_number >= limit:
                     raise _StepFailed(domain.chain_gates_reason(mode, [outcome.label for outcome in red]))
                 round_number += 1
-                self._fixup(step, round_number, tip, _red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red]), True)
+                copies = _copy_gate_logs(red, _scratch_directory(step.run_dir, step.ticket.id, ROLE_FIXUP))
+                self._fixup(step, round_number, tip, _red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red], copies), True)
                 continue
             gates_text = green_gates_text(tip, [(outcome.command, outcome.output) for outcome in outcomes])
             if rejected is None:
@@ -3485,11 +3489,12 @@ class _ChainRun:
         return unmapped
 
 
-def _red_gates_text(commit: str, red: list[tuple[str, str]]) -> str:
-    """The findings of a fix-up round for red gates: each red gate on `commit`, and its output."""
+def _red_gates_text(commit: str, red: list[tuple[str, str]], copies: Sequence[GateLogCopy] = ()) -> str:
+    """The findings of a fix-up round for red gates: each red gate on `commit`, its output, and the copy of each full log (#246)."""
     gates = "".join(f"- The gate `{gate}` is red.\n" for gate, _ in red)
     output = "\n\n".join(f"$ {gate}\n{text.rstrip(chr(10))}" for gate, text in red)
-    return f"The engine ran the gates on the tip of the chain, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
+    text = f"The engine ran the gates on the tip of the chain, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
+    return text + (f"\n{gate_log_copies_text(copies)}\n" if copies else "")
 
 
 def _chain_text(tickets: list[Ticket]) -> str:
@@ -3503,12 +3508,14 @@ class _GateRun(NamedTuple):
     """The outcome of one gate for the engine: whether it is green, its output, and the name that a reason gives it.
 
     `label` is the name of the gate, or its command when it has no name, and a gate that the runner ended at its time limit has `(timed out)` after it.
+    `log` is the log file of the gate run, with its full output, or None for a gate that did not run again (see `gate-skip`).
     """
 
     command: str
     green: bool
     output: str
     label: str
+    log: Path | None = None
 
 
 def _run_gate(
@@ -3577,7 +3584,24 @@ def _run_gate_with_output(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
         exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True, **named,
     )
-    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown)
+    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown, log)
+
+
+def _copy_gate_logs(red: Sequence[_GateRun], scratch: Path) -> list[GateLogCopy]:
+    """Copy the full log of each red gate into the scratch directory `scratch` of the next session, and give the copies (#246).
+
+    The brief gives only the end of the output of a gate (`GATE_OUTPUT_TAIL_CHARS`), and a host can refuse a read of the
+    gate log in the directory of the run. The copy has the name of the log with `gate-` before it, so a later copy does not
+    replace it. The engine does not read the output of a test runner: the copy is the log as the gate wrote it.
+    """
+    copies: list[GateLogCopy] = []
+    for outcome in red:
+        if outcome.log is None:
+            continue
+        copy = scratch / f"gate-{outcome.log.name}"
+        shutil.copyfile(outcome.log, copy)
+        copies.append(GateLogCopy(outcome.command, copy, len(copy.read_bytes().splitlines())))
+    return copies
 
 
 def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int) -> Path:

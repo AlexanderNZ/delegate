@@ -491,6 +491,33 @@ def finding_labels_section() -> str:
     ))
 
 
+@dataclass(frozen=True)
+class GateLogCopy:
+    """The copy of the full log of one red gate in the scratch directory of a session (#246): the gate command, the path, the size in lines."""
+
+    command: str
+    path: Path
+    lines: int
+
+
+def gate_log_copies_text(copies: Sequence[GateLogCopy]) -> str:
+    """The text that names the copy of the full log of each red gate, after the output of the red gates in a brief (#246).
+
+    The brief gives only the end of the output of each gate, so the first failures of a long output are not in it. The
+    text names each copy with its gate command and its size in lines, and tells the specialist to read the copy when the
+    output in the brief does not hold every failure. Give an empty string when there is no copy.
+    """
+    if not copies:
+        return ""
+    items = "\n".join(f"- `{copy.command}`: `{copy.path}` ({copy.lines} lines)" for copy in copies)
+    return (
+        "The output above is only the end of the output of each red gate, so it can be missing failures. "
+        "The engine copied the full output of each red gate into your scratch directory:\n\n"
+        f"{items}\n\n"
+        "When the output above does not hold every failure, read the full output in the copy. Do not run a gate command to see it."
+    )
+
+
 def green_gates_text(commit: str, outputs: Sequence[tuple[str, str]]) -> str:
     """The text of the `## Gates` section of a verifier brief when the engine ran the gates green on `commit`.
 
@@ -734,6 +761,7 @@ def continuation_brief(
     notes: str | None = None,
     uncommitted: Sequence[str] = (),
     scratch: str | Path | None = None,
+    gate_logs: Sequence[GateLogCopy] = (),
 ) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
@@ -752,6 +780,9 @@ def continuation_brief(
 
     `scratch` is the scratch directory of the session (#227). A resumed brief names it again in the section "Scratch
     directory", and a new agent gets it in its full specialist brief.
+
+    `gate_logs` holds the copy of the full log of each red gate in `scratch` (#246). The brief names each copy after the
+    output of the red gates (see `gate_log_copies_text`).
     """
     lines = [
         f"Ticket {ticket}",
@@ -778,6 +809,8 @@ def continuation_brief(
         ]
     if gate_output:
         lines += ["", "The engine ran the gates after the last run. This is the output of the red gates:", "", "```", gate_output.rstrip("\n"), "```"]
+    if gate_logs:
+        lines += ["", gate_log_copies_text(gate_logs)]
     lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]
     continuation = ("## Continuation", "\n".join(lines))
     if resumed:
