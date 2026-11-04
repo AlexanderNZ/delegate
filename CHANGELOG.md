@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-04
+
 ### Added
 
 - `agent-definitions schema` (also `delegate schema`) prints the schema of a declaration as JSON (#172). A consumer that declares agents in its own configuration language listed the keys by hand, and each new key (`contextLoad` in 1.8.0, `gateExtraFlags` in 1.10.0) broke its schema check until it added the key. Now the output has one entry for each key, with its `type`, `required`, `default` and `since` (the version that added the key), and `items` for an array and `values` for a key with fixed values. A test fails when a key of the declaration parser, or a field of the agent, is missing from the output. The guard half of the issue shipped in 1.16.0 as `render --sets-json` (#237), so there is no `guard-sets` command. A consumer checks its mirror against `schema` and `render --sets-json`, not against the shell text of a rendered file. See `docs/reference/commands.md` and the skill `agent-definitions`.
