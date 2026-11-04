@@ -24,10 +24,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
-from .engine import PAUSE_REQUEST_NAME, EngineError, state_directory
+from .engine import PAUSE_REQUEST_NAME
 from .journal import JournalError, is_paused, newest_run_end, read_new_events
 from .lock import LockError, live_holder
-from .runs import RunsError, journal_of
+from .runs import RunsError, journal_of, locate
 
 
 class PauseError(Exception):
@@ -48,7 +48,8 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
     nothing, when the run is unknown, its journal is not valid, it ended, it is paused, or no live process works on it.
     """
     try:
-        journal = journal_of(repo, run_id, vcs)
+        location = locate(repo, vcs)  # one lookup for the command (#239)
+        journal = journal_of(repo, run_id, vcs, location=location)
         events, _ = read_new_events(journal, 0, 1)
     except (RunsError, JournalError) as error:
         raise PauseError(str(error)) from None
@@ -62,9 +63,9 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
     if is_paused(events):
         raise PauseError(f"run {run_id!r} is paused already; go on with {resume}")
     try:
-        _, state_dir = state_directory(repo, vcs, run_id)
+        state_dir = location.state_directory(run_id)
         holder = live_holder(state_dir, str(events[0]["run_branch"]))
-    except (EngineError, LockError) as error:
+    except LockError as error:
         raise PauseError(str(error)) from None
     if holder is None or holder.run_id != run_id:
         raise PauseError(f"run {run_id!r} has no live process: it stopped, so it needs no pause; go on with {resume}")

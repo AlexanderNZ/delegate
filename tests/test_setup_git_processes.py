@@ -87,6 +87,48 @@ def test_the_scripted_adapter_starts_only_the_add_and_the_commit_of_its_work_in_
     assert len(scripted.calls) == len(scripted.verifier_calls) == 1
 
 
+# The processes of one run of one ticket with the scripted adapter, from the start of `delegate run` to its end: the git
+# processes of the engine, the add and the commit of the adapter, and the gate. Before #239 the run started 62. The
+# issue asks for at least 30% fewer, so the budget is 43.
+RUN_OF_ONE_TICKET_BEFORE_239: int = 62
+RUN_OF_ONE_TICKET_BUDGET: int = 43
+
+
+def test_a_run_of_one_ticket_starts_at_least_30_percent_fewer_processes_than_before_239(tmp_path, capsys, scripted):
+    scripted.files_by_ticket = {}  # the default work, `feature.txt`, makes the gate of the workflow green
+    repo = make_repo(tmp_path)
+    before = git_processes.all_started()
+
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+
+    started = git_processes.all_started() - before
+    out, err = capsys.readouterr()
+    # The run did all of its work: the build, the gate, the rebase, the verifier, and the advance of the run branch.
+    assert (code, err) == (0, "")
+    assert "\nrun built " in out, out
+    assert git(repo, "show", "run/demo:feature.txt") == "feature\n"
+    assert len(scripted.calls) == len(scripted.verifier_calls) == 1
+    assert RUN_OF_ONE_TICKET_BUDGET <= RUN_OF_ONE_TICKET_BEFORE_239 * 7 // 10
+    assert started <= RUN_OF_ONE_TICKET_BUDGET, f"the run started {started} processes; the budget is {RUN_OF_ONE_TICKET_BUDGET}"
+
+
+def test_delegate_status_with_no_run_id_looks_up_the_repository_with_one_git_process(tmp_path, capsys, scripted):
+    # The command finds the newest run and reports it; it looks up the repository and its state one time (#239).
+    scripted.files_by_ticket = {}
+    repo = make_repo(tmp_path)
+    assert delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)]) == 0
+    run_line = capsys.readouterr().out.splitlines()[0]
+    before = git_processes.all_started()
+
+    code = delegate.main(["status", "--repo", str(repo)])
+
+    started = git_processes.all_started() - before
+    out, err = capsys.readouterr()
+    assert (code, err) == (0, "")
+    assert run_line.removeprefix("run ") in out
+    assert started == 1
+
+
 def test_a_process_that_the_test_code_starts_counts_once_in_the_count_of_all_processes(tmp_path):
     before = git_processes.all_started()
 

@@ -99,7 +99,7 @@ The port speaks the language of the domain. It names no git command and no flag,
 
 | Operation | What it does |
 | --- | --- |
-| `repository_root`, `shared_data_directory` | Find the top of the checkout, and the directory that the checkout and all its worktrees share. In it, the file `delegate/state-root` names the [**state directory**](../glossary.md#state-directory), which is outside it by default, and the runs from before #200 are in `delegate/`. See [where the engine writes](run.md#where-the-engine-writes). |
+| `repository_root`, `shared_data_directory`, `repository_paths` | Find the top of the checkout, and the directory that the checkout and all its worktrees share. `repository_paths` gives the two from one look-up, so each command finds them one time and passes them on (#239). In it, the file `delegate/state-root` names the [**state directory**](../glossary.md#state-directory), which is outside it by default, and the runs from before #200 are in `delegate/`. See [where the engine writes](run.md#where-the-engine-writes). |
 | `branch_exists`, `create_branch`, `branch_tip` | Look for a branch, make the [**run branch**](../glossary.md#run-branch) or a ticket branch, and read its newest commit. |
 | `delete_branch` | Delete a ticket branch when the run branch holds its newest commit, with the safe delete of git, and keep it when the run branch does not hold it. The clean-up of a run uses it. |
 | `commit_of`, `head_commit`, `commits_since` | Name a commit, and list the commits that a branch holds beyond another. |
@@ -107,7 +107,7 @@ The port speaks the language of the domain. It names no git command and no flag,
 | `rebase_onto` | Put the commits of a ticket branch on top of the run branch. A conflict or a refusal gives a result, and the worktree keeps the state from before. |
 | `changed_paths`, `diff_text`, `uncommitted_changes` | List the paths that differ between two commits, read the text of those changes for the [**brief**](../glossary.md#brief), and list the paths that a worktree changed and did not commit. The [**hotspot**](../glossary.md#hotspot) guard and the worktree check of a verifier use them. |
 | `hooks_directory`, `use_hooks_directory`, `worktree_environment` | Find the hooks that a checkout reads from its own configuration, keep a hooks directory for a worktree alone, and give the environment entries that make the settings of the worktree hold for a process of its ticket. The [**push guard**](../glossary.md#push-guard) uses them. |
-| `is_ancestor`, `fast_forward_branch` | Ask whether a commit holds another, and move the run branch to a verified commit by fast-forward only. |
+| `is_ancestor`, `fast_forward_branch` | Ask whether a commit holds another, and move the run branch to a verified commit by fast-forward only. The engine gives the tip that its check of the run branch read, and the move fails when the run branch is no longer there. |
 | `make_scratch_repository` | Make a new repository with one commit, for the [**guard probe**](../glossary.md#guard-probe). |
 | `make_verifier_copy`, `stop_file_watcher` | Make the [**verifier copy**](../glossary.md#verifier-copy), and stop the background watcher of the file system before a directory goes. |
 

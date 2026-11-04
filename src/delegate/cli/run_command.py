@@ -64,12 +64,13 @@ from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
-    EngineError, PlanReview, RunInterrupted, StateRootError, check_start, new_run_id, record_state_root, review_plan_change, run_workflow, state_directory,
+    EngineError, PlanReview, RunInterrupted, StateLocation, StateRootError, check_start, new_run_id, record_state_root, review_plan_change,
+    run_workflow, state_directory,
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
-from ..run.runs import LOG_NAME, RunsError, journal_of, run_id_of
+from ..run.runs import LOG_NAME, RunsError, journal_of, locate, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
@@ -229,18 +230,19 @@ def _override_tiers(tiers: Tiers, args: argparse.Namespace) -> Tiers:
     return overridden
 
 
-def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVersionControl) -> int:
+def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVersionControl, location: StateLocation) -> int:
     """Start `delegate run <argv>` for the run `run_id` in a new session, print the run id and the log path, and return 0.
 
     The run process writes its standard output and its standard error to the log file of the run. A resume appends
-    to the log of its run. Return 1, and start nothing, when `repo` is not a repository or the run to resume is unknown.
+    to the log of its run. Return 1, and start nothing, when the run to resume is unknown. `location` is the location
+    that the checks of the start looked up (#239).
     """
     try:
         if resume:
-            run_dir = journal_of(repo, run_id, vcs).parent
+            run_dir = journal_of(repo, run_id, vcs, location=location).parent
         else:
-            top, state = state_directory(repo, vcs, run_id)
-            record_state_root(top, vcs, state)  # the command that prints the run id finds the run, before the run process starts
+            state = location.state_directory(run_id)
+            record_state_root(location, state)  # the command that prints the run id finds the run, before the run process starts
             run_dir = state / "runs" / run_id
     except (EngineError, RunsError) as error:
         print(f"delegate run: {error}", file=sys.stderr)
@@ -335,15 +337,19 @@ def main(argv: list[str] | None = None) -> int:
     reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
+    # A resume looks up the repository and its state directories here, one time, and passes them on (#239). A new run
+    # looks them up in its checks of the start.
+    location: StateLocation | None = None
     if args.resume is not None:
         try:
-            args.resume = run_id_of(args.repo, args.resume, vcs)  # a short id names its run by the full id from here on
+            location = locate(args.repo, vcs)
+            args.resume = run_id_of(args.repo, args.resume, vcs, location=location)  # a short id names its run by the full id from here on
         except RunsError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
     if args.workflow is None:
         try:
-            args.workflow = workflow_of_run(args.repo, args.resume, vcs)
+            args.workflow = workflow_of_run(args.repo, args.resume, vcs, location=location)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
@@ -359,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.dry_run and args.resume is not None:
         try:
-            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry)
+            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location)
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
@@ -376,15 +382,15 @@ def main(argv: list[str] | None = None) -> int:
             run_id = args.resume if args.resume is not None else new_run_id()
             try:
                 # The checks that need no agent come before the run process, so their error goes to the caller.
-                check_start(
+                location = check_start(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
                     break_lock=args.break_lock, reviewed=reviewed, retry=args.retry,
-                    coordinator_commit=args.coordinator_commit, detach=True,
+                    coordinator_commit=args.coordinator_commit, detach=True, location=location,
                 )
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
                 return 1
-            return _detach(argv, run_id, args.repo, args.resume is not None, vcs)
+            return _detach(argv, run_id, args.repo, args.resume is not None, vcs, location)
         # The run process prints each warning of the quality check at its start; a detached run writes it to its log.
         for check in quality_checks(workflow):
             if check.warns:
@@ -402,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_workflow(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
-                    agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit,
+                    agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit, location=location,
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -430,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: unmapped finding: {finding}", file=sys.stderr)
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
-        print("\n".join(_end_lines(status.snapshot(args.repo, result.run_id, vcs, stream_reader_of, utc_now()))))
+        print("\n".join(_end_lines(status.snapshot_of_journal(result.journal, stream_reader_of, utc_now()))))
         if result.paused is not None:
             print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
             return EXIT_PAUSED

@@ -17,6 +17,7 @@ from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate
 from delegate.ports.vcs import VcsError
 
+from . import git_processes
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, state_dir
 
 PUSH_REFUSED = "delegate: push refused"
@@ -135,6 +136,29 @@ def test_the_environment_entries_hold_for_a_worktree_in_a_path_with_a_wildcard(t
     assert Path(run_git(worktree, "config", "--get", "core.hooksPath", environment=entries).stdout.strip()) == hooks
     assert run_git(tmp_path / "other", "config", "--get", "core.hooksPath", environment=entries).returncode == 1
     assert run_git(repo, "config", "--get", "core.hooksPath", environment=entries).returncode == 1
+
+
+def test_the_environment_entries_hold_for_a_worktree_whose_git_file_names_its_git_directory_with_a_relative_path(tmp_path, vcs):
+    # The port reads the `.git` file of a worktree for its git directory (#239). Git writes a relative path there with
+    # `--relative-paths`, and the entries must name the git directory that git itself finds.
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", "--relative-paths", "-b", "feature", str(worktree), "main")
+    git(repo, "worktree", "add", "-q", "-b", "other", str(tmp_path / "other"), "main")
+    assert (worktree / ".git").read_text().startswith("gitdir: ../")
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    hooks = tmp_path / "my-hooks"
+    hooks.mkdir()
+    vcs.use_hooks_directory(repo, worktree, hooks)
+    before = git_processes.all_started()
+    entries = vcs.worktree_environment(worktree)
+
+    assert git_processes.all_started() - before == 0  # the `.git` file gave the git directory, with no git process
+    git_dir = Path(git(worktree, "rev-parse", "--absolute-git-dir").strip()).resolve()
+    assert entries[f"GIT_CONFIG_VALUE_{int(entries['GIT_CONFIG_COUNT']) - 1}"] == str(git_dir / "delegate.config")
+    assert Path(run_git(worktree, "config", "--get", "core.hooksPath", environment=entries).stdout.strip()) == hooks
+    assert run_git(worktree, "config", "--get", "core.fsmonitor", environment=entries).stdout.strip() == "false"
+    assert run_git(tmp_path / "other", "config", "--get", "core.hooksPath", environment=entries).returncode == 1
 
 
 def test_the_entries_of_the_port_go_after_the_entries_that_the_environment_holds_and_these_stay_in_effect(tmp_path, vcs, monkeypatch):

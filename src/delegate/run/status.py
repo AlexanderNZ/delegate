@@ -50,6 +50,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output
+from .engine import StateLocation
 from .journal import ABANDONED, JournalError, abandon_note, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
@@ -130,12 +131,14 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
     return [*lines, "", *table]
 
 
-def report(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> list[str]:
+def report(
+    repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime, *, location: StateLocation | None = None,
+) -> list[str]:
     """The lines of the report for a run of the repository: the run with that id, or the newest run when `run_id` is None.
 
-    The errors are the errors of `snapshot`.
+    The errors are the errors of `snapshot`. `location` is as in `snapshot`.
     """
-    journal = journal_of(repo, run_id, vcs)
+    journal = journal_of(repo, run_id, vcs, location=location)
     events, _ = read_new_events(journal, 0, 1)
     if not events:
         raise JournalError(f"journal {journal} holds no event")
@@ -801,7 +804,9 @@ def halt_note(halt: dict[str, object]) -> str:
     return f"halted at the {halt['role']} of ticket {halt['ticket']}: {halt['message']}"
 
 
-def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime) -> Snapshot:
+def snapshot(
+    repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime, *, location: StateLocation | None = None,
+) -> Snapshot:
     """The snapshot of a run of the repository: the run with that id, or the newest run when `run_id` is None.
 
     A run in progress appends to its journal, so a last line with no newline is
@@ -809,9 +814,17 @@ def snapshot(repo: Path, run_id: str | None, vcs: VersionControl, reader_of: Rea
     JournalError when its journal is not valid. A stream that cannot be read is
     not an error: the ticket of that stream has no tokens, and no activity when
     its agent runs now. The stream of an agent that runs now can be missing: the
-    harness has not opened it yet, so the agent has 0 tokens.
+    harness has not opened it yet, so the agent has 0 tokens. `location` is the location that the command looked up
+    (see `runs.locate`), or None to look it up here.
     """
-    journal = journal_of(repo, run_id, vcs)
+    return snapshot_of_journal(journal_of(repo, run_id, vcs, location=location), reader_of, now)
+
+
+def snapshot_of_journal(journal: Path, reader_of: ReaderOf, now: datetime) -> Snapshot:
+    """The snapshot of the run of the journal file `journal`, as `snapshot` gives it, with no lookup of the repository.
+
+    `delegate run` knows the journal of its run, so its end lines need no git process (#239).
+    """
     events, _ = read_new_events(journal, 0, 1)
     return snapshot_of(events, journal, reader_of, now)
 

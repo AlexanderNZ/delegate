@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .engine import EngineError, StateRootError, state_directories
+from .engine import EngineError, StateLocation, StateRootError, locate_state
 from .journal import JournalError, newest_run_end, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
@@ -57,18 +57,27 @@ def _start_time(journal: Path) -> datetime:
         raise RunsError(f"journal {journal}: the first line is not an event with a time") from None
 
 
-def _states(repo: Path, vcs: VersionControl) -> list[Path]:
-    """Each state directory of the repository that can hold a run, the default one first (#200).
+def locate(repo: Path, vcs: VersionControl) -> StateLocation:
+    """The location of the repository and of its state directories (see `engine.locate_state`), for a command that looks it up one time (#239).
 
-    The second directory is `<git common dir>/delegate`, when it holds runs of the versions before #200. Raise RunsError
-    when `repo` is not a git repository.
+    Raise RunsError when `repo` is not a git repository, or when the state root is not valid.
     """
     try:
-        return state_directories(repo, vcs)[1]
+        return locate_state(repo, vcs)
     except StateRootError as error:
         raise RunsError(str(error)) from None
     except EngineError as error:
         raise RunsError(f"{repo} is not a git repository: {error}") from None
+
+
+def _states(repo: Path, vcs: VersionControl, location: StateLocation | None = None) -> list[Path]:
+    """Each state directory of the repository that can hold a run, the default one first (#200).
+
+    The second directory is `<git common dir>/delegate`, when it holds runs of the versions before #200. Raise RunsError
+    when `repo` is not a git repository. A `location` that the command looked up already gives the directories with
+    no lookup.
+    """
+    return (location or locate(repo, vcs)).run_directories()
 
 
 def _all_journals(states: list[Path]) -> list[Path]:
@@ -146,23 +155,25 @@ def _full_run_id(states: list[Path], run_id: str) -> str:
     return matches[0] if matches else run_id
 
 
-def run_id_of(repo: Path, run_id: str, vcs: VersionControl) -> str:
+def run_id_of(repo: Path, run_id: str, vcs: VersionControl, *, location: StateLocation | None = None) -> str:
     """The full id of the run that `run_id` names in the repository: a full run id, or the short id of one run.
 
     `delegate run --resume` uses it. A run id that names no run comes back as it is. Raise RunsError when `repo` is not
-    a git repository, or when more than one run has the short id.
+    a git repository, or when more than one run has the short id. `location` is the location that the command looked
+    up (see `locate`), or None to look it up here.
     """
-    return _full_run_id(_states(repo, vcs), run_id)
+    return _full_run_id(_states(repo, vcs, location), run_id)
 
 
-def journal_of(repo: Path, run_id: str | None, vcs: VersionControl) -> Path:
+def journal_of(repo: Path, run_id: str | None, vcs: VersionControl, *, location: StateLocation | None = None) -> Path:
     """The journal file of the run `run_id`, or of the newest run when `run_id` is `None`.
 
     `run_id` is a full run id, or the short id of one run (`run_id_of`). The run can be in the default state directory
     or in `<git common dir>/delegate` (#200). Raise RunsError when `repo` is not a git repository, when the run is
-    unknown, when more than one run has the short id, or when the repository has no run.
+    unknown, when more than one run has the short id, or when the repository has no run. `location` is the location
+    that the command looked up (see `locate`), or None to look it up here.
     """
-    states = _states(repo, vcs)
+    states = _states(repo, vcs, location)
     if run_id is not None:
         run_id = _full_run_id(states, run_id)
         for state in states:
@@ -246,14 +257,15 @@ def is_active(journal: Path) -> bool:
     return newest_run_end(events) is None
 
 
-def runs_of(repo: Path, vcs: VersionControl) -> Runs:
+def runs_of(repo: Path, vcs: VersionControl, *, location: StateLocation | None = None) -> Runs:
     """The newest run and the active runs of the repository. A run that failed at start can be the newest run.
 
     A journal that cannot be read is not listed: `Runs.unreadable` names it with the reason, and the other runs are
     listed (#191). Raise RunsError when `repo` is not a git repository, when the repository has no run that can be
-    listed, or when a lock file cannot be read.
+    listed, or when a lock file cannot be read. `location` is the location that the command looked up (see `locate`),
+    or None to look it up here.
     """
-    states = _states(repo, vcs)
+    states = _states(repo, vcs, location)
     journals = _all_journals(states)
     failed = _failed_starts(states)
     if not journals and not failed:

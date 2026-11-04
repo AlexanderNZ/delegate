@@ -467,19 +467,18 @@ def _moved_text(run_branch: str, expected: str, found: str) -> str:
     )
 
 
-def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_branch: str, ticket: str) -> None:
-    """Halt the run when the run branch is not at the tip that the journal says (#186).
+def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_branch: str, ticket: str) -> str:
+    """Halt the run when the run branch is not at the tip that the journal says (#186). Return the tip.
 
     The run branch moves only when the engine advances it after an ACCEPT. A difference means that a commit landed with
     no verification. The engine writes `run-branch-moved` (the expected tip and the tip that it found) and raises
-    `_RunBranchMoved`, which halts the run as an invariant violation does. Do nothing when the tips agree.
+    `_RunBranchMoved`, which halts the run as an invariant violation does. When the tips agree, return the tip that the
+    check read, so the caller does not read it again (#239). A journal with no expected tip has no check.
     """
     expected = _expected_tip(read_events(journal.path))
-    if expected is None:
-        return
     found = _tip(vcs, repo, run_branch)
-    if found == expected:
-        return
+    if expected is None or found == expected:
+        return found
     journal.append("run-branch-moved", ticket=ticket, run_branch=run_branch, expected=expected, found=found)
     raise _RunBranchMoved(_moved_text(run_branch, expected, found))
 
@@ -606,6 +605,34 @@ def _repository_directory(shared: Path, root: Path) -> Path:
     return root / f"{name}-{key}"
 
 
+@dataclass(frozen=True)
+class StateLocation:
+    """Where a command finds the repository and the state of its runs: the paths that it looks up one time (#239).
+
+    `top` is the top level of the repository, `shared` its git common directory, and `directories` the state directory
+    of a new run, then `<git common dir>/delegate` when that is another directory. `locate_state` looks them up, and a
+    command passes the value on to each function that needs the paths. The value holds paths only: each method reads
+    the disk again when it is called. No value lives longer than the command that looked it up, because a worktree
+    can be made again at the same path.
+    """
+
+    top: Path
+    shared: Path
+    directories: tuple[Path, ...]
+
+    def state_directory(self, run_id: str | None = None) -> Path:
+        """The directory where the engine keeps its state, as `state_directory` gives it."""
+        if run_id is not None and not (self.directories[0] / "runs" / run_id).is_dir():
+            for other in self.directories[1:]:
+                if (other / "runs" / run_id).is_dir():
+                    return other
+        return self.directories[0]
+
+    def run_directories(self) -> list[Path]:
+        """Each state directory that can hold a run, as `state_directories` gives them."""
+        return [self.directories[0], *(other for other in self.directories[1:] if (other / "runs").is_dir())]
+
+
 def state_directory(repo: Path, vcs: VersionControl, run_id: str | None = None) -> tuple[Path, Path]:
     """The top level of the repository and the directory where the engine keeps its state.
 
@@ -634,12 +661,8 @@ def state_directory(repo: Path, vcs: VersionControl, run_id: str | None = None) 
     StateRootError when the root, or the path in `state-root`, is not an
     absolute path.
     """
-    top, directories = _state_directories(repo, vcs)
-    if run_id is not None and not (directories[0] / "runs" / run_id).is_dir():
-        for other in directories[1:]:
-            if (other / "runs" / run_id).is_dir():
-                return top, other
-    return top, directories[0]
+    location = locate_state(repo, vcs)
+    return location.top, location.state_directory(run_id)
 
 
 def state_directories(repo: Path, vcs: VersionControl) -> tuple[Path, list[Path]]:
@@ -648,15 +671,17 @@ def state_directories(repo: Path, vcs: VersionControl) -> tuple[Path, list[Path]
     The second directory is `<git common dir>/delegate`, where the runs that started before #200 are. It is in the list
     only when it holds a directory `runs`. Raise the errors of `state_directory`.
     """
-    top, directories = _state_directories(repo, vcs)
-    return top, [directories[0], *(other for other in directories[1:] if (other / "runs").is_dir())]
+    location = locate_state(repo, vcs)
+    return location.top, location.run_directories()
 
 
-def _state_directories(repo: Path, vcs: VersionControl) -> tuple[Path, list[Path]]:
-    """The top level, the state directory of a new run, and `<git common dir>/delegate` when it is another directory."""
+def locate_state(repo: Path, vcs: VersionControl) -> StateLocation:
+    """Look up the top level, the git common directory and the state directories of the repository that holds `repo`.
+
+    The rules are those of `state_directory`. Raise its errors. A command calls this one time and passes the result on.
+    """
     with _vcs_errors():
-        top = vcs.repository_root(repo)
-        shared = vcs.shared_data_directory(top)
+        top, shared = vcs.repository_paths(repo)
     legacy = shared / "delegate"
     recorded = _recorded_root(shared)
     root = os.environ.get(STATE_ROOT_VARIABLE)
@@ -673,17 +698,16 @@ def _state_directories(repo: Path, vcs: VersionControl) -> tuple[Path, list[Path
                 f"using {chosen}",
                 file=sys.stderr,
             )
-    return top, [chosen] if chosen == legacy else [chosen, legacy]
+    return StateLocation(top, shared, (chosen,) if chosen == legacy else (chosen, legacy))
 
 
-def record_state_root(repo: Path, vcs: VersionControl, state_dir: Path) -> None:
+def record_state_root(location: StateLocation, state_dir: Path) -> None:
     """Write the path of `state_dir` to `<git common dir>/delegate/state-root` when the state is not in `<git common dir>/delegate`.
 
     The file is the one line that a command needs to find the state without `DELEGATE_STATE_ROOT`. It is written
     to a private file first, and a rename puts it in place, so a command never reads half a path.
     """
-    with _vcs_errors():
-        shared_delegate = vcs.shared_data_directory(vcs.repository_root(repo)) / "delegate"
+    shared_delegate = location.shared / "delegate"
     if state_dir == shared_delegate:
         return
     path = shared_delegate / STATE_ROOT_FILE
@@ -710,9 +734,12 @@ def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[st
     return journal, events
 
 
-def workflow_of_run(repo: Path, run_id: str, vcs: VersionControl) -> Path:
-    """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown."""
-    _, state_dir = state_directory(repo, vcs, run_id)
+def workflow_of_run(repo: Path, run_id: str, vcs: VersionControl, *, location: StateLocation | None = None) -> Path:
+    """The path of the workflow file that the run `run_id` started from. Raise EngineError when the run is unknown.
+
+    `location` is the location that the command looked up (see `locate_state`), or None to look it up here.
+    """
+    state_dir = (location or locate_state(repo, vcs)).state_directory(run_id)
     try:
         events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
     except JournalError as error:
@@ -965,7 +992,7 @@ def _review(
 
 def review_plan_change(
     workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
-    retry: str | None = None,
+    retry: str | None = None, *, location: StateLocation | None = None,
 ) -> PlanReview:
     """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
 
@@ -973,9 +1000,11 @@ def review_plan_change(
     ticket of `--retry`: the text of a failed ticket that it starts again can
     change (rule 10). Raise
     EngineError when the run is unknown, or when the workflow differs from the
-    run in a field other than the tickets.
+    run in a field other than the tickets. `location` is the location that the command looked up (see `locate_state`),
+    or None to look it up here.
     """
-    top, state_dir = state_directory(repo, vcs, run_id)
+    location = location or locate_state(repo, vcs)
+    top, state_dir = location.top, location.state_directory(run_id)
     try:
         events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
     except JournalError as error:
@@ -1418,8 +1447,8 @@ def _check_chain_start(
 def check_start(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *,
     resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (), retry: str | None = None,
-    coordinator_commit: str | None = None, detach: bool = False,
-) -> None:
+    coordinator_commit: str | None = None, detach: bool = False, location: StateLocation | None = None,
+) -> StateLocation:
     """The checks of a run that need no agent: the tier of each role, the lock, and the branches or the plan. Create nothing.
 
     Raise EngineError, which names the input at fault, when a check fails. A run branch in use is reported first: the
@@ -1432,19 +1461,24 @@ def check_start(
     With `detach`, a resume also makes each other check that refuses a resume, a retry or a plan change (see `_resume_checks`):
     the run branch, and the retry of `retry` with its `coordinator_commit`. They change nothing: a refusal of the run process
     would be only in its log, and the journal would not show it (#240). The foreground run makes these checks after the lock.
+
+    `location` is the location that the command looked up (see `locate_state`), or None to look it up here. Return the
+    location, so the caller passes it on and does not look it up again (#239).
     """
-    repo, directories = _state_directories(repo, vcs)
+    location = location or locate_state(repo, vcs)
+    repo = location.top
     _roles(workflow, tiers, adapter.tier_column)
     try:
         # The lock of a run that started before #200 is in `<git common dir>/delegate`, so a run there counts too.
-        for directory in directories:
+        for directory in location.directories:
             check_free(directory, workflow.run_branch, run_id, break_stale=break_lock)
     except LockError as error:
         raise EngineError(str(error)) from None
     if resume:
-        _refuse_plan_change(review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed, retry), workflow_path, run_id)
+        review = review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed, retry, location=location)
+        _refuse_plan_change(review, workflow_path, run_id)
         if detach:
-            _, state_dir = state_directory(repo, vcs, run_id)
+            state_dir = location.state_directory(run_id)
             try:
                 events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
             except JournalError as error:
@@ -1452,13 +1486,14 @@ def check_start(
             _resume_checks(workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None)
     else:
         _check_branches(workflow, repo, vcs)
+    return location
 
 
 def run_workflow(
     workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, *,
     resume: str | None = None, retry: str | None = None, break_lock: bool = False,
     on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
-    agents_changed: bool = False, coordinator_commit: str | None = None,
+    agents_changed: bool = False, coordinator_commit: str | None = None, location: StateLocation | None = None,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -1503,16 +1538,19 @@ def run_workflow(
     `coordinator_commit` goes with `retry`: a commit of the coordinator at the tip of the branch of the ticket that
     changes only hotspot paths (#225). The `retry` event records it with its paths, and the hotspot check of the step
     does not count it (see `_coordinator_commit`). Raise EngineError, which names the commit, when it is refused.
+
+    `location` is the location that the command looked up (see `locate_state`), or None to look it up here. The run
+    looks it up at most one time (#239).
     """
     if coordinator_commit is not None and retry is None:
         raise EngineError("--coordinator-commit needs --retry TICKET")
     run_id = resume if resume is not None else (run_id or new_run_id())
-    check_start(
+    location = check_start(
         workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
-        retry=retry,
+        retry=retry, location=location,
     )
-    repo, state_dir = state_directory(repo, vcs, run_id)
-    record_state_root(repo, vcs, state_dir)
+    repo, state_dir = location.top, location.state_directory(run_id)
+    record_state_root(location, state_dir)
     roles = _roles(workflow, tiers, adapter.tier_column)
     try:
         with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
@@ -2447,16 +2485,15 @@ def _build_with_continuations(
                     return stop
                 # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
                 # something else than the commit. `economy` mode runs no gate here, but its chain gates run on this tree later.
-                uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers)
+                # The specialist was the last step that can move HEAD, so one read serves the check and the first gate (#239).
+                head = _head(vcs, worktree) if each_ticket else None
+                uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers, head)
                 if uncommitted:
                     trigger, reason, uncommitted_paths = TRIGGER_UNCOMMITTED, _uncommitted_reason(uncommitted), tuple(uncommitted)
-                elif not each_ticket:
+                elif head is None:
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `_ChainRun`)
                 else:
-                    outcomes = [
-                        _run_gate_with_output(gates, vcs, gate, ticket.id, worktree, journal, 0, PHASE_BUILD, stack.gate_timeout, stack.gate_names.get(gate))
-                        for gate in stack.gates
-                    ]
+                    outcomes = _gate_outcomes(gates, vcs, stack, ticket.id, worktree, journal, 0, PHASE_BUILD, head)
                     red = [outcome for outcome in outcomes if not outcome.green]
                     if not red:
                         return None
@@ -2495,7 +2532,8 @@ def _uncommitted_paths(vcs: VersionControl, worktree: Path) -> list[str]:
 
 
 def _uncommitted_before_gates(
-    journal: Journal, vcs: VersionControl, worktree: Path, gates: Sequence[str] | None, leftovers: frozenset[str] = frozenset()
+    journal: Journal, vcs: VersionControl, worktree: Path, gates: Sequence[str] | None, leftovers: frozenset[str] = frozenset(),
+    head: str | None = None,
 ) -> list[str]:
     """The paths that a change not committed holds in the worktree, when a gate is about to run in it. Else an empty list.
 
@@ -2507,9 +2545,10 @@ def _uncommitted_before_gates(
     the tree of a later gate, so the answer does not depend on the journal.
     A path in `leftovers` is a file that an earlier gate run of this process
     left in a tree that was clean before it: it is no work of the specialist.
+    `head` is the HEAD of the worktree when the caller read it after the last step that can move it, or None.
     """
     if gates is not None:
-        commit = _head(vcs, worktree)
+        commit = head if head is not None else _head(vcs, worktree)
         if all(_green_result(journal, gate, commit) is not None for gate in gates):
             return []
     return [path for path in _uncommitted_paths(vcs, worktree) if path not in leftovers]
@@ -2605,8 +2644,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     start, or one that ended with a failed hook, leaves nothing to abort.
     """
     ticket, run_branch = step.ticket, step.workflow.run_branch
-    _check_run_branch(step.journal, step.vcs, step.repo, run_branch, ticket.id)
-    onto = _tip(step.vcs, step.repo, run_branch)
+    onto = _check_run_branch(step.journal, step.vcs, step.repo, run_branch, ticket.id)
     before = _head(step.vcs, step.worktree)
     with _vcs_errors():
         rebase = step.vcs.rebase_onto(step.worktree, run_branch)
@@ -2628,13 +2666,9 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
             f"branch {step.branch} holds no commit beyond {run_branch} after the rebase; "
             f"{run_branch} holds its work already"
         )
-    red = [
-        label for gate in step.stack.gates
-        if (label := _run_gate(
-            step.gates, step.vcs, gate, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE, step.stack.gate_timeout,
-            step.stack.gate_names.get(gate),
-        ))
-    ]
+    # The rebase was the last step that can move HEAD, so the first gate uses `after` (#239).
+    outcomes = _gate_outcomes(step.gates, step.vcs, step.stack, ticket.id, step.worktree, step.journal, 0, PHASE_REBASE, after)
+    red = [outcome.label for outcome in outcomes if not outcome.green]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
     return None
@@ -2678,13 +2712,15 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     for round_number in domain.verification_rounds(mode, first_round):
         if report is not None:
             findings_text = _fixup_round(step, round_number, rejected, report.findings)
-        gates_text = _engine_gates_text(step)
+        # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves the
+        # gates text, the brief and the verifier (#239).
+        verified = _tip(step.vcs, step.repo, step.branch)
+        gates_text = _engine_gates_text(step, verified)
         fixup_body = (
             None if findings_text is None
             else _checked_fixup_brief(step, round_number, rejected, findings_text, gates_text)
         )
-        verified = _tip(step.vcs, step.repo, step.branch)
-        report = _verify_round(step, round_number, fixup_body, gates_text)
+        report = _verify_round(step, round_number, fixup_body, gates_text, verified=verified)
         if domain.is_accepted(report.verdict):
             return verified
         rejected = verified
@@ -2707,8 +2743,8 @@ def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[s
     return findings_text
 
 
-def _engine_gates_text(step: _Step) -> str | None:
-    """The `## Gates` text of a verifier brief of one ticket: the green gate output of the engine on the tip of its branch.
+def _engine_gates_text(step: _Step, commit: str) -> str | None:
+    """The `## Gates` text of a verifier brief of one ticket: the green gate output of the engine on `commit`, the tip of its branch.
 
     The verifier reviews the tip of the branch of the step: the rebased commit,
     or the fix-up commit. When the journal holds a green `gate-result` of each
@@ -2717,7 +2753,6 @@ def _engine_gates_text(step: _Step) -> str | None:
     a chain. Return None for a stack with no gates, or when a gate has no green
     result on that commit: the brief then gives the gate commands.
     """
-    commit = _tip(step.vcs, step.repo, step.branch)
     outputs: list[tuple[str, str]] = []
     for gate in step.stack.gates:
         green = _green_result(step.journal, gate, commit)
@@ -2873,7 +2908,7 @@ def _check_verifier_stop(journal: Journal, vcs: VersionControl, worktree: Path, 
 
 def _verify_round(
     step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None,
-    earlier_fixups: tuple[str, str] | None = None,
+    earlier_fixups: tuple[str, str] | None = None, *, verified: str | None = None,
 ) -> VerifierReport:
     """Run one fresh verifier in a new temporary copy and return its valid verdict report.
 
@@ -2886,13 +2921,17 @@ def _verify_round(
     holds the same text. For a chain, `fixups` gives the
     fix-up commits of red gates that the full pass must see, and `earlier_fixups`
     gives the fix-up commits of the stacks verified before (see `chain_brief`).
+
+    `verified` is the tip of the branch of the step, when the caller read it after the last step that can move the
+    branch. With None the round reads it.
     """
     ticket = step.ticket
     where = f"stack {ticket.stack}" if step.segments is not None else f"ticket {ticket.id}"
     _pause_point(step.journal, ticket.id, PAUSED_BEFORE_VERIFIER, f"before the verifier of {where}", round=round_number, **step.chain_fields)
     tier, model = step.roles["verifier"]
     mode = "full" if fixup_body is None else "fix-up"
-    verified = _tip(step.vcs, step.repo, step.branch)
+    if verified is None:
+        verified = _tip(step.vcs, step.repo, step.branch)
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
@@ -3040,10 +3079,10 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
     Return None when it moved, or the reason the step fails.
     """
     run_branch = step.workflow.run_branch
-    _check_run_branch(step.journal, step.vcs, step.repo, run_branch, step.ticket.id)
-    run_tip = _tip(step.vcs, step.repo, run_branch)
+    run_tip = _check_run_branch(step.journal, step.vcs, step.repo, run_branch, step.ticket.id)
     with _vcs_errors():
-        moved = step.vcs.fast_forward_branch(step.repo, run_branch, verified)
+        # The port moves the branch only while it is at `run_tip`, the tip that the check read.
+        moved = step.vcs.fast_forward_branch(step.repo, run_branch, verified, run_tip)
     if not moved:
         return (
             f"run branch {run_branch} cannot fast-forward to {step.branch}: "
@@ -3509,6 +3548,7 @@ class _GateRun(NamedTuple):
 
     `label` is the name of the gate, or its command when it has no name, and a gate that the runner ended at its time limit has `(timed out)` after it.
     `log` is the log file of the gate run, with its full output, or None for a gate that did not run again (see `gate-skip`).
+    `commit` is the commit that the result is for: the HEAD of the worktree before the gate.
     """
 
     command: str
@@ -3516,6 +3556,7 @@ class _GateRun(NamedTuple):
     output: str
     label: str
     log: Path | None = None
+    commit: str | None = None
 
 
 def _run_gate(
@@ -3533,9 +3574,30 @@ def _run_gate(
     return None if outcome.green else outcome.label
 
 
+def _gate_outcomes(
+    gates: GateRunner, vcs: VersionControl, stack: Stack, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
+    head: str,
+) -> list[_GateRun]:
+    """Run each gate of `stack` as `_run_gate_with_output` does, in order, and return their outcomes.
+
+    `head` is the HEAD of the worktree, which the caller read after the last step that can move it. The first gate uses
+    it. A gate that ran is a step that can move HEAD, so the gate after it reads HEAD again. A gate that the journal
+    let skip ran nothing, so the gate after it uses the same commit (#239).
+    """
+    outcomes: list[_GateRun] = []
+    commit: str | None = head
+    for gate in stack.gates:
+        outcome = _run_gate_with_output(
+            gates, vcs, gate, ticket, worktree, journal, round_number, phase, stack.gate_timeout, stack.gate_names.get(gate), commit=commit,
+        )
+        outcomes.append(outcome)
+        commit = outcome.commit if outcome.log is None else None
+    return outcomes
+
+
 def _run_gate_with_output(
     gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    gate_timeout: float | None = None, name: str | None = None,
+    gate_timeout: float | None = None, name: str | None = None, *, commit: str | None = None,
 ) -> _GateRun:
     """Run one gate command as `_run_gate` does. Return its outcome: whether it is green, and the tail of its output.
 
@@ -3561,8 +3623,12 @@ def _run_gate_with_output(
     `gate-start` with the path of the file. The gate runner appends the output
     to the file while the gate runs, so `delegate status` and `delegate watch`
     see the activity of a long gate.
+
+    `commit` is the HEAD of the worktree when the caller read it after the last step that can move it. With None the
+    engine reads it here.
     """
-    commit = _head(vcs, worktree)
+    if commit is None:
+        commit = _head(vcs, worktree)
     named: dict[str, object] = {} if name is None else {"name": name}
     shown = name or command
     green = _green_result(journal, command, commit)
@@ -3572,7 +3638,7 @@ def _run_gate_with_output(
             "gate-skip", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit, green_seq=green_seq,
             reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})", **named,
         )
-        return _GateRun(command, True, str(green.get("output_tail", "")), shown)
+        return _GateRun(command, True, str(green.get("output_tail", "")), shown, commit=commit)
     _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{shown}` of ticket {ticket}", command=command, phase=phase, **named)
     log = _gate_log_path(journal, ticket, phase, round_number)
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log), **named)
@@ -3584,7 +3650,7 @@ def _run_gate_with_output(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
         exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True, **named,
     )
-    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown, log)
+    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown, log, commit)
 
 
 def _copy_gate_logs(red: Sequence[_GateRun], scratch: Path) -> list[GateLogCopy]:

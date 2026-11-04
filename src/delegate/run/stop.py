@@ -18,10 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
-from .engine import EngineError, state_directory
 from .journal import JournalError, is_paused, newest_run_end, read_new_events
 from .lock import LockError, LockHolder, live_holder
-from .runs import RunsError, journal_of
+from .runs import RunsError, journal_of, locate
 
 # The seconds between two looks at the lock while the stop waits.
 POLL_SECONDS: float = 0.1
@@ -48,7 +47,8 @@ def stop_run(repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float) 
     The outcome has `released` false when the process still holds the lock at the end of the wait.
     """
     try:
-        journal = journal_of(repo, run_id, vcs)
+        location = locate(repo, vcs)  # one lookup for the command (#239)
+        journal = journal_of(repo, run_id, vcs, location=location)
         events, _ = read_new_events(journal, 0, 1)
     except (RunsError, JournalError) as error:
         raise StopError(str(error)) from None
@@ -63,9 +63,9 @@ def stop_run(repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float) 
         raise StopError(f"run {run_id!r} is paused already, and no process works on it; go on with {resume}")
     run_branch = str(events[0]["run_branch"])
     try:
-        _, state_dir = state_directory(repo, vcs, run_id)
+        state_dir = location.state_directory(run_id)
         holder = live_holder(state_dir, run_branch)
-    except (EngineError, LockError) as error:
+    except LockError as error:
         raise StopError(str(error)) from None
     if holder is None or holder.run_id != run_id:
         raise StopError(f"run {run_id!r} has no live process: it stopped already; go on with {resume}")

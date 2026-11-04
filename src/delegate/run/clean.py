@@ -47,7 +47,7 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
-from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, EngineError, restore_progress, state_directories
+from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, EngineError, locate_state, restore_progress
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
@@ -133,14 +133,15 @@ def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run
     except with `dry_run`.
     """
     try:
-        top, states = state_directories(repo, vcs)
+        location = locate_state(repo, vcs)  # one lookup for the command and each run id of it (#239)
     except EngineError as error:
         raise CleanError(f"{repo} is not a git repository: {error}") from None
+    top, states = location.top, location.run_directories()
     errors: list[str] = []
     journals: set[Path] = set()
     for run_id in run_ids:
         try:
-            journals.add(journal_of(top, run_id, vcs))
+            journals.add(journal_of(top, run_id, vcs, location=location))
         except RunsError as error:
             errors.append(str(error))
     if ended:
@@ -428,8 +429,8 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
     port while it removes is an error of the result, and the other items are still removed.
     """
     try:
-        top, _ = state_directories(repo, vcs)
-        journal = journal_of(top, run_id, vcs)
+        location = locate_state(repo, vcs)  # one lookup for the command (#239)
+        journal = journal_of(location.top, run_id, vcs, location=location)
     except EngineError as error:
         raise AbandonError(f"{repo} is not a git repository: {error}") from None
     except RunsError as error:
@@ -453,7 +454,7 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
     try:
         # The lock keeps a resume out while the command works. A stale lock names no live process, so it goes.
         with run_lock(state, run_branch, run_id, break_stale=True) as broken:
-            return _abandon_run(top, state, journal, reason, delete_run_branch, vcs, broken)
+            return _abandon_run(location.top, state, journal, reason, delete_run_branch, vcs, broken)
     except LockError as error:
         raise AbandonError(f"run {run_id} has a live process: {error}; stop it with delegate stop {run_id}, then abandon it") from None
     except JournalError as error:

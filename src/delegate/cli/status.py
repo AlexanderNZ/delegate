@@ -28,7 +28,7 @@ from ..adapters.git import GitVersionControl
 from ..ports.harness import Activity
 from ..run import status
 from ..run.journal import JournalError
-from ..run.runs import FailedStart, RunsError, runs_of
+from ..run.runs import FailedStart, RunsError, locate, runs_of
 
 # The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid. With
 # `--json` and no run id, it is also the exit status when more than one run is active, or when the newest run failed at start.
@@ -69,10 +69,12 @@ def utc_now() -> datetime:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    vcs = GitVersionControl()
     try:
+        location = locate(args.repo, vcs)  # one lookup for the command (#239)
         run_id = args.run_id
         if run_id is None:
-            runs = runs_of(args.repo, GitVersionControl())
+            runs = runs_of(args.repo, vcs, location=location)
             for line in runs.unreadable_lines("delegate status"):
                 print(line, file=sys.stderr)
             if runs.chosen is None:
@@ -91,10 +93,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             run_id = runs.chosen.parent.name
         if args.json:
-            snap = status.snapshot(args.repo, run_id, GitVersionControl(), stream_reader_of, utc_now())
+            snap = status.snapshot(args.repo, run_id, vcs, stream_reader_of, utc_now(), location=location)
             print(json.dumps(snap.to_json(), indent=2))
             return 0
-        lines = status.report(args.repo, run_id, GitVersionControl(), stream_reader_of, utc_now())
+        lines = status.report(args.repo, run_id, vcs, stream_reader_of, utc_now(), location=location)
     except (RunsError, JournalError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR

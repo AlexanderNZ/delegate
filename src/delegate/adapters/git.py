@@ -95,7 +95,23 @@ def _gitdir_pattern(git_dir: Path) -> str:
 
 
 def _worktree_git_dir(worktree: Path) -> Path:
-    """The real path of the git directory of a checkout: `.git/worktrees/<name>` for a linked worktree."""
+    """The real path of the git directory of a checkout: `.git/worktrees/<name>` for a linked worktree.
+
+    A linked worktree holds a `.git` file with one line, `gitdir: <path>`, and the path can be relative to the
+    worktree (gitrepository-layout(5)). The backend reads that file, so the engine starts no git process for the
+    git directory of a worktree that it made (#239). For any other form (a `.git` directory, a file of another form,
+    or a path that is not a directory), git gives the answer.
+    """
+    gitfile = worktree / ".git"
+    try:
+        text = gitfile.read_text() if gitfile.is_file() else ""
+    except (OSError, UnicodeDecodeError):
+        text = ""
+    first, _, rest = text.partition("\n")
+    if first.startswith("gitdir: ") and not rest.strip():
+        found = (worktree / first[len("gitdir: "):]).resolve()
+        if found.is_dir():
+            return found
     return Path(_git(worktree, "rev-parse", "--absolute-git-dir")).resolve()
 
 
@@ -177,6 +193,11 @@ class GitVersionControl:
     def shared_data_directory(self, path: Path) -> Path:
         # One git process: the engine asks for this directory many times in each run (#229).
         return Path(_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+
+    def repository_paths(self, path: Path) -> tuple[Path, Path]:
+        # One git process for the two paths that each command looks up (#239).
+        top, common = _git(path, "rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir").splitlines()
+        return Path(top), Path(common).resolve()
 
     def branch_exists(self, repo: Path, branch: str) -> bool:
         return _run(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
@@ -304,14 +325,15 @@ class GitVersionControl:
         operation, cause = f"git merge-base --is-ancestor {ancestor} {descendant}", result.stderr.strip() or str(result.returncode)
         raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=repo, cause=cause)
 
-    def fast_forward_branch(self, repo: Path, branch: str, to_commit: str) -> bool:
-        tip = self.branch_tip(repo, branch)
+    def fast_forward_branch(self, repo: Path, branch: str, to_commit: str, tip: str | None = None) -> bool:
+        if tip is None:
+            tip = self.branch_tip(repo, branch)
         # Any failure of the ancestor check, such as a `to_commit` that names no commit, is the answer no.
         if _run(repo, "merge-base", "--is-ancestor", tip, to_commit).returncode != 0:
             return False
-        target = self.commit_of(repo, to_commit)
-        # The old value in the last argument makes the move fail if the branch moved in the meantime.
-        _git(repo, "update-ref", f"refs/heads/{branch}", target, tip)
+        # `^{commit}` gives the branch the commit, also for a name of a tag. The old value in the last argument makes the
+        # move fail if the branch is not at `tip`: it moved in the meantime, or the branch does not exist.
+        _git(repo, "update-ref", f"refs/heads/{branch}", f"{to_commit}^{{commit}}", tip)
         return True
 
     def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str) -> None:

@@ -100,6 +100,13 @@ class VersionControl(Protocol):
         """
         ...
 
+    def repository_paths(self, path: Path) -> tuple[Path, Path]:
+        """The top directory of the checkout that holds `path`, and the shared data directory, from one look-up.
+
+        The two values are those of `repository_root` and `shared_data_directory`. A command looks them up one time (#239).
+        """
+        ...
+
     def branch_exists(self, repo: Path, branch: str) -> bool:
         """Tell whether a branch of that name exists. A tag of that name does not count."""
         ...
@@ -231,13 +238,16 @@ class VersionControl(Protocol):
         """Tell whether the commit `descendant` holds the commit `ancestor`. A commit holds itself."""
         ...
 
-    def fast_forward_branch(self, repo: Path, branch: str, to_commit: str) -> bool:
+    def fast_forward_branch(self, repo: Path, branch: str, to_commit: str, tip: str | None = None) -> bool:
         """Move the branch to `to_commit` when the branch holds only commits that `to_commit` holds.
 
         Return True when the branch moved. Return False, and leave the branch
         where it is, when it holds a commit that `to_commit` does not hold, or
         when `to_commit` names no commit.
         Raise VcsError when there is no such branch.
+
+        `tip` is the id of the newest commit of the branch, when the caller read it already (#239). The port then does
+        not read it again, and moves the branch only while the branch is at `tip`: raise VcsError when it is not.
         """
         ...
 

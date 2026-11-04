@@ -130,6 +130,30 @@ def test_the_shared_data_directory_from_a_subdirectory_of_a_worktree_costs_one_g
     assert shared == (repo / ".git").resolve()
 
 
+def test_the_repository_paths_of_a_subdirectory_of_a_worktree_are_its_top_and_the_shared_directory_from_one_git_process(tmp_path, vcs):
+    # Each command looks up the two paths one time (#239), so the two come from one process.
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    (worktree / "sub").mkdir()
+    before = git_processes.all_started()
+
+    top, shared = vcs.repository_paths(worktree / "sub")
+
+    assert git_processes.all_started() - before == 1
+    assert top.resolve() == worktree.resolve()
+    assert shared == (repo / ".git").resolve()
+
+
+def test_the_repository_paths_of_a_directory_outside_any_repository_are_an_error(tmp_path, vcs, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+
+    with pytest.raises(VcsError):
+        vcs.repository_paths(outside)
+
+
 def test_the_repository_root_of_a_directory_outside_any_repository_is_an_error(tmp_path, vcs, monkeypatch):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -729,6 +753,44 @@ def test_fast_forward_branch_to_a_commit_that_does_not_exist_leaves_the_branch_a
 
     assert moved is False
     assert sha(repo, "main") == tip
+
+
+def test_fast_forward_branch_with_the_tip_that_the_caller_read_moves_the_branch(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    tip = sha(repo, "main")
+    vcs.create_branch(repo, "run/demo", "main")
+    git(repo, "checkout", "-q", "-b", "side")
+    new = commit(repo, "side.txt", "side\n", "side")
+
+    assert vcs.fast_forward_branch(repo, "run/demo", new, tip) is True
+    assert sha(repo, "run/demo") == new
+
+
+def test_fast_forward_branch_with_a_tip_that_the_branch_left_is_an_error_and_moves_nothing(tmp_path, vcs):
+    # The caller read the tip, then a commit landed on the branch: the port must not move it from the new tip (#239).
+    repo = make_repo(tmp_path)
+    read = sha(repo, "main")
+    vcs.create_branch(repo, "run/demo", "main")
+    git(repo, "checkout", "-q", "run/demo")
+    landed = commit(repo, "landed.txt", "landed\n", "landed")
+    git(repo, "checkout", "-q", "-b", "side")
+    new = commit(repo, "side.txt", "side\n", "side")
+
+    with pytest.raises(VcsError):
+        vcs.fast_forward_branch(repo, "run/demo", new, read)
+    assert sha(repo, "run/demo") == landed
+
+
+def test_fast_forward_branch_to_the_name_of_an_annotated_tag_moves_the_branch_to_its_commit(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    vcs.create_branch(repo, "run/demo", "main")
+    git(repo, "checkout", "-q", "-b", "side")
+    new = commit(repo, "side.txt", "side\n", "side")
+    git(repo, "tag", "-a", "-m", "release", "v1", new)
+
+    assert vcs.fast_forward_branch(repo, "run/demo", "v1") is True
+    assert sha(repo, "run/demo") == new
+    assert git(repo, "cat-file", "-t", "refs/heads/run/demo").strip() == "commit"
 
 
 def test_fast_forward_branch_of_a_branch_that_does_not_exist_is_an_error(tmp_path, vcs):
