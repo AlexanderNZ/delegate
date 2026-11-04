@@ -1,6 +1,6 @@
 # How to give the agents an MCP server
 
-Use this page when the agents of a [**run**](../glossary.md#run) must use an MCP server, for example a code index. The setup has five parts, and each part is in a different place: the server in `mcp-servers`, the tools of the [**verifier**](../glossary.md#verifier) in `verifier-tools`, the index in `prepare`, the allow rules in the settings file of the host, and the stop of the daemon in `env`. This page puts the five parts in one order. [The workflow reference](../reference/workflow.md#mcp-servers) gives each field, its type and its rules.
+Use this page when the agents of a [**run**](../glossary.md#run) must use an MCP server, for example a code index. The setup has five parts, and each part is in a different place. The server is in `mcp-servers`. The tools of the [**verifier**](../glossary.md#verifier) are in `verifier-tools`. The index is in `prepare`. The allow rules are in the settings file of the host. The stop of the daemon is in `env`. This page puts the five parts in one order. [The workflow reference](../reference/workflow.md#mcp-servers) gives each field, its type and its rules.
 
 ## Before you start
 
@@ -86,7 +86,7 @@ The rule is for the permission of the session. The seal of the verifier, which `
 
 ### 5. Stop the daemon of the server
 
-Some servers start a daemon. `codegraph serve --mcp` starts a detached daemon, with the parent pid 1 and an idle timeout of 300 seconds. Measured on 2026-11-04 with `codegraph` 1.6.0 in a worktree. The daemon is outside the process group of the agent, so the timeout of the agent does not end it, and it stays after the clean removes the worktree.
+Some servers start a daemon. `codegraph serve --mcp` starts a detached daemon, with the parent pid 1 and an idle timeout of 300 seconds. Measured on 2026-11-04 with `codegraph` 1.6.0 in a worktree. The daemon is outside the process group of the agent, so the timeout of the agent does not end it. It stays after the clean removes the worktree.
 
 Set the setting of the server that stops the daemon in `env`. For `codegraph`, it is `CODEGRAPH_NO_DAEMON = "1"`. Measured with 1.6.0: with this setting no process stays after the session, and the tools work.
 
@@ -96,7 +96,7 @@ Check this after a run. List the processes of the server, and make sure that non
 pgrep -fl "codegraph.*serve"
 ```
 
-A process of another session on the same host also shows in the list. A process whose path is in a worktree of the run, or one that has the parent pid 1 after the run ended, is a daemon that stays. End it, and look for the setting that stops it.
+A process of another session on the same host also shows in the list. A daemon that stays is a process whose path is in a worktree of the run. It is also a process that has the parent pid 1 after the run ended. End it, and look for the setting that stops it.
 
 ### 6. Check the workflow before each launch
 
