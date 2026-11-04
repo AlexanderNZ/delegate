@@ -373,7 +373,7 @@ STACK_FIELDS: tuple[str, ...] = (
     "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file", "gate-timeout", "agent-timeout",
 )
 GATE_FIELDS: tuple[str, ...] = ("name", "command")
-MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url", "verifier-tools")
+MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url", "verifier-tools", "env")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by", "tier")
 
 
@@ -447,7 +447,8 @@ def _read_file(reader: _Reader, root: Path, name: str, where: str) -> str | None
 def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpServer, ...] | None:
     """The MCP servers of a stack: a table of server tables, each with exactly one of `command` and `url`.
 
-    A server table can also hold `verifier-tools` (#257): at least one exact tool name, with no `*`.
+    A server table can also hold `verifier-tools` (#257): at least one exact tool name, with no `*`. A local server can
+    also hold `env` (#258): a table of strings. The loader refuses `env` on a server with `url`.
     """
     table = reader.table(value, field)
     if table is None:
@@ -461,17 +462,41 @@ def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpSe
             continue
         reader.refuse_unknown(server, MCP_SERVER_FIELDS, server_field)
         tools = _read_verifier_tools(reader, server, f"{server_field}.verifier-tools")
+        env = _read_env(reader, server, server_field)
         if ("command" in server) == ("url" in server):
             reader.problems.append(f"{server_field}: needs exactly one of command and url")
         elif "command" in server:
             command = reader.string_list(server, "command", f"{server_field}.command", at_least_one=True)
             if command is not None:
-                servers.append(McpServer(name, command=tuple(command), verifier_tools=tools))
+                servers.append(McpServer(name, command=tuple(command), verifier_tools=tools, env=env))
         else:
             url = reader.string(server, "url", f"{server_field}.url")
             if url is not None:
                 servers.append(McpServer(name, url=url, verifier_tools=tools))
     return tuple(servers) if len(reader.problems) == problems else None
+
+
+def _read_env(reader: _Reader, server: dict[str, object], server_field: str) -> tuple[tuple[str, str], ...]:
+    """The `env` of a server table as (name, value) pairs, or () when it has none. A defect is a new entry in `reader.problems`.
+
+    `env` is a table of strings. A server with `url` has no process to give it to, so `env` on it is a defect.
+    """
+    if "env" not in server:
+        return ()
+    field = f"{server_field}.env"
+    if "url" in server:
+        reader.problems.append(f"{field}: only a server with command takes env, and {server_field} has url")
+        return ()
+    table = reader.table(server["env"], field)
+    if table is None:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for key, value in table.items():
+        if isinstance(value, str):
+            pairs.append((key, value))
+        else:
+            reader.problems.append(f"{field}.{key}: must be a string, not {value!r}")
+    return tuple(pairs)
 
 
 def _read_verifier_tools(reader: _Reader, server: dict[str, object], field: str) -> tuple[str, ...]:

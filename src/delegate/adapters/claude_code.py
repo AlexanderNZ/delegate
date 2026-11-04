@@ -150,6 +150,8 @@ def _mcp_config(servers: tuple[McpServer, ...]) -> str:
             entries[server.name] = {"type": "http", "url": server.url}
         else:
             entries[server.name] = {"command": server.command[0], "args": list(server.command[1:])}
+            if server.env:
+                entries[server.name]["env"] = dict(server.env)
     return json.dumps({"mcpServers": entries})
 
 

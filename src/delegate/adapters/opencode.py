@@ -195,6 +195,8 @@ def _environment(servers: tuple[McpServer, ...], sealed: SealedAgent | None = No
             mcp[server.name] = {"type": "remote", "url": server.url}
         else:
             mcp[server.name] = {"type": "local", "command": list(server.command)}
+            if server.env:
+                mcp[server.name]["environment"] = dict(server.env)
     return {**environment, CONFIG_VARIABLE: json.dumps(config)}
 
 

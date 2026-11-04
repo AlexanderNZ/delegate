@@ -212,6 +212,23 @@ def test_the_mcp_servers_of_the_request_go_to_the_harness_in_the_inline_configur
     assert not any("playwright" in arg for arg in call["argv"])
 
 
+def test_the_env_of_a_local_server_goes_to_the_environment_of_its_inline_configuration_entry(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    servers = (
+        McpServer("graph", command=("codegraph", "serve", "--mcp"), env=(("CODEGRAPH_NO_DAEMON", "1"), ("A", "1"))),
+        McpServer("browser", command=("npx", "@playwright/mcp@latest")),
+    )
+
+    adapters.get("opencode").run(request(tmp_path, mcp_servers=servers))
+
+    (call,) = fake.calls()
+    assert json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"]) == {"mcp": {
+        "graph": {"type": "local", "command": ["codegraph", "serve", "--mcp"], "environment": {"CODEGRAPH_NO_DAEMON": "1", "A": "1"}},
+        "browser": {"type": "local", "command": ["npx", "@playwright/mcp@latest"]},
+    }}
+
+
 def test_the_mcp_servers_of_the_request_keep_the_inline_configuration_of_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", json.dumps({"share": "disabled", "mcp": {"own": {"type": "remote", "url": "https://own.example.invalid"}}}))
     fake = opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")

@@ -48,18 +48,22 @@ class McpServer:
     """One MCP server that a stack gives its agents, in a form that no harness owns.
 
     A local server has `command`: the program and its arguments. The harness
-    starts it with its own environment. A remote server has `url` instead. A
+    starts it with its own environment, and `env` adds settings to it (#258). A remote server has `url` instead. A
     server has exactly one of the two. The adapter writes the server in the
     configuration form of its harness.
 
     `verifier_tools` holds the names of the tools of the server that the verifier of the stack gets (#257), each one exact
     name, without a prefix of the harness. The engine gives them to the seal of the verifier as `McpTool` values.
+
+    `env` holds the environment settings that the harness gives to a local server, as (name, value) pairs in the order of
+    the workflow file (#258). A remote server has none.
     """
 
     name: str
     command: tuple[str, ...] = ()
     url: str | None = None
     verifier_tools: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

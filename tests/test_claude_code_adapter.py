@@ -318,6 +318,23 @@ def test_the_mcp_servers_of_the_request_are_the_only_mcp_servers_on_the_command(
     assert argv[argv.index("--agent") + 1] == "delegate-seal-python-specialist:python-specialist"
 
 
+def test_the_env_of_a_local_server_goes_to_the_mcp_config_entry_of_the_server(tmp_path, monkeypatch):
+    fake = claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    servers = (
+        McpServer("graph", command=("codegraph", "serve", "--mcp"), env=(("CODEGRAPH_NO_DAEMON", "1"), ("A", "1"))),
+        McpServer("browser", command=("npx", "@playwright/mcp@latest")),
+    )
+
+    adapters.get("claude-code").run(request(tmp_path, mcp_servers=servers))
+
+    (call,) = fake.calls()
+    argv = call["argv"]
+    assert json.loads(argv[argv.index("--mcp-config") + 1]) == {"mcpServers": {
+        "graph": {"command": "codegraph", "args": ["serve", "--mcp"], "env": {"CODEGRAPH_NO_DAEMON": "1", "A": "1"}},
+        "browser": {"command": "npx", "args": ["@playwright/mcp@latest"]},
+    }}
+
+
 def test_the_adapter_writes_the_stream_to_the_path_that_the_request_names(tmp_path, monkeypatch):
     claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
     stream = tmp_path / "chosen" / "x.jsonl"

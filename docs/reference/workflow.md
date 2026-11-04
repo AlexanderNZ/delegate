@@ -274,20 +274,24 @@ The table `[stacks.<name>.mcp-servers]` holds one table for each MCP server. The
 
 | Field | Type | Meaning |
 |---|---|---|
-| `command` | list of strings | A local server: the program and its arguments. At least one entry is required. The harness starts the program with its own environment. |
+| `command` | list of strings | A local server: the program and its arguments. At least one entry is required. The harness starts the program with its own environment, and `env` adds settings to it. |
 | `url` | string | A remote server: the URL of its endpoint. |
+| `env` | table of strings | Optional. Only a server with `command` takes it. The environment settings that the harness gives to the program, in addition to its own environment: each key is a variable name and each value is a string. A value that is not a string is an error of the workflow, and so is `env` on a server with `url`. |
 | `verifier-tools` | list of strings | Optional. The tools of the server that the verifier of the stack can use. Give each tool by its name in the server, without a prefix such as `mcp__<server>__`. Each entry is one exact name: an empty name and a name with `*` are errors of the workflow. At least one entry is required. |
 
 ```toml
 [stacks.web.mcp-servers.browser]
 command = ["npx", "@playwright/mcp@latest"]
+env = { PLAYWRIGHT_BROWSERS_PATH = "/opt/browsers" }
 verifier-tools = ["browser_navigate", "browser_snapshot"]
 
 [stacks.web.mcp-servers.tracker]
 url = "https://mcp.example.com/mcp"
 ```
 
-In this example, the verifier of the stack `web` can use two tools of the server `browser`, and no tool of the server `tracker`. The specialist can use each tool of the two servers.
+In this example, the verifier of the stack `web` can use two tools of the server `browser`, and no tool of the server `tracker`. The specialist can use each tool of the two servers. The program of the server `browser` starts with the variable `PLAYWRIGHT_BROWSERS_PATH` in its environment.
+
+A server can need a setting in its environment. For example, `codegraph serve --mcp` starts a detached daemon that stays after the session ends, and `env = { CODEGRAPH_NO_DAEMON = "1" }` stops it. Before `env`, the only way was a wrapper such as `command = ["env", "NAME=value", "<program>"]`.
 
 A rendered verifier has a list of the tools that it can use, and a server tool that is not in that list is not available to the verifier. The instructions of the server still go to the verifier. So, without `verifier-tools`, the verifier can read about the tools of a server but cannot use them. The [quality check](run.md#the-quality-check) of the dry run gives a `warn` line for each server with no `verifier-tools`. Measured on Claude Code 2.1.287 on 2026-11-05, from the `init` event of `--output-format stream-json`, with one local server in `--mcp-config` and `--strict-mcp-config`:
 
@@ -371,4 +375,5 @@ The check is in Python and starts no process. For example, the id `a.lock` is a 
 | A stack gives both `specialist-notes` and `specialist-notes-file`, or both `verifier-notes` and `verifier-notes-file`. | The stack and the two fields, for example `stacks.web: give at most one of verifier-notes and verifier-notes-file`. |
 | A `specialist-notes-file` or a `verifier-notes-file` does not exist, or it is empty. | The stack, the field and the path. |
 | An MCP server has both `command` and `url`, or neither. | The server, for example `stacks.web.mcp-servers.browser`. |
+| An MCP server has `env` and `url`, or a value of `env` is not a string. | The field, for example `stacks.web.mcp-servers.tracker.env` or `stacks.web.mcp-servers.browser.env.NAME`. |
 | `gate-timeout` or `agent-timeout` is zero, a negative number, text, or not a finite number. | The field, for example `stacks.python.gate-timeout: must be greater than 0 minutes, not 0`. |

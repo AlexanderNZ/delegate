@@ -96,6 +96,21 @@ def test_the_claude_code_command_of_the_specialist_holds_the_mcp_servers_of_its_
     }}
 
 
+def test_the_env_of_a_local_server_reaches_the_adapter_in_the_request_of_each_agent_of_the_stack(tmp_path, capsys, scripted):
+    workflow = with_servers(WORKFLOW).replace(
+        'command = ["npx", "@playwright/mcp@latest"]\n', 'command = ["npx", "@playwright/mcp@latest"]\nenv = { A = "1", B = "two" }\n', 1,
+    )
+    repo = make_repo(tmp_path, workflow)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 0, err
+    servers_of = {request.agent: request.mcp_servers for request in [*scripted.calls, *scripted.verifier_calls]}
+    browser = McpServer("browser", command=("npx", "@playwright/mcp@latest"), env=(("A", "1"), ("B", "two")))
+    assert servers_of["python-specialist"] == (browser, TRACKER)
+    assert servers_of["python-verifier"] == (browser, TRACKER)
+
+
 def test_only_the_seal_of_the_verifier_of_the_stack_gets_the_verifier_tools_of_its_servers(tmp_path, capsys, scripted):
     workflow = with_servers(WORKFLOW).replace(
         'url = "https://mcp.example.invalid/mcp"\n', 'url = "https://mcp.example.invalid/mcp"\nverifier-tools = ["issue_read", "search"]\n', 1,
@@ -143,8 +158,14 @@ def test_a_stack_with_mcp_servers_passes_the_check(tmp_path, capsys):
                      ["stacks.python.mcp-servers.browser.command", "list of strings"], id="command-not-a-list"),
         pytest.param('\n[stacks.python.mcp-servers.browser]\nurl = 8080\n', "",
                      ["stacks.python.mcp-servers.browser.url", "string"], id="url-not-a-string"),
-        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nenv = { TOKEN = "x" }\n', "",
-                     ["stacks.python.mcp-servers.browser", "env", "unknown field"], id="unknown-server-field"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\ntimeout = 5\n', "",
+                     ["stacks.python.mcp-servers.browser", "timeout", "unknown field"], id="unknown-server-field"),
+        pytest.param('\n[stacks.python.mcp-servers.tracker]\nurl = "https://x.invalid"\nenv = { A = "1" }\n', "",
+                     ["stacks.python.mcp-servers.tracker.env", "url"], id="env-with-url"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nenv = { A = 1 }\n', "",
+                     ["stacks.python.mcp-servers.browser.env.A", "string"], id="env-value-not-a-string"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nenv = ["A=1"]\n', "",
+                     ["stacks.python.mcp-servers.browser.env", "table"], id="env-not-a-table"),
         pytest.param("", 'mcp-servers = ["browser"]\n',
                      ["stacks.python.mcp-servers", "table"], id="servers-not-a-table"),
         pytest.param("", 'mcp-servers = { browser = "npx" }\n',
