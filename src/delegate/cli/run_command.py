@@ -65,8 +65,8 @@ from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
-    EngineError, PlanReview, RunInterrupted, StateLocation, StateRootError, check_start, new_run_id, record_state_root, review_plan_change,
-    run_workflow, state_directory,
+    EngineError, PlanReview, RetryHint, RunInterrupted, StateLocation, StateRootError, check_start, new_run_id, record_state_root,
+    retry_hints, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
@@ -285,9 +285,10 @@ def _print_review(review: PlanReview) -> int:
         print(f"run {review.run_id}: no plan change")
         print(f"order: {', '.join(review.new_order)}")
         _print_skipped(review)
-        for problem in review.problems():
+        problems = [*review.problems(), *_retry_problem(review)]
+        for problem in problems:
             print(f"delegate run: {problem}", file=sys.stderr)
-        return 1 if review.problems() else 0
+        return 1 if problems else 0
     check = review.check
     print(f"run {review.run_id}: plan change")
     print(f"old order: {', '.join(review.old_order)}")
@@ -302,10 +303,15 @@ def _print_review(review: PlanReview) -> int:
             for line in review.texts[ticket].rstrip("\n").splitlines():
                 print(f"  {line}" if line else "")
     _print_skipped(review)
-    problems = review.problems()
+    problems = [*review.problems(), *_retry_problem(review)]
     for problem in problems:
         print(f"delegate run: {problem}", file=sys.stderr)
     return 1 if problems else 0
+
+
+def _retry_problem(review: PlanReview) -> list[str]:
+    """The refusal of the retry of `--retry` as a problem of the dry run (#261), or none when the engine accepts the retry."""
+    return [] if review.retry_refusal is None else [review.retry_refusal]
 
 
 def _print_skipped(review: PlanReview) -> None:
@@ -324,8 +330,12 @@ def _start_lines(run_id: str, journal: Path) -> list[str]:
     return [f"run {run_id}", f"journal {journal}", f"follow it with delegate watch{dot}pause it with delegate pause {short_run_id(run_id)}"]
 
 
-def _end_lines(snap: status.Snapshot) -> list[str]:
-    """The summary line of a run that ended or paused, and one retry line for each failed step, in plan order.
+def _end_lines(snap: status.Snapshot, hints: list[RetryHint]) -> list[str]:
+    """The summary line of a run that ended or paused, and one retry line for each retry that the engine accepts, in plan order.
+
+    `hints` gives the retries (see `retry_hints`), also a retry that goes on only with a new text of the ticket. In
+    `economy` mode after the verification of the chain, that is one ticket of the chain, not each ticket that the
+    verification failed (#261). A retry that needs a commit of the coordinator has `--coordinator-commit <sha>` in its line.
 
     The summary has the two token counts only when the snapshot has them. On a terminal, the result is in the colour of
     its role, and the token counts are faint.
@@ -339,8 +349,9 @@ def _end_lines(snap: status.Snapshot) -> list[str]:
     if snap.tokens_new is not None and snap.tokens_cache is not None:
         parts.append(styled("dim", f"{status.format_tokens(snap.tokens_new)} new{dot}{status.format_tokens(snap.tokens_cache)} cache"))
     retries = [
-        f"retry with delegate run --resume {short_run_id(snap.run_id)} --retry {ticket.id}"
-        for ticket in snap.tickets if ticket.state == status.FAILED
+        f"retry with delegate run --resume {short_run_id(snap.run_id)} --retry {hint.ticket}"
+        + (" --coordinator-commit <sha>" if hint.coordinator else "")
+        for hint in hints
     ]
     return [dot.join(parts), *retries]
 
@@ -466,7 +477,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"delegate run: unmapped finding: {finding}", file=sys.stderr)
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
-        print("\n".join(_end_lines(status.snapshot_of_journal(result.journal, stream_reader_of, utc_now()))))
+        snap = status.snapshot_of_journal(result.journal, stream_reader_of, utc_now())
+        print("\n".join(_end_lines(snap, retry_hints(workflow, result.journal, result.run_id))))
         if result.paused is not None:
             print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
             return EXIT_PAUSED

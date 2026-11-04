@@ -652,6 +652,27 @@ def test_an_economy_retry_of_a_ticket_that_the_chain_verification_failed_exits_o
     refused(repo, capsys, run_id, scripted, "a", "verification of the chain")
 
 
+def test_the_end_of_an_economy_run_whose_chain_verification_rejected_names_the_tip_once_with_a_coordinator_commit(tmp_path, capsys, scripted):
+    # The verifier of the chain a, b rejects in each round with a finding that names no ticket, so the chain fails a and b.
+    scripted.verdict_sequence, scripted.verdict_findings = ["REJECT"], [FINDING]
+    repo = make_repo(tmp_path, economy(ticket("a"), ticket("b")))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert code == 1
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+
+    retries = [line for line in out.splitlines() if line.startswith("retry with ")]
+
+    # A plain retry of a ticket of the chain is refused: only the retry of the tip with a commit of the coordinator goes on (#225).
+    short = run_id.rsplit("-", 1)[-1]
+    assert retries == [f"retry with delegate run --resume {short} --retry b --coordinator-commit <sha>"]
+    tip = git(repo, "rev-parse", "run/demo-b").strip()
+    argv = retries[0].removeprefix("retry with delegate run ").replace("<sha>", tip).split()
+    code, out, err = run_main(capsys, *argv, "--repo", str(repo), "--dry-run")
+    assert (code, err) == (0, "")
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b", "--dry-run")
+    assert code == 1 and "verification of the chain failed it" in err
+
+
 def test_an_economy_retry_of_a_step_whose_chain_start_moved_exits_one_and_changes_nothing(tmp_path, capsys, scripted):
     # Ticket b starts from the tip of a. Then the verification of the chain adds a fix-up commit to the branch of a.
     scripted.failing_tickets = {"b"}

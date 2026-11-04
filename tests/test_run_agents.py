@@ -711,3 +711,87 @@ def test_a_retry_after_a_stop_before_a_fixup_goes_on_when_the_run_branch_moved_a
     # The rebased branch of ticket a holds the fix-up commit and the work of ticket b, and the run branch holds it.
     assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-a").strip()
     assert git(repo, "merge-base", "--is-ancestor", "run/demo-b", "run/demo") == ""
+
+
+def stop_the_chain_before_its_verifier(tmp_path: Path, capsys, **repo: object) -> tuple[Path, ScriptedAdapter, int, str, str, str]:
+    """An economy chain a then b, whose verifier seal changes while a specialist works: the chain verification stops before its verifier.
+
+    Return the repository, the adapter, which stays registered, and the exit code, the stdout, the stderr and the run id of the run.
+    """
+    repo_path = make_repo(tmp_path, second_ticket=True, mode="economy", **repo)  # type: ignore[arg-type]
+    adapter = change_verifier_seal_during_the_specialist()
+    adapter.files_by_ticket = {"b": {"b.txt": "b\n"}}
+    code, out, err, events = start_run(repo_path, capsys)
+    return repo_path, adapter, code, out, err, str(next(e for e in events if e["event"] == "run-start")["run_id"])
+
+
+def test_a_retry_of_the_tip_after_a_stop_before_the_chain_verifier_builds_the_chain_with_one_verifier_and_no_coordinator_commit(tmp_path, capsys):
+    try:
+        repo, adapter, code, out, err, run_id = stop_the_chain_before_its_verifier(tmp_path, capsys)
+        assert code == 1 and adapter.verifier_calls == []
+        events = read_journal_file(repo, run_id)
+        (changed,) = [e for e in events if e["event"] == "agents-changed"]
+        assert (changed["ticket"], changed["role"]) == ("b", "verifier")
+        assert [e["ticket"] for e in events if e["event"] == "step-end" and e["state"] == "failed"] == ["a", "b"]
+        assert "--retry b --agents-changed" in err
+        tip = git(repo, "rev-parse", "run/demo-b").strip()
+
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "b", "--agents-changed")
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    after = read_journal_file(repo, run_id)[len(events):]
+    (retry,) = [e for e in after if e["event"] == "retry"]
+    assert (retry["ticket"], retry["phase"], retry["revived"]) == ("b", "chain", ["a"])
+    assert "coordinator_commit" not in retry
+    # The tip did not move, so the gates do not run again: the green result of the first verification counts.
+    assert [e["event"] for e in after if e["event"].startswith("gate-")] == ["gate-skip"]
+    assert len(adapter.verifier_calls) == 1
+    assert [e["verdict"] for e in after if e["event"] == "verdict"] == ["ACCEPT"]
+    assert {e["ticket"]: e["state"] for e in after if e["event"] == "step-end"} == {"a": "built", "b": "built"}
+    assert [e["result"] for e in after if e["event"] == "run-end"] == ["built"]
+    # No commit of the coordinator: the run branch is the tip of the chain as the specialists left it.
+    assert git(repo, "rev-parse", "run/demo").strip() == tip
+
+
+def test_a_stop_before_the_verifier_of_a_stack_that_is_not_the_last_names_the_tip_and_its_retry_goes_on(tmp_path, capsys):
+    try:
+        repo, adapter, code, out, err, run_id = stop_the_chain_before_its_verifier(tmp_path, capsys, stacks=("python", "web"), second_stack="web")
+        assert code == 1 and adapter.verifier_calls == []
+        events = read_journal_file(repo, run_id)
+        (changed,) = [e for e in events if e["event"] == "agents-changed"]
+        assert (changed["ticket"], changed["role"], changed["agent"]) == ("a", "verifier", "python-verifier")
+        # Ticket b is at the tip of the chain, so only its retry goes on.
+        assert "--retry b --agents-changed" in err and "--retry a --agents-changed" not in err
+
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "b", "--agents-changed")
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    after = read_journal_file(repo, run_id)[len(events):]
+    assert [a.agent for a in adapter.verifier_calls] == ["python-verifier", "web-verifier"]
+    assert {e["ticket"]: e["state"] for e in after if e["event"] == "step-end"} == {"a": "built", "b": "built"}
+    assert [e["result"] for e in after if e["event"] == "run-end"] == ["built"]
+
+
+def test_the_end_of_a_run_that_stopped_before_the_chain_verifier_names_only_the_retry_of_the_tip_and_a_dry_run_accepts_it(tmp_path, capsys):
+    try:
+        repo, adapter, code, out, err, run_id = stop_the_chain_before_its_verifier(tmp_path, capsys)
+        assert code == 1
+
+        retries = [line for line in out.splitlines() if line.startswith("retry with ")]
+
+        short = run_id.rsplit("-", 1)[-1]
+        assert retries == [f"retry with delegate run --resume {short} --retry b"]
+        for line in retries:
+            argv = line.removeprefix("retry with delegate run ").split()
+            code, out, err = run_main(capsys, *argv, "--repo", str(repo), "--dry-run")
+            assert (code, err) == (0, ""), line
+        # The dry run checks the retry: the retry of the other ticket of the chain, which the engine refuses, exits 1.
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--dry-run")
+    finally:
+        adapters.unregister("scripted")
+    assert code == 1
+    assert f"ticket 'a' of run '{run_id}' cannot be retried" in err and "--retry b" in err

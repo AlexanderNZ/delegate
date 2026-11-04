@@ -887,6 +887,9 @@ class PlanReview:
     other: list[str] = field(default_factory=list)
     # What the resume does with each ticket that the run skipped, in plan order (#260). Only `review_plan_change` sets it.
     skipped: tuple[SkippedTicket, ...] = ()
+    # The message that refuses the retry of `--retry`, or None when the engine accepts it (#261). Only `review_plan_change`
+    # sets it. It is not in `problems`: a resume refuses the retry with the same message after the plan change.
+    retry_refusal: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -1026,7 +1029,68 @@ def review_plan_change(
         raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
     with _vcs_errors():
         review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
-    return replace(review, skipped=_skipped_outlook(workflow, events, run_id, review, retry, coordinator))
+    return replace(
+        review, skipped=_skipped_outlook(workflow, events, run_id, review, retry, coordinator),
+        retry_refusal=_retry_refusal(workflow, events, run_id, review, retry, coordinator),
+    )
+
+
+def _retry_refusal(
+    workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None, coordinator: bool,
+) -> str | None:
+    """The message with which the rules of the retry (`_retry_plan`) refuse the retry of `retry`, or None (#261).
+
+    None also when there is no `retry`. The check of the commit of `--coordinator-commit` needs the repository, so the
+    resume makes it, not this function.
+    """
+    if retry is None:
+        return None
+    restart = review.check is not None and retry in review.check.restarted
+    try:
+        _retry_plan(workflow, restore_progress(events, run_id, retrying=True), run_id, retry, restart, coordinator)
+    except EngineError as error:
+        return str(error)
+    return None
+
+
+@dataclass(frozen=True)
+class RetryHint:
+    """A retry that the engine accepts for a failed step of a run (#261): the ticket, and whether it needs `--coordinator-commit`."""
+
+    ticket: str
+    coordinator: bool = False
+
+
+def retry_hints(workflow: Workflow, journal: Path, run_id: str) -> list[RetryHint]:
+    """The retries that the rules of the retry (`_retry_plan`) accept for the failed steps of a run, in plan order (#261).
+
+    A failed ticket whose retry the rules refuse has no hint. A retry that the rules accept only with a new text of the
+    ticket (see `_restart_step`) has a hint: the retry goes on when the text changes. In `economy` mode, a retry of a
+    ticket that the verification of the chain failed goes on only at one ticket: the ticket at the tip of the chain, or
+    after a stop before a chain fix-up the ticket that ends the stack (#209). So the hints name that ticket once. When
+    only a commit of the coordinator lets the chain go on (#225), the hint of the tip says so. Return no hint when the
+    journal cannot be read.
+    """
+    try:
+        events = read_events(journal, torn_tail=True)
+    except JournalError:
+        return []
+    progress = restore_progress(events, run_id, retrying=True)
+    failed = [ticket.id for ticket in plan_order(workflow) if ticket.id in progress.failed]
+
+    def accepted(ticket_id: str, coordinator: bool = False, restart: bool = False) -> bool:
+        try:
+            _retry_plan(workflow, progress, run_id, ticket_id, restart, coordinator)
+        except EngineError:
+            return False
+        return True
+
+    plain = [ticket_id for ticket_id in failed if accepted(ticket_id) or accepted(ticket_id, restart=True)]
+    hints = {ticket_id: RetryHint(ticket_id) for ticket_id in plain}
+    chain_goes_on = any(_chain_failed(_ticket_events(events, ticket_id)) for ticket_id in plain)
+    if workflow.mode == domain.ECONOMY and not chain_goes_on:
+        hints.update({t: RetryHint(t, coordinator=True) for t in failed if t not in hints and accepted(t, True)})
+    return [hints[ticket_id] for ticket_id in failed if ticket_id in hints]
 
 
 def _skipped_outlook(
@@ -1297,15 +1361,16 @@ def _economy_retry_plan(
 
     A step that the agent check stopped before the chain fix-up session is the exception to the refusal for the
     verification of the chain: the phase is `chain-fixup` (see `_chain_fixup_plan`). A retry with a commit of the
-    coordinator (`coordinator`) is the other exception: the phase is `chain` (see `_chain_retry_plan`).
+    coordinator (`coordinator`) is the second exception, and a step that the agent check stopped before a verifier session
+    of the chain is the third (#261): the phase is `chain` (see `_chain_retry_plan`).
     """
     if not any(e["event"] == "step-start" for e in prior):
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that started")
     stop = None if restart else _chain_stop(prior)
     if stop is not None:
         return _chain_fixup_plan(workflow, progress, ticket_id, prior, stop)
-    if coordinator and not restart and _chain_failed(prior):
-        return _chain_retry_plan(workflow, progress, refused, ticket_id, prior)
+    if not restart and _chain_failed(prior) and (coordinator or _stopped_before_chain_verifier(progress.events, ticket_id)):
+        return _chain_retry_plan(workflow, progress, refused, ticket_id, prior, coordinator)
     if _chain_failed(prior):
         raise EngineError(
             f"{refused}: the verification of the chain failed it; "
@@ -1324,13 +1389,28 @@ def _economy_retry_plan(
     return _RetryPlan(ticket_id, phase, 0, prior)
 
 
+def _stopped_before_chain_verifier(events: Sequence[dict[str, object]], ticket_id: str) -> bool:
+    """True when the agent check (#205) stopped the verification of the chain before a verifier session, and that stop failed `ticket_id` (#261).
+
+    The stop is the newest `agents-changed` of the run for the role `verifier`: in `economy` mode only the verification of
+    the chain starts a verifier. No agent started after it, and the newest `step-end` of `ticket_id` comes after it. The
+    stop changed no commit, so the chain can go on with its verification, as with a commit of the coordinator (#225).
+    """
+    stops = [index for index, e in enumerate(events) if e["event"] == "agents-changed" and e["role"] == ROLE_VERIFIER]
+    if not stops or any(e["event"] == "agent-start" for e in events[stops[-1] + 1 :]):
+        return False
+    ends = [index for index, e in enumerate(events) if e["event"] == "step-end" and e.get("ticket") == ticket_id]
+    return bool(ends) and ends[-1] > stops[-1]
+
+
 def _chain_failed(prior: Sequence[dict[str, object]]) -> bool:
     """True when the verification of the chain failed the step: the step has a `step-end` built before its newest `step-end`."""
     return any(e["event"] == "step-end" and e["state"] == BUILT for e in prior)
 
 
 def _chain_retry_plan(
-    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...]
+    workflow: Workflow, progress: _Progress, refused: str, ticket_id: str, prior: tuple[dict[str, object], ...],
+    coordinator: bool = True,
 ) -> _RetryPlan:
     """The plan of a retry with a commit of the coordinator, for a step that the verification of the chain failed (#225).
 
@@ -1342,6 +1422,10 @@ def _chain_retry_plan(
 
     Raise EngineError when a ticket after `ticket_id` in the plan is in the chain: the branch of that ticket holds the
     tip of the chain, so the commit of the coordinator goes on that branch.
+
+    With no `coordinator`, the agent check stopped the verification of the chain before a verifier session (#261, see
+    `_stopped_before_chain_verifier`). The plan is the same: the tip did not move, so the gates of the new verification
+    count the green result of the gates before the stop (see `gate-skip`), and a verifier starts.
     """
     order = plan_order(workflow)
     revive = tuple(
@@ -1350,10 +1434,8 @@ def _chain_retry_plan(
     )
     chain = [ticket.id for ticket in order if ticket.id == ticket_id or ticket.id in revive or ticket.id in progress.built]
     if chain[-1] != ticket_id:
-        raise EngineError(
-            f"{refused}: ticket {chain[-1]!r} is at the tip of the chain; "
-            f"put the commit of the coordinator on its branch, and retry it with --retry {chain[-1]}"
-        )
+        where = "put the commit of the coordinator on its branch, and " if coordinator else ""
+        raise EngineError(f"{refused}: ticket {chain[-1]!r} is at the tip of the chain; {where}retry it with --retry {chain[-1]}")
     return _RetryPlan(ticket_id, RETRY_CHAIN, 0, prior, revive=revive)
 
 
@@ -2082,7 +2164,8 @@ def _probe_guards(
 
 
 def _check_agent_file(
-    journal: Journal, agent: str, ticket: str, role: str, round_number: int, fields: dict[str, object] | None = None,
+    journal: Journal, agent: str, ticket: str, role: str, round_number: int, fields: dict[str, object] | None = None, *,
+    retry: str | None = None,
 ) -> SealedAgent | None:
     """Fail the step before an agent session when a file of the seal of the agent is not as the run recorded it (#217).
 
@@ -2090,7 +2173,7 @@ def _check_agent_file(
     changed file, the recorded hash, and the new hash (`None` for a missing file), and `fields` (the fix-up gives the
     fields that a retry needs to run it again, see `_run_fixup`). Raise `_StepFailed`, whose message names the file and
     both hashes. The agent file in the tree of the agent is not read. Give the sealed agent for the request, or None when
-    the run recorded no seal for the agent.
+    the run recorded no seal for the agent. `retry` is the ticket that the message names for the retry, when it is not `ticket`.
     """
     recorded = recorded_agents(read_events(journal.path))
     if recorded is None:
@@ -2102,7 +2185,7 @@ def _check_agent_file(
         "agents-changed", ticket=ticket, role=role, round=round_number, tree=TREE_SEAL, agent=agent, path=str(change.path),
         recorded_hash=change.recorded, new_hash=change.found, **(fields or {}),
     )
-    raise _StepFailed(change.message(ticket))
+    raise _StepFailed(change.message(retry or ticket))
 
 
 def _lenient_fields(report: SpecialistReport | VerifierReport) -> dict[str, object]:
@@ -3055,7 +3138,11 @@ def _verify_round(
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
         _run_prepare(step.gates, step.vcs, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
-        sealed = _check_agent_file(step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number)
+        # In a chain, only the retry of the ticket at the tip goes on after the stop (#261), so the message names it.
+        sealed = _check_agent_file(
+            step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number,
+            retry=step.anchor.id if step.anchor is not None else None,
+        )
         added = _make_proof_copy(copy)
         # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
         before = snapshot_worktree(step.vcs, step.worktree)
