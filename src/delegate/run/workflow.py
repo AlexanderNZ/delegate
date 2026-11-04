@@ -373,7 +373,7 @@ STACK_FIELDS: tuple[str, ...] = (
     "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file", "gate-timeout", "agent-timeout",
 )
 GATE_FIELDS: tuple[str, ...] = ("name", "command")
-MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url")
+MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url", "verifier-tools")
 TICKET_FIELDS: tuple[str, ...] = ("id", "text", "text-file", "stack", "blocked-by", "tier")
 
 
@@ -445,7 +445,10 @@ def _read_file(reader: _Reader, root: Path, name: str, where: str) -> str | None
 
 
 def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpServer, ...] | None:
-    """The MCP servers of a stack: a table of server tables, each with exactly one of `command` and `url`."""
+    """The MCP servers of a stack: a table of server tables, each with exactly one of `command` and `url`.
+
+    A server table can also hold `verifier-tools` (#257): at least one exact tool name, with no `*`.
+    """
     table = reader.table(value, field)
     if table is None:
         return None
@@ -457,17 +460,35 @@ def _read_mcp_servers(reader: _Reader, value: object, field: str) -> tuple[McpSe
         if server is None:
             continue
         reader.refuse_unknown(server, MCP_SERVER_FIELDS, server_field)
+        tools = _read_verifier_tools(reader, server, f"{server_field}.verifier-tools")
         if ("command" in server) == ("url" in server):
             reader.problems.append(f"{server_field}: needs exactly one of command and url")
         elif "command" in server:
             command = reader.string_list(server, "command", f"{server_field}.command", at_least_one=True)
             if command is not None:
-                servers.append(McpServer(name, command=tuple(command)))
+                servers.append(McpServer(name, command=tuple(command), verifier_tools=tools))
         else:
             url = reader.string(server, "url", f"{server_field}.url")
             if url is not None:
-                servers.append(McpServer(name, url=url))
+                servers.append(McpServer(name, url=url, verifier_tools=tools))
     return tuple(servers) if len(reader.problems) == problems else None
+
+
+def _read_verifier_tools(reader: _Reader, server: dict[str, object], field: str) -> tuple[str, ...]:
+    """The `verifier-tools` of a server table, or () when it has none. A defect is a new entry in `reader.problems`.
+
+    Each name is one exact tool name, so an empty name and a name with `*` are defects: no measurement shows how a
+    harness reads `*` in the tools of an agent. `string_list` refuses an empty name.
+    """
+    if "verifier-tools" not in server:
+        return ()
+    names = reader.string_list(server, "verifier-tools", field, at_least_one=True)
+    if names is None:
+        return ()
+    for name in names:
+        if "*" in name:
+            reader.problems.append(f"{field}: the tool name {name!r} holds '*'; give each tool by its exact name")
+    return tuple(dict.fromkeys(names))
 
 
 def _read_tickets(reader: _Reader, value: object, root: Path, tiers: Tiers) -> list[Ticket]:

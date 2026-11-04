@@ -89,7 +89,7 @@ The adapter therefore removes these tools for every agent, and the specialist br
 The adapter starts each specialist and each verifier with a small context. The agent gets:
 
 - **MCP servers**: only the servers of its [**stack**](../glossary.md#stack). By default that is none. `--strict-mcp-config` makes the harness ignore the MCP servers of the user, of the project, and of the installed plugins. A stack that needs a server names it in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)), and the adapter passes it with `--mcp-config`.
-- **Tools**: the built-in tools that the agent definition allows (all of them when the definition has no `tools` field), less `Monitor` and `TaskStop`. The adapter removes no other tool.
+- **Tools**: the built-in tools that the agent definition allows (all of them when the definition has no `tools` field), less `Monitor` and `TaskStop`. The adapter removes no other tool. An agent with a `tools` field gets only the MCP tools that the field names. So the seal of a verifier adds `mcp__<server>__<tool>` for each tool of the `verifier-tools` of its stack (see [MCP servers](workflow.md#mcp-servers)).
 - **Hooks**: the hooks of the agent definition, for example the Bash guard of the verifier. They are in `hooks/hooks.json` of the seal, and the plugin runs them. `--strict-mcp-config` does not change them.
 - [**Skills**](../glossary.md#skill): every skill that the harness finds, not only the skills of the agent definition. See below.
 
@@ -116,7 +116,7 @@ An agent session of a run starts only from the [**sealed agent**](../glossary.md
 | File of the seal | Content |
 |---|---|
 | `.claude-plugin/plugin.json` | The plugin name, `delegate-seal-<agent>`. The name always starts with `delegate-seal-`. |
-| `agents/<agent>.md` | The agent file with no `hooks` field, and at the end of its body the section `## Instructions of the repository` (see [the instructions of the repository](#the-instructions-of-the-repository)). Each project skill that its `skills` list names becomes `<plugin>:<skill>`. A skill that is not in `.claude/skills/` of the main checkout is a user skill: the session loads the user skills, so its name does not change. |
+| `agents/<agent>.md` | The agent file with no `hooks` field, and at the end of its body the section `## Instructions of the repository` (see [the instructions of the repository](#the-instructions-of-the-repository)). Each project skill that its `skills` list names becomes `<plugin>:<skill>`. A skill that is not in `.claude/skills/` of the main checkout is a user skill: the session loads the user skills, so its name does not change. For a verifier whose stack names `verifier-tools`, the `tools` field has `mcp__<server>__<tool>` for each of these tools at its end. A `tools` field of the text form `Read, Grep` stays text, and a list stays a list. The seal adds no `tools` field to an agent file that has none. |
 | `hooks/hooks.json` | The `hooks` field of the agent file, with no change, as `{"hooks": ...}`. The file is absent when the agent file has no `hooks`. |
 | `skills/<skill>/` | A copy of each skill that the `skills` list names and that is in `.claude/skills/` of the main checkout. |
 

@@ -270,20 +270,39 @@ The specialist briefs do not hold the verifier notes, and the verifier briefs do
 
 ### MCP servers
 
-The table `[stacks.<name>.mcp-servers]` holds one table for each MCP server. The name of the table is the name of the server. The specialist and the verifier of the stack get these servers, and the agents of the other stacks do not. Each server has exactly one of these fields:
+The table `[stacks.<name>.mcp-servers]` holds one table for each MCP server. The name of the table is the name of the server. The adapter gives these servers to the session of the specialist and of the verifier of the stack, and not to the agents of the other stacks. A rendered specialist has no list of tools, so it can use every tool of a server. The verifier can use only the tools that `verifier-tools` names. Each server has exactly one of the fields `command` and `url`:
 
 | Field | Type | Meaning |
 |---|---|---|
 | `command` | list of strings | A local server: the program and its arguments. At least one entry is required. The harness starts the program with its own environment. |
 | `url` | string | A remote server: the URL of its endpoint. |
+| `verifier-tools` | list of strings | Optional. The tools of the server that the verifier of the stack can use. Give each tool by its name in the server, without a prefix such as `mcp__<server>__`. Each entry is one exact name: an empty name and a name with `*` are errors of the workflow. At least one entry is required. |
 
 ```toml
 [stacks.web.mcp-servers.browser]
 command = ["npx", "@playwright/mcp@latest"]
+verifier-tools = ["browser_navigate", "browser_snapshot"]
 
 [stacks.web.mcp-servers.tracker]
 url = "https://mcp.example.com/mcp"
 ```
+
+In this example, the verifier of the stack `web` can use two tools of the server `browser`, and no tool of the server `tracker`. The specialist can use each tool of the two servers.
+
+A rendered verifier has a list of the tools that it can use, and a server tool that is not in that list is not available to the verifier. The instructions of the server still go to the verifier. So, without `verifier-tools`, the verifier can read about the tools of a server but cannot use them. The [quality check](run.md#the-quality-check) of the dry run gives a `warn` line for each server with no `verifier-tools`. Measured on Claude Code 2.1.287 on 2026-11-05, from the `init` event of `--output-format stream-json`, with one local server in `--mcp-config` and `--strict-mcp-config`:
+
+| `tools` of the agent | Status of the server | MCP tools of the session |
+|---|---|---|
+| `[Read]` | connected | none |
+| `[Read, mcp__<server>__<tool>]` | connected | `mcp__<server>__<tool>` |
+| no `tools` field | connected | each tool of the server |
+
+The engine adds the tools of `verifier-tools` to the [**sealed agent**](../glossary.md#sealed-agent) of the verifier of the stack, and to no other agent. The agent file of the verifier in the repository does not change. When one agent is the verifier of more than one stack, its seal gets the `verifier-tools` of each of those stacks. The adapter writes each tool in the form of its harness:
+
+- `claude-code`: `mcp__<server>__<tool>` at the end of the `tools` field of the sealed agent file. See [the sealed agent](claude-code-adapter.md#the-sealed-agent).
+- `opencode`: `<server>_<tool>: allow` at the end of the `permission` map of the sealed agent. See [the sealed agent](opencode-adapter.md#the-sealed-agent).
+
+An agent file with no list of tools (no `tools` field for `claude-code`, no `permission` map for `opencode`) gives the agent every tool of a server, so the seal does not change it.
 
 The adapter gives the servers to the harness in the form of that harness. Without the table, an agent gets no MCP server where the harness allows that. See [what the agent gets](claude-code-adapter.md#what-the-agent-gets) for the `claude-code` adapter, and [what the agent gets](opencode-adapter.md#what-the-agent-gets) for the `opencode` adapter.
 

@@ -62,7 +62,8 @@ from pathlib import Path
 
 from ..definitions.validate import opencode_bash_action, split_frontmatter
 from ..ports.harness import (
-    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent, SealedFile,
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, McpTool, SealedAgent,
+    SealedFile,
 )
 from .environment import process_environment
 from .process import run_harness
@@ -111,6 +112,10 @@ USER_SKILL_DIRECTORIES: tuple[Path, ...] = (
 # The directory of the seal that holds a copy of each project skill of the agent.
 SEAL_SKILL_DIRECTORY: str = "skills"
 
+# A character that the harness replaces with `_` in the name of an MCP server and of its tool. The harness gives a tool
+# of an MCP server the id `<server>_<tool>` after it replaced them. Read from the program of OpenCode 1.15.10 (#257).
+MCP_NAME_CHARACTER = re.compile(r"[^a-zA-Z0-9_-]")
+
 # The warning of the harness when it runs another agent than the one that `--agent` names. The text before `Falling back`
 # says why: the agent is a subagent, or the harness did not find it (the adapter checks that case first).
 FALL_BACK_WARNING = re.compile(r'agent "(?P<name>[^"\n]*)"[^\n]*Falling back to default agent')
@@ -150,6 +155,19 @@ def _skills_of(sealed: SealedAgent) -> list[Skill]:
     prompt = _sealed_entry(sealed).get("prompt")
     roots = [sealed.directory / SEAL_SKILL_DIRECTORY, *(Path.home() / directory for directory in USER_SKILL_DIRECTORIES)]
     return [Skill(name, _found_skill(name, roots)) for name in _skill_names(prompt if isinstance(prompt, str) else "")]
+
+
+def _with_mcp_tools(permission: dict[str, object], mcp_tools: tuple[McpTool, ...]) -> dict[str, object]:
+    """The permission map with `<server>_<tool>: allow` for each tool of `mcp_tools` at its end (#257).
+
+    The harness disables a tool when the last rule whose key matches the id of the tool is `deny` for each pattern, so
+    the `"*": deny` of a verifier disables each MCP tool, and a rule after it allows one tool again (read from the
+    program of OpenCode 1.15.10). A key that the map holds already moves to the end, so it is the last rule of the tool.
+    """
+    added = {
+        f"{MCP_NAME_CHARACTER.sub('_', tool.server)}_{MCP_NAME_CHARACTER.sub('_', tool.name)}": "allow" for tool in mcp_tools
+    }
+    return {**{key: value for key, value in permission.items() if key not in added}, **added}
 
 
 def _environment(servers: tuple[McpServer, ...], sealed: SealedAgent | None = None) -> dict[str, str]:
@@ -295,12 +313,14 @@ class OpenCodeAdapter:
             directory / f"{agent}.md" for directory in (source / PROJECT_AGENT_DIRECTORY, Path.home() / USER_AGENT_DIRECTORY)
         )
 
-    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+    def seal(self, agent: str, source: Path, into: Path, mcp_tools: tuple[McpTool, ...] = ()) -> SealedAgent | None:
         """Write the agent file of `agent` for `source` as an OpenCode configuration in `into`. The handle is the agent name.
 
         The file is `<agent>.json`: the entry of `agent` holds the frontmatter of the agent file with `mode: all`, and the
         body of the file as `prompt`. Each skill that the body lists and that a project skill directory of `source`
         holds is copied to `skills/<skill>/`. None when there is no agent file. Raise AdapterError when the file has no usable frontmatter.
+        Each tool of `mcp_tools` goes to the end of the `permission` map of the entry as `<server>_<tool>: allow` (#257),
+        when the agent file has a permission map.
         """
         found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
@@ -313,6 +333,8 @@ class OpenCodeAdapter:
             raise AdapterError(f"the agent file {found} has no usable frontmatter: {error}")
         into.mkdir(parents=True, exist_ok=True)
         sealed = into / f"{agent}.json"
+        if mcp_tools and isinstance(frontmatter.get("permission"), dict):
+            frontmatter["permission"] = _with_mcp_tools(frontmatter["permission"], mcp_tools)
         configuration = {"agent": {agent: {**frontmatter, "mode": "all", "prompt": body.strip()}}}
         sealed.write_text(json.dumps(configuration, indent=2) + "\n")
         skills = into / SEAL_SKILL_DIRECTORY

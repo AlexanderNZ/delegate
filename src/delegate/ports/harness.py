@@ -51,11 +51,26 @@ class McpServer:
     starts it with its own environment. A remote server has `url` instead. A
     server has exactly one of the two. The adapter writes the server in the
     configuration form of its harness.
+
+    `verifier_tools` holds the names of the tools of the server that the verifier of the stack gets (#257), each one exact
+    name, without a prefix of the harness. The engine gives them to the seal of the verifier as `McpTool` values.
     """
 
     name: str
     command: tuple[str, ...] = ()
     url: str | None = None
+    verifier_tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class McpTool:
+    """One tool of an MCP server, by the name of the server and the name of the tool, in a form that no harness owns (#257).
+
+    The adapter writes the name of the tool in the form of its harness, for example `mcp__<server>__<tool>`.
+    """
+
+    server: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -225,7 +240,11 @@ class Adapter(Protocol):
     session (#217), and gives the seal to the session in `AdapterRequest.sealed`. The OpenCode adapter writes
     `<agent>.json`, an OpenCode configuration with the agent as an entry of `agent`, and its handle is the agent name.
     The Claude Code adapter seals a plugin, and its handle is `<plugin>:<agent>`. An adapter can refuse to seal, with an
-    `AdapterError` that says why.
+    `AdapterError` that says why. `mcp_tools` holds the MCP tools that the seal adds to the tools of the agent (#257): the
+    `verifier_tools` of the servers of each stack whose verifier is `agent`. The seal adds each one in the form of its
+    harness where the agent file limits the tools of the agent. An agent file with no such limit gets every tool of a
+    server already, so the seal does not change it. The engine passes `mcp_tools` only when it is not empty, so an
+    adapter whose `seal` takes three arguments serves each workflow with no `verifier-tools`.
 
     `permits` runs the guard of a sealed agent on one command. It gives `None` when the guard permits the command, else
     the reason of the denial, as text. It reads the files of the seal, so it judges the seal and not the source.
@@ -259,7 +278,7 @@ class Adapter(Protocol):
 
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]: ...
 
-    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None: ...
+    def seal(self, agent: str, source: Path, into: Path, mcp_tools: tuple[McpTool, ...] = ()) -> SealedAgent | None: ...
 
     def permits(self, sealed: SealedAgent, command: str) -> str | None: ...
 

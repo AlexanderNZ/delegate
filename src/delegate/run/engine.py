@@ -179,7 +179,7 @@ from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
-from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents
+from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
     gate_log_copies_text, green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
@@ -2024,10 +2024,11 @@ def _run_agent(adapter: Adapter, journal: Journal, ticket: str, role: str, round
 def _seal_agents(adapter: Adapter, repo: Path, run_dir: Path, workflow: Workflow) -> list[dict[str, object]]:
     """Seal each agent of the workflow from the main checkout into the run directory, and give the record (#217).
 
-    An adapter that refuses to seal (an `AdapterError`) stops the command with an `EngineError`, and the journal gets no event.
+    The seal of a verifier gets the `verifier-tools` of the MCP servers of its stack (#257). An adapter that refuses to
+    seal (an `AdapterError`) stops the command with an `EngineError`, and the journal gets no event.
     """
     try:
-        return seal_agents(adapter, repo, run_dir, agent_names(workflow))
+        return seal_agents(adapter, repo, run_dir, agent_names(workflow), verifier_mcp_tools(workflow))
     except AdapterError as error:
         raise EngineError(f"the agents of the run cannot be sealed: {error}") from None
 

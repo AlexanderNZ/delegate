@@ -22,7 +22,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult, SealedAgent, SealedFile
+from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult, McpTool, SealedAgent, SealedFile
 
 # The cases read the worktrees and the ticket branches after a run, so the workflow keeps them: a run that ends built
 # removes them by default (#167). `CLEANED_WORKFLOW` is the same workflow without the field.
@@ -250,6 +250,7 @@ class ScriptedAdapter:
 
     `agent_paths` gives the two paths where the harness would find an agent file: the project file under
     `.claude/agents`, then the file in `user_agents`. `seal` copies the first file that exists into the seal directory.
+    `sealed_tools` holds the `mcp_tools` of each call of `seal` that got them (#257), by agent name.
     Each request holds `sealed`, the seal of its agent, as the engine gives it. `permits` gives the reason that `denials` holds for a command, and `None` for any
     other command. The adapter takes part in the setup check of the dry run only when `checks_setup` is true.
 
@@ -323,6 +324,7 @@ class ScriptedAdapter:
     probe_outcomes: dict[str, str] = field(default_factory=dict)
     probe_calls: list[AdapterRequest] = field(default_factory=list)
     probe_commits: list[int] = field(default_factory=list)
+    sealed_tools: dict[str, tuple[McpTool, ...]] = field(default_factory=dict)
 
     @property
     def probe_gone(self) -> bool:
@@ -348,8 +350,10 @@ class ScriptedAdapter:
         """The paths where the harness would look for `agent`: under `.claude/agents` of `source`, then in `user_agents`."""
         return tuple(directory / f"{agent}.md" for directory in (source / ".claude" / "agents", self.user_agents) if directory is not None)
 
-    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+    def seal(self, agent: str, source: Path, into: Path, mcp_tools: tuple[McpTool, ...] = ()) -> SealedAgent | None:
         """Copy the agent file that the search finds into `into`. The handle is the agent name. None when there is no file."""
+        if mcp_tools:
+            self.sealed_tools[agent] = mcp_tools
         found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
             return None

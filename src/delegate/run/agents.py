@@ -22,7 +22,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..ports.harness import Adapter, SealedAgent, SealedFile
+from ..ports.harness import Adapter, McpTool, SealedAgent, SealedFile
 from .workflow import Workflow
 
 # The directory of the seals under the run directory.
@@ -68,6 +68,20 @@ def agent_names(workflow: Workflow) -> list[str]:
     return names
 
 
+def verifier_mcp_tools(workflow: Workflow) -> dict[str, tuple[McpTool, ...]]:
+    """The MCP tools that the seal of each verifier adds (#257): the `verifier_tools` of each server of each stack of the verifier.
+
+    An agent that is the verifier of no stack has no entry, and neither has a verifier whose stacks name no `verifier-tools`.
+    A tool is in the tuple once, in the order of the stacks, of the servers and of the names.
+    """
+    tools: dict[str, dict[McpTool, None]] = {}
+    for stack in workflow.stacks.values():
+        for server in stack.mcp_servers:
+            for name in server.verifier_tools:
+                tools.setdefault(stack.verifier, {})[McpTool(server.name, name)] = None
+    return {agent: tuple(found) for agent, found in tools.items()}
+
+
 def record_of(sealed: SealedAgent) -> dict[str, object]:
     """The journal record of one seal: the agent, the source path, the seal directory, the handle, and the files with their hashes."""
     return {
@@ -79,17 +93,22 @@ def record_of(sealed: SealedAgent) -> dict[str, object]:
     }
 
 
-def seal_agents(adapter: Adapter, repo: Path, run_dir: Path, names: list[str]) -> list[dict[str, object]]:
+def seal_agents(
+    adapter: Adapter, repo: Path, run_dir: Path, names: list[str], mcp_tools: dict[str, tuple[McpTool, ...]] | None = None,
+) -> list[dict[str, object]]:
     """Seal each agent of `names` from `repo` into `<run_dir>/agents/<agent>/` and give the record of the seals.
 
     A seal that is already there goes first, so a seal again leaves no file of the old one. An agent that the adapter does not
-    find has no entry. An adapter that refuses to seal raises AdapterError, and the caller reports it.
+    find has no entry. An adapter that refuses to seal raises AdapterError, and the caller reports it. The seal of an agent
+    with an entry in `mcp_tools` gets those tools (#257). The adapter gets the argument only when the entry is not empty,
+    so an adapter whose `seal` takes three arguments seals each other agent.
     """
     record: list[dict[str, object]] = []
     for name in names:
         directory = run_dir / SEAL_DIRECTORY / name
         shutil.rmtree(directory, ignore_errors=True)
-        sealed = adapter.seal(name, repo, directory)
+        tools = (mcp_tools or {}).get(name, ())
+        sealed = adapter.seal(name, repo, directory, mcp_tools=tools) if tools else adapter.seal(name, repo, directory)
         if sealed is not None:
             record.append(record_of(sealed))
     return record

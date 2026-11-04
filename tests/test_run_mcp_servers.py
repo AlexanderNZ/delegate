@@ -9,15 +9,17 @@ records its arguments.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+import yaml
 
 from delegate import adapters
 from delegate.cli import delegate
-from delegate.ports.harness import McpServer
+from delegate.ports.harness import McpServer, McpTool
 
-from . import claude_fake
-from .support import WORKFLOW, ScriptedAdapter, make_repo, run_main, write_project_agents
+from . import claude_fake, opencode_fake
+from .support import WORKFLOW, ScriptedAdapter, make_repo, read_journal, run_main, write_project_agents
 
 pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
@@ -94,6 +96,18 @@ def test_the_claude_code_command_of_the_specialist_holds_the_mcp_servers_of_its_
     }}
 
 
+def test_only_the_seal_of_the_verifier_of_the_stack_gets_the_verifier_tools_of_its_servers(tmp_path, capsys, scripted):
+    workflow = with_servers(WORKFLOW).replace(
+        'url = "https://mcp.example.invalid/mcp"\n', 'url = "https://mcp.example.invalid/mcp"\nverifier-tools = ["issue_read", "search"]\n', 1,
+    )
+    repo = make_repo(tmp_path, workflow)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 0, err
+    assert scripted.sealed_tools == {"python-verifier": (McpTool("tracker", "issue_read"), McpTool("tracker", "search"))}
+
+
 HOTSPOTS = 'hotspots = ["LICENSE", ".github/workflows/*"]\n'
 
 
@@ -135,6 +149,16 @@ def test_a_stack_with_mcp_servers_passes_the_check(tmp_path, capsys):
                      ["stacks.python.mcp-servers", "table"], id="servers-not-a-table"),
         pytest.param("", 'mcp-servers = { browser = "npx" }\n',
                      ["stacks.python.mcp-servers.browser", "table"], id="server-not-a-table"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nverifier-tools = ["*"]\n', "",
+                     ["stacks.python.mcp-servers.browser.verifier-tools", "'*'", "exact name"], id="verifier-tools-star"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nverifier-tools = ["browser_*"]\n', "",
+                     ["stacks.python.mcp-servers.browser.verifier-tools", "'browser_*'", "exact name"], id="verifier-tools-pattern"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nverifier-tools = [""]\n', "",
+                     ["stacks.python.mcp-servers.browser.verifier-tools", "list of strings", "['']"], id="verifier-tools-empty-name"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nverifier-tools = []\n', "",
+                     ["stacks.python.mcp-servers.browser.verifier-tools", "at least one"], id="verifier-tools-empty-list"),
+        pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nverifier-tools = "browser_snapshot"\n', "",
+                     ["stacks.python.mcp-servers.browser.verifier-tools", "list of strings"], id="verifier-tools-not-a-list"),
     ],
 )
 def test_a_malformed_mcp_server_exits_1_and_names_the_field(tmp_path, capsys, servers, stack_field, expected):
@@ -145,3 +169,63 @@ def test_a_malformed_mcp_server_exits_1_and_names_the_field(tmp_path, capsys, se
     assert "Traceback" not in err
     for part in expected:
         assert part in err
+
+
+GRAPH = """
+[stacks.python.mcp-servers.graph]
+command = ["graph-server", "--stdio"]
+verifier-tools = ["explore"]
+"""
+
+
+def sealed_record(out: str) -> dict[str, dict[str, object]]:
+    """The record of each seal in the `run-start` event of the journal, by agent."""
+    start = next(e for e in read_journal(out) if e["event"] == "run-start")
+    return {entry["agent"]: entry for entry in start["agents"]}
+
+
+def frontmatter(path) -> dict[str, object]:
+    """The YAML frontmatter of an agent file."""
+    return yaml.safe_load(path.read_text().split("---\n", 2)[1])
+
+
+def tools_of(path) -> list[str]:
+    tools = frontmatter(path)["tools"]
+    return [name.strip() for name in tools.split(",")] if isinstance(tools, str) else list(tools)
+
+
+def test_a_server_with_verifier_tools_adds_its_mcp_tools_to_the_sealed_claude_code_verifier_and_not_to_the_specialist(tmp_path, monkeypatch, capsys):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"').replace("\n[[tickets]]", GRAPH + "\n[[tickets]]"))
+    write_project_agents(repo)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    record = sealed_record(out)
+    verifier = Path(record["python-verifier"]["seal"]) / "agents" / "python-verifier.md"
+    specialist = Path(record["python-specialist"]["seal"]) / "agents" / "python-specialist.md"
+    assert tools_of(verifier) == ["Read", "Grep", "Glob", "Bash", "Write", "mcp__graph__explore"]
+    assert "tools" not in frontmatter(specialist)
+    assert "mcp__" not in specialist.read_text()
+    # The source agent file does not change, and the agent check of the verifier passes before its guard probe.
+    assert "mcp__" not in (repo / ".claude" / "agents" / "python-verifier.md").read_text()
+    probe = next(e for e in read_journal(out) if e["event"] == "guard-probe")
+    assert (probe["agent"], probe["result"]) == ("python-verifier", "denied")
+
+
+def test_a_server_with_verifier_tools_allows_its_mcp_tools_in_the_sealed_opencode_verifier_and_not_in_the_specialist(tmp_path, monkeypatch, capsys):
+    opencode_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "opencode"').replace("\n[[tickets]]", GRAPH + "\n[[tickets]]"))
+    write_project_agents(repo)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    record = sealed_record(out)
+    verifier = json.loads((Path(record["python-verifier"]["seal"]) / "python-verifier.json").read_text())["agent"]["python-verifier"]
+    specialist = (Path(record["python-specialist"]["seal"]) / "python-specialist.json").read_text()
+    permission = list(verifier["permission"].items())
+    # The OpenCode id of a tool of an MCP server is `<server>_<tool>`, and the last rule of a tool decides.
+    assert permission[0] == ("*", "deny")
+    assert permission[-1] == ("graph_explore", "allow")
+    assert "graph_explore" not in specialist
+    assert "graph_explore" not in (repo / ".opencode" / "agents" / "python-verifier.md").read_text()

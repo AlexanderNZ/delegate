@@ -71,7 +71,8 @@ import yaml
 
 from ..definitions.validate import split_frontmatter
 from ..ports.harness import (
-    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, SealedAgent, SealedFile,
+    CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, McpTool, SealedAgent,
+    SealedFile,
 )
 from .environment import process_environment
 from .process import run_harness
@@ -331,11 +332,12 @@ class ClaudeCodeAdapter:
         """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
         return tuple(directory / f"{agent}.md" for directory in (source / AGENT_DIRECTORY, Path.home() / AGENT_DIRECTORY))
 
-    def seal(self, agent: str, source: Path, into: Path) -> SealedAgent | None:
+    def seal(self, agent: str, source: Path, into: Path, mcp_tools: tuple[McpTool, ...] = ()) -> SealedAgent | None:
         """Write the plugin of `agent` for `source` into `into`. None when there is no agent file.
 
         The handle is `<plugin>:<agent>`, and the plugin name is `delegate-seal-<agent>`. Raise AdapterError for a
-        harness older than 2.1.287, and for an agent file with no usable frontmatter.
+        harness older than 2.1.287, and for an agent file with no usable frontmatter. Each tool of `mcp_tools` goes to
+        the `tools` of the sealed agent file as `mcp__<server>__<tool>` (#257), when the agent file has `tools`.
         """
         found = next((path for path in self.agent_paths(agent, source) if path.is_file()), None)
         if found is None:
@@ -359,6 +361,8 @@ class ClaudeCodeAdapter:
             (into / "hooks" / "hooks.json").write_text(json.dumps({"hooks": hooks}, indent=2) + "\n")
         if "skills" in frontmatter:
             frontmatter["skills"] = _seal_skills(frontmatter["skills"], plugin, source, into)
+        if mcp_tools and "tools" in frontmatter:
+            frontmatter["tools"] = _with_mcp_tools(frontmatter["tools"], mcp_tools)
         (into / "agents").mkdir(exist_ok=True)
         text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True, width=1_000_000, default_flow_style=False)
         (into / "agents" / f"{agent}.md").write_text(f"---\n{text}---{body}{_instructions(source)}")
@@ -489,6 +493,22 @@ def _expand(text: str, directory: Path, depth: int) -> str:
 def _digest(path: Path) -> str:
     """The SHA-256 of the file as a hexadecimal text."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _with_mcp_tools(tools: object, mcp_tools: tuple[McpTool, ...]) -> object:
+    """The `tools` field of an agent file with `mcp__<server>__<tool>` for each tool of `mcp_tools` at its end (#257).
+
+    The harness gives an agent with a `tools` list only the MCP tools that the list names (measured on 2.1.287, #257).
+    A field of the text form `Read, Grep` stays text, and a list stays a list. A name that the field holds already is
+    not added again. A field of another type does not change: the harness reads no tool from it.
+    """
+    names = [f"mcp__{tool.server}__{tool.name}" for tool in mcp_tools]
+    if isinstance(tools, str):
+        listed = [name.strip() for name in tools.split(",") if name.strip()]
+        return ", ".join([*listed, *(name for name in names if name not in listed)])
+    if isinstance(tools, list):
+        return [*tools, *(name for name in names if name not in tools)]
+    return tools
 
 
 def _seal_skills(skills: object, plugin: str, source: Path, into: Path) -> object:

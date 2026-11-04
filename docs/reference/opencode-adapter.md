@@ -53,7 +53,7 @@ The maps of a rendered verifier cannot follow the runtime value of `$TMPDIR` (#1
 The agent gets:
 
 - **MCP servers**: the servers of its [**stack**](../glossary.md#stack), and also the MCP servers of the user and of the project. A stack names its servers in its `mcp-servers` table (see [the workflow reference](workflow.md#mcp-servers)). The adapter writes them in the `mcp` field of the inline configuration `OPENCODE_CONFIG_CONTENT`: a local server as `type` `local` and `command`, a remote server as `type` `remote` and `url`. The harness merges that configuration with its other configuration. When the environment of the engine already holds `OPENCODE_CONFIG_CONTENT`, the adapter keeps its fields and adds the servers. When it is not a JSON object, the adapter raises `AdapterError`.
-- **Tools and permissions**: the tools and the permission map of the sealed agent. The adapter removes no tool.
+- **Tools and permissions**: the tools and the permission map of the sealed agent. The adapter removes no tool. The `"*": deny` rule of a rendered verifier also disables each MCP tool. So the seal of a verifier adds `<server>_<tool>: allow` at the end of its `permission` map for each tool of the `verifier-tools` of its stack (see [MCP servers](workflow.md#mcp-servers)).
 - [**Skills**](../glossary.md#skill): every skill that the harness finds. The prompt of a new session holds the text of each skill of its definition. See [the skills of the agent](#the-skills-of-the-agent).
 
 The harness gives no way to start an agent without the MCP servers of the user and of the project. Measured on OpenCode 1.15.10 on 2026-10-18: `opencode --help` and `opencode run --help` show no MCP option, and `--pure` removes only the external plugins. The configuration can turn off a server only by its name, and the adapter does not know the names of the servers of the user. With `OPENCODE_CONFIG_CONTENT` that named one server, `opencode mcp list` listed that server and the three servers of the user.
@@ -88,6 +88,15 @@ An agent session of a run starts only from the [**sealed agent**](../glossary.md
 - `prompt`, the body of the agent file.
 
 The seal directory also holds `skills/<skill>/`, a copy of each project skill that the body of the agent lists (see [the skills of the agent](#the-skills-of-the-agent)).
+
+For a verifier whose stack names `verifier-tools` (see [MCP servers](workflow.md#mcp-servers)), the `permission` map of the entry has one rule `<server>_<tool>: allow` at its end for each of these tools. The seal replaces each character of the server name and of the tool name that is not a letter, a digit, `_` or `-` with `_`. A rule of the same key that the map already holds moves to the end. The seal adds no `permission` map to an agent file that has none.
+
+The form of the rule comes from the program of OpenCode 1.15.10, read on 2026-11-05:
+
+- The harness gives a tool of an MCP server the id `<server>_<tool>`, with the same replacement of characters.
+- The harness disables a tool of a session when the last rule whose key matches the id of the tool has the action `deny` for each pattern. So `"*": deny` disables each MCP tool, and a later rule `<server>_<tool>: allow` makes that tool available again.
+
+With a local server in `OPENCODE_CONFIG_CONTENT`, `opencode mcp list` showed the server as connected. `opencode debug agent <agent>` lists only the built-in tools, and `opencode debug agent <agent> --tool <server>_<tool>` gave `Tool <server>_<tool> not found` for each permission map. So no measurement shows the MCP tools of a live session. That needs a session with a model.
 
 The handle of the sealed agent is the agent name. A file with no usable frontmatter is not sealed: the adapter raises `AdapterError` that names the file.
 

@@ -280,3 +280,32 @@ def test_a_detached_run_writes_the_warn_lines_to_its_log_and_not_to_the_stderr_o
     text = wait_for_ends(log, 1)
     warnings = [line for line in text.splitlines() if line.startswith("delegate run: warn ")]
     assert [line.split()[3] for line in warnings] == ["gate-timeout:", "agent-timeout:"]
+
+
+SERVERS = """
+[stacks.python.mcp-servers.browser]
+command = ["npx", "@playwright/mcp@latest"]
+
+[stacks.python.mcp-servers.graph]
+command = ["graph-server", "--stdio"]
+verifier-tools = ["explore", "callers"]
+"""
+
+
+def test_a_server_with_no_verifier_tools_warns_and_a_server_with_them_is_ok(tmp_path, capsys):
+    code, section, err = dry_run(tmp_path, capsys, BASE.replace("\n[[tickets]]", SERVERS + "\n[[tickets]]", 1))
+
+    assert code == 0
+    assert check(section, "verifier-tools") == [
+        "warn verifier-tools: stack python: server browser has no verifier-tools; set verifier-tools; without it, the "
+        "verifier of the stack gets no tool of that server",
+        "ok verifier-tools: stack python: server graph: verifier-tools explore, callers",
+    ]
+    assert "warn" not in err
+
+
+def test_a_stack_with_no_mcp_server_has_no_line_of_the_verifier_tools_check(tmp_path, capsys):
+    code, section, _ = dry_run(tmp_path, capsys, BASE)
+
+    assert code == 0
+    assert check(section, "verifier-tools") == []

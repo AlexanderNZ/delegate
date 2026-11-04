@@ -41,7 +41,10 @@ class Check:
 
 
 def quality_checks(workflow: Workflow) -> list[Check]:
-    """The checks of `workflow`, in the order of the table of checks: the checks of a stack give one line for each stack."""
+    """The checks of `workflow`, in the order of the table of checks: the checks of a stack give one line for each stack.
+
+    The check `verifier-tools` gives one line for each MCP server of a stack (#257), and no line for a stack with no server.
+    """
     stacks = list(workflow.stacks.values())
     return [
         *(_timeout("gate-timeout", stack.name, stack.gate_timeout, "a gate") for stack in stacks),
@@ -50,6 +53,7 @@ def quality_checks(workflow: Workflow) -> list[Check]:
         *(_hotspots(stack) for stack in stacks),
         Check(OK, "verifier-tier", f"the verifier runs on the tier {role_tier(workflow.mode, 'verifier', workflow.tier_overrides)}"),
         *(_gate_names(stack) for stack in stacks),
+        *(check for stack in stacks for check in _verifier_tools(stack)),
     ]
 
 
@@ -100,3 +104,21 @@ def _gate_names(stack: Stack) -> Check:
         f'stack {stack.name}: {same}; give each one a name: {{ name = "<name>", command = "<command>" }}; '
         "without it, the views cannot tell the gates apart",
     )
+
+
+def _verifier_tools(stack: Stack) -> list[Check]:
+    """One check for each MCP server of the stack: `warn` for a server with no `verifier-tools` (#257).
+
+    The verifier of a harness with a list of tools gets only the MCP tools that the list names, so it gets no tool of
+    such a server.
+    """
+    return [
+        Check(OK, "verifier-tools", f"stack {stack.name}: server {server.name}: verifier-tools {', '.join(server.verifier_tools)}")
+        if server.verifier_tools else
+        Check(
+            WARN, "verifier-tools",
+            f"stack {stack.name}: server {server.name} has no verifier-tools; set verifier-tools; without it, the verifier "
+            "of the stack gets no tool of that server",
+        )
+        for server in stack.mcp_servers
+    ]
