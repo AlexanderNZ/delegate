@@ -24,6 +24,8 @@ base-branch = "main"
 run-branch = "run/demo"
 mode = "assure"
 adapter = "scripted"
+# Each ticket starts from the base branch, so the rebase of the second ticket makes a new commit (#244).
+ticket-start = "base-branch"
 # The cases read the ticket branches after the run, so the run keeps them (#167).
 keep-worktrees = true
 
@@ -39,7 +41,7 @@ OWN_GATES_RULE = "the gates that you ran"
 
 
 def workflow(gate: str, tickets: str) -> str:
-    """A workflow of one stack in `assure` mode. No ticket waits for another, so each starts from the base branch."""
+    """A workflow of one stack in `assure` mode. With `ticket-start = "base-branch"`, each ticket starts from the base branch."""
     text = HEAD.format(gate=gate)
     for ticket in tickets:
         text += f'\n[[tickets]]\nid = "{ticket}"\ntext = "Ticket {ticket} adds its file."\nstack = "python"\nblocked-by = []\n'

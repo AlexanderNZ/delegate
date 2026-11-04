@@ -64,13 +64,14 @@ def test_the_run_branch_and_the_ticket_worktree_come_from_the_port(tmp_path, scr
     result = start_run(repo, vcs, scripted_adapter)
 
     assert result.ok
-    # The run branch and the ticket branch start from the base of the run: the commit of the base branch at the start.
+    # The run branch starts from the base of the run: the commit of the base branch at the start.
     made = [(name, args[1:]) for name, args in vcs.calls if name == "create_branch"]
     assert made == [("create_branch", ("run/demo", run_base))]
+    # In `assure` mode the ticket branch starts from the tip of the run branch by default (#244).
     worktrees = [args for name, args in vcs.calls if name == "ensure_worktree"]
     assert len(worktrees) == 1
     _, worktree, branch, start = worktrees[0]
-    assert (branch, start) == ("run/demo-a", run_base)
+    assert (branch, start) == ("run/demo-a", "run/demo")
     assert worktree.name == "a" and worktree.is_dir()
     assert git(repo, "rev-parse", "--verify", "refs/heads/run/demo").strip()
 
