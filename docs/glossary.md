@@ -304,6 +304,10 @@ See [Agent pair](#agent-pair).
 
 A pause (`delegate pause`) asks an active run to stop at its next step boundary. The engine cuts off no agent and no gate, so no work is lost. The journal gets `paused` and no `run-end`, and a resume goes on with the run. Ctrl-C stops a run at once, also inside a step. See [the pause](reference/run.md#the-pause).
 
+## Permission mode
+
+The permission mode is a setting of a harness session. It sets what the session does with a tool call that no allow rule permits. `dontAsk` is one permission mode of Claude Code: it denies such a call, because a [headless](#headless) session cannot ask. It is not the [mode](#mode) of a run. A host that runs agents in such a mode gives them a settings file with allow rules. See [what the adapter does not set](reference/claude-code-adapter.md#what-the-adapter-does-not-set) and [the settings of a host](reference/claude-code-adapter.md#the-settings-of-a-host).
+
 ## Plan change
 
 A plan change is a resume with a workflow whose tickets differ from the newest plan of the run. It can add tickets, and change or remove tickets that have not started. The built part of the run is fixed. The journal records the change in the event `plan-change`. A later ticket of the change needs `--reviewed`, and its brief gets the section "Plan change". See [the plan change](reference/run.md#the-plan-change).

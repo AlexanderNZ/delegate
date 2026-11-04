@@ -45,3 +45,27 @@ def test_each_field_that_the_page_names_in_code_is_in_the_workflow_reference():
     assert {"command", "env", "verifier-tools", "prepare", "mcp-servers"} <= fields
     missing = sorted(field for field in fields if f"`{field}`" not in reference)
     assert missing == []
+
+
+DONTASK_LINKED_TO_THE_MODE_OF_A_RUN = re.compile(r"`dontAsk`\s*\[\*{0,2}[^\]]*\]\([^)]*glossary\.md#mode\)")
+
+
+@outside_the_package
+def test_no_page_links_dontask_to_the_glossary_entry_of_the_mode_of_a_run():
+    pages = sorted((ROOT / "docs").rglob("*.md"))
+    linked = [
+        str(page.relative_to(ROOT))
+        for page in pages
+        if DONTASK_LINKED_TO_THE_MODE_OF_A_RUN.search(page.read_text())
+    ]
+
+    assert pages
+    assert linked == []
+
+
+@outside_the_package
+def test_the_page_links_the_permission_mode_entry_that_the_glossary_holds():
+    glossary = (ROOT / "docs" / "glossary.md").read_text()
+
+    assert "\n## Permission mode\n" in glossary
+    assert "`dontAsk` [**permission mode**](../glossary.md#permission-mode)" in PAGE.read_text()

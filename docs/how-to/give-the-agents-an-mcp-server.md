@@ -69,7 +69,7 @@ The [**engine**](../glossary.md#engine) runs `prepare` in the worktree of the ti
 
 ### 4. Add the allow rules on a host in `dontAsk` mode
 
-A [**headless**](../glossary.md#headless) [**session**](../glossary.md#session) cannot ask for a permission, and `dontAsk` [**mode**](../glossary.md#mode) denies each tool that no rule allows. See [what the adapter does not set](../reference/claude-code-adapter.md#what-the-adapter-does-not-set). So a host that gives the agents a settings file with `DELEGATE_AGENT_SETTINGS` needs an allow rule for each MCP tool. See [the settings of a host](../reference/claude-code-adapter.md#the-settings-of-a-host).
+A [**headless**](../glossary.md#headless) [**session**](../glossary.md#session) cannot ask for a permission, and `dontAsk` [**permission mode**](../glossary.md#permission-mode) denies each tool that no rule allows. See [what the adapter does not set](../reference/claude-code-adapter.md#what-the-adapter-does-not-set). So a host that gives the agents a settings file with `DELEGATE_AGENT_SETTINGS` needs an allow rule for each MCP tool. See [the settings of a host](../reference/claude-code-adapter.md#the-settings-of-a-host).
 
 Write one rule for each tool, in the form `mcp__<server>__<tool>`, and no wildcard. A wildcard would also allow a tool that a later version adds, before you read it.
 

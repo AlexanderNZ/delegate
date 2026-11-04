@@ -161,7 +161,7 @@ def test_a_stack_with_mcp_servers_passes_the_check(tmp_path, capsys):
         pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\ntimeout = 5\n', "",
                      ["stacks.python.mcp-servers.browser", "timeout", "unknown field"], id="unknown-server-field"),
         pytest.param('\n[stacks.python.mcp-servers.tracker]\nurl = "https://x.invalid"\nenv = { A = "1" }\n', "",
-                     ["stacks.python.mcp-servers.tracker.env", "url"], id="env-with-url"),
+                     ["stacks.python.mcp-servers.tracker.env", "only a server with command takes env"], id="env-with-url"),
         pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nenv = { A = 1 }\n', "",
                      ["stacks.python.mcp-servers.browser.env.A", "string"], id="env-value-not-a-string"),
         pytest.param('\n[stacks.python.mcp-servers.browser]\ncommand = ["npx"]\nenv = ["A=1"]\n', "",

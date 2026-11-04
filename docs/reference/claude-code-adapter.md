@@ -43,7 +43,7 @@ With no setting of the host, the adapter passes no permission option other than 
 
 ## The settings of a host
 
-A host can give every agent of every [**run**](../glossary.md#run) a settings file and a permission mode, with no change to a workflow file. Two environment variables of the engine set them:
+A host can give every agent of every [**run**](../glossary.md#run) a settings file and a [**permission mode**](../glossary.md#permission-mode), with no change to a workflow file. Two environment variables of the engine set them:
 
 | Variable | Effect |
 |---|---|
