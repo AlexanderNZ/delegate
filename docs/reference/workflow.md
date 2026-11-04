@@ -270,6 +270,8 @@ The specialist briefs do not hold the verifier notes, and the verifier briefs do
 
 ### MCP servers
 
+See [how to give the agents an MCP server](../how-to/give-the-agents-an-mcp-server.md) for the steps in order.
+
 The table `[stacks.<name>.mcp-servers]` holds one table for each MCP server. The name of the table is the name of the server. The adapter gives these servers to the session of the specialist and of the verifier of the stack, and not to the agents of the other stacks. A rendered specialist has no list of tools, so it can use every tool of a server. The verifier can use only the tools that `verifier-tools` names. Each server has exactly one of the fields `command` and `url`:
 
 | Field | Type | Meaning |
