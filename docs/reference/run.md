@@ -26,7 +26,7 @@ To start a run that the shell or the harness cannot stop, add `--detach`. See [t
 | Option | Meaning |
 |---|---|
 | `[<workflow>]` | Path to the workflow TOML file; with --resume the default is the file that the run started from. |
-| `--dry-run` | Validate the workflow and print the plan and the state directory of the run, then the quality check of the workflow, then check that each stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; create nothing. |
+| `--dry-run` | Validate the workflow and print the plan and the state directory of the run, then the quality check of the workflow, then check that each stack has its agent files and that its verifier permits its gates, then run the guard probe of each verifier when the adapter has one; with --resume, print the old order, the new order and the verdict of each rule of a plan change, and no quality check; create no branch, no worktree and no journal. |
 | `--resume <run-id>` | Go on with the run RUN_ID from its journal; build the steps that are not complete; a workflow whose tickets differ from the newest plan of the run is a plan change. |
 | `--reviewed <ids>` | With --resume, the later tickets of a plan change that you reviewed against the added and changed tickets: ticket ids separated by commas, or all. |
 | `--retry <ticket>` | With --resume, go on with the failed step of TICKET, also in a run that ended; use its worktree and its commits again, and go on at the first phase that did not complete; when the text of TICKET in the workflow changed, start TICKET again from its base with a new specialist, and keep the old branch as \<branch>-failed-\<n>. |

@@ -10,10 +10,15 @@ import argparse
 import sys
 from pathlib import Path
 
+from .epilog import DOCS_PAGE, HelpFormatter, epilog
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="delegate docs", description="Write the generated sections of the reference pages from the code, or check that they are current."
+        prog="delegate docs",
+        description="Write the generated sections of the reference pages from the code, or check that they are current.",
+        epilog=epilog(DOCS_PAGE),
+        formatter_class=HelpFormatter,
     )
     parser.add_argument("--root", type=Path, default=Path("."), help="the repository root, which holds docs/ and skills/; default is the current directory")
     parser.add_argument("--check", action="store_true", help="write nothing; exit 1 and name each section and file that differs from the code")

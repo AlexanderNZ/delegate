@@ -29,6 +29,7 @@ from ..ports.harness import Activity
 from ..run import status
 from ..run.journal import JournalError
 from ..run.runs import FailedStart, RunsError, locate, runs_of
+from .epilog import STATUS_PAGE, HelpFormatter, epilog
 
 # The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid. With
 # `--json` and no run id, it is also the exit status when more than one run is active, or when the newest run failed at start.
@@ -37,7 +38,12 @@ EXIT_ERROR: int = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate status", description="Print the state and the progress of each ticket of a run, from its journal and its event streams.")
+    parser = argparse.ArgumentParser(
+        prog="delegate status",
+        description="Print the state and the progress of each ticket of a run, from its journal and its event streams.",
+        epilog=epilog(STATUS_PAGE),
+        formatter_class=HelpFormatter,
+    )
     parser.add_argument(
         "run_id", nargs="?",
         help="the run to show; default is the one active run, or the newest run of the repository when no run is active",

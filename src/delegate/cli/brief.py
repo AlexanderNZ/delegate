@@ -13,12 +13,15 @@ from pathlib import Path
 from ..adapters.git import GitVersionControl
 from ..run.brief import BriefError, fixup_brief, full_brief, read_task
 from ..shared.version import VersionAction
+from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="verifier-brief",
         description="Print a verifier's brief. The mode of the brief sets the mode of the verifier.",
+        epilog=epilog(COMMANDS_PAGE),
+        formatter_class=HelpFormatter,
     )
     p.add_argument("--version", action=VersionAction, help="print the version of the package and exit")
     sub = p.add_subparsers(dest="mode", required=True)

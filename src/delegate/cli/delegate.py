@@ -20,6 +20,7 @@ import sys
 from ..run.watch import EXIT_INTERRUPTED
 from . import agent_definitions, brief, clean, docs_command, pause, run_command, status, stop, watch
 from ..shared.version import VersionAction
+from .epilog import COMMANDS_PAGE, RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .title import Title
 
 # Subcommands that the `agent-definitions` command owns, with the line that
@@ -71,6 +72,8 @@ def _help_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="delegate",
         description="A delegation kit. Each subcommand takes the arguments of its standalone command.",
+        epilog=epilog(COMMANDS_PAGE, RUN_PAGE, WORKFLOW_PAGE),
+        formatter_class=HelpFormatter,
     )
     parser.add_argument(
         TIERS_OPTION,

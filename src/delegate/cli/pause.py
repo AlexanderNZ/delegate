@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..adapters.git import GitVersionControl
 from ..run import pause
+from .epilog import RUN_PAGE, HelpFormatter, epilog
 from .status import utc_now
 
 # The exit status of a run that cannot be paused: an unknown run, a run that ended or is paused, or a run with no live process.
@@ -22,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="delegate pause",
         description="Ask a run to stop at its next step boundary: after the current step, or before the next gate or verifier.",
+        epilog=epilog(RUN_PAGE),
+        formatter_class=HelpFormatter,
     )
     parser.add_argument("run_id", help="the run to pause; it must have a live process")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")

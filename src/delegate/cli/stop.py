@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..adapters.git import GitVersionControl
 from ..run import stop
+from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
 # The seconds that the command waits for the lock of the run to be free, after it sent the signal.
 WAIT_SECONDS: float = 30.0
@@ -24,6 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="delegate stop",
         description="Stop a run now: send SIGTERM to its process, wait for the lock to be free, and print the command that goes on with the run.",
+        epilog=epilog(COMMANDS_PAGE),
+        formatter_class=HelpFormatter,
     )
     parser.add_argument("run_id", help="the run to stop; it must have a live process")
     parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")

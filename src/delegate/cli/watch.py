@@ -45,6 +45,7 @@ from ..run import live, status, watch
 from ..run.journal import JournalError
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
+from .epilog import STATUS_PAGE, HelpFormatter, epilog
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
 
@@ -86,7 +87,12 @@ def _position(text: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate watch", description="Follow the journal of a run, print each new event, and exit with the run's result.")
+    parser = argparse.ArgumentParser(
+        prog="delegate watch",
+        description="Follow the journal of a run, print each new event, and exit with the run's result.",
+        epilog=epilog(STATUS_PAGE),
+        formatter_class=HelpFormatter,
+    )
     parser.add_argument(
         "run_id", nargs="?",
         help="the run to follow; default is the one active run, or the newest run of the repository when no run is active",

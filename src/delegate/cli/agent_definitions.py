@@ -14,6 +14,7 @@ from ..definitions.render import guard_sets, render
 from ..definitions.validate import validate_set
 from ..shared.tiers import Tiers, load_tiers
 from ..shared.version import VersionAction
+from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
 
 def opencode_model_pair(text: str) -> tuple[str, str]:
@@ -156,7 +157,13 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="agent-definitions")
+    p = argparse.ArgumentParser(
+        prog="agent-definitions",
+        description="Render an agent declaration into agent files for each harness, print the schema of a declaration, "
+        "validate rendered agent files, or bootstrap the agent pair of a repository.",
+        epilog=epilog(COMMANDS_PAGE),
+        formatter_class=HelpFormatter,
+    )
     p.add_argument("--version", action=VersionAction, help="print the version of the package and exit")
     p.add_argument("--tiers", help="path to a tiers.toml; default is the bundled table")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -250,7 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="how the context skill loads its references: blocks | read (the Read tool, no load-time block); "
         "default: write no field",
     )
-    b.add_argument("--skills-root", default=DEFAULT_SKILLS_ROOT, help=f"default {DEFAULT_SKILLS_ROOT}")
+    b.add_argument(
+        "--skills-root", default=DEFAULT_SKILLS_ROOT,
+        help=f"the skills directory under --repo that gets <name>-context/, and the --skills-dir of the validation pass; default {DEFAULT_SKILLS_ROOT}",
+    )
     b.add_argument(
         "--user-skills-dir",
         help="a second skills directory to search; default: ~/.claude/skills",

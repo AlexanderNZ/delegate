@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..adapters.git import GitVersionControl
 from ..run import clean
+from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
 # The exit status of an error: an unknown run, a journal that cannot be read, or a removal that failed.
 EXIT_ERROR: int = 1
@@ -28,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
             "A run that is active, failed, paused or stopped keeps everything. "
             "With --abandon, end a run that is not built for good, and remove what it left."
         ),
+        epilog=epilog(COMMANDS_PAGE),
+        formatter_class=HelpFormatter,
     )
     parser.add_argument("run_id", nargs="*", help="a run to clean: the run id or the short run id; give more than one to clean more")
     parser.add_argument("--ended", action="store_true", help="clean every run whose newest run-end has the result built")

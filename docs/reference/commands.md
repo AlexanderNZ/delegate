@@ -169,7 +169,7 @@ delegate bootstrap --repo <dir> --name <name> --domain <text> --tier <tier> --sk
 | `--output-language <language>` | The language of agent text: none \| ste (ASD-STE100); default: write no field. |
 | `--tracked-file-build` | The build reads tracked files only, as a flake does; the specialist then stages every new file. |
 | `--context-load <mode>` | How the context skill loads its references: blocks \| read (the Read tool, no load-time block); default: write no field. |
-| `--skills-root <skills-root>` | Default .claude/skills. |
+| `--skills-root <skills-root>` | The skills directory under --repo that gets \<name>-context/, and the --skills-dir of the validation pass; default .claude/skills. |
 | `--user-skills-dir <user-skills-dir>` | A second skills directory to search; default: ~/.claude/skills. |
 | `--dry-run` | Print every file with its content and write nothing. |
 

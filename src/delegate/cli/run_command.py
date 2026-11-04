@@ -75,6 +75,7 @@ from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
+from .epilog import RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .setup_check import check_setup
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
@@ -95,6 +96,13 @@ RESULT_ROLES: dict[str, str] = {status.BUILT: "ok bold", status.FAILED: "bad bol
 DETACHED_PROGRAM: str = (
     "import json, sys; sys.path[:0] = json.loads(sys.argv[1]); "
     "from delegate.cli.delegate import main; sys.exit(main(sys.argv[2:]))"
+)
+
+
+# The text at the end of the help, before the docs site (#247, #248). A coordinator reads the help and the dry run.
+RUN_EPILOG: str = (
+    "Before each launch and each resume, run delegate run <workflow> --dry-run and read its quality check. "
+    "A warn line names a setting to add or change, and its effect on the quality or the time of the run."
 )
 
 
@@ -139,7 +147,12 @@ def _stop_signals_as_ctrl_c() -> Iterator[None]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="delegate run", description="Build the tickets of a workflow file, or check it and print its plan.")
+    parser = argparse.ArgumentParser(
+        prog="delegate run",
+        description="Build the tickets of a workflow file, or check it and print its plan.",
+        epilog=epilog(RUN_PAGE, WORKFLOW_PAGE, before=RUN_EPILOG),
+        formatter_class=HelpFormatter,
+    )
     parser.add_argument(
         "workflow", type=Path, nargs="?",
         help="path to the workflow TOML file; with --resume the default is the file that the run started from",
@@ -147,8 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run", action="store_true",
         help="validate the workflow and print the plan and the state directory of the run, then the quality check of the workflow, then check that each "
-        "stack has its agent files and that its verifier permits its gates; with --resume, print the old order, the new order and the verdict of each rule of a plan change; "
-        "create nothing",
+        "stack has its agent files and that its verifier permits its gates, then run the guard probe of each verifier when the adapter has one; "
+        "with --resume, print the old order, the new order and the verdict of each rule of a plan change, and no quality check; "
+        "create no branch, no worktree and no journal",
     )
     parser.add_argument(
         "--resume", metavar="RUN_ID",
