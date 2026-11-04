@@ -192,6 +192,10 @@
 *[Pauses]: A pause (delegate pause) asks an active run to stop at its next step boundary.
 *[pause]: A pause (delegate pause) asks an active run to stop at its next step boundary.
 *[pauses]: A pause (delegate pause) asks an active run to stop at its next step boundary.
+*[Permission mode]: The permission mode is a setting of a harness session.
+*[Permission modes]: The permission mode is a setting of a harness session.
+*[permission mode]: The permission mode is a setting of a harness session.
+*[permission modes]: The permission mode is a setting of a harness session.
 *[Plan change]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
 *[Plan changes]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
 *[plan change]: A plan change is a resume with a workflow whose tickets differ from the newest plan of the run.
