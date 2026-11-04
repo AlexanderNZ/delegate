@@ -73,13 +73,23 @@ def observed(tmp_path, capsys, mode: str, scripted: ScriptedAdapter) -> dict[str
     code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
     out = capsys.readouterr().out
     assert code == 0
-    starts = {e["ticket"]: e["base_commit"] for e in read_journal(out) if e["event"] == "step-start"}
+    events = read_journal(out)
+    starts = {e["ticket"]: e["base_commit"] for e in events if e["event"] == "step-start"}
+    base = git(repo, "rev-parse", "main").strip()
+    # The tip of the run branch when the step of b starts: the newest advance before it, or the base of the run (#244).
+    before_b = events[: next(i for i, e in enumerate(events) if e["event"] == "step-start" and e["ticket"] == "b")]
+    run_tip = next((e["to_commit"] for e in reversed(before_b) if e["event"] == "run-branch-advance"), base)
     from_previous = starts["b"] == git(repo, "rev-parse", "run/demo-a").strip()
-    from_base = starts["b"] == git(repo, "rev-parse", "main").strip()
-    assert from_previous != from_base
+    if starts["b"] == run_tip != base:
+        start = "tip of the run branch"
+    elif from_previous:
+        start = "previous ticket"
+    else:
+        assert starts["b"] == base
+        start = "base branch"
     return {
         "Verifier runs": "each branch, at once" if len(scripted.verifier_calls) == 2 else "each stack, at the end of the chain",
-        "Branch starts from": "previous ticket" if from_previous else "base branch",
+        "Branch starts from": start,
     }
 
 

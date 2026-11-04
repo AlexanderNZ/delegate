@@ -176,7 +176,7 @@ A finding code is the code that the validator writes for one problem in a render
 
 ## Fix-up
 
-A fix-up is the round that follows a REJECT: the specialist adds a new commit for the findings, and a fresh verifier checks the delta. A fix-up never amends, because an amend destroys the delta. Each mode has a limit of rounds.
+A fix-up is the round that follows a REJECT, or red gates on the tip of the chain in `economy` mode: the specialist adds a new commit for the findings or the red gates, and a fresh verifier checks the delta. A fix-up never amends, because an amend destroys the delta. Each mode has a limit of rounds.
 
 Not: fixup, fix-up pass, scoped fix-up. Use `fixup` only in the command `delegate brief fixup`.
 

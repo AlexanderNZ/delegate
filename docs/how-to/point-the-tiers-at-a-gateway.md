@@ -66,6 +66,9 @@ verifier = "python-verifier"
 gates = ["python3 -m unittest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["workflow.toml", "my-tiers.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
@@ -87,6 +90,6 @@ In [**`assure`**](../glossary.md#assure) [**mode**](../glossary.md#mode) the [**
 
 ## Other commands
 
-`--tiers` also changes the other commands that read the tier table. For `render`, `validate` and [**`bootstrap`**](../glossary.md#bootstrap), put it before the subcommand, as in `delegate --tiers my-tiers.toml validate`. The commands `brief`, [**`pause`**](../glossary.md#pause), `status`, `watch` and `docs` refuse it. See [the options before the subcommand](../reference/commands.md#options-before-the-subcommand).
+`--tiers` also changes the other commands that read the tier table. For `render`, `validate` and [**`bootstrap`**](../glossary.md#bootstrap), put it before the subcommand, as in `delegate --tiers my-tiers.toml validate`. The commands `brief`, [**`pause`**](../glossary.md#pause), `stop`, `status`, `watch`, `clean` and `docs` refuse it. See [the options before the subcommand](../reference/commands.md#options-before-the-subcommand).
 
 To change only the OpenCode column, use `--opencode-model` and `--opencode-allow` and no file. See [the model of the OpenCode adapter](../reference/opencode-adapter.md#the-model).

@@ -8,6 +8,9 @@ specialist = "python-specialist"
 verifier = "python-verifier"
 gates = ["python3 -m unittest"]
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 10
+agent-timeout = 60
 
 [[tickets]]
 id = "1"

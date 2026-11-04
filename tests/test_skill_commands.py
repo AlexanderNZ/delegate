@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate.cli import agent_definitions, brief, clean, docs_command, pause, run_command, status, stop, watch
+from delegate.cli import agent_definitions, brief, clean, delegate, docs_command, pause, run_command, status, stop, watch
 from delegate.docs.neutrality import KIT_ROOT_VAR
 
 KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[1] / "skills")
@@ -44,7 +44,7 @@ FENCE = re.compile(r"^\s*(`{3,})")
 INLINE = re.compile(r"(?<!`)`([^`]+)`(?!`)")
 PLACEHOLDER = re.compile(r"<[^<>\n]+>")
 
-# The parser of each subcommand of `delegate`. `render`, `validate` and `bootstrap` go to `agent-definitions`.
+# The parser of each subcommand of `delegate`. `render`, `schema`, `validate` and `bootstrap` go to `agent-definitions`.
 SUBCOMMAND_PARSERS: dict[str, Callable] = {
     "run": run_command.build_parser,
     "pause": pause.build_parser,
@@ -55,7 +55,7 @@ SUBCOMMAND_PARSERS: dict[str, Callable] = {
     "docs": docs_command.build_parser,
     "brief": brief.build_parser,
 }
-AGENT_DEFINITIONS_SUBCOMMANDS = {"render", "validate", "bootstrap"}
+AGENT_DEFINITIONS_SUBCOMMANDS = {"render", "schema", "validate", "bootstrap"}
 PREFIXES = ("delegate ", "agent-definitions ", "verifier-brief ")
 
 
@@ -141,6 +141,14 @@ def parse_error(command: str) -> str | None:
         if not args:
             return "delegate takes a subcommand"
         subcommand, rest = args[0], args[1:]
+        if subcommand.startswith("-") and not tiers:
+            # An option of the umbrella itself, such as --version: the command decides (#236).
+            with contextlib.redirect_stderr(io.StringIO()) as stderr, contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    code = delegate.main(args)
+                except SystemExit as stop_:
+                    code = stop_.code
+            return None if code in (0, None) else (stderr.getvalue().strip().splitlines() or [f"exit {code}"])[-1]
         if subcommand in AGENT_DEFINITIONS_SUBCOMMANDS:
             parser, argv = agent_definitions.build_parser(), [*tiers, subcommand, *rest]
         elif subcommand in SUBCOMMAND_PARSERS and not tiers:
@@ -182,6 +190,14 @@ def test_a_command_with_an_option_that_the_parser_does_not_know_is_refused():
     text = "Run:\n\n```bash\ndelegate run <workflow> --mode economy\n```\n"
 
     assert [(c.line, parse_error(c.text)) for c in commands_of(text)] == [(4, "delegate run: error: unrecognized arguments: --mode economy")]
+
+
+def test_an_option_of_the_umbrella_is_accepted_and_an_unknown_one_is_refused():
+    text = "Check `delegate --version` and `delegate schema`, not `delegate --bogus`.\n"
+
+    assert [(c.text, parse_error(c.text) is None) for c in commands_of(text)] == [
+        ("delegate --version", True), ("delegate schema", True), ("delegate --bogus", False),
+    ]
 
 
 def test_an_inline_command_is_read_also_when_it_wraps_over_two_lines():

@@ -103,6 +103,9 @@ verifier = "python-verifier"
 gates = ["python3 -m pytest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
@@ -117,4 +120,4 @@ Check the file. The command builds nothing.
 delegate run workflow.toml --dry-run
 ```
 
-The command prints the plan and exits 0. See [the workflow reference](../reference/workflow.md) for every field, and [the tutorial](../tutorial.md) to build the ticket.
+The command prints the plan and the quality check of the workflow, and exits 0. A `warn` line of the quality check names a setting to add or change. See [how to write a workflow for a run](write-a-workflow-for-a-run.md) for each setting, [the workflow reference](../reference/workflow.md) for every field, and [the tutorial](../tutorial.md) to build the ticket.

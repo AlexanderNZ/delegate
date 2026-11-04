@@ -28,6 +28,9 @@ verifier = "python-verifier"
 gates = ["python3 -m unittest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
@@ -56,7 +59,7 @@ The [**specialists**](../glossary.md#specialist) run on the [**tier**](../glossa
 delegate run workflow.toml --dry-run
 ```
 
-The command prints the tickets in the order of the chain. It builds nothing.
+The command prints the tickets in the order of the chain, and then the quality check. It builds nothing. Read each `warn` line of the quality check. See [how to write a workflow for a run](write-a-workflow-for-a-run.md).
 
 ### 3. Run the chain
 
@@ -93,7 +96,7 @@ git merge --ff-only run/chain
 
 ## When the gates are red or the verifier rejects the chain
 
-Red gates at the end of the chain start a [**fix-up**](../glossary.md#fix-up) round. The fix-up specialist gets the output of the red gates. The fix-up is a new commit on the end of the chain, and the engine then runs the gates again.
+Red gates at the end of the chain start a [**fix-up**](../glossary.md#fix-up) round. The fix-up brief gives the end of the output of each red gate. It also names a copy of the full log of each red gate, in the scratch directory of the fix-up [**session**](../glossary.md#session). See [the copy of the log of a red gate](../reference/run.md#the-copy-of-the-log-of-a-red-gate). The fix-up is a new commit on the end of the chain, and the engine then runs the gates again.
 
 A [**REJECT**](../glossary.md#reject) also starts a fix-up round. The engine runs the gates on the new commit, and a fresh verifier then checks the new commit and the [**findings**](../glossary.md#finding).
 

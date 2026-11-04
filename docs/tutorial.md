@@ -51,7 +51,7 @@ The sample files are in `delegate-kit/examples/tutorial`. There are six files:
 | `docs/agents/delegation.md` | The [**gate**](glossary.md#gate) command and the [**hotspots**](glossary.md#hotspot) of the project. |
 | `.claude/skills/sample-style/SKILL.md` | A [**skill**](glossary.md#skill) with the style rules of the project. |
 | `ticket.md` | The ticket that you will build. |
-| `workflow.toml` | The [**workflow**](glossary.md#workflow) file. It names the ticket, the mode, and the gate. |
+| `workflow.toml` | The [**workflow**](glossary.md#workflow) file. It names the ticket, the mode, the gate, and the time limits of a gate and an agent. |
 
 ## 3. Make the sample repository
 
@@ -108,7 +108,7 @@ Check the workflow file. This command creates no branch, no worktree and no jour
 delegate run workflow.toml --dry-run
 ```
 
-The command prints the plan. It has one ticket, and the ticket is ready at once.
+The command prints the plan. It has one ticket, and the ticket is ready at once. Then it prints the quality check of the workflow. Each line of the check starts with `ok`, because the sample sets each setting that the check reads. In your own workflow, a `warn` line names a setting to add or change. Last, the command checks the agent files and the gate of the verifier.
 
 ## 7. Run the ticket
 
@@ -240,6 +240,6 @@ You ran the whole loop once:
 
 ## Next steps
 
-- [The workflow file](reference/workflow.md) shows how to write a workflow with many tickets.
+- [How to write a workflow for a run](how-to/write-a-workflow-for-a-run.md) gives the choices of a workflow with many tickets. [The workflow file](reference/workflow.md) gives each field.
 - [The `delegate run` reference](reference/run.md) explains the fix-up round, the pause, the [**resume**](glossary.md#resume) of a stopped run, and the guards. It also explains the [**plan change**](glossary.md#plan-change), which adds a ticket to a run.
 - [The reference for `delegate status` and `delegate watch`](reference/status-and-watch.md) lists the exit codes that a [**coordinator**](glossary.md#coordinator) can act on.

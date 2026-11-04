@@ -119,6 +119,9 @@ verifier = "backend-verifier"
 gates = ["cd backend && python3 -m pytest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [stacks.web]
 specialist = "web-specialist"
@@ -126,6 +129,9 @@ verifier = "web-verifier"
 gates = ["cd web && npm test"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["docs/agents/delegation.md", "workflow.toml"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
@@ -146,4 +152,4 @@ Check the file. The command builds nothing.
 delegate run workflow.toml --dry-run
 ```
 
-The plan puts ticket `1` before ticket `2`. See [the workflow reference](../reference/workflow.md) for every field.
+The plan puts ticket `1` before ticket `2`. The quality check prints the checks of a stack once for each stack. See [how to write a workflow for a run](write-a-workflow-for-a-run.md) for each setting, and [the workflow reference](../reference/workflow.md) for every field.

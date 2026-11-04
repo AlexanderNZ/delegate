@@ -123,6 +123,9 @@ def test_the_sample_workflow_passes_the_dry_run(tmp_path, home, claude_stand_in,
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")
     assert "ticket 1 " in out
+    # The tutorial says that each line of the quality check is `ok` (#248).
+    quality = out.split("quality check\n", 1)[1].splitlines()[:6]
+    assert [line.split()[0] for line in quality] == ["ok"] * 6
 
 
 @outside_the_package

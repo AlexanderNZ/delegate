@@ -27,7 +27,7 @@ COMMAND_PAGES: dict[str, list[str]] = {
     "run.md": ["run", "pause"],
     "status-and-watch.md": ["status", "watch"],
     "docs.md": ["docs"],
-    "commands.md": ["render", "validate", "bootstrap", "brief", "clean", "stop"],
+    "commands.md": ["render", "schema", "validate", "bootstrap", "brief", "clean", "stop"],
 }
 
 
@@ -97,7 +97,7 @@ def test_each_synopsis_line_names_its_command_and_only_options_that_the_command_
 
     assert lines, f"{page} needs a synopsis"
     for line in lines:
-        subcommand = next((name for name in subcommands if line.startswith(f"delegate {name} ")), None)
+        subcommand = next((name for name in subcommands if f"{line} ".startswith(f"delegate {name} ")), None)
         assert subcommand, f"{page}: '{line}' does not start with one of {subcommands}"
         options = set(re.findall(r"--[a-z][a-z-]*", help_text(subcommand, capsys)))
         assert set(re.findall(r"--[a-z][a-z-]*", line)) <= options, f"{page}: an option in '{line}' is not an option of delegate {subcommand}"

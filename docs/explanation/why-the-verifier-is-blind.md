@@ -16,7 +16,7 @@ Blindness costs something. The verifier does not know the intent behind a strang
 
 A report also says "the gates are green". I do not take that word either. The agent may have run a different command, it may have run the gates before its last edit, or it may have run them in a state that the branch does not hold.
 
-So the engine runs the gates itself, after the specialist finishes, in the [**worktree**](../glossary.md#worktree) of the specialist. The result is the exit code of the engine's own command. It does not come from the agent that wrote the code. The engine runs them a second time after the rebase in [**`assure`**](../glossary.md#assure) mode, because the rebase can change the result.
+So the engine runs the gates itself, after the specialist finishes, in the [**worktree**](../glossary.md#worktree) of the specialist. The result is the exit code of the engine's own command. It does not come from the agent that wrote the code. In [**`assure`**](../glossary.md#assure) mode, the engine runs them a second time after a rebase that changes the commit, because such a rebase can change the result. A rebase that keeps the commit keeps the result, so the gates do not run again.
 
 ## Why the verifier runs the gates as well
 
@@ -24,7 +24,7 @@ If the engine runs the gates, why does the verifier run them?
 
 The reason is the [**red proof**](../glossary.md#red-proof). A verifier that only reads a test cannot tell whether the test can fail. A test that passes before and after a change protects nothing. To know that a test is not decoration, the verifier breaks the code the test covers and watches the test go red. That means the verifier must run the test.
 
-The verifier must not break the real worktree. So the engine prepares a [**temporary copy**](../glossary.md#temporary-copy) of the branch and passes its path in the [**brief**](../glossary.md#brief). The verifier runs the gates in the copy. The [**verifier guard**](../glossary.md#verifier-guard) keeps the copy read-only, so for a red proof the engine also makes a second copy with no `.git` entry, the proof copy. The verifier breaks the proof copy, and the engine throws it away. After the verifier ends, the engine checks that the real worktree has the same HEAD and the same status as before. A difference is an invariant violation, and the [**run**](../glossary.md#run) stops. I do not rely on the verifier's promise to stay read-only. I rely on the check.
+The verifier must not break the real worktree. So the engine prepares a [**temporary copy**](../glossary.md#temporary-copy) of the branch and passes its path in the [**brief**](../glossary.md#brief). In a `delegate run`, the brief holds the output of the green gates, and the verifier does not run the gates again. It runs the tests of its red proof, and its own probes, in the copy. The [**verifier guard**](../glossary.md#verifier-guard) keeps the copy read-only, so for a red proof the engine also makes a second copy with no `.git` entry, the proof copy. The verifier breaks the proof copy, and the engine throws it away. After the verifier ends, the engine checks that the real worktree has the same HEAD and the same status as before. A difference is an invariant violation, and the [**run**](../glossary.md#run) stops. I do not rely on the verifier's promise to stay read-only. I rely on the check.
 
 ## What this does not give
 

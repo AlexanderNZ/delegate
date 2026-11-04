@@ -68,6 +68,9 @@ verifier = "python-verifier"
 gates = ["python3 -m unittest"]
 # The engine also reserves .claude/agents/ and .opencode/agents/ in every stack.
 hotspots = ["workflow.toml", "tickets/"]
+# The time limits of one gate run and of one agent session, in minutes.
+gate-timeout = 30
+agent-timeout = 90
 
 [[tickets]]
 id = "1"
@@ -99,7 +102,7 @@ delegate run workflow.toml --dry-run
 delegate run workflow.toml
 ```
 
-The dry run reports a ticket file that does not exist, a [**blocker**](../glossary.md#blocker) that no ticket has, and a cycle. The plan puts ticket `1` before ticket `2`. The dry run also needs the agent files that the workflow names to exist first: for `claude-code`, in `.claude/agents/` of the repository or in `.claude/agents/` of your home directory.
+The dry run reports a ticket file that does not exist, a [**blocker**](../glossary.md#blocker) that no ticket has, and a cycle. The plan puts ticket `1` before ticket `2`. Then the dry run prints its quality check. Read each `warn` line before you start the build. See [how to write a workflow for a run](write-a-workflow-for-a-run.md). The dry run also needs the agent files that the workflow names to exist first: for `claude-code`, in `.claude/agents/` of the repository or in `.claude/agents/` of your home directory.
 
 ### 5. Read the result and merge
 

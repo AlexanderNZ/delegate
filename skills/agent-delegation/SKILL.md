@@ -203,9 +203,10 @@ agent-definitions validate /tmp/agents \
   --skills-dir .claude/skills --user-skills-dir ~/.claude/skills
 ```
 
-Pass `--user-skills-dir` to find skills that are installed in the user
-directory. A skill found in either the project directory or the user directory
-passes. A skill absent from both is `MISSING_SKILL`.
+`validate` also looks for each skill in the user directory, which is
+`~/.claude/skills` by default. Pass `--user-skills-dir` to name a different
+user directory. A skill found in either the project directory or the user
+directory passes. A skill absent from both is `MISSING_SKILL`.
 
 The brief names the per-stack agent, not the global fallback: "Agent:
 `<repo>-api-specialist` / `<repo>-api-verifier`" for a backend ticket. The
@@ -580,10 +581,16 @@ scopes each fix-up, and records each step in a journal.
   ticket. Those actions stay with the coordinator.
 - Before each launch and each resume, run `delegate run <workflow> --dry-run`
   and read its section `quality check`. An `ok` line names a feature that the
-  workflow uses. A `warn` line names a missing field that lowers the quality
-  of the run or wastes time, for example `gate-timeout`. Set the field, or
-  tell the owner why the run goes on without it. A workflow that you copy from
-  an older run does not have the fields that a later version added.
+  workflow uses. A `warn` line names a setting to add or change, for example
+  a missing `gate-timeout`, and its effect on the quality or the time of the
+  run. Set the setting, or tell the owner why the run goes on without it. A
+  workflow that you copy from an older run does not have the fields that a
+  later version added. A run without `--dry-run` prints each `warn` line on
+  stderr at its start, and a detached run writes them only to its log.
+  `delegate run --resume <run-id> --dry-run` prints no quality check, so
+  before a resume run `delegate run <workflow> --dry-run`. The help of
+  `delegate run` (`--help`) says the same, and names the docs site. The guide
+  `docs/how-to/write-a-workflow-for-a-run.md` gives each setting.
 - After you merge a run branch into the base branch, run
   `delegate clean --ended --merged`. It deletes each run branch that the base
   branch holds, and removes the ticket worktrees and the merged ticket
@@ -595,6 +602,10 @@ scopes each fix-up, and records each step in a journal.
   only the gate commands. The engine runs `prepare` itself in the worktree
   before the specialist starts, and in the copy of each verifier before it
   makes the proof copy. A `prepare` command that fails ends the step.
+- Give each stack a `gate-timeout` and an `agent-timeout`, in minutes.
+  Without them, a gate or an agent that hangs stops the run with no limit. A
+  gate past its limit is a red gate. An agent past its limit has no valid
+  report, and the continuation rules apply.
 
 ### The two modes
 The modes trade cost against feedback time. The table holds every setting that
@@ -603,7 +614,7 @@ differs between them.
 | Setting | `assure` | `economy` |
 | --- | --- | --- |
 | Verifier runs | each branch, at once | each stack, at the end of the chain |
-| Branch starts from | base branch | previous ticket |
+| Branch starts from | tip of the run branch | previous ticket |
 | Specialist tier | `strong` | `standard` |
 | Verifier tier | `verifier` | `verifier` |
 | Fix-up rounds | 2 | 2 |
@@ -613,6 +624,12 @@ differs between them.
   the rebase and before the next ticket builds on it, so a defect is found
   early. Choose it when a defect in one ticket would spoil the tickets that
   follow.
+- In `assure` mode each ticket branch starts from the tip of the run branch,
+  because `ticket-start` is `run-branch` by default. The rebase then keeps the
+  commit, the engine writes `gate-skip`, and each ticket runs its gates once.
+  Set `ticket-start = "base-branch"` only when each specialist must start from
+  the base of the run. Then a ticket with no `blocked-by` after an accepted
+  ticket runs its gates two times, and the quality check warns.
 - `economy` gives up early discovery. The engine runs the gates once for each
   stack, on the chain tip, and not after each ticket. A defect in the first
   ticket shows only at the end of the chain, after the later tickets built on
@@ -668,13 +685,17 @@ branch moves only on ACCEPT.
   verifier does not run them again.
 - Red gates and a REJECT each start a fix-up round: a new commit on the chain
   tip, then the gates, then a fresh verifier. The two causes share two rounds.
+  The fix-up brief after red chain gates names a copy of the full log of each
+  red gate, in the scratch directory of the fix-up session.
 - The rule to verify each branch immediately, after the rebase and before the
   next ticket builds on it, is the `assure` rule. It does not apply to
   `economy`, and `economy` does not break it.
 
 ### Continuation under the engine
 A specialist that ends capped or failed, or leaves red gates in `assure` mode,
-continues in the same worktree. The commits that it already made stay. In
+continues in the same worktree. A change that it did not commit, and a report
+that is missing or not valid on a branch with commits, also start a
+continuation. The commits that it already made stay. In
 `economy` mode the gates run only on the chain tip, and red gates there start a
 fix-up round.
 
@@ -683,6 +704,11 @@ fix-up round.
   continuation brief.
 - Each mode has a continuation limit (see the table). At the limit, the step
   fails.
+- After red gates, the engine copies the full log of each red gate into the
+  scratch directory of the next session, as `gate-<name of the log>`. The
+  continuation brief gives the end of the output, and the path and the number
+  of lines of each copy. A specialist that does not see each failure in the
+  end of the output reads the copy.
 - The engine never starts the task again in a new worktree. This is the same
   rule as for a capped specialist that you run by hand.
 
@@ -691,10 +717,13 @@ The person who asks for a run cannot see the agents. You report the run with
 the commands of the kit. These rules apply from the start of the run to its
 end.
 
-1. **Start the run detached.** Start the run with `delegate run --detach`.
+1. **Start the run detached.** Before you start it, run
+   `delegate run <workflow> --dry-run`, and read its quality check. Start the
+   run with `delegate run --detach`.
    First the command makes the checks that need no agent: the workflow, the
    tiers, the lock, and the branches of a new run. For a resume, it also
-   applies the rules of a plan change, with `--reviewed`. A check that fails
+   applies the rules of a plan change, with `--reviewed`, and checks a run
+   that ended, the run branch, `--retry` and `--coordinator-commit`. A check that fails
    prints its error on stderr, exits 1, and starts no process. Then the
    command starts the run process with the `setsid` system call, so that the
    harness cannot stop it with your shell. It prints `run <run id>` and
@@ -756,7 +785,10 @@ end.
    `delegate run --detach --resume <run-id> --retry <ticket>`, also in a run
    that ended. When the retry builds the step, the engine also builds each
    ticket that the step made it skip, in plan order, when its blockers are
-   built. A run that ends with a failed step or a skipped ticket exits 1.
+   built. Each later resume applies the skip rule again, so such a ticket
+   stays ready, also when the retry stopped before its step. A ticket with a
+   blocker that is still not built stays skipped. A run that ends with a
+   failed step or a skipped ticket exits 1.
    An invariant violation halts a run for good: a resume, a plan change and a
    retry of that run are refused. Start a new run.
 
@@ -826,7 +858,7 @@ by hand leaves a journal that does not tell what happened.
 4. **Check the engine before you start a run.** Before you start a run, check
    that the engine on the host is the version that the docs of the repository
    name. A different version can read a workflow or a journal in a different
-   way.
+   way. `delegate --version` prints the version of the engine.
 
 The table gives the command for each case. Run `delegate status <run-id>` first,
 and show its output to the owner with the command.

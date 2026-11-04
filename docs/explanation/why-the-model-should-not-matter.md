@@ -38,7 +38,7 @@ The [**fix-up**](../glossary.md#fix-up) got the same treatment. A fix-up verifie
 
 The contracts fixed how each agent behaved. They didn't fix how the agents worked together. One verifier checked one specialist, and then the two played football. Reject. Fix. Reject. Now it passes. A couple of rounds of fix-ups, a re-scope, and a fresh check of the whole change, even when two lines had moved. Work got done very quickly. The quality was inconsistent, and the token bill was massive.
 
-The loop had no stop rule, and I was the one running it, by hand, during a [**run**](../glossary.md#run): rebase before the check, run each [**gate**](../glossary.md#gate), stop after the second rejection, and write down what happened. So I made the work a [**workflow**](../glossary.md#workflow): a simple, sequential list of tickets that the [**engine**](../glossary.md#engine) dispatches one at a time. Each ticket is built, checked and resolved before the next one starts. The engine runs the gates itself, after the rebase. It caps the fix-up rounds. It writes every event to the [**journal**](../glossary.md#journal). And it reaches each harness through an [**adapter**](../glossary.md#adapter), so the same rules hold in Claude Code and in OpenCode.
+The loop had no stop rule, and I was the one running it, by hand, during a [**run**](../glossary.md#run): rebase before the check, run each [**gate**](../glossary.md#gate), stop after the second rejection, and write down what happened. So I made the work a [**workflow**](../glossary.md#workflow): a simple, sequential list of tickets that the [**engine**](../glossary.md#engine) dispatches one at a time. Each ticket is built, checked and resolved before the next one starts. The engine runs the gates itself, on the commit that the verifier sees. It caps the fix-up rounds. It writes every event to the [**journal**](../glossary.md#journal). And it reaches each harness through an [**adapter**](../glossary.md#adapter), so the same rules hold in Claude Code and in OpenCode.
 
 ### What came from others
 
@@ -102,7 +102,7 @@ So the inputs of a run are files: the ticket, the workflow, the delegation docum
 
 Bassim Eledath is blunt about review: "if the same model instance implements and evaluates its own work, it's biased." His rule for it is "Don't let the same model grade its own exam — separate the implementer from the reviewer".
 
-The verifier answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh session, no report, the gates run again in a [**temporary copy**](../glossary.md#temporary-copy) of the branch, and a [**red proof**](../glossary.md#red-proof) on a second copy that it may break, to show that each new test can fail. Shared knowledge. Separate work.
+The verifier answers that in two halves. It gets the same textbook: every skill of the specialist, so it judges the work by the same standard. And it sits a separate exam: a fresh session, no report, the output of the gates that the engine ran, a [**temporary copy**](../glossary.md#temporary-copy) of the branch, and a [**red proof**](../glossary.md#red-proof) on a second copy that it may break, to show that each new test can fail. Shared knowledge. Separate work.
 
 ### The coordinator is the part not yet fixed
 
@@ -116,7 +116,7 @@ My recommendation is a verifier one tier above the specialist. A mid tier builds
 
 Two things are acceptable that I might be expected to forbid.
 
-- The same model grading the same model is acceptable. In [**`assure`**](../glossary.md#assure) mode, the bundled table puts `strong` and `verifier` on the same model. The verifier still sits a separate exam: a fresh session, blind, with its own gates and its own red proof. Bassim Eledath allows this too: "Have a different model (or a different instance with a review-specific prompt) do the review pass."
+- The same model grading the same model is acceptable. In [**`assure`**](../glossary.md#assure) mode, the bundled table puts `strong` and `verifier` on the same model. The verifier still sits a separate exam: a fresh session, blind, with the gate output of the engine and its own red proof. Bassim Eledath allows this too: "Have a different model (or a different instance with a review-specific prompt) do the review pass."
 - A different model family is not required. Not every user has more than one family. A [**gateway**](../glossary.md#gateway) can serve one vendor only, and a kit that needs two families would leave those users out. A second family can go behind the `verifier` tier in a [**tier file**](../glossary.md#tier-file). That is a choice for each team, not a rule of the kit.
 
 Here my work and Bassim Eledath's part ways. He argues for model diversity in each role: "use different models for different jobs", because "the cumulative output is stronger than any single model working alone." I do not argue with that. This work does something else. It fixes the process so that model diversity is safe and measurable. Change the model behind one tier, and the brief, the gates and the check stay the same. Any difference in the journal, in [**REJECT**](../glossary.md#reject) verdicts and in fix-up rounds, is then the difference that the model made. A second family can be tried with evidence, not with faith.

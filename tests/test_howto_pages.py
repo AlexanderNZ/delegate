@@ -13,6 +13,7 @@ from .pages import HOW_TO, ROOT, blocks, outside_the_package
 PAGES = [
     "bootstrap-a-single-stack-repository.md",
     "bootstrap-a-monorepo.md",
+    "write-a-workflow-for-a-run.md",
     "run-an-economy-chain.md",
     "watch-and-resume-a-run.md",
     "point-the-tiers-at-a-gateway.md",
@@ -37,7 +38,7 @@ def anchors(markdown: str) -> set[str]:
 
 
 @outside_the_package
-def test_the_how_to_directory_holds_the_seven_pages_of_the_ticket_and_no_other():
+def test_the_how_to_directory_holds_the_pages_of_the_tickets_and_no_other():
     assert sorted(path.name for path in HOW_TO.glob("*.md")) == sorted(PAGES)
 
 
