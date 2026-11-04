@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Added
+
+- The dry run of a resume (`delegate run --resume <run-id> --dry-run`) prints the section `skipped tickets:` (#260). Since #245, each resume applies the skip rule again to each ticket that the rule skipped, but the dry run did not show it. A coordinator that resumed a run with skipped tickets had to read the journal to know if the resume builds them, or if it must add copies of them, and a copy builds the same work twice. Now the section has one line for each ticket that the run skipped, in plan order: `runs again` when each blocker is built, `runs again if <ids> is built earlier in this resume` when a blocker runs earlier in the same resume, `stays skipped: <reason>` with each blocker that is not built and its state, and `stays skipped until a retry of the step that crashed` for a ticket that the run did not reach. The dry run uses the same functions as the resume, so the two cannot disagree. A run with no skipped ticket gives no section. See "The skipped tickets" in `docs/reference/run.md`.
+
 ## [1.17.0] - 2026-11-04
 
 ### Added

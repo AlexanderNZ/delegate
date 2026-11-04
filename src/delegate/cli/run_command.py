@@ -13,7 +13,8 @@ halted exits with `EXIT_HALTED`: it has no `run-end`, and `--resume` goes on at 
 A resume with a workflow whose tickets differ from the newest plan of the run is
 a plan change. `--reviewed <ids>` names the later tickets that the coordinator
 reviewed. `--resume <run-id> --dry-run` prints the old order, the new order and
-the verdict of each rule of a plan change, and changes nothing.
+the verdict of each rule of a plan change, then what the resume does with each ticket that the run skipped (#260), and
+changes nothing.
 
 When the run holds its lock and its journal records the start, the command prints the start lines of frame 1k of the
 design (#119): `run <id>`, `journal <path>`, and the line that tells how to follow and pause the run. When the run ends
@@ -283,6 +284,7 @@ def _print_review(review: PlanReview) -> int:
     if review.check is None:
         print(f"run {review.run_id}: no plan change")
         print(f"order: {', '.join(review.new_order)}")
+        _print_skipped(review)
         for problem in review.problems():
             print(f"delegate run: {problem}", file=sys.stderr)
         return 1 if review.problems() else 0
@@ -299,10 +301,21 @@ def _print_review(review: PlanReview) -> int:
             print(f"ticket {ticket} ({'added' if ticket in check.added else 'changed'}):")
             for line in review.texts[ticket].rstrip("\n").splitlines():
                 print(f"  {line}" if line else "")
+    _print_skipped(review)
     problems = review.problems()
     for problem in problems:
         print(f"delegate run: {problem}", file=sys.stderr)
     return 1 if problems else 0
+
+
+def _print_skipped(review: PlanReview) -> None:
+    """Print what the resume does with each ticket that the run skipped (#260). Print nothing when the run skipped no
+    ticket, or when the rules refuse the resume."""
+    if not review.skipped or review.problems():
+        return
+    print("skipped tickets:")
+    for skipped in review.skipped:
+        print(f"  ticket {skipped.ticket}: {skipped.text}")
 
 
 def _start_lines(run_id: str, journal: Path) -> list[str]:
@@ -379,7 +392,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.dry_run and args.resume is not None:
         try:
-            review = review_plan_change(workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location)
+            review = review_plan_change(
+                workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location,
+                coordinator=args.coordinator_commit is not None,
+            )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1

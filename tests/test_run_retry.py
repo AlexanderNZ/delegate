@@ -15,7 +15,7 @@ from .support import (
     append_events, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
 from .test_run_multi import HEAD, ticket
-from .test_run_pause import RUN_PAUSED, pause_during_the_specialist_of
+from .test_run_pause import RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of
 
 FINDING = "FINDING-5120 a.txt holds no header row"
 SCOPED = "## Findings under verification"
@@ -287,6 +287,126 @@ def test_a_resume_leaves_skipped_a_ticket_whose_blocker_still_failed_and_gives_t
     end = events[-1]
     assert (end["event"], end["result"], end["failed"], end["skipped"]) == ("run-end", "failed", ["d"], ["c", "f"])
     assert sorted(end["built"]) == ["a", "b", "e"]
+
+
+SKIPPED_SECTION = "skipped tickets:"
+
+
+def a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted):
+    """A run that a retry of a built a, and that paused before the step of b. Return the repo and the run id.
+
+    Ticket b waits on a, c on b, and e on d. Ticket x waits on nothing. The verifiers of a and d end with no verdict, so a
+    and d fail, and the skip rule skips b, c and e. A pause during the specialist of x stops the first run with no
+    `run-end`. A retry of a builds a, and a pause during its verifier stops the run before the step of b. No journal
+    event records that b and c are ready now.
+    """
+    for t in "ex":
+        scripted.files_by_ticket[t] = {f"{t}.txt": f"{t}\n"}
+    tickets = ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",)) + ticket("d") + ticket("e", ("d",)) + ticket("x")
+    repo = make_repo(tmp_path, HEAD + tickets)
+    end_with_no_verdict(scripted, scoped_only=False)
+    pause_during_the_specialist_of(repo, capsys, scripted, "x")
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert code == RUN_PAUSED, err
+    run_id = run_id_of(repo)
+    assert [e["ticket"] for e in read_journal_file(repo, run_id) if e["event"] == "skip"] == ["b", "c", "e"]
+    healthy(scripted, "ACCEPT")
+    scripted.on_specialist = None
+
+    def pause_at_the_verifier_of_a(request):
+        if ticket_of(request) == "a":
+            assert pause(repo, capsys, run_id)[0] == 0
+
+    scripted.during_verifier = pause_at_the_verifier_of_a
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+    assert code == RUN_PAUSED, err
+    assert scripted.calls == [] and [ticket_of(call) for call in scripted.verifier_calls] == ["a"]
+    assert read_journal_file(repo, run_id)[-1]["event"] == "paused"
+    scripted.during_verifier = None
+    return repo, run_id
+
+
+def skipped_section(out: str) -> list[str]:
+    """The lines of the section on the skipped tickets that the dry run of a resume prints, with no header."""
+    lines = out.splitlines()
+    assert SKIPPED_SECTION in lines, out
+    return [line for line in lines[lines.index(SKIPPED_SECTION) + 1 :] if line.startswith("  ")]
+
+
+def test_the_dry_run_of_a_resume_says_that_a_ticket_runs_again_when_a_retry_built_its_blocker_and_stopped_before_it(
+    tmp_path, capsys, scripted
+):
+    # The journal still holds the `skip` of b from the first run. The resume applies the skip rule again (#245), so b
+    # runs. The dry run says it before the resume (#260), and the resume then does what the dry run said.
+    repo, run_id = a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted)
+    before, verifiers = journal_path(repo, run_id).read_bytes(), len(scripted.verifier_calls)
+
+    code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert "  ticket b: runs again: each blocker is built" in skipped_section(out)
+    assert journal_path(repo, run_id).read_bytes() == before
+    assert scripted.calls == [] and len(scripted.verifier_calls) == verifiers
+    healthy(scripted, "ACCEPT", "ACCEPT", "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    assert code == 1 and "ticket e: skipped: blocked by d, which failed\n" in err
+    assert [ticket_of(call) for call in scripted.calls] == ["b", "c"]
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["failed"], end["skipped"]) == ("run-end", ["d"], ["e"])
+    assert sorted(end["built"]) == ["a", "b", "c", "x"]
+
+
+def test_the_dry_run_of_a_resume_says_that_a_ticket_whose_blocker_still_failed_stays_skipped_and_names_the_blocker(
+    tmp_path, capsys, scripted
+):
+    repo, run_id = a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted)
+
+    code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert "  ticket e: stays skipped: blocked by d, which failed" in skipped_section(out)
+
+
+def test_the_dry_run_of_a_resume_says_that_the_dependant_of_a_ticket_that_runs_again_runs_again(tmp_path, capsys, scripted):
+    # C waits on b, which is not built yet. B runs earlier in the same resume, so c runs too when b is built.
+    repo, run_id = a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted)
+
+    code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert skipped_section(out) == [
+        "  ticket b: runs again: each blocker is built",
+        "  ticket c: runs again if b is built earlier in this resume",
+        "  ticket e: stays skipped: blocked by d, which failed",
+    ]
+
+
+def test_the_dry_run_of_a_resume_says_that_a_ticket_that_a_crash_left_unreached_stays_skipped_until_a_retry_of_that_step(
+    tmp_path, capsys, scripted
+):
+    # The verifier of a raises, so the step crashes, the run ends, and b is not reached. A plan change adds c.
+    def crash(request):
+        raise RuntimeError("the harness broke")
+
+    scripted.during_verifier = crash
+    repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b") + ticket("c"))
+
+    code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert skipped_section(out) == [
+        "  ticket b: stays skipped until a retry of the step that crashed: the run ended after ticket a crashed"
+    ]
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert skipped_section(out) == ["  ticket b: runs again"]
 
 
 def test_an_assure_retry_of_a_step_that_crashed_builds_the_tickets_that_the_run_did_not_reach(tmp_path, capsys, scripted):

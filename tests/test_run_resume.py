@@ -253,6 +253,8 @@ def test_the_dry_run_of_a_resume_takes_no_lock_and_changes_nothing(tmp_path, cap
     code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
 
     assert (code, err) == (0, "") and f"run {run_id}: no plan change" in out
+    # The run skipped no ticket, so the dry run has no section on skipped tickets (#260).
+    assert "skipped tickets:" not in out
     assert journal_path(repo, run_id).read_bytes() == before
     assert sorted(p.name for p in state_dir(repo).rglob("*.lock")) == locks
     assert scripted.calls == []

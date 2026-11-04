@@ -858,6 +858,14 @@ def _recorded_plan(events: list[dict[str, object]]) -> list[domain.PlanTicket] |
 
 
 @dataclass(frozen=True)
+class SkippedTicket:
+    """What a resume does with a ticket that the run skipped (#260): `text` says if its step runs, and why, in the words of the dry run."""
+
+    ticket: str
+    text: str
+
+
+@dataclass(frozen=True)
 class PlanReview:
     """What a resume does with the plan of a run: the old and the new order, and the verdict of each rule of a plan change.
 
@@ -877,6 +885,8 @@ class PlanReview:
     missing: list[str] = field(default_factory=list)
     texts: dict[str, str] = field(default_factory=dict)
     other: list[str] = field(default_factory=list)
+    # What the resume does with each ticket that the run skipped, in plan order (#260). Only `review_plan_change` sets it.
+    skipped: tuple[SkippedTicket, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -992,7 +1002,7 @@ def _review(
 
 def review_plan_change(
     workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
-    retry: str | None = None, *, location: StateLocation | None = None,
+    retry: str | None = None, *, location: StateLocation | None = None, coordinator: bool = False,
 ) -> PlanReview:
     """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
 
@@ -1002,6 +1012,9 @@ def review_plan_change(
     EngineError when the run is unknown, or when the workflow differs from the
     run in a field other than the tickets. `location` is the location that the command looked up (see `locate_state`),
     or None to look it up here.
+
+    The result also holds what the resume does with each ticket that the run skipped (see `_skipped_outlook`).
+    `coordinator` tells that the resume has `--coordinator-commit`.
     """
     location = location or locate_state(repo, vcs)
     top, state_dir = location.top, location.state_directory(run_id)
@@ -1012,7 +1025,56 @@ def review_plan_change(
     if not events or events[0]["event"] != "run-start":
         raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
     with _vcs_errors():
-        return _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
+        review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
+    return replace(review, skipped=_skipped_outlook(workflow, events, run_id, review, retry, coordinator))
+
+
+def _skipped_outlook(
+    workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None, coordinator: bool,
+) -> tuple[SkippedTicket, ...]:
+    """What a resume does with each ticket that the run skipped, in plan order. Empty when the run skipped no ticket (#260).
+
+    The function restores the progress of the run, applies the plan change and the retry, and applies the skip rule
+    again, with the same functions as the resume (`restore_progress`, `_retry_plan`, `_apply_plan_change`,
+    `_prepare_resume` and `domain.skip_reason`). It takes each step that runs before a ticket as built: the skip rule
+    skips the dependants of a step that fails. Empty also when the resume is refused, so that no step runs.
+    """
+    order = plan_order(workflow)
+    try:
+        progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
+        restart = retry is not None and review.check is not None and retry in review.check.restarted
+        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator) if retry is not None else None
+    except EngineError:
+        return ()
+    was_skipped = set(progress.skipped)
+    if review.check is not None:
+        _apply_plan_change(review.check, progress)
+    _prepare_resume(workflow, order, progress, plan)
+    built, failed, skipped = progress.built, progress.failed, progress.skipped
+    complete = {*built, *failed, *skipped}
+    runs: list[str] = []
+    outlook: list[SkippedTicket] = []
+    for ticket in order:
+        if ticket.id in skipped:
+            # The skip rule did not skip it: the run did not reach it after a crash (see `_prepare_resume`).
+            outlook.append(SkippedTicket(ticket.id, f"stays skipped until a retry of the step that crashed: {skipped[ticket.id]}"))
+            continue
+        if ticket.id in complete:
+            continue
+        reason = domain.skip_reason(ticket.blocked_by, [*built, *runs], failed)
+        if reason is None:
+            runs.append(ticket.id)
+        if ticket.id not in was_skipped:
+            continue
+        if reason is not None:
+            outlook.append(SkippedTicket(ticket.id, f"stays skipped: {reason}"))
+            continue
+        earlier = [blocker for blocker in ticket.blocked_by if blocker in runs]
+        text = "runs again" if not ticket.blocked_by else "runs again: each blocker is built"
+        if earlier:
+            text = f"runs again if {', '.join(earlier)} {'is' if len(earlier) == 1 else 'are'} built earlier in this resume"
+        outlook.append(SkippedTicket(ticket.id, text))
+    return tuple(outlook)
 
 
 def _refuse_plan_change(review: PlanReview, workflow_path: Path, run_id: str) -> None:
@@ -1673,27 +1735,9 @@ def _execute(
     if tiers is not None:
         _probe_guards(adapter, vcs, tiers, journal, workflow, state_dir / "runs" / run_id, run_id)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
-    retried_reason = ""
-    if plan is not None:
-        failed.remove(plan.ticket)
-        retried_reason = failures.pop(plan.ticket)
-        for revived in plan.revive:
-            # The stop failed these tickets with the retried ticket, and their branches hold their commits (#209).
-            failed.remove(revived)
-            del failures[revived]
-            built.append(revived)
-            journal.append("step-end", ticket=revived, state=BUILT, reason=None)
-        if workflow.mode == domain.ECONOMY:
-            # The chain goes on after the step: the skip rule applies again to each ticket after it that was skipped.
-            for later in order[[t.id for t in order].index(plan.ticket) + 1 :]:
-                skipped.pop(later.id, None)
-        else:
-            # The skip rule applies again to each ticket that the failed step made the engine skip.
-            for dependant in domain.skipped_because_of(plan.ticket, [(t.id, t.blocked_by) for t in order], skipped):
-                del skipped[dependant]
-    # At each resume the skip rule applies again to each ticket that it skipped, with the blockers of now (#245). A
-    # ticket whose blockers are now built is not skipped, and its step runs. Another gets a new `skip` if its reason changed.
-    before = {blocked: skipped.pop(blocked) for blocked in progress.blocked if blocked in skipped}
+    retried_reason, before = _prepare_resume(workflow, order, progress, plan)
+    for revived in plan.revive if plan is not None else ():
+        journal.append("step-end", ticket=revived, state=BUILT, reason=None)
     complete = {*built, *failed, *skipped}
     ended_early = False
     paused: str | None = None
@@ -1777,6 +1821,38 @@ def _execute(
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, agents_note=agents_note)
 
 
+def _prepare_resume(workflow: Workflow, order: list[Ticket], progress: _Progress, plan: _RetryPlan | None) -> tuple[str, dict[str, str]]:
+    """Apply the retry and the skip rule of a resume to `progress`, as the engine does before the first step of a resume.
+
+    Return the reason of the failure of the retried step (empty with no `plan`), and the old reason of each ticket that
+    the skip rule skipped and that is now not skipped. The skip rule (`domain.skip_reason`) then decides for each of these
+    tickets in plan order. The dry run of a resume uses the same function (see `_skipped_outlook`), so it cannot disagree
+    with the resume (#260).
+    """
+    built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
+    retried_reason = ""
+    if plan is not None:
+        failed.remove(plan.ticket)
+        retried_reason = failures.pop(plan.ticket)
+        for revived in plan.revive:
+            # The stop failed these tickets with the retried ticket, and their branches hold their commits (#209).
+            failed.remove(revived)
+            del failures[revived]
+            built.append(revived)
+        if workflow.mode == domain.ECONOMY:
+            # The chain goes on after the step: the skip rule applies again to each ticket after it that was skipped.
+            for later in order[[t.id for t in order].index(plan.ticket) + 1 :]:
+                skipped.pop(later.id, None)
+        else:
+            # The skip rule applies again to each ticket that the failed step made the engine skip.
+            for dependant in domain.skipped_because_of(plan.ticket, [(t.id, t.blocked_by) for t in order], skipped):
+                del skipped[dependant]
+    # At each resume the skip rule applies again to each ticket that it skipped, with the blockers of now (#245). A
+    # ticket whose blockers are now built is not skipped, and its step runs. Another gets a new `skip` if its reason changed.
+    before = {blocked: skipped.pop(blocked) for blocked in progress.blocked if blocked in skipped}
+    return retried_reason, before
+
+
 def _clean_up(
     workflow: Workflow, order: list[Ticket], vcs: VersionControl, repo: Path, state_dir: Path, run_id: str, journal: Journal
 ) -> None:
@@ -1832,6 +1908,11 @@ def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.Plan
         order=[t.id for t in plan], reviewed=check.later, plan=_plan_record(plan),
         **({"retry_text": {t: {"old": old, "new": new} for t, (old, new) in check.restarted.items()}} if check.restarted else {}),
     )
+    _apply_plan_change(check, progress)
+
+
+def _apply_plan_change(check: domain.PlanCheck, progress: _Progress) -> None:
+    """Apply a plan change to the progress of the run: a removed ticket leaves the skipped tickets, and so does a changed ticket."""
     for ticket_id in [*check.removed, *check.changed]:
         progress.skipped.pop(ticket_id, None)
 
