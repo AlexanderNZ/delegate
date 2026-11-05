@@ -234,6 +234,9 @@ PHASE_REBASE: str = "rebase"
 PHASE_FIXUP: str = "fixup"
 PHASE_CHAIN: str = domain.GATES_OF_CHAIN
 
+# The environment entry of a `prepare` command: the absolute path of the main checkout of the repository of the run (#265).
+PREPARE_REPO_VARIABLE: str = "DELEGATE_REPO"
+
 # The `tree` of a `prepare-start` and a `prepare-result`: the worktree of a ticket, or the temporary copy of a verifier (#155).
 TREE_WORKTREE: str = "worktree"
 TREE_VERIFY_COPY: str = "verify-copy"
@@ -2409,11 +2412,13 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
 
 
 def _run_prepare(
-    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int
+    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int, repo: Path
 ) -> None:
     """Run the `prepare` commands of `stack` in `path`, in order, through the gate runner (#155).
 
-    `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A command in the worktree gets the entries of the worktree (#221). A git tree holds no ignored
+    `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A command in the worktree gets the entries of the worktree (#221). A command in either tree
+    gets `DELEGATE_REPO`, the path of the main checkout `repo` (#265): the copy of a verifier is a clone with no remote, so a command cannot
+    find the main checkout from it. A gate and an agent session do not get the entry. A git tree holds no ignored
     file, so a stack that needs installed dependencies names the commands that
     install them. The engine runs them itself, with the environment of a gate,
     before an agent starts in the tree. The journal records `prepare-start` and
@@ -2429,7 +2434,7 @@ def _run_prepare(
     """
     fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
     # The verifier copy is a repository of its own, which holds its settings itself.
-    environment = _worktree_environment(vcs, path) if tree == TREE_WORKTREE else None
+    environment = {**(_worktree_environment(vcs, path) if tree == TREE_WORKTREE else {}), PREPARE_REPO_VARIABLE: str(repo)}
     for command in stack.prepare:
         log = _gate_log_path(journal, ticket, f"prepare-{tree}", round_number)
         journal.append("prepare-start", **fields, command=command, prepare_log=str(log))
@@ -2446,7 +2451,9 @@ def _run_prepare(
             )
 
 
-def _prepare_ticket_worktree(gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool) -> None:
+def _prepare_ticket_worktree(
+    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool, repo: Path
+) -> None:
     """Run the `prepare` commands of `stack` in the worktree of `ticket` when it needs them. Raise `_StepFailed` when one fails.
 
     The worktree needs them when the engine made it now (`made`), or when the
@@ -2463,7 +2470,7 @@ def _prepare_ticket_worktree(gates: GateRunner, vcs: VersionControl, journal: Jo
                 last = event
         if last is not None and last["event"] == "prepare-result" and last["exit_status"] == 0 and last["command"] == stack.prepare[-1]:
             return
-    _run_prepare(gates, vcs, journal, stack, ticket, TREE_WORKTREE, worktree, 0)
+    _run_prepare(gates, vcs, journal, stack, ticket, TREE_WORKTREE, worktree, 0, repo)
 
 
 def _build_ticket(
@@ -2536,7 +2543,7 @@ def _build_ticket(
         if rebases:
             rebased_onto = str(rebases[-1]["onto_commit"])
     try:
-        _prepare_ticket_worktree(gates, vcs, journal, stack, ticket.id, worktree, made)
+        _prepare_ticket_worktree(gates, vcs, journal, stack, ticket.id, worktree, made, repo)
     except _StepFailed as failed:
         return str(failed)
     # The commits of a ticket are the commits beyond the point where its branch started, or, after a rebase,
@@ -3196,7 +3203,7 @@ def _verify_round(
         except (EngineError, BriefError) as error:
             raise _StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
-        _run_prepare(step.gates, step.vcs, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number)
+        _run_prepare(step.gates, step.vcs, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number, step.repo)
         # In a chain, only the retry of the ticket at the tip goes on after the stop (#261), so the message names it.
         sealed = _check_agent_file(
             step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number,
@@ -3395,7 +3402,7 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure, **coordinator)
     made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
     try:
-        _prepare_ticket_worktree(step.gates, step.vcs, step.journal, step.stack, ticket.id, step.worktree, made)
+        _prepare_ticket_worktree(step.gates, step.vcs, step.journal, step.stack, ticket.id, step.worktree, made, step.repo)
         if plan.phase == RETRY_FIXUP:
             # The branch holds no fix-up commit: the stop came before the fix-up session. Run that fix-up again.
             if plan.rejected is None or not fixup_held:

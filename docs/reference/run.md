@@ -105,6 +105,8 @@ The field `prepare` of a stack names the commands that make a tree ready for the
 
 For each command, the journal holds `prepare-start` and `prepare-result`. Each command writes its output to its own log file. A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate: it starts no continuation and no fix-up round, and the agent of the tree does not start. After the last command in the worktree of a ticket, the engine checks the worktree for changed and untracked paths. A path that `.gitignore` names is not one. When it finds a path, the step fails with the reason `prepare left <paths> in the worktree; add them to .gitignore, or make prepare leave the worktree clean`, and no agent starts (#224). The check does not apply to the temporary copy of a verifier. With no `prepare` field, the engine runs no command and writes no `prepare-start`.
 
+Each command gets the environment entry `DELEGATE_REPO`, the absolute path of the main checkout, in both trees (#265). The gates and the agent sessions do not get it. See [Prepare](workflow.md#prepare).
+
 ### The agent check
 
 An agent [**session**](../glossary.md#session) of a run starts only from the [**sealed agent**](../glossary.md#sealed-agent) of the run, and only when the files of the seal match the record in the journal. An agent file that git ignores is in no diff, and a tree that a specialist wrote can hold an agent file or a settings file that replaces the agent or turns off its hooks. So the engine does not read the agent file in the tree where an agent runs.

@@ -352,3 +352,42 @@ def test_a_prepare_command_that_writes_an_ignored_file_does_not_fail_the_step(tm
 
     assert (code, err) == (0, "")
     assert len(adapter.calls) == 1
+
+
+# The ignored file in which a `prepare` command writes the main checkout that the engine named in its environment (#265).
+REPO_FILE = "main-checkout.path"
+WRITE_REPO = f'printf %s "$DELEGATE_REPO" > {REPO_FILE}'
+
+
+def test_a_prepare_command_gets_the_path_of_the_main_checkout_in_the_worktree_and_in_the_verify_copy(tmp_path, capsys, git_identity, monkeypatch):
+    monkeypatch.delenv("DELEGATE_REPO", raising=False)
+    found: dict[str, str] = {}
+    adapters.register("scripted", ScriptedAdapter(
+        on_specialist=lambda request: found.update(worktree=(request.cwd / REPO_FILE).read_text()),
+        during_verifier=lambda request: found.update(copy=(request.cwd / REPO_FILE).read_text()),
+    ))
+    try:
+        repo = make_repo(tmp_path, workflow(f"['{WRITE_REPO}']"))
+        (repo / ".gitignore").write_text(f"{MARKER}\n{REPO_FILE}\n")
+        git(repo, "commit", "-q", "-am", "ignore the file of the path")
+
+        code, out, err, events = run(repo, capsys)
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    assert found == {"worktree": str(repo.resolve()), "copy": str(repo.resolve())}
+
+
+def test_a_gate_command_does_not_get_the_path_of_the_main_checkout(tmp_path, capsys, seen, monkeypatch):
+    monkeypatch.delenv("DELEGATE_REPO", raising=False)
+    text = workflow(f'["{PREPARE}"]').replace(
+        'gates = ["test -f feature.txt"]', 'gates = ["test -f feature.txt && test -z \\"${DELEGATE_REPO+set}\\""]'
+    )
+    repo = make_repo(tmp_path, text)
+
+    code, out, err, events = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    results = [e for e in events if e["event"] == "gate-result"]
+    assert results and all(e["exit_status"] == 0 for e in results)

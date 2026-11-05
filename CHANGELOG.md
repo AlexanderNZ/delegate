@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Added
+
+- The `prepare` commands of a stack get the environment entry `DELEGATE_REPO`: the absolute path of the main checkout of the repository of the run (#265). The entry is the same in the worktree of a ticket and in the temporary copy of a verifier, and the engine adds it after the entries of the worktree (#221). Before, a command could not find the main checkout from the copy: the copy is a clone with no remote, so `git rev-parse --git-common-dir` gives the copy itself. So a stack could not copy an ignored cache or index, for example a code index such as `.codegraph/` or a dependency cache, from the main checkout, and had to make it again in each copy. The gates and the agent sessions do not get the entry. See "Prepare" in `docs/reference/workflow.md`.
+
 ### Fixed
 
 - In `assure` mode, a retry with `--coordinator-commit <sha>` goes on with a step whose specialist, or whose fix-up specialist of a round, gave a valid report that says `partial` or `blocked` (#264). Before, the engine refused the retry: "the fix-up specialist of round N gave no valid report that says committed". When the work needed a change of a hotspot path, for example a CI workflow file, a coordinator could only add a new ticket with a copy of the text. Now, after a report of the specialist, the step goes on at the gates of round 0, on the tip of the branch of the ticket. After a report of the fix-up specialist of round N, the step goes on at the gates of that fix-up, then at its scoped verifier, with the rejected commit and the findings of round N: it is not a new round. The checks of the commit of the coordinator do not change, and the hotspot check still counts each other commit of the step. Without `--coordinator-commit`, the retry is still refused, and when the report gives a reason, the message names `--retry <ticket> --coordinator-commit <sha>`. The retry line at the end of such a run names `--coordinator-commit <sha>`, and the dry run of the resume accepts the retry. See "The retry with a commit of the coordinator" in `docs/reference/run.md`.
