@@ -10,7 +10,8 @@ clean-up existed, or with `keep-worktrees = true` (#168). Both use the rules of
 - A ticket worktree with a change that is not committed stays, and so does its
   branch. Its file watcher is stopped, because nothing else stops it.
 - A ticket branch goes only when the holder branch (the run branch) holds its
-  newest commit, with the safe delete of the port. Otherwise it stays.
+  newest commit, with the safe delete of the port. Otherwise it stays. A caller can
+  name more holders (`Holder`): the branch goes when one of them holds it (#267).
 - A branch that a retry with a new text kept (`TicketTree.failed`) goes whatever
   it holds, when the caller allows it (`discard_failed`). The engine does not
   allow it at the end of a run: the coordinator reads that work first.
@@ -22,6 +23,7 @@ The module starts no process and imports no adapter: the port does the work.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +31,14 @@ from ..ports.vcs import VcsError, VersionControl
 
 # The most paths of a kept worktree that the reason names.
 CLEANUP_PATHS_NAMED: int = 10
+
+
+@dataclass(frozen=True)
+class Holder:
+    """A branch that can hold the commits of another branch, and the words that name it in a reason (#267)."""
+
+    branch: str
+    name: str = "the run branch"
 
 
 @dataclass(frozen=True)
@@ -74,7 +84,7 @@ class Cleanup:
 
 def clean_tickets(
     vcs: VersionControl, repo: Path, trees: list[TicketTree], holder: str, holder_name: str = "the run branch",
-    *, dry_run: bool = False, discard_failed: bool = False,
+    *, dry_run: bool = False, discard_failed: bool = False, also: Sequence[Holder] = (),
 ) -> Cleanup:
     """Remove the worktree and the hooks of each ticket, and delete each ticket branch that the branch `holder` holds.
 
@@ -83,12 +93,14 @@ def clean_tickets(
     directory does not exist is gone already, and its branch can still go.
     With `dry_run` nothing changes, and the result says what would change.
     With `discard_failed` the branch of a tree with `failed` goes, whatever it holds.
+    A branch in `also` can hold the ticket branch in place of `holder` (#267): the branch goes when `holder` or one of them holds it.
     """
     result = Cleanup()
     try:
-        held = vcs.branch_exists(repo, holder)
+        holders = _holders(vcs, repo, [Holder(holder, holder_name), *also])
     except VcsError as failure:
-        held, result.errors = False, [f"branch {holder}: {failure}"]
+        holders, result.errors = [], [f"branch {holder}: {failure}"]
+    live = [h for h, exists in holders if exists]
     for tree in trees:
         if tree.failed:
             _discard_failed(vcs, repo, tree.branch, result, discard_failed, dry_run)
@@ -117,12 +129,10 @@ def clean_tickets(
                 continue
             if kept is not None:
                 result.keep_branch(tree.branch, "its worktree is kept")
-            elif not held:
-                result.keep_branch(tree.branch, f"{holder_name} {holder!r} does not exist, so nothing shows that its commits are held")
-            elif _delete(vcs, repo, tree.branch, holder, dry_run):
+            elif _delete_held(vcs, repo, tree.branch, live, dry_run):
                 result.branches_deleted.append(tree.branch)
             else:
-                result.keep_branch(tree.branch, f"{holder_name} {holder!r} does not hold its commits")
+                result.keep_branch(tree.branch, _reason(holders))
         except VcsError as failure:
             result.keep_branch(tree.branch, str(failure), error=True)
     return result
@@ -152,12 +162,48 @@ def remove_empty_directories(*directories: Path) -> None:
             pass
 
 
-def delete_held_branch(vcs: VersionControl, repo: Path, branch: str, holder: str, *, dry_run: bool = False) -> bool:
-    """Delete `branch` when `holder` holds its newest commit, and return True. With `dry_run`, only tell whether it would go.
+def delete_held_branch(vcs: VersionControl, repo: Path, branch: str, holders: Sequence[Holder], *, dry_run: bool = False) -> bool:
+    """Delete `branch` when one of `holders` holds its newest commit, and return True. With `dry_run`, only tell whether it would go.
 
-    Raise VcsError when the port refuses the delete for another cause.
+    A holder that does not exist holds nothing, and it is no error (#267). Raise VcsError when the port refuses the
+    delete for another cause.
     """
-    return _delete(vcs, repo, branch, holder, dry_run)
+    return _delete_held(vcs, repo, branch, [h for h, exists in _holders(vcs, repo, holders) if exists], dry_run)
+
+
+def not_held_reason(vcs: VersionControl, repo: Path, holders: Sequence[Holder]) -> str:
+    """The reason that a branch stays when no holder holds it: it names each holder that was checked (#267)."""
+    return _reason(_holders(vcs, repo, holders))
+
+
+def _reason(holders: Sequence[tuple[Holder, bool]]) -> str:
+    """The reason of `not_held_reason` from the holders with the fact that each branch exists. A holder that does not exist is named so."""
+    if len(holders) == 1:
+        (holder, exists), = holders
+        if not exists:
+            return f"{holder.name} {holder.branch!r} does not exist, so nothing shows that its commits are held"
+        return f"{holder.name} {holder.branch!r} does not hold its commits"
+    if all(exists for _, exists in holders):
+        return "neither " + " nor ".join(f"{h.name} {h.branch!r}" for h, _ in holders) + " holds its commits"
+    return "; ".join(
+        f"{h.name} {h.branch!r} {'does not hold its commits' if exists else 'does not exist'}" for h, exists in holders
+    )
+
+
+def _holders(vcs: VersionControl, repo: Path, holders: Sequence[Holder]) -> list[tuple[Holder, bool]]:
+    """Each holder with the fact that its branch exists. A branch that two holders name counts once, with the first name."""
+    seen: set[str] = set()
+    found: list[tuple[Holder, bool]] = []
+    for holder in holders:
+        if holder.branch not in seen:
+            seen.add(holder.branch)
+            found.append((holder, vcs.branch_exists(repo, holder.branch)))
+    return found
+
+
+def _delete_held(vcs: VersionControl, repo: Path, branch: str, holders: Sequence[Holder], dry_run: bool) -> bool:
+    """Delete `branch` when the first of `holders` that holds it does; True when it went, or with `dry_run` when it would."""
+    return any(_delete(vcs, repo, branch, holder.branch, dry_run) for holder in holders)
 
 
 def _delete(vcs: VersionControl, repo: Path, branch: str, holder: str, dry_run: bool) -> bool:

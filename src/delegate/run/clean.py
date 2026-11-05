@@ -9,8 +9,9 @@ a verifier also leaves the temporary copy of the verifier and its proof copy.
 worktrees and their hooks, deletes each ticket branch that the run branch
 holds, and removes the leftover verifier copies and proof copies, and the
 scratch directories of the agent sessions of the run (#227). With
-`merged`, it then deletes the run branch when the base branch holds it. When the
-run branch is gone already, the base branch is the holder of the ticket
+`merged`, it then deletes the run branch when the base branch holds it or the default
+branch of the repository holds it (#267): a stacked run has the run branch of an earlier run as its base branch,
+and a fixed base branch never moves. When the run branch is gone already, the base branch and the default branch are the holders of the ticket
 branches with `merged`, and without it every ticket branch stays.
 
 A run is cleaned only when the newest `run-end` of its journal after its newest
@@ -46,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
-from .cleanup import Cleanup, TicketTree, clean_tickets, delete_held_branch, remove_empty_directories
+from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
 from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, EngineError, locate_state, restore_progress
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
@@ -208,18 +209,24 @@ def _clean_run(
     run_branch, base_branch = str(start["run_branch"]), str(start["base_branch"])
     outcome = RunClean(run_id)
     try:
-        holder, holder_name = run_branch, "the run branch"
+        # The base branch or the default branch can hold the run branch: a stacked run has the run branch of an earlier
+        # run as its base branch, and a fixed base branch never moves (#267).
+        checked = [Holder(base_branch, "the base branch")]
+        default = vcs.default_branch(repo) if merged else None
+        if default is not None:
+            checked.append(Holder(default, "the default branch"))
+        holder, also = Holder(run_branch), []
         if merged and not vcs.branch_exists(repo, run_branch):
-            holder, holder_name = base_branch, "the base branch"
+            holder, also = checked[0], checked[1:]
         trees = _ticket_trees(events, state, run_id)
         sizes = {str(tree.worktree): _size(tree.worktree) for tree in trees if tree.worktree.is_dir()}
-        cleanup = clean_tickets(vcs, repo, trees, holder, holder_name, dry_run=dry_run, discard_failed=True)
+        cleanup = clean_tickets(vcs, repo, trees, holder.branch, holder.name, dry_run=dry_run, discard_failed=True, also=also)
         if merged and vcs.branch_exists(repo, run_branch):
             try:
-                if delete_held_branch(vcs, repo, run_branch, base_branch, dry_run=dry_run):
+                if delete_held_branch(vcs, repo, run_branch, checked, dry_run=dry_run):
                     cleanup.branches_deleted.append(run_branch)
                 else:
-                    cleanup.keep_branch(run_branch, f"the base branch {base_branch!r} does not hold its commits")
+                    cleanup.keep_branch(run_branch, not_held_reason(vcs, repo, checked))
             except VcsError as error:
                 cleanup.keep_branch(run_branch, str(error), error=True)
     except VcsError as error:

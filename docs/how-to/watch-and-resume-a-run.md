@@ -258,7 +258,7 @@ Merge the run branch into the [**base branch**](../glossary.md#base-branch), as 
 delegate clean --ended --merged --dry-run
 ```
 
-The command changes nothing. It prints one line for each run: the worktrees and the branches that it would remove, each item that it would keep with the reason, and the space that it would free. `--ended` selects each run that ended `built`. `--merged` adds the run branch of such a run when the base branch holds it. A run that is active, failed, paused or stopped keeps everything, and its line gives the reason. To clean one run, give its run id in place of `--ended`.
+The command changes nothing. It prints one line for each run: the worktrees and the branches that it would remove, each item that it would keep with the reason, and the space that it would free. `--ended` selects each run that ended `built`. `--merged` adds the run branch of such a run when the base branch or the default branch holds it. A run that is active, failed, paused or stopped keeps everything, and its line gives the reason. To clean one run, give its run id in place of `--ended`.
 
 ### 3. Remove it
 

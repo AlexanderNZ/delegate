@@ -111,6 +111,15 @@ class VersionControl(Protocol):
         """Tell whether a branch of that name exists. A tag of that name does not count."""
         ...
 
+    def default_branch(self, repo: Path) -> str | None:
+        """The name of the default branch of the repository (#267), or None when it has none.
+
+        The default branch is the local branch that the default branch of the remote names. When the repository
+        records no such name, it is the branch that the main checkout holds. Return None when the local branch that
+        the remote names does not exist, or when the main checkout holds no branch.
+        """
+        ...
+
     def create_branch(self, repo: Path, branch: str, start: str) -> None:
         """Make the branch `branch` at `start`, with no checkout. Raise VcsError when the branch exists."""
         ...

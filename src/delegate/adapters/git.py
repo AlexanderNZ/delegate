@@ -202,6 +202,19 @@ class GitVersionControl:
     def branch_exists(self, repo: Path, branch: str) -> bool:
         return _run(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
 
+    def default_branch(self, repo: Path) -> str | None:
+        remote = _run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+        if remote.returncode == 0:
+            # `origin/main` names the local branch `main`. A remote name that is not `origin` cannot be here: the ref is under `origin`.
+            name = remote.stdout.strip().removeprefix("origin/")
+            return name if name and self.branch_exists(repo, name) else None
+        # The first entry of the list of worktrees is the main checkout.
+        listing = _git(repo, "worktree", "list", "--porcelain").splitlines()
+        main = Path(listing[0].removeprefix("worktree ")) if listing and listing[0].startswith("worktree ") else repo
+        # Exit status 1 means a detached HEAD: no branch.
+        current = _run(main, "symbolic-ref", "--quiet", "--short", "HEAD")
+        return current.stdout.strip() or None
+
     def create_branch(self, repo: Path, branch: str, start: str) -> None:
         _git(repo, "branch", branch, start)
 

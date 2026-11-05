@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("run_id", nargs="*", help="a run to clean: the run id or the short run id; give more than one to clean more")
     parser.add_argument("--ended", action="store_true", help="clean every run whose newest run-end has the result built")
-    parser.add_argument("--merged", action="store_true", help="also delete the run branch of each cleaned run when the base branch holds it")
+    parser.add_argument("--merged", action="store_true", help="also delete the run branch of each cleaned run when the base branch or the default branch holds it")
     parser.add_argument("--dry-run", action="store_true", help="print what the command would remove and keep, and change nothing")
     parser.add_argument(
         "--abandon", metavar="RUN_ID",

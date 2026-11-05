@@ -30,10 +30,11 @@ def scripted(scripted):
     return scripted
 
 
-def workflow_on(tmp_path: Path, run_branch: str) -> Path:
-    """A copy of the shared workflow, which keeps its worktrees, with its own run branch. It is outside the repository."""
+def workflow_on(tmp_path: Path, run_branch: str, base_branch: str = "main") -> Path:
+    """A copy of the shared workflow, which keeps its worktrees, with its own run branch and base branch. It is outside the repository."""
     path = tmp_path / f"{run_branch.replace('/', '-')}.toml"
-    path.write_text(WORKFLOW.replace('run-branch = "run/demo"', f'run-branch = "{run_branch}"'))
+    text = WORKFLOW.replace('run-branch = "run/demo"', f'run-branch = "{run_branch}"')
+    path.write_text(text.replace('base-branch = "main"', f'base-branch = "{base_branch}"'))
     return path
 
 
@@ -148,6 +149,105 @@ def test_merged_deletes_the_run_branch_only_when_the_base_branch_holds_it(tmp_pa
     assert read_journal_file(repo, merged)[-1]["branches_deleted"] == ["run/merged-a", "run/merged"]
     kept = read_journal_file(repo, open_run)[-1]["branches_kept"]
     assert [k["branch"] for k in kept] == ["run/open"]
+
+
+def test_merged_deletes_each_run_branch_of_a_stack_when_the_default_branch_holds_the_top_of_it(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    run_ids = []
+    base = "main"
+    for number in ("one", "two", "three"):
+        scripted.files = {"feature.txt": f"feature {number}\n"}
+        code, run_id = run(repo, workflow_on(tmp_path, f"run/{number}", base), capsys)
+        assert code == 0
+        run_ids.append(run_id)
+        base = f"run/{number}"
+    git(repo, "merge", "-q", "--ff-only", "run/three")
+
+    for run_id in run_ids:
+        code, out, err = clean(repo, capsys, run_id, "--merged")
+        assert (code, err) == (0, "")
+        assert "kept branch" not in line_of(out, run_id)
+
+    assert set(branches(repo)) == {"main"}
+    assert worktrees(repo) == {repo.resolve()}
+
+
+def test_merged_deletes_the_run_branch_of_a_run_whose_base_branch_did_not_move_when_the_default_branch_holds_it(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "base/milestone", "main")
+    code, run_id = run(repo, workflow_on(tmp_path, "run/fixed", "base/milestone"), capsys)
+    assert code == 0
+    git(repo, "merge", "-q", "--ff-only", "run/fixed")
+
+    code, out, err = clean(repo, capsys, run_id, "--merged")
+
+    assert (code, err) == (0, "")
+    assert set(branches(repo)) == {"main", "base/milestone"}
+    assert "run/fixed" in line_of(out, run_id) and "run/fixed-a" in line_of(out, run_id)
+    assert read_journal_file(repo, run_id)[-1]["branches_deleted"] == ["run/fixed-a", "run/fixed"]
+
+
+def test_merged_keeps_a_run_branch_that_neither_the_base_branch_nor_the_default_branch_holds_and_the_line_names_both(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "base/milestone", "main")
+    code, run_id = run(repo, workflow_on(tmp_path, "run/open", "base/milestone"), capsys)
+    assert code == 0
+    tip = branches(repo)["run/open"]
+
+    code, out, err = clean(repo, capsys, run_id, "--merged")
+
+    assert (code, err) == (0, "")
+    assert branches(repo)["run/open"] == tip
+    line = line_of(out, run_id)
+    assert "branch run/open:" in line and "'base/milestone'" in line and "'main'" in line
+    kept = read_journal_file(repo, run_id)
+    assert all(e["event"] != "cleanup" or "run/open" not in e["branches_deleted"] for e in kept)
+
+
+def test_dry_run_with_merged_says_the_same_for_a_run_branch_that_the_default_branch_holds(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "base/milestone", "main")
+    code, run_id = run(repo, workflow_on(tmp_path, "run/fixed", "base/milestone"), capsys)
+    git(repo, "merge", "-q", "--ff-only", "run/fixed")
+    before = branches(repo)
+
+    code, out, err = clean(repo, capsys, run_id, "--merged", "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert branches(repo) == before
+    assert "would delete 2 branches (run/fixed-a, run/fixed)" in line_of(out, run_id)
+
+
+def test_the_default_branch_is_the_one_that_origin_head_names_not_the_one_that_the_main_checkout_holds(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "trunk", "main")
+    git(repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    git(repo, "branch", "base/milestone", "main")
+    code, run_id = run(repo, workflow_on(tmp_path, "run/fixed", "base/milestone"), capsys)
+    git(repo, "branch", "-f", "trunk", "run/fixed")  # main stays behind and trunk holds the run
+
+    code, out, err = clean(repo, capsys, run_id, "--merged")
+
+    assert (code, err) == (0, "")
+    assert set(branches(repo)) == {"main", "trunk", "base/milestone"}
+
+
+def test_merged_deletes_a_ticket_branch_of_a_run_whose_run_branch_is_gone_when_the_default_branch_holds_it(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "base/milestone", "main")
+    code, run_id = run(repo, workflow_on(tmp_path, "run/fixed", "base/milestone"), capsys)
+    git(repo, "merge", "-q", "--ff-only", "run/fixed-a")
+    git(repo, "branch", "-D", "run/fixed")
+
+    code, out, err = clean(repo, capsys, run_id, "--merged")
+
+    assert (code, err) == (0, "")
+    assert set(branches(repo)) == {"main", "base/milestone"}
 
 
 def test_without_merged_the_run_branch_stays_also_when_the_base_branch_holds_it(tmp_path, capsys, scripted):

@@ -92,6 +92,47 @@ def test_the_git_backend_has_every_operation_of_the_port(vcs):
     assert isinstance(vcs, VersionControl)
 
 
+# The default branch (#267).
+
+
+def test_the_default_branch_is_the_branch_that_the_main_checkout_holds_when_the_repository_records_no_remote_default(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "other")
+
+    assert vcs.default_branch(repo) == "main"
+
+
+def test_the_default_branch_from_a_linked_worktree_is_the_branch_of_the_main_checkout(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    vcs.ensure_worktree(repo, tmp_path / "linked", "ticket", "main")
+
+    assert vcs.default_branch(tmp_path / "linked") == "main"
+
+
+def test_the_default_branch_is_the_local_branch_that_the_remote_default_names_and_not_the_branch_of_the_main_checkout(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    git(repo, "branch", "trunk")
+    git(repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+    assert vcs.default_branch(repo) == "trunk"
+
+
+def test_the_default_branch_is_none_when_the_local_branch_of_the_remote_default_does_not_exist(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    git(repo, "update-ref", "refs/remotes/origin/trunk", "main")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+    assert vcs.default_branch(repo) is None
+
+
+def test_the_default_branch_is_none_when_the_main_checkout_holds_no_branch(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    git(repo, "checkout", "-q", "--detach")
+
+    assert vcs.default_branch(repo) is None
+
+
 # Where the repository is.
 
 

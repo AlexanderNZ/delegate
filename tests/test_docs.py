@@ -153,7 +153,7 @@ CLEAN_OPTIONS = """\
 |---|---|
 | `[<run-id>]` | A run to clean: the run id or the short run id; give more than one to clean more. |
 | `--ended` | Clean every run whose newest run-end has the result built. |
-| `--merged` | Also delete the run branch of each cleaned run when the base branch holds it. |
+| `--merged` | Also delete the run branch of each cleaned run when the base branch or the default branch holds it. |
 | `--dry-run` | Print what the command would remove and keep, and change nothing. |
 | `--abandon <run-id>` | End the run for good: it is paused, halted, failed or stopped, and no process works on it; write run-end with the result abandoned, then remove its worktrees, ticket branches and hooks, and keep the run branch; needs --reason. |
 | `--reason <reason>` | With --abandon, the reason: the text goes to the journal of the run and to delegate status. |
