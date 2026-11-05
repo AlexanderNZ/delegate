@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.19.1] - 2026-11-05
+
 ### Fixed
 
 - `delegate clean --merged` deletes a run branch that the default branch of the repository holds, also for a stacked run and for a fixed base branch (#267). Before, only the base branch of the run could hold the run branch. In a stack, the base branch of a run is the run branch of an earlier run. After the default branch moved to the top of the stack, the clean of the earlier run deleted its run branch, and the clean of the next run then kept its run branch (or failed on the base branch that was gone), although the default branch held its commits. A fixed base branch such as `base/<milestone>` never moves, so `--merged` never deleted the run branch. Now the run branch goes when the base branch holds it or the default branch holds it. The default branch is the local branch that `refs/remotes/origin/HEAD` names, or the branch that the main checkout holds when the repository has no such ref. A base branch that does not exist holds nothing, and it is no error. When the run branch is gone already, the ticket branches follow the same rule. The line for a kept run branch names each branch that the command checked, and `--dry-run` prints the same result. The version-control port has the new operation `default_branch`. See `delegate clean` in `docs/reference/commands.md`.
