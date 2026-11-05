@@ -7,11 +7,16 @@ the paths of that commit, and still counts each other commit of the step. The ga
 part of the branch, and the verifier brief names it. The engine refuses a commit that is not on top of the branch, and
 a commit that changes a path outside the hotspots.
 
+In `assure` mode the retry also goes on with a step whose specialist, or whose fix-up specialist of a round, reported
+partial or blocked because the work needs a hotspot (#264).
+
 Each case calls `delegate.main` against a real temporary git repository, with the scripted adapter in the place of the
 harness. The coordinator commits with git in the worktree of the ticket, as a person does.
 """
 
 import json
+
+import pytest
 
 from .support import (
     commit_head, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir,
@@ -277,3 +282,135 @@ def test_a_coordinator_commit_that_the_rebase_writes_again_is_still_not_counted_
     assert git(repo, "rev-parse", "run/demo").strip() == rebased
     assert {"a.txt", "b.txt", "LICENSE"} <= set(tree(repo, "run/demo"))
     assert (events[-1]["event"], events[-1]["result"], sorted(events[-1]["built"])) == ("run-end", "built", ["a", "b"])
+
+
+# #264: in `assure` mode the specialist, or the fix-up specialist of a round, reports partial because the work needs a hotspot.
+LISTING_GATE = 'gates = ["ls *.txt"]'
+NEEDS_RENDER = "LICENSE is a hotspot; the coordinator renders it"
+
+
+def partial(ticket_id: str):
+    """A report function of the scripted adapter: a valid report that says partial, because the work needs a hotspot."""
+    return lambda request, head: json.dumps(
+        valid_report(ticket_id, f"run/demo-{ticket_id}", head, status="partial", blocked_reason=NEEDS_RENDER)
+    )
+
+
+def fixup_needs_a_hotspot(tmp_path, capsys, scripted):
+    """An `assure` run: the gates are green, the verifier rejects, and the fix-up of round 1 reports partial with no commit."""
+    scripted.verdict_sequence = ["REJECT"]
+    scripted.verdict_findings = ["LICENSE: the render is not current"]
+    scripted.fixup_files = {}
+    scripted.fixup_report_text = partial("a")
+    repo = make_repo(tmp_path, workflow(ticket("a")).replace(RENDER_GATE, LISTING_GATE))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    assert code == 1 and len(scripted.fixup_calls) == 1 and len(scripted.verifier_calls) == 1
+    return repo, run_id, out
+
+
+def specialist_needs_a_hotspot(tmp_path, capsys, scripted):
+    """An `assure` run: the specialist commits its work and reports partial, because the gates need the render of a hotspot."""
+    scripted.report_text = partial("a")
+    repo = make_repo(tmp_path, workflow(ticket("a")))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    assert code == 1 and len(scripted.calls) == 1 and scripted.verifier_calls == []
+    scripted.report_text = None
+    return repo, run_id, out
+
+
+def test_an_assure_retry_with_a_coordinator_commit_after_a_partial_fixup_runs_the_gates_and_the_scoped_verifier_of_that_round(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, out = fixup_needs_a_hotspot(tmp_path, capsys, scripted)
+    worktree = worktree_of(repo, run_id, "a")
+    rejected = git(worktree, "rev-parse", "HEAD").strip()
+    render = coordinator_commits(worktree, {"LICENSE": "rendered\n"})
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render)
+
+    assert (code, err) == (0, ""), err
+    assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.fixup_calls == []
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert {k: retried[0][k] for k in ("ticket", "phase", "round", "coordinator_commit", "coordinator_paths")} == {
+        "ticket": "a", "phase": "gates", "round": 1, "coordinator_commit": render, "coordinator_paths": ["LICENSE"],
+    }
+    assert "hotspot-finding" not in event_names(retried) and "fixup-start" not in event_names(retried)
+    assert [(e["phase"], e["round"], e["commit"], e["green"]) for e in retried if e["event"] == "gate-result"] == [
+        ("fixup", 1, render, True)
+    ]
+    # Not a new round: the scoped verifier of round 1 sees the rejected commit and the findings of round 1.
+    (verifier,) = scripted.verifier_calls
+    assert verifier.prompt.startswith("## Findings under verification")
+    assert "LICENSE: the render is not current" in verifier.prompt and rejected in verifier.prompt
+    assert [(e["round"], e["mode"], e["verdict"]) for e in retried if e["event"] == "verdict"] == [(1, "fix-up", "ACCEPT")]
+    assert git(repo, "rev-parse", "run/demo").strip() == render
+    assert [e["state"] for e in retried if e["event"] == "step-end"] == ["built"]
+
+
+def test_an_assure_retry_with_a_coordinator_commit_after_a_partial_specialist_report_runs_the_gates_of_round_0(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, out = specialist_needs_a_hotspot(tmp_path, capsys, scripted)
+    render = coordinator_commits(worktree_of(repo, run_id, "a"), {"LICENSE": "rendered\n"})
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render)
+
+    assert (code, err) == (0, ""), err
+    assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.fixup_calls == []
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert {k: retried[0][k] for k in ("ticket", "phase", "round", "coordinator_commit")} == {
+        "ticket": "a", "phase": "gates", "round": 0, "coordinator_commit": render,
+    }
+    assert "hotspot-finding" not in event_names(retried)
+    assert [(e["phase"], e["round"], e["commit"], e["green"]) for e in retried if e["event"] == "gate-result"] == [
+        ("build", 0, render, True)
+    ]
+    (verifier,) = scripted.verifier_calls
+    assert not verifier.prompt.startswith("## Findings under verification")
+    assert f"`{render}`" in section(verifier.prompt, COORDINATOR_SECTION)
+    assert git(repo, "show", "run/demo:LICENSE") == "rendered\n" and "a.txt" in tree(repo, "run/demo")
+    assert [e["state"] for e in retried if e["event"] == "step-end"] == ["built"]
+
+
+def test_a_partial_specialist_commit_of_a_hotspot_still_fails_the_retry_with_a_coordinator_commit(tmp_path, capsys, scripted):
+    scripted.files_by_ticket["a"] = {"a.txt": "a\n", "NOTICE": "changed by the specialist\n"}
+    repo, run_id, out = specialist_needs_a_hotspot(tmp_path, capsys, scripted)
+    render = coordinator_commits(worktree_of(repo, run_id, "a"), {"LICENSE": "rendered\n"})
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render)
+
+    assert code == 1 and "hotspot finding: NOTICE matches the hotspot 'NOTICE'" in err and "LICENSE" not in err
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert [e["state"] for e in retried if e["event"] == "step-end"] == ["failed"]
+    assert scripted.verifier_calls == [] and "gate-result" not in event_names(retried)
+
+
+@pytest.mark.parametrize("needs_a_hotspot", [fixup_needs_a_hotspot, specialist_needs_a_hotspot], ids=["fix-up", "specialist"])
+def test_an_assure_retry_of_a_partial_report_without_a_coordinator_commit_is_refused_and_the_message_names_the_flag(
+    tmp_path, capsys, scripted, needs_a_hotspot
+):
+    repo, run_id, first_out = needs_a_hotspot(tmp_path, capsys, scripted)
+    short = run_id.rsplit("-", 1)[-1]
+    # The end of the run names the retry that the engine accepts: the retry with a commit of the coordinator.
+    assert [line for line in first_out.splitlines() if line.startswith("retry with ")] == [
+        f"retry with delegate run --resume {short} --retry a --coordinator-commit <sha>"
+    ]
+
+    code, out, dry_err = resume_main(repo, capsys, run_id, "--retry", "a", "--dry-run")
+    assert code == 1
+    err = refused(repo, capsys, run_id, scripted, "--retry", "a")
+
+    (message,) = [line for line in err.splitlines() if "cannot be retried" in line]
+    assert message in dry_err.splitlines()
+    assert f"ticket 'a' of run '{run_id}' cannot be retried" in message
+    assert NEEDS_RENDER in message and "--retry a --coordinator-commit <sha>" in message
+
+    # With the commit of the coordinator, the dry run accepts the retry.
+    render = coordinator_commits(worktree_of(repo, run_id, "a"), {"LICENSE": "rendered\n"})
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render, "--dry-run")
+    assert (code, err) == (0, ""), err

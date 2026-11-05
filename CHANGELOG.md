@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- In `assure` mode, a retry with `--coordinator-commit <sha>` goes on with a step whose specialist, or whose fix-up specialist of a round, gave a valid report that says `partial` or `blocked` (#264). Before, the engine refused the retry: "the fix-up specialist of round N gave no valid report that says committed". When the work needed a change of a hotspot path, for example a CI workflow file, a coordinator could only add a new ticket with a copy of the text. Now, after a report of the specialist, the step goes on at the gates of round 0, on the tip of the branch of the ticket. After a report of the fix-up specialist of round N, the step goes on at the gates of that fix-up, then at its scoped verifier, with the rejected commit and the findings of round N: it is not a new round. The checks of the commit of the coordinator do not change, and the hotspot check still counts each other commit of the step. Without `--coordinator-commit`, the retry is still refused, and when the report gives a reason, the message names `--retry <ticket> --coordinator-commit <sha>`. The retry line at the end of such a run names `--coordinator-commit <sha>`, and the dry run of the resume accepts the retry. See "The retry with a commit of the coordinator" in `docs/reference/run.md`.
+
 ## [1.18.0] - 2026-11-05
 
 ### Added
