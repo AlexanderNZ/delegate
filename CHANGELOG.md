@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-11-05
+
 ### Added
 
 - The how-to guide "Give the agents a command-line tool" (`docs/how-to/give-the-agents-a-command-line-tool.md`) (#266). A tool with a command-line interface costs no context until an agent runs it, but the instructions and the tool definitions of an MCP server load into each session, and no guide said so. The guide covers the specialist (it can run each shell command, and a host in `dontAsk` mode needs one allow rule), the verifier (add the subcommand that reads to `gateCommands` with a trailing `*`, for example `codegraph explore *`, and render the pair again), the data of the tool (copy it in `prepare` from `DELEGATE_REPO`, then update it), and the git hooks of the host (a `post-checkout` hook must always exit 0, and must not start an update in the background). The worked example is `codegraph` 1.6.2. Its `prepare` recipe removes `.codegraph/`, copies only `codegraph.db` from `DELEGATE_REPO`, and runs `codegraph sync` (`codegraph init -y .` when the main checkout has no `codegraph.db`), because a copied lock file that names a live process makes `codegraph sync` fail. The `.gitignore` of the repository must name `.codegraph/`: the file `.codegraph/.gitignore` does not ignore itself, and the clean check of `prepare` fails without the line. The guide "Give the agents an MCP server" now starts with the context cost and links to the new guide. A test renders the declaration of the guide and checks the verifier guard on `codegraph explore <words>`, `codegraph sync`, `codegraph init -y` and `codegraph index`, and a test runs the dry run on the workflow of the guide.
