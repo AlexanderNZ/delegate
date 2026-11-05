@@ -1,5 +1,7 @@
 # How to give the agents an MCP server
 
+The instructions and the tool definitions of an MCP server load into each [**session**](../glossary.md#session), so a server costs context even when no agent uses it. A tool with a command-line interface costs no context until an agent runs it. For such a tool, see [how to give the agents a command-line tool](give-the-agents-a-command-line-tool.md). Use the page here when the tool has no command-line interface, or when an agent needs the server.
+
 Use this page when the agents of a [**run**](../glossary.md#run) must use an MCP server, for example a code index. The setup has five parts, and each part is in a different place. The server is in `mcp-servers`. The tools of the [**verifier**](../glossary.md#verifier) are in `verifier-tools`. The index is in `prepare`. The allow rules are in the settings file of the host. The stop of the daemon is in `env`. This page puts the five parts in one order. [The workflow reference](../reference/workflow.md#mcp-servers) gives each field, its type and its rules.
 
 ## Before you start
@@ -69,7 +71,7 @@ The [**engine**](../glossary.md#engine) runs `prepare` in the worktree of the ti
 
 ### 4. Add the allow rules on a host in `dontAsk` mode
 
-A [**headless**](../glossary.md#headless) [**session**](../glossary.md#session) cannot ask for a permission, and `dontAsk` [**permission mode**](../glossary.md#permission-mode) denies each tool that no rule allows. See [what the adapter does not set](../reference/claude-code-adapter.md#what-the-adapter-does-not-set). So a host that gives the agents a settings file with `DELEGATE_AGENT_SETTINGS` needs an allow rule for each MCP tool. See [the settings of a host](../reference/claude-code-adapter.md#the-settings-of-a-host).
+A [**headless**](../glossary.md#headless) session cannot ask for a permission, and `dontAsk` [**permission mode**](../glossary.md#permission-mode) denies each tool that no rule allows. See [what the adapter does not set](../reference/claude-code-adapter.md#what-the-adapter-does-not-set). So a host that gives the agents a settings file with `DELEGATE_AGENT_SETTINGS` needs an allow rule for each MCP tool. See [the settings of a host](../reference/claude-code-adapter.md#the-settings-of-a-host).
 
 Write one rule for each tool, in the form `mcp__<server>__<tool>`, and no wildcard. A wildcard would also allow a tool that a later version adds, before you read it.
 

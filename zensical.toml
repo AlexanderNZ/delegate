@@ -23,6 +23,7 @@ nav = [
     { "Bootstrap a single-stack repository" = "how-to/bootstrap-a-single-stack-repository.md" },
     { "Bootstrap a monorepo" = "how-to/bootstrap-a-monorepo.md" },
     { "Write a workflow for a run" = "how-to/write-a-workflow-for-a-run.md" },
+    { "Give the agents a command-line tool" = "how-to/give-the-agents-a-command-line-tool.md" },
     { "Give the agents an MCP server" = "how-to/give-the-agents-an-mcp-server.md" },
     { "Run an economy chain" = "how-to/run-an-economy-chain.md" },
     { "Watch and resume a run" = "how-to/watch-and-resume-a-run.md" },

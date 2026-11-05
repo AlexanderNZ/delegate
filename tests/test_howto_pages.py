@@ -14,6 +14,7 @@ PAGES = [
     "bootstrap-a-single-stack-repository.md",
     "bootstrap-a-monorepo.md",
     "write-a-workflow-for-a-run.md",
+    "give-the-agents-a-command-line-tool.md",
     "give-the-agents-an-mcp-server.md",
     "run-an-economy-chain.md",
     "watch-and-resume-a-run.md",
