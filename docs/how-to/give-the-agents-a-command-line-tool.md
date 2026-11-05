@@ -15,7 +15,8 @@ The example gives the agents of the [**stack**](../glossary.md#stack) `python` a
 - `codegraph explore` writes nothing in `.codegraph/`. It does not update the index after a change of a file.
 - `codegraph sync` after a change of one file took about 1 second.
 - A second `codegraph sync` that starts while one runs in the same tree fails at once with exit 1. It does not wait for the lock.
-- `.codegraph/.gitignore` makes git ignore the directory, so the [**worktree**](../glossary.md#worktree) is clean after `prepare`.
+- `.codegraph/.gitignore` holds `*` and `!.gitignore`, so git does not ignore that file. In a repository whose `.gitignore` does not name `.codegraph/`, `git status` shows `?? .codegraph/` in the [**worktree**](../glossary.md#worktree), and the clean check of `prepare` fails it.
+- A copied `codegraph.lock` that names a live process makes `codegraph sync` fail with exit 1 ("locked by another process"). `codegraph sync` after a copy of only `codegraph.db` exits 0 and writes `.codegraph/.gitignore` again.
 
 The declaration gives the verifier the subcommand that reads. The workflow builds the index.
 
@@ -23,6 +24,10 @@ The declaration gives the verifier the subcommand that reads. The workflow build
 [agents.python]
 description = "A Python application."
 gateCommands = ["uv run pytest tests/unit", "codegraph explore *"]
+```
+
+```text title=".gitignore"
+.codegraph/
 ```
 
 ```toml title="workflow.toml"
@@ -39,7 +44,7 @@ gates = [
 ]
 prepare = [
   "uv sync --frozen",
-  "if [ -d \"$DELEGATE_REPO/.codegraph\" ]; then cp -R \"$DELEGATE_REPO/.codegraph\" .codegraph && codegraph sync; else codegraph init -y .; fi",
+  "if [ -f \"$DELEGATE_REPO/.codegraph/codegraph.db\" ]; then rm -rf .codegraph && mkdir .codegraph && cp \"$DELEGATE_REPO/.codegraph/codegraph.db\" .codegraph/ && codegraph sync; else codegraph init -y .; fi",
 ]
 hotspots = ["workflow.toml", ".github/workflows/*", "uv.lock"]
 gate-timeout = 20
@@ -87,9 +92,9 @@ delegate render agents.toml -o out
 
 A tree that git makes holds no ignored file. So an index or a cache of the tool is not in the worktree of a [**ticket**](../glossary.md#ticket). It is also not in the [**temporary copy**](../glossary.md#temporary-copy) of a verifier.
 
-Make the data in `prepare`. The [**engine**](../glossary.md#engine) runs `prepare` in both trees, and gives each command the environment entry `DELEGATE_REPO`, the path of the main checkout. Copy the data from the main checkout, then update it. A copy and an update are faster than a new build. The example copies `.codegraph/` and runs `codegraph sync`. When the main checkout has no index, it runs `codegraph init -y .`. See [prepare](../reference/workflow.md#prepare).
+Make the data in `prepare`. The [**engine**](../glossary.md#engine) runs `prepare` in both trees, and gives each command the environment entry `DELEGATE_REPO`, the path of the main checkout. Copy the data from the main checkout, then update it. A copy and an update are faster than a new build. The example removes `.codegraph/`, copies only `codegraph.db` from the main checkout, and runs `codegraph sync`. When the main checkout has no `codegraph.db`, it runs `codegraph init -y .`. The recipe copies only the database because the lock file and the pid files of the main checkout name a live process, and a copy of them makes `codegraph sync` fail. The recipe removes `.codegraph/` first, so it is safe when `prepare` runs again in a reused worktree: `cp -R` would copy into `.codegraph/.codegraph`. See [prepare](../reference/workflow.md#prepare).
 
-The worktree must be clean after `prepare`. The directory `.codegraph/` has its own `.gitignore`, so the check passes. A tool with no such file needs an entry in the `.gitignore` of the repository.
+The worktree must be clean after `prepare`. The `.gitignore` of the repository must name `.codegraph/`, as in the worked example. The file `.codegraph/.gitignore` does not ignore itself, so without the line the check fails. The same holds for the data of any tool.
 
 ### 4. Keep the git hooks of the host safe
 

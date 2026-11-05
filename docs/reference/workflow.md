@@ -245,7 +245,7 @@ The engine runs the commands in order, with the environment of a gate, in each t
 
 A command that fails ends the step `failed` with the reason `prepare failed: <command>`. It is not a gate, and it starts no fix-up round. See [the prepare commands](run.md#the-prepare-commands).
 
-Each command also gets the environment entry `DELEGATE_REPO`: the absolute path of the main checkout of the repository of the run. The entry is the same in the worktree and in the temporary copy. The engine adds it after the entries of the worktree. The temporary copy is a clone with no remote, so a command cannot find the main checkout from it with `git rev-parse --git-common-dir`. The gates and the agent sessions do not get the entry. A stack can use it to copy an ignored cache or index that the main checkout holds, which can take much less time than to make it again in each tree. This example copies the ignored directory `.codegraph` when the main checkout has it:
+Each command also gets the environment entry `DELEGATE_REPO`: the absolute path of the main checkout of the repository of the run. The entry is the same in the worktree and in the temporary copy. The engine adds it after the entries of the worktree. The temporary copy is a clone with no remote, so a command cannot find the main checkout from it with `git rev-parse --git-common-dir`. The gates and the agent sessions do not get the entry. A stack can use it to copy an ignored cache or index that the main checkout holds, which can take much less time than to make it again in each tree. This example copies the index `.codegraph/codegraph.db` when the main checkout has it, and runs `codegraph sync`. It copies only the database, because the lock file and the pid files of the main checkout can name a live process, and a copy of them makes `codegraph sync` fail. It removes `.codegraph` first, so it is safe when `prepare` runs again in a reused worktree:
 
 ```toml
 [stacks.web]
@@ -255,11 +255,11 @@ gates = ["npm test"]
 hotspots = []
 prepare = [
   "npm ci",
-  "if [ -d \"$DELEGATE_REPO/.codegraph\" ]; then cp -R \"$DELEGATE_REPO/.codegraph\" .codegraph; fi",
+  "if [ -f \"$DELEGATE_REPO/.codegraph/codegraph.db\" ]; then rm -rf .codegraph && mkdir .codegraph && cp \"$DELEGATE_REPO/.codegraph/codegraph.db\" .codegraph/ && codegraph sync; else codegraph init -y .; fi",
 ]
 ```
 
-Add the directory to `.gitignore`, so the worktree stays clean after the last command.
+Add `.codegraph/` to the `.gitignore` of the repository, so the worktree stays clean after the last command. The file `.codegraph/.gitignore` does not ignore itself.
 
 The worktree of a ticket must be clean after the last command. When `prepare` leaves a changed file or an untracked file that `.gitignore` does not name, the step fails before the specialist starts, with the reason `prepare left <paths> in the worktree; add them to .gitignore, or make prepare leave the worktree clean`. Without this check, the engine would take the path for uncommitted work of the specialist and start a continuation. A file that `.gitignore` names, such as `node_modules`, is not a problem. The check does not apply to the temporary copy of a verifier. `delegate run --dry-run` prints the line `stack <name> prepare: <command>` for each command.
 

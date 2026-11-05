@@ -105,7 +105,7 @@ def test_the_workflow_of_the_page_passes_the_dry_run_with_the_declaration_of_the
     tmp_path, home, git_identity, claude_stand_in, capsys
 ):
     repo = new_repo(tmp_path / "repo")
-    assert sorted(write_files(PAGE, repo)) == ["agents.toml", "settings.json", "workflow.toml"]
+    assert sorted(write_files(PAGE, repo)) == [".gitignore", "agents.toml", "settings.json", "workflow.toml"]
     agents = repo / ".claude" / "agents"
     agents.mkdir(parents=True)
     for name, content in render(parse_declaration(_declaration_of_the_page()), load_tiers())["claude-code"].items():
@@ -137,3 +137,62 @@ def test_each_field_that_the_page_names_in_code_is_in_the_references():
     assert {"prepare", "DELEGATE_REPO"} <= fields
     missing = sorted(field for field in fields if f"`{field}`" not in reference)
     assert missing == []
+
+
+def _prepare_commands_with_the_recipe() -> dict[str, list[str]]:
+    """The prepare commands of the guide and of the reference that mention the code index, by page."""
+    found = {}
+    for page, block in [
+        ("guide", file_block(PAGE, "workflow.toml")),
+        ("reference", next(b for b in blocks(REFERENCE) if b.lang == "toml" and ".codegraph" in b.body)),
+    ]:
+        stacks = tomllib.loads(block.body)["stacks"]
+        [commands] = [stack["prepare"] for stack in stacks.values() if any(".codegraph" in c for c in stack["prepare"])]
+        found[page] = commands
+    return found
+
+
+@outside_the_package
+def test_the_worked_example_of_the_guide_lists_the_index_directory_in_its_gitignore():
+    """The `.gitignore` inside `.codegraph/` holds `*` and `!.gitignore`, so git still shows the directory (#266b)."""
+    lines = file_block(PAGE, ".gitignore").body.splitlines()
+
+    assert ".codegraph/" in lines
+
+
+@outside_the_package
+def test_no_page_holds_the_recursive_copy_or_the_claim_that_the_inner_gitignore_makes_the_tree_clean():
+    pages = sorted((ROOT / "docs").rglob("*.md"))
+    recursive_copy = re.compile(r"cp -R \\?\"\$DELEGATE_REPO/\.codegraph\\?\"")
+
+    assert [page.name for page in pages if recursive_copy.search(page.read_text())] == []
+    assert [page.name for page in pages if "`.codegraph/.gitignore` makes git ignore" in page.read_text()] == []
+    assert [page.name for page in pages if "has its own `.gitignore`, so the check passes" in page.read_text()] == []
+
+
+@outside_the_package
+@pytest.mark.parametrize("page", ["guide", "reference"])
+def test_the_recipe_copies_only_the_database_and_is_safe_to_run_again(tmp_path, page):
+    """A copy of the lock file makes `codegraph sync` fail; a second run must not nest `.codegraph/.codegraph`."""
+    command = _prepare_commands_with_the_recipe()[page][-1]
+    main, tree, bin_dir = tmp_path / "main", tmp_path / "tree", tmp_path / "bin"
+    (main / ".codegraph").mkdir(parents=True)
+    for name, text in [("codegraph.db", "index"), ("codegraph.lock", "4242"), ("codegraph.pid", "4242")]:
+        (main / ".codegraph" / name).write_text(text)
+    tree.mkdir()
+    bin_dir.mkdir()
+    stand_in = bin_dir / "codegraph"
+    stand_in.write_text(
+        '#!/bin/sh\n[ "$1" = sync ] || exit 3\n[ -f .codegraph/codegraph.lock ] && exit 1\n'
+        "[ -f .codegraph/codegraph.db ] || exit 4\nprintf '*\\n!.gitignore\\n' > .codegraph/.gitignore\n"
+    )
+    stand_in.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "DELEGATE_REPO": str(main)}
+
+    codes = [
+        subprocess.run(["bash", "-c", command], cwd=tree, env=env, capture_output=True, text=True).returncode
+        for _ in range(2)
+    ]
+
+    assert codes == [0, 0]
+    assert sorted(path.name for path in (tree / ".codegraph").iterdir()) == [".gitignore", "codegraph.db"]
