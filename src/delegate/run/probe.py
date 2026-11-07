@@ -18,8 +18,9 @@ The engine decides from facts, not from the opinion of the agent:
   Claude Code has `"overageStatus":"rejected"`).
 - `inconclusive`: any other result, for example a session that did not call the tool with the command, whose final text
   alone tells of a denial, that ended `failed`, that ran past its time limit, whose first error of the probe command is no
-  denial, or where a permission mode of the host refused the probe command itself (`AdapterResult.refused_commands`):
-  then the guard did not decide, and the text of the refusal holds the word "denied" too.
+  denial, or where a permission mode of the host refused a call of the probe command, also after a denial by the guard
+  (`AdapterResult.refused_commands`): then the guard did not decide for that call, and the text of the refusal holds the
+  word "denied" too. The port gives no order between the two lists, so this rule comes before the rule of the first error.
 
 The module asks the port for the repository and the adapter for the session. It starts no process itself. `delegate.cli`
 uses it for the dry run, and the engine uses it at the start of a run.

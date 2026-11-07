@@ -1500,7 +1500,10 @@ def _chain_retry_plan(
     and then passes, or a stop of the agent check before a verifier session of the chain (#261). When the gates were green
     on the tip, the new verification counts that result (see `gate-skip`), and a verifier starts.
 
-    Raise EngineError when a ticket after `ticket_id` in the plan is in the chain, and name the ticket at the tip.
+    Raise EngineError when a ticket after `ticket_id` in the plan is in the chain, and name the ticket at the tip. With no
+    `coordinator`, also raise EngineError when the agent check stopped the chain before the fix-up of an earlier ticket
+    (see `_chain_stop`): the retry of that ticket goes on at the stopped fix-up, and a retry of the tip drops the fix-up
+    and its findings. So the retry hints name the chain once (see `retry_hints`).
     """
     order = plan_order(workflow)
     revive = tuple(
@@ -1511,6 +1514,12 @@ def _chain_retry_plan(
     if chain[-1] != ticket_id:
         where = "put the commit of the coordinator on its branch, and " if coordinator else ""
         raise EngineError(f"{refused}: ticket {chain[-1]!r} is at the tip of the chain; {where}retry it with --retry {chain[-1]}")
+    stopped = next((other for other in revive if _chain_stop(tuple(_ticket_events(progress.events, other))) is not None), None)
+    if stopped is not None and not coordinator:
+        raise EngineError(
+            f"{refused}: the agent check stopped the chain before the fix-up of ticket {stopped!r}; "
+            f"retry it with --retry {stopped} --agents-changed"
+        )
     return _RetryPlan(ticket_id, RETRY_CHAIN, 0, prior, revive=revive)
 
 

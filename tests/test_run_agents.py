@@ -675,6 +675,42 @@ def test_a_retry_after_a_stop_before_the_chain_fixup_of_a_stack_that_is_not_the_
     assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-b").strip()
 
 
+def test_the_end_of_a_run_that_stopped_before_the_chain_fixup_of_a_stack_that_is_not_the_last_names_one_retry_line(tmp_path, capsys):
+    # Chain a (stack python) then b (stack web). The agent check stops the chain fix-up of the python stack, which ends at a.
+    repo = make_repo(tmp_path, stacks=("python", "web"), second_ticket=True, mode="economy", second_stack="web")
+    adapter = ScriptedAdapter(
+        verdict_sequence=["REJECT", "ACCEPT"], verdict_findings=["[a] The CSV file is empty."],
+        files_by_ticket={"b": {"b.txt": "b\n"}},
+    )
+
+    def change(request) -> None:
+        if len(adapter.verifier_calls) == 1:
+            tamper(request, "python-specialist")
+
+    adapter.during_verifier = change
+    adapters.register("scripted", adapter)
+    try:
+        code, out, err, events = start_run(repo, capsys)
+        run_id = next(e for e in events if e["event"] == "run-start")["run_id"]
+        assert code == 1
+        short = run_id.rsplit("-", 1)[-1]
+        # Only the ticket that ends the stopped stack goes on: the retry of the tip would drop the stopped fix-up and its findings.
+        assert [line for line in out.splitlines() if line.startswith("retry with ")] == [
+            f"retry with delegate run --resume {short} --retry a"
+        ]
+        dry_code, dry_out, dry_err = resume_main(repo, capsys, run_id, "--retry", "b", "--dry-run")
+        code, out, err = resume_main(repo, capsys, run_id, "--retry", "b")
+    finally:
+        adapters.unregister("scripted")
+
+    assert dry_code == 1
+    assert f"ticket 'b' of run '{run_id}' cannot be retried" in dry_err and "--retry a" in dry_err
+    assert code == 1
+    assert f"ticket 'b' of run '{run_id}' cannot be retried" in err and "--retry a" in err
+    assert [e for e in read_journal_file(repo, run_id) if e["event"] == "retry"] == []
+    assert adapter.fixup_calls == []
+
+
 def test_a_retry_after_a_stop_before_a_fixup_goes_on_when_the_run_branch_moved_after_the_stop(tmp_path, capsys):
     # Tickets a (stack python) and b (stack web) are independent. Ticket a stops before its fix-up, ticket b is built and moves the run branch.
     repo = make_repo(tmp_path, stacks=("python", "web"), second_ticket=True, second_stack="web")
