@@ -160,7 +160,10 @@ class AdapterResult:
     (command, text) pair for each call of the shell tool whose tool result is an
     error, in the order of the stream: the command of the call and the text of its
     result. The guard probe reads a denial from it (#219), and never from the final
-    text, because a model can write a denial and not call the tool.
+    text, because a model can write a denial and not call the tool. `refused_commands` holds the command of each call of
+    the shell tool whose tool result says that a permission mode of the harness refused the tool (#268): the guard did not
+    decide on such a call. The text of that refusal can hold the word "denied", so the guard probe needs this fact to tell
+    it from a denial of the guard. An adapter that cannot tell the two leaves it empty.
     """
 
     exit_status: int
@@ -173,6 +176,7 @@ class AdapterResult:
     ended_timeout: bool = False
     reason: str | None = None
     command_errors: tuple[tuple[str, str], ...] = ()
+    refused_commands: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.end_state not in END_STATES:

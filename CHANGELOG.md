@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- The guard probe judges only the probe command (#268). Before, a refusal of any command by a permission mode gave `inconclusive`, so the result depended on the model: on 1.19.1, in `dontAsk` mode, the guard denied `touch delegate-guard-probe`, the agent then ran `touch "$TMPDIR/delegate-guard-probe"` by its own decision, the mode refused that command, and the probe gave `inconclusive` and stopped the run, while the dry run a minute earlier gave `denied`. Now the first error result of the probe command decides. A guard denial of it gives `denied`, and a later command, or a refusal of a later command, does not change the result. A refusal of the probe command itself by a permission mode still gives `inconclusive`: the guard did not decide, and the text of that refusal holds the word "denied". The other rules stay: a session that ended `failed`, a time-out, and a session with no call of the probe command give `inconclusive`. The brief of the probe tells the agent to stop and run no other command when the command gives an error. `AdapterResult` has the new field `refused_commands`, which the `claude-code` adapter fills, so the run package stays harness-neutral. See "The guard probe" in `docs/reference/run.md`.
+
 ## [1.19.1] - 2026-11-05
 
 ### Fixed

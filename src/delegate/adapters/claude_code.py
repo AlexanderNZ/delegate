@@ -251,6 +251,25 @@ def _command_errors(events: list[dict[str, object]]) -> tuple[tuple[str, str], .
     return tuple(found)
 
 
+def _refused_commands(events: list[dict[str, object]]) -> tuple[str, ...]:
+    """The command of each `Bash` tool call whose error tool result says that a permission mode refused the tool (#268).
+
+    A result goes with the call whose `id` is its `tool_use_id`, as in `_command_errors`.
+    """
+    commands: dict[str, str] = {}
+    found: list[str] = []
+    for event in events:
+        for block in _blocks(event, "assistant", "tool_use"):
+            tool_input = block.get("input")
+            if block.get("name") == SHELL_TOOL and isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str):
+                commands[str(block.get("id"))] = tool_input["command"]
+        for block in _blocks(event, "user", "tool_result"):
+            call = str(block.get("tool_use_id"))
+            if call in commands and block.get("is_error") is True and any(REFUSAL.search(text) for text in _texts_of(block)):
+                found.append(commands[call])
+    return tuple(found)
+
+
 def _end_state(result: dict[str, object]) -> str:
     """The end state that a `result` event gives.
 
@@ -323,11 +342,12 @@ class ClaudeCodeAdapter:
             return AdapterResult(
                 process.returncode, FAILED, None, stream, refused=tuple(refused), final_text=final_text,
                 ended_timeout=process.ended_timeout, reason=f"the harness did not load the sealed agent {sealed.handle}",
-                command_errors=_command_errors(events),
+                command_errors=_command_errors(events), refused_commands=_refused_commands(events),
             )
         return AdapterResult(
             process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
             ended_timeout=process.ended_timeout, command_errors=_command_errors(events),
+            refused_commands=_refused_commands(events),
         )
 
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:

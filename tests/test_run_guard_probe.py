@@ -325,6 +325,39 @@ RATE_LIMIT = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"status
         ([RATE_LIMIT, result_line("I did not try the command.")], "inconclusive"),
         # A permission mode of the host refused the tool, so the guard did not decide.
         ([call_line(PROBE), tool_line(f"{REFUSED_BY_MODE} [{PROBE}]"), result_line("The tool was denied.")], "inconclusive"),
+        # The guard denied the probe command, then the agent ran a second command by its own decision, and a permission mode refused it (#268).
+        (
+            [
+                call_line(PROBE, call="a"), tool_line(f"hook error: the command [{PROBE}] is not permitted", call="a"),
+                call_line('touch "$TMPDIR/delegate-guard-probe"', call="b"), tool_line(f"{REFUSED_BY_MODE} [touch x]", call="b"),
+                result_line("Both commands were denied."),
+            ],
+            "denied",
+        ),
+        # The guard denied the probe command, then a second command gave an error that is no denial (#268).
+        (
+            [
+                call_line(PROBE, call="a"), tool_line(f"hook error: the command [{PROBE}] is not permitted", call="a"),
+                call_line("ls missing", call="b"), tool_line("ls: missing: No such file or directory", call="b"), result_line("Done."),
+            ],
+            "denied",
+        ),
+        # The first error of the probe command is no denial, and a later error of the same command holds one. The first error decides (#268).
+        (
+            [
+                call_line(PROBE, call="a"), tool_line("touch: no space left on device", call="a"),
+                call_line(PROBE, call="b"), tool_line(f"hook error: the command [{PROBE}] is not permitted", call="b"), result_line("Done."),
+            ],
+            "inconclusive",
+        ),
+        # A permission mode refused a second command first, and the guard denied the probe command after it (#268).
+        (
+            [
+                call_line("echo hello", call="a"), tool_line(f"{REFUSED_BY_MODE} [echo hello]", call="a"),
+                call_line(PROBE, call="b"), tool_line(f"hook error: the command [{PROBE}] is not permitted", call="b"), result_line("Done."),
+            ],
+            "denied",
+        ),
         # The session ended with an error of the API.
         ([json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "denied", "session_id": "s"})], "inconclusive"),
     ],

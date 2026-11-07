@@ -567,6 +567,30 @@ def test_a_tool_that_a_permission_mode_refused_is_in_the_result(tmp_path, monkey
     assert result.refused == (("Bash", "don't ask"),)
 
 
+def test_the_command_that_a_permission_mode_refused_is_in_the_result_and_a_guard_denial_is_not(tmp_path, monkeypatch):
+    lines = (claude_fake.FIXTURES / "finished.jsonl").read_text().splitlines()
+
+    def call(command: str, call_id: str) -> str:
+        block = {"type": "tool_use", "id": call_id, "name": "Bash", "input": {"command": command}}
+        return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [block]}})
+
+    def error(text: str, call_id: str) -> str:
+        block = {"type": "tool_result", "tool_use_id": call_id, "is_error": True, "content": text}
+        return json.dumps({"type": "user", "message": {"role": "user", "content": [block]}})
+
+    mode = "Permission to use Bash has been denied because Claude Code is running in dontAsk mode."
+    extra = [call("touch a", "c1"), error("hook error: [touch a] is not permitted", "c1"), call("touch b", "c2"), error(mode, "c2")]
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "refused.jsonl").write_text("\n".join([*lines[:-1], *extra, lines[-1]]) + "\n")
+    harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "refused.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.refused_commands == ("touch b",)
+    assert [command for command, _ in result.command_errors] == ["touch a", "touch b"]
+
+
 def test_a_stream_with_no_refusal_gives_no_refused_tool(tmp_path, monkeypatch):
     claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
 

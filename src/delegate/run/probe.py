@@ -9,14 +9,17 @@ brief asks for one command, `touch delegate-guard-probe`, which the guard must d
 The engine decides from facts, not from the opinion of the agent:
 
 - `ran`: the file `delegate-guard-probe` exists after the session. The guard did not stop the command.
-- `denied`: the file does not exist, the session ended `finished` with no permission-mode refusal, and the event stream
-  shows that the guard denied the command: a call of the shell tool with the probe command whose tool result is an error
-  that holds a word of `DENIAL` (`AdapterResult.command_errors`). The final text does not count, because a model can decline
-  to call the tool and write "not permitted". A line of the stream with no such call does not count, because a stream holds
-  fields that look like a denial (the rate-limit event of Claude Code has `"overageStatus":"rejected"`).
+- `denied`: the file does not exist, the session ended `finished`, and the first error result of the probe command is a
+  denial of the guard: a call of the shell tool with the probe command whose tool result is an error that holds a word of
+  `DENIAL` (`AdapterResult.command_errors`). Only the probe command counts (#268). A later command, and a refusal of a
+  later command by a permission mode, do not change the result: the model can try another command by its own decision.
+  The final text does not count, because a model can decline to call the tool and write "not permitted". A line of the
+  stream with no such call does not count, because a stream holds fields that look like a denial (the rate-limit event of
+  Claude Code has `"overageStatus":"rejected"`).
 - `inconclusive`: any other result, for example a session that did not call the tool with the command, whose final text
-  alone tells of a denial, that ended `failed`, that ran past its time limit, or that a permission mode of the host refused
-  (then the guard did not decide).
+  alone tells of a denial, that ended `failed`, that ran past its time limit, whose first error of the probe command is no
+  denial, or where a permission mode of the host refused the probe command itself (`AdapterResult.refused_commands`):
+  then the guard did not decide, and the text of the refusal holds the word "denied" too.
 
 The module asks the port for the repository and the adapter for the session. It starts no process itself. `delegate.cli`
 uses it for the dry run, and the engine uses it at the start of a run.
@@ -62,7 +65,8 @@ Run this command one time in your working directory, with your Bash tool, exactl
 
     {PROBE_COMMAND}
 
-Then give the output or the error of the tool in your final text, word for word. Run no other command.
+Then give the output or the error of the tool in your final text, word for word. When the command gives an error, stop,
+and run no other command: do not try the command again, and do not try another form of it.
 """
 
 
@@ -92,10 +96,15 @@ def _result_of(session: AdapterResult, file_exists: bool) -> str:
     """The result that the facts of the session give: `ran`, `denied` or `inconclusive`."""
     if file_exists:
         return RAN
-    if session.end_state != FINISHED or session.ended_timeout or session.reason is not None or session.refused:
+    if session.end_state != FINISHED or session.ended_timeout or session.reason is not None:
         return INCONCLUSIVE
-    guard_denied = any(command.strip() == PROBE_COMMAND and DENIAL.search(text) for command, text in session.command_errors)
-    return DENIED if guard_denied else INCONCLUSIVE
+    # A permission mode that refused the probe command itself means that the guard did not decide. Its text holds a word of
+    # `DENIAL`, so it must not count as a denial of the guard (#268).
+    if any(command.strip() == PROBE_COMMAND for command in session.refused_commands):
+        return INCONCLUSIVE
+    # The first error result of the probe command decides. A later command, or a refusal of it, does not change the result.
+    first = next((text for command, text in session.command_errors if command.strip() == PROBE_COMMAND), None)
+    return DENIED if first is not None and DENIAL.search(first) else INCONCLUSIVE
 
 
 def probe_guard(adapter: Adapter, vcs: VersionControl, sealed: SealedAgent, model: str, stream: Path) -> Probe:
