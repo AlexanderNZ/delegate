@@ -375,7 +375,8 @@ class PlanCheck(NamedTuple):
 
 
 def check_plan_change(
-    old: Sequence[PlanTicket], new: Sequence[PlanTicket], started: Collection[str], retried: str | None = None
+    old: Sequence[PlanTicket], new: Sequence[PlanTicket], started: Collection[str], retried: str | None = None,
+    failed_chain: Sequence[str] = (),
 ) -> PlanCheck:
     """Apply the rules of a plan change to the old plan and the new plan, each in plan order.
 
@@ -389,6 +390,11 @@ def check_plan_change(
     `retried` is the id of a failed ticket that a retry starts again, or None.
     Its `text` can change (rule 10). Its `stack` and its `blocked-by` stay
     fixed, and so does each other ticket of the built part.
+
+    `failed_chain` holds the tickets of an `economy` chain whose verification failed them, in plan order, or nothing
+    (#270). A new ticket starts from the last built ticket before it, so it would not hold the work of that chain. Rule 5
+    refuses a new ticket then, unless `retried` is the ticket at the tip of the chain: the retry revives the chain, and
+    the new tickets start from its tip.
     """
     old_ids, new_ids = [t.id for t in old], [t.id for t in new]
     by_id = {t.id: t for t in new}
@@ -428,6 +434,8 @@ def check_plan_change(
             ]
         else:
             problems[2] = [f"the new order {', '.join(new_ids)} does not start with the built part {', '.join(fixed)}"]
+    if added and failed_chain and retried != failed_chain[-1]:
+        problems[5] = [_failed_chain_text(added, failed_chain)]
     moved = [i for i in new_ids if i in added or (i in changed and not set(changed[i]) <= NO_WORK_FIELDS)]
     later: list[str] = []
     if moved:
@@ -441,3 +449,13 @@ def unreviewed(later: Sequence[str], reviewed: Collection[str]) -> list[str]:
     if REVIEWED_ALL in reviewed:
         return []
     return [ticket_id for ticket_id in later if ticket_id not in reviewed]
+
+
+def _failed_chain_text(added: Sequence[str], failed_chain: Sequence[str]) -> str:
+    """The message of rule 5 that refuses new tickets after an `economy` chain whose verification failed (#270)."""
+    tickets = ", ".join(repr(ticket_id) for ticket_id in added)
+    return (
+        f"the verification of the chain {', '.join(failed_chain)} failed, so the new tickets {tickets} would not start from "
+        f"the tip of the chain and would not hold its work; give --retry {failed_chain[-1]}: the chain then goes on with the "
+        "new tickets from its tip, and its verification runs again over the whole chain; or start a new run"
+    )

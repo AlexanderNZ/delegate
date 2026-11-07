@@ -20,9 +20,12 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from .support import state_dir
-from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree
+from .support import (
+    ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report,
+)
 from .test_run_economy import ECONOMY
 from .test_run_multi import HEAD, ticket
+from .test_run_pause import ECONOMY_HEAD, RUN_PAUSED, pause_during_the_specialist_of
 
 
 def text_of(ticket_id: str) -> str:
@@ -304,6 +307,103 @@ def test_in_an_economy_chain_a_ticket_added_after_the_chain_verification_gets_it
     assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-c").strip()
     run_end = [e for e in events if e["event"] == "run-end"][-1]
     assert (run_end["result"], run_end["built"]) == ("built", ["a", "b", "c"])
+
+
+def failed_chain(tmp_path, capsys, scripted) -> tuple[object, str, str, str]:
+    """Run an economy chain a, b whose chain gate is red in the first run only, then add ticket c in the workflow (#270).
+
+    The fix-up specialist changes nothing, so the verification of the chain fails a and b. Return the repository, the run
+    id, the tip of the chain, and the workflow text with the added ticket c.
+    """
+    flag = tmp_path / "red-chain-gate"
+    flag.write_text("the chain gate is red while this file exists\n")
+    scripted.fixup_files, scripted.fixup_commit = {}, False
+    scripted.fixup_report_text = lambda request, head: json.dumps(
+        valid_report("b", "run/demo-b", head, status="partial", blocked_reason="no change is necessary")
+    )
+    head = HEAD.replace('mode = "assure"', 'mode = "economy"').replace('gates = ["ls *.txt"]', f'gates = ["test ! -f {flag}"]')
+    repo = make_repo(tmp_path, head + ticket("a") + ticket("b"))
+    code, _, _ = start(repo, capsys)
+    assert code == 1
+    run_id = run_id_of(repo)
+    run_end = read_journal_file(repo, run_id)[-1]
+    assert (run_end["event"], sorted(run_end["failed"])) == ("run-end", ["a", "b"])
+    flag.unlink()
+    clear_calls(scripted)
+    added = head + ticket("a") + ticket("b") + ticket("c")
+    write_workflow(repo, added)
+    return repo, run_id, git(repo, "rev-parse", "run/demo-b").strip(), added
+
+
+def test_in_an_economy_run_a_ticket_added_after_a_failed_chain_with_a_retry_of_the_tip_starts_from_the_tip_and_the_whole_chain_is_verified(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, tip, _ = failed_chain(tmp_path, capsys, scripted)
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--resume", run_id, "--repo", str(repo), "--retry", "b", "--dry-run")
+    assert (code, err) == (0, ""), err
+    assert [line.split(":")[1] for line in out.splitlines() if line.startswith("rule 5:")] == [" ok"]
+    assert "retry b: phase chain, revives a" in out.splitlines()
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b")
+
+    assert (code, err) == (0, ""), err
+    assert [ticket_of(c) for c in scripted.calls] == ["c"]
+    events = read_journal_file(repo, run_id)
+    after = events[event_names(events).index("plan-change") :]
+    assert [(e["ticket"], e["base_commit"]) for e in after if e["event"] == "step-start"] == [("c", tip)]
+    tip_of_c = git(repo, "rev-parse", "run/demo-c").strip()
+    gates = [(e["ticket"], e["commit"], e["green"]) for e in after if e["event"] == "gate-result" and e["phase"] == "chain"]
+    assert gates == [("c", tip_of_c, True)]
+    assert [e["tickets"] for e in after if e["event"] == "verify-start"] == [["a", "b", "c"]]
+    assert git(repo, "rev-parse", "run/demo").strip() == tip_of_c
+    assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
+    run_end = events[-1]
+    assert (run_end["event"], run_end["result"], sorted(run_end["built"]), run_end["failed"]) == ("run-end", "built", ["a", "b", "c"], [])
+
+
+def test_in_an_economy_run_a_plan_change_that_adds_a_ticket_after_a_failed_chain_without_a_retry_of_the_tip_is_refused(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, _, _ = failed_chain(tmp_path, capsys, scripted)
+    before = journal_path(repo, run_id).read_bytes()
+    branches = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+
+    dry = run_main(capsys, str(repo / "workflow.toml"), "--resume", run_id, "--repo", str(repo), "--dry-run")
+    code, out, err = resume_main(repo, capsys, run_id)
+
+    for exit_code, message in ((dry[0], dry[2]), (code, err)):
+        assert exit_code == 1 and "Traceback" not in message
+        assert "--retry b" in message and "new run" in message and "'c'" in message, message
+    assert [line.split(":")[1] for line in dry[1].splitlines() if line.startswith("rule 5:")] == [" refused"]
+    assert journal_path(repo, run_id).read_bytes() == before
+    assert git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads") == branches
+    assert scripted.calls == [] and scripted.verifier_calls == []
+
+
+def test_in_an_economy_chain_the_plan_change_section_of_a_later_ticket_says_that_its_branch_holds_the_chain_before_it(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path, ECONOMY_HEAD + ticket("a") + ticket("b"))
+    pause_during_the_specialist_of(repo, capsys, scripted, "a")
+    code, _, err = start(repo, capsys)
+    assert code == RUN_PAUSED, err
+    run_id = run_id_of(repo)
+    scripted.on_specialist = None
+    clear_calls(scripted)
+    write_workflow(repo, ECONOMY_HEAD + ticket("a") + ticket("x") + ticket("b"))
+
+    code, out, err = resume_main(repo, capsys, run_id, "--reviewed", "b")
+
+    assert (code, err) == (0, ""), err
+    specialist = {ticket_of(call): call.prompt for call in scripted.calls}
+    assert list(specialist) == ["x", "b"]
+    section = specialist["b"].split("## Plan change", 1)[1].split("\n## ", 1)[0]
+    assert "Ticket x (added)" in section
+    assert "the branch of this ticket holds the work of each ticket before it in the chain" in section
+    assert "`run/demo`" not in section
+    # The text is true: the branch of b starts at the tip of x, which starts at the tip of a.
+    starts = {e["ticket"]: e["base_commit"] for e in read_journal_file(repo, run_id) if e["event"] == "step-start"}
+    assert (starts["x"], starts["b"]) == (git(repo, "rev-parse", "run/demo-a").strip(), git(repo, "rev-parse", "run/demo-x").strip())
 
 
 def test_plan_change_is_in_the_journal_a_second_resume_compares_with_the_newest_plan_and_status_counts_the_new_ticket(

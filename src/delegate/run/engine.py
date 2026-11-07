@@ -996,7 +996,9 @@ def _review(
         return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted)
     started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
     ended = [str(event["state"]) for event in events if event["event"] == "step-end" and event["ticket"] == retry]
-    check = domain.check_plan_change(old, new_plan, started, retry if ended and ended[-1] == FAILED else None)
+    check = domain.check_plan_change(
+        old, new_plan, started, retry if ended and ended[-1] == FAILED else None, _failed_chain(workflow, events, run_id)
+    )
     other = [
         f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
         for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
@@ -1008,6 +1010,21 @@ def _review(
             other.append(f"branch {branch!r} for the new ticket {ticket.id!r} exists already; delete it or give the ticket another id")
     texts = {t.id: t.text for t in workflow.tickets if t.id in check.added or t.id in check.changed}
     return PlanReview(run_id, workflow.mode, old_order, new_order, check, domain.unreviewed(check.later, reviewed), texts, other)
+
+
+def _failed_chain(workflow: Workflow, events: list[dict[str, object]], run_id: str) -> list[str]:
+    """The tickets that the verification of an `economy` chain failed, in plan order, or no ticket (#270).
+
+    Such a ticket failed, and its newest step has a `step-end` built before its newest `step-end` (see `_chain_failed`).
+    A retry of one of them can build it again: then it is not failed. In `assure` mode there is no chain.
+    """
+    if workflow.mode != domain.ECONOMY:
+        return []
+    failed = restore_progress(events, run_id, retrying=True).failed
+    return [
+        ticket_id for ticket_id in plan_ids(events)
+        if ticket_id in failed and _chain_failed(_ticket_events(events, ticket_id))
+    ]
 
 
 def review_plan_change(
@@ -2104,9 +2121,12 @@ def _plan_change_note(journal: Journal, workflow: Workflow, ticket_ids: list[str
     if not kinds:
         return None
     if workflow.mode == domain.ECONOMY:
+        # A plan change that adds a ticket after a chain whose verification failed goes on only with the retry of its
+        # tip, which revives the chain (#270). So the chain before this ticket holds each built ticket before it.
         location = (
-            "The engine builds these tickets before this ticket. Each ticket of the chain starts from the ticket before it, "
-            "so the branch of this ticket holds their work."
+            "The engine builds these tickets before this ticket. Each ticket of the chain starts from the last built ticket "
+            "before it, so the branch of this ticket holds the work of each ticket before it in the chain, these tickets too. "
+            "A ticket that failed is not in the chain, and the branch of this ticket does not hold its work."
         )
     else:
         location = f"The engine builds these tickets before this ticket, and their accepted work is on the run branch `{workflow.run_branch}`."
