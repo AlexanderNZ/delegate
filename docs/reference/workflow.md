@@ -351,6 +351,7 @@ A resume reads the workflow file again. With no workflow argument, `delegate run
 
 - `mode`, `adapter`, `base-branch` and `run-branch` must not change. If one of them changes, the resume exits 1, and the message names the field.
 - The tickets can change. This is a plan change. The built part of the run is fixed. A new ticket goes at the end, or before a ticket that has not started. A ticket that has not started can change, move or go. A new ticket before built work, and a change to a built ticket, are refused, and the message names the ticket and the field.
+- In `economy` mode, a new ticket after a chain whose verification failed needs `--retry <tip>` for the ticket at the tip of that chain. The retry revives the chain, and the first new ticket starts from its tip. Without the retry, the resume is refused.
 - A later ticket has not started, and comes after an added or changed ticket. Read each later ticket against the new work, then give `--reviewed <ids>` or `--reviewed all`. Without it, the resume is refused.
 - A change to the `tier` of a ticket that has not started changes no work. A ticket whose only change is its `tier` makes no later ticket, so it needs no `--reviewed`.
 

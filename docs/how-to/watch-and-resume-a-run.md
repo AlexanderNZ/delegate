@@ -176,6 +176,8 @@ blocked-by = ["1"]
 
 A new ticket goes at the end, or before a ticket that has not started. The `blocked-by` lists set the new order. Do not change or remove a ticket that has started. The resume refuses such a change, and names the ticket and the field.
 
+In [**economy**](../glossary.md#economy) [**mode**](../glossary.md#mode), a new ticket starts from the last built ticket before it in the [**chain**](../glossary.md#chain). After a chain whose verification failed, the tickets of the chain are not built. So the resume refuses a new ticket after that chain, unless it also has `--retry <tip>` for the ticket at the tip of the chain. See [retry after a failed verification of the tickets](#3-retry-after-a-failed-verification-of-the-tickets).
+
 ### 3. Check the change
 
 ```sh
@@ -251,6 +253,8 @@ In [**economy**](../glossary.md#economy) [**mode**](../glossary.md#mode), the ti
 A gate can fail one time and then pass, and no commit fixes such a gate. Retry the tip with no commit. First run the dry run, `delegate run --resume <run-id> --retry <tip> --dry-run`. It prints `retry <tip>: phase chain, revives <ids>`. Then run `delegate run --detach --resume <run-id> --retry <tip>`. The retry builds the other tickets of the chain again. It runs the gates again on the tip, and starts a fresh verifier. The [**fix-up**](../glossary.md#fix-up) rounds before the retry do not count against the limit.
 
 A gate can also need a change of a [**hotspot**](../glossary.md#hotspot) path, and only you can make it. Commit the change on the branch of the tip, in its worktree. Then add `--coordinator-commit <sha>` to the retry. The retry line names this flag when the newest report of a fix-up of the chain names a hotspot path. See [the retry in economy mode](../reference/run.md#the-retry-in-economy-mode) and [the retry with a commit of the coordinator](../reference/run.md#the-retry-with-a-commit-of-the-coordinator).
+
+The fix-up of the chain can also need new rulings of the owner. Add the rulings as new tickets at the end of the workflow, and give the retry of the tip in the same resume: `delegate run --resume <run-id> --retry <tip> --dry-run`, then `delegate run --detach --resume <run-id> --retry <tip>`. The retry builds the tickets of the chain again. The first new ticket starts from the tip of the chain, so its branch holds the work of the chain. After the last new ticket, the verification of the chain runs again over the whole chain. Without `--retry <tip>`, the dry run and the resume refuse the new tickets: rule 5 of [the plan change](../reference/run.md#the-plan-change) names `--retry <tip>`. The other way is a new run.
 
 ## Clean up after a run
 

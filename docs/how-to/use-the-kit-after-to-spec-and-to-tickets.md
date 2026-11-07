@@ -116,4 +116,4 @@ The engine never merges to your base branch, never pushes, and never closes a ti
 
 ## When the plan changes during the run
 
-`to-tickets` can give a new ticket while the run works. Save it to a file, add it to the workflow, and resume the run. Do not change the file of a ticket that has started: the [**resume**](../glossary.md#resume) refuses it. See [change the plan of a run](watch-and-resume-a-run.md#change-the-plan-of-a-run).
+`to-tickets` can give a new ticket while the run works. Save it to a file, add it to the workflow, and resume the run. Do not change the file of a ticket that has started: the [**resume**](../glossary.md#resume) refuses it. In `economy` mode, after a [**chain**](../glossary.md#chain) whose verification failed, give `--retry <tip>` with the resume: the new ticket then starts from the tip of the chain, and without the retry the resume refuses the new ticket. See [change the plan of a run](watch-and-resume-a-run.md#change-the-plan-of-a-run).

@@ -818,7 +818,13 @@ these rules:
 4. **No built work changes.** The engine refuses a new ticket before a ticket
    that started. Retry the step, or start a new run.
 5. **A new ticket gets its own gates and verifier,** also in `economy` mode
-   after the verification of the chain.
+   after the verification of the chain. In `economy` mode a new ticket starts
+   from the last built ticket before it. After a chain whose verification
+   failed, the engine refuses a new ticket, unless the resume also has
+   `--retry <tip>` for the ticket at the tip of that chain. With the retry,
+   the chain goes on: the first new ticket starts from the tip, and the
+   verification of the chain runs again over the whole chain. The other way
+   is a new run.
 6. **Review each later ticket before the resume.** A later ticket has not
    started and comes after an added or changed ticket. It was written before
    the change, so a precondition can be wrong now. Run
@@ -868,7 +874,8 @@ and show its output to the owner with the command.
 | An invalid verdict: the verifier wrote a verdict that the engine refuses, and the step failed | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket>`. The retry uses the worktree and the commits again. |
 | A failed economy chain: the gates or the verifier of the chain failed after the fix-up rounds, also for a gate that failed one time and then passes | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <tip>`, where `<tip>` is the ticket at the tip of the chain: the retry line at the end of the run names it. The retry needs no commit. It builds the other tickets of the chain again, runs the gates on the tip again, and starts a fresh verifier. The fix-up rounds before the retry do not count. Do not run the verifier outside the engine. |
 | Red gates that need a change of a hotspot path, for example a committed agent pair that is not the render of the code: the specialist or the fix-up specialist reported `partial` or `blocked`, and named the coordinator | Make the change yourself, as one commit on the branch of the ticket, in its worktree. In `economy` mode, use the ticket at the tip of the chain. The commit changes only hotspot paths. Then run `delegate run --detach --resume <run-id> --retry <ticket> --coordinator-commit <sha>`. The hotspot check does not count that commit, and the gates and the verifier check it. Do not finish the chain outside the engine. |
-| A new ruling of the owner in the middle of a run, for a ticket that failed | Edit the text of that ticket in the workflow. Run `delegate run --resume <run-id> --retry <ticket> --dry-run` and show the verdict to the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket> --reviewed all`. |
+| A new ruling of the owner in the middle of a run, for a ticket that failed | Edit the text of that ticket in the workflow. Run `delegate run --resume <run-id> --retry <ticket> --dry-run` and show the verdict to the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket> --reviewed all`. In `economy` mode, the text of a ticket that the verification of the chain failed cannot change: add new tickets after the chain, as the next row tells. |
+| New tickets with rulings of the owner after a failed economy chain | Add the tickets to the workflow. Run `delegate run --resume <run-id> --retry <tip> --dry-run`, where `<tip>` is the ticket at the tip of the chain, and show the verdict to the owner. Then run `delegate run --detach --resume <run-id> --retry <tip>`. The first new ticket starts from the tip, and the verification of the chain runs again over the whole chain. Without `--retry <tip>`, the engine refuses the new tickets. |
 | A new ruling of the owner for a ticket that has not started | Pause with `delegate pause <run-id>`, change the workflow, and follow the steps of "Change the plan of a run". |
 | A stop now: the owner wants the run to stop with no wait | Tell the owner that the run can lose the work of a running agent. Then run `delegate stop <run-id>`. Go on later with `delegate run --detach --resume <run-id>`. |
 | Give up on a run: the owner does not want the run to go on | Tell the owner that the command removes the worktrees and the branches of the tickets, also with work that is not committed. Then run `delegate clean --abandon <run-id> --reason "<text>"`. To do the work again, start a new run. |
