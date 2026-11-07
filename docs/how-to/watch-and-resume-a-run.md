@@ -244,6 +244,14 @@ A lock whose process still exists stays. A lock of another run id, whose process
 
 A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. The same is true for a run that halted with `run-branch-moved`. A commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
 
+### 3. Retry after a failed verification of the tickets
+
+In [**economy**](../glossary.md#economy) [**mode**](../glossary.md#mode), the tickets form a [**chain**](../glossary.md#chain). A failure of the verification of the chain fails each ticket of the chain. Only the ticket at the tip of the chain goes on. The retry line at the end of the run names it.
+
+A gate can fail one time and then pass, and no commit fixes such a gate. Retry the tip with no commit. First run the dry run, `delegate run --resume <run-id> --retry <tip> --dry-run`. It prints `retry <tip>: phase chain, revives <ids>`. Then run `delegate run --detach --resume <run-id> --retry <tip>`. The retry builds the other tickets of the chain again. It runs the gates again on the tip, and starts a fresh verifier. The [**fix-up**](../glossary.md#fix-up) rounds before the retry do not count against the limit.
+
+A gate can also need a change of a [**hotspot**](../glossary.md#hotspot) path, and only you can make it. Commit the change on the branch of the tip, in its worktree. Then add `--coordinator-commit <sha>` to the retry. The retry line names this flag when the newest report of a fix-up of the chain names a hotspot path. See [the retry in economy mode](../reference/run.md#the-retry-in-economy-mode) and [the retry with a commit of the coordinator](../reference/run.md#the-retry-with-a-commit-of-the-coordinator).
+
 ## Clean up after a run
 
 A run that ends `built` removes the [**worktree**](../glossary.md#worktree) of each ticket, and deletes each ticket branch that the run branch holds. The run branch stays, because you merge it. A run that ended before that clean-up existed, or with `keep-worktrees = true`, keeps its worktrees and its ticket branches. `delegate clean` removes them. See [`delegate clean`](../reference/commands.md#delegate-clean).

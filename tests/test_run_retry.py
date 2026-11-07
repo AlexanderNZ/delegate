@@ -8,11 +8,14 @@ at the verifier, or at the scoped verifier of the fix-up round. Each case calls
 adapter in the place of the harness.
 """
 
+import json
+
 import pytest
 
 from .support import state_dir
 from .support import (
     append_events, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
+    valid_report,
 )
 from .test_run_multi import HEAD, ticket
 from .test_run_pause import RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of
@@ -643,16 +646,27 @@ def test_an_economy_retry_of_a_step_that_a_later_built_ticket_went_past_exits_on
     refused(repo, capsys, run_id, scripted, "a", "ticket 'b'", "built")
 
 
-def test_an_economy_retry_of_a_ticket_that_the_chain_verification_failed_exits_one_and_changes_nothing(tmp_path, capsys, scripted):
+def test_an_economy_retry_of_the_tip_after_the_last_chain_reject_gets_a_fresh_verifier_and_new_fix_up_rounds(tmp_path, capsys, scripted):
+    # The verifier of the chain rejects in each round, so the chain fails after its last fix-up round (#269).
     scripted.verdict_sequence, scripted.verdict_findings = ["REJECT"], [FINDING]
     repo = make_repo(tmp_path, economy(ticket("a")))
     code, run_id = first_run(repo, capsys)
-    assert code == 1
+    assert code == 1 and len(scripted.fixup_calls) == 2
+    healthy(scripted, "REJECT", "ACCEPT")
+    scripted.fixup_files = {"fixup-of-the-retry.txt": "fix\n"}  # the files of the first run are on the branch already
 
-    refused(repo, capsys, run_id, scripted, "a", "verification of the chain")
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    # The two fix-up rounds before the retry do not count: the REJECT of the retry gets a fix-up round, and the run is built.
+    assert (code, err) == (0, ""), err
+    assert scripted.calls == [] and scripted.continuation_calls == []
+    assert len(scripted.fixup_calls) == 1 and len(scripted.verifier_calls) == 2
+    events = read_journal_file(repo, run_id)
+    assert {k: after_retry(events)[0][k] for k in ("ticket", "phase", "revived")} == {"ticket": "a", "phase": "chain", "revived": []}
+    assert (events[-1]["event"], events[-1]["result"], events[-1]["built"]) == ("run-end", "built", ["a"])
 
 
-def test_the_end_of_an_economy_run_whose_chain_verification_rejected_names_the_tip_once_with_a_coordinator_commit(tmp_path, capsys, scripted):
+def test_the_end_of_an_economy_run_whose_chain_verification_rejected_names_the_plain_retry_of_the_tip_once(tmp_path, capsys, scripted):
     # The verifier of the chain a, b rejects in each round with a finding that names no ticket, so the chain fails a and b.
     scripted.verdict_sequence, scripted.verdict_findings = ["REJECT"], [FINDING]
     repo = make_repo(tmp_path, economy(ticket("a"), ticket("b")))
@@ -662,15 +676,96 @@ def test_the_end_of_an_economy_run_whose_chain_verification_rejected_names_the_t
 
     retries = [line for line in out.splitlines() if line.startswith("retry with ")]
 
-    # A plain retry of a ticket of the chain is refused: only the retry of the tip with a commit of the coordinator goes on (#225).
+    # No report names a hotspot, so the retry of the tip needs no commit of the coordinator (#269).
     short = run_id.rsplit("-", 1)[-1]
-    assert retries == [f"retry with delegate run --resume {short} --retry b --coordinator-commit <sha>"]
-    tip = git(repo, "rev-parse", "run/demo-b").strip()
-    argv = retries[0].removeprefix("retry with delegate run ").replace("<sha>", tip).split()
+    assert retries == [f"retry with delegate run --resume {short} --retry b"]
+    argv = retries[0].removeprefix("retry with delegate run ").split()
     code, out, err = run_main(capsys, *argv, "--repo", str(repo), "--dry-run")
     assert (code, err) == (0, "")
-    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b", "--dry-run")
-    assert code == 1 and "verification of the chain failed it" in err
+    assert "retry b: phase chain, revives a" in out.splitlines()
+
+
+# The chain gate of `flaky_chain` is red while this file exists in the directory of the test.
+FLAKY = "flaky-gate"
+
+
+def flaky_chain(tmp_path, capsys, scripted):
+    """Run an economy chain a, b whose chain gate is red in the first run only. Return the repository and the run id.
+
+    The fix-up specialist changes nothing and reports partial, as in the run of #269: the gate is flaky.
+    """
+    (tmp_path / FLAKY).write_text("the chain gate is red while this file exists\n")
+    scripted.fixup_files, scripted.fixup_commit = {}, False
+    scripted.fixup_report_text = lambda request, head: json.dumps(
+        valid_report("b", "run/demo-b", head, status="partial", blocked_reason="the gates are green in the worktree; no change is necessary")
+    )
+    workflow = economy(ticket("a"), ticket("b")).replace('gates = ["ls *.txt"]', f'gates = ["test ! -f {tmp_path / FLAKY}"]')
+    repo = make_repo(tmp_path, workflow)
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    assert code == 1
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    # The report says partial, but it names no hotspot: the retry line of the tip has no commit of the coordinator.
+    short = run_id.rsplit("-", 1)[-1]
+    assert [line for line in out.splitlines() if line.startswith("retry with ")] == [
+        f"retry with delegate run --resume {short} --retry b"
+    ]
+    first = read_journal_file(repo, run_id)
+    assert first[-1]["event"] == "run-end" and sorted(first[-1]["failed"]) == ["a", "b"]
+    (tmp_path / FLAKY).unlink()
+    healthy(scripted, "ACCEPT")
+    return repo, run_id
+
+
+def test_an_economy_retry_of_the_tip_with_no_commit_runs_the_chain_gates_again_and_a_fresh_verifier_after_a_flaky_gate(
+    tmp_path, capsys, scripted
+):
+    repo, run_id = flaky_chain(tmp_path, capsys, scripted)
+    tip = git(repo, "rev-parse", "run/demo-b").strip()
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "b")
+
+    assert (code, err) == (0, "")
+    events = read_journal_file(repo, run_id)
+    retried = after_retry(events)
+    assert [(e["phase"], e["commit"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("chain", tip, True)]
+    assert len(scripted.verifier_calls) == 1
+    assert git(repo, "rev-parse", "run/demo").strip() == tip
+    assert {"a.txt", "b.txt"} <= set(tree(repo, "run/demo"))
+    end = events[-1]
+    assert (end["event"], end["result"], sorted(end["built"]), end["failed"]) == ("run-end", "built", ["a", "b"], [])
+
+
+def test_an_economy_retry_of_the_tip_with_no_commit_records_the_phase_chain_and_the_revived_tickets_and_starts_no_specialist(
+    tmp_path, capsys, scripted
+):
+    repo, run_id = flaky_chain(tmp_path, capsys, scripted)
+
+    resume_main(repo, capsys, run_id, "--retry", "b")
+
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert {k: retried[0][k] for k in ("ticket", "phase", "revived")} == {"ticket": "b", "phase": "chain", "revived": ["a"]}
+    assert "coordinator_commit" not in retried[0]
+    assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.fixup_calls == []
+    assert [e["role"] for e in retried if e["event"] == "agent-start"] == ["verifier"]
+
+
+def test_an_economy_retry_with_no_commit_of_a_ticket_of_the_chain_that_is_not_the_tip_is_refused_and_names_the_tip(
+    tmp_path, capsys, scripted
+):
+    repo, run_id = flaky_chain(tmp_path, capsys, scripted)
+
+    refused(repo, capsys, run_id, scripted, "a", "ticket 'b' is at the tip of the chain", "--retry b")
+
+
+def test_an_economy_retry_of_the_tip_with_no_commit_is_refused_when_a_chain_fix_up_changed_a_hotspot(tmp_path, capsys, scripted):
+    # The chain gate is red, and the fix-up specialist changes the hotspot LICENSE, so the chain fails with a hotspot finding.
+    scripted.fixup_files = {"LICENSE": "changed by the fix-up\n"}
+    workflow = economy(ticket("a"), ticket("b")).replace('gates = ["ls *.txt"]', 'gates = ["test -f no-such-file"]')
+    repo = make_repo(tmp_path, workflow)
+    code, run_id = first_run(repo, capsys)
+    assert code == 1 and "hotspot-finding" in event_names(read_journal_file(repo, run_id))
+
+    refused(repo, capsys, run_id, scripted, "b", "hotspot finding: LICENSE")
 
 
 def test_an_economy_retry_of_a_step_whose_chain_start_moved_exits_one_and_changes_nothing(tmp_path, capsys, scripted):

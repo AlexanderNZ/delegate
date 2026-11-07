@@ -229,6 +229,26 @@ def test_an_economy_retry_with_a_coordinator_commit_goes_on_with_a_chain_that_it
     assert (end["event"], end["result"], sorted(end["built"]), end["failed"]) == ("run-end", "built", ["a", "b"], [])
 
 
+def test_the_end_of_an_economy_run_whose_chain_fix_up_report_names_a_hotspot_names_the_retry_of_the_tip_with_a_coordinator_commit(
+    tmp_path, capsys, scripted
+):
+    # The chain gates are red on the render, and the fix-up specialist reports partial: the reason names the hotspot LICENSE.
+    scripted.fixup_files = {}
+    scripted.fixup_report_text = lambda request, head: json.dumps(
+        valid_report("b", "run/demo-b", head, status="partial", blocked_reason="the gate needs a new render of LICENSE")
+    )
+    repo = make_repo(tmp_path, workflow(ticket("a"), ticket("b"), mode="economy"))
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    short = run_id.rsplit("-", 1)[-1]
+    assert [line for line in out.splitlines() if line.startswith("retry with ")] == [
+        f"retry with delegate run --resume {short} --retry b --coordinator-commit <sha>"
+    ]
+
+
 def test_an_economy_chain_retry_with_a_coordinator_commit_names_the_ticket_at_the_tip_of_the_chain(tmp_path, capsys, scripted):
     scripted.fixup_report_text = lambda request, head: json.dumps(
         valid_report("b", "run/demo-b", head, status="partial", blocked_reason="LICENSE is a hotspot")

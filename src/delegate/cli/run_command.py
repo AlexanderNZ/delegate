@@ -186,8 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--coordinator-commit", metavar="SHA",
         help="with --retry, a commit of the coordinator at the tip of the branch of TICKET that changes only hotspot paths, "
         "for example a new render of the agent pair; the hotspot guard does not count its paths, the gates and the verifier "
-        "check it as part of the branch, and in economy mode it lets the retry of the ticket at the tip of the chain go on "
-        "with a chain whose verification failed",
+        "check it as part of the branch, and in economy mode the retry of the ticket at the tip of a chain whose verification "
+        "failed goes on with the commit",
     )
     parser.add_argument(
         "--agents-changed", action="store_true",
@@ -285,6 +285,7 @@ def _print_review(review: PlanReview) -> int:
         print(f"run {review.run_id}: no plan change")
         print(f"order: {', '.join(review.new_order)}")
         _print_skipped(review)
+        _print_retry(review)
         problems = [*review.problems(), *_retry_problem(review)]
         for problem in problems:
             print(f"delegate run: {problem}", file=sys.stderr)
@@ -303,6 +304,7 @@ def _print_review(review: PlanReview) -> int:
             for line in review.texts[ticket].rstrip("\n").splitlines():
                 print(f"  {line}" if line else "")
     _print_skipped(review)
+    _print_retry(review)
     problems = [*review.problems(), *_retry_problem(review)]
     for problem in problems:
         print(f"delegate run: {problem}", file=sys.stderr)
@@ -312,6 +314,12 @@ def _print_review(review: PlanReview) -> int:
 def _retry_problem(review: PlanReview) -> list[str]:
     """The refusal of the retry of `--retry` as a problem of the dry run (#261), or none when the engine accepts the retry."""
     return [] if review.retry_refusal is None else [review.retry_refusal]
+
+
+def _print_retry(review: PlanReview) -> None:
+    """Print the phase at which the retry of `--retry` goes on, when the engine accepts it (#269). Print nothing else."""
+    if review.retry_outlook is not None and not review.problems():
+        print(review.retry_outlook)
 
 
 def _print_skipped(review: PlanReview) -> None:
@@ -335,7 +343,8 @@ def _end_lines(snap: status.Snapshot, hints: list[RetryHint]) -> list[str]:
 
     `hints` gives the retries (see `retry_hints`), also a retry that goes on only with a new text of the ticket. In
     `economy` mode after the verification of the chain, that is one ticket of the chain, not each ticket that the
-    verification failed (#261). A retry that needs a commit of the coordinator has `--coordinator-commit <sha>` in its line.
+    verification failed (#261). A retry that needs a commit of the coordinator has `--coordinator-commit <sha>` in its line:
+    in `economy` mode, only when the newest report of a chain fix-up names a hotspot path (#269).
 
     The summary has the two token counts only when the snapshot has them. On a terminal, the result is in the colour of
     its role, and the token counts are faint.
