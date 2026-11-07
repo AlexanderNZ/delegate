@@ -27,7 +27,7 @@ HEADING = "## Tell the owner before you change the course of a run"
 # Each case of the ticket: a word of the first cell of its row, and the command that the row must hold.
 CASES: dict[str, str] = {
     "invalid verdict": "delegate run --detach --resume <run-id> --retry <ticket>",
-    "economy chain": "delegate run --detach --resume <run-id> --retry <ticket>",
+    "economy chain": "delegate run --detach --resume <run-id> --retry <tip>",
     "new ruling": "--retry <ticket>",
     "stop now": "delegate stop <run-id>",
     "give up": "delegate clean --abandon <run-id> --reason",
