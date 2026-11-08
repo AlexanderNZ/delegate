@@ -15,7 +15,9 @@ import pytest
 from delegate.cli.run_command import EXIT_HALTED
 
 from . import claude_fake
-from .support import WORKFLOW, make_repo, read_journal, run_main, write_project_agents
+from .support import (
+    WORKFLOW, event_names, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir, write_project_agents,
+)
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -67,3 +69,51 @@ def test_a_harness_that_cannot_start_the_agent_ends_the_run_with_its_message_and
     assert code == EXIT_HALTED
     assert "--agent 'python-specialist' not found" in err
     assert "Traceback" not in err
+
+
+def test_a_usage_limit_of_the_specialist_halts_the_run_with_no_continuation_and_a_resume_goes_on_with_the_step(tmp_path, monkeypatch, capsys):
+    # The recorded stream of a real session that hit the usage limit (#271). Before, the session ended `failed`, the
+    # engine started a continuation that hit the same limit, and the step failed with "ended failed with exit status 1".
+    fake = claude_fake.install(tmp_path, monkeypatch, "usage-limit.jsonl", exit_status=1)
+    repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == EXIT_HALTED, err
+    assert len(fake.calls()) == 1
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
+    events = read_journal_file(repo, run_dir.name)
+    names = event_names(events)
+    assert names[-1] == "halted"
+    assert (events[-1]["ticket"], events[-1]["role"]) == ("a", "specialist")
+    assert "You've hit your session limit · resets 4pm (Pacific/Auckland)" in events[-1]["message"]
+    assert not {"continuation", "step-end", "run-end"} & set(names)
+    assert "You've hit your session limit" in err
+
+    # The limit is gone: the resume starts the specialist of the open step again, with no `--retry`.
+    monkeypatch.setenv("FAKE_HARNESS_STREAM", str(claude_fake.FIXTURES / "finished.jsonl"))
+    monkeypatch.setenv("FAKE_HARNESS_EXIT", "0")
+    code, out, err = resume_main(repo, capsys, run_dir.name)
+
+    assert len(fake.calls()) == 2
+    events = read_journal_file(repo, run_dir.name)
+    after = events[event_names(events).index("resume"):]
+    assert [(e["ticket"], e["end_state"]) for e in after if e["event"] == "adapter-result"][:1] == [("a", "finished")]
+    assert "halted" not in event_names(after)
+
+
+def test_an_error_result_that_is_no_failure_of_the_harness_fails_the_step_with_the_text_of_the_result(tmp_path, monkeypatch, capsys):
+    # The 404 of a model that does not exist is an error of the request, so the session ends `failed`, as before (#271).
+    claude_fake.install(tmp_path, monkeypatch, "failed.jsonl", exit_status=1)
+    repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1, err
+    events = read_journal(out)
+    assert "halted" not in event_names(events)
+    step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "a")
+    assert step_end["state"] == "failed"
+    assert "the specialist session failed: There's an issue with the selected model (no-such-model-xyz)." in step_end["reason"]

@@ -154,8 +154,8 @@ class AdapterResult:
     refused, in the order of the stream, so the engine can name the cause.
     `final_text` is the last text of the agent in the stream, or `None`: the
     engine reads a missing verdict from it. `reason` is the text that says why
-    the adapter ended the session as failed when the stream does not say it, for
-    example that the harness did not load the sealed agent (#217), or `None`. The
+    the adapter ended the session as failed, for example that the harness did not
+    load the sealed agent (#217), or the text of the failed result of the harness on one line (#271), or `None`. The
     engine puts it in the reason of the failed step. `command_errors` holds a
     (command, text) pair for each call of the shell tool whose tool result is an
     error, in the order of the stream: the command of the call and the text of its

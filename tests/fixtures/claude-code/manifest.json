@@ -8,6 +8,7 @@
   "fixtures": {
     "finished.jsonl": {"end_state": "finished", "how": "model haiku, agent smoke-agent, a prompt that asks for one sentence", "exit_status": 0},
     "capped.jsonl": {"end_state": "capped", "how": "model haiku, --max-turns 1, a prompt that needs two tool calls", "exit_status": 1},
-    "failed.jsonl": {"end_state": "failed", "how": "model no-such-model-xyz, which the API refuses with a 404", "exit_status": 1}
+    "failed.jsonl": {"end_state": "failed", "how": "model no-such-model-xyz, which the API refuses with a 404", "exit_status": 1},
+    "usage-limit.jsonl": {"end_state": "halted", "how": "a specialist session of the run 20261018T014240Z-661a that hit the usage limit; the result has is_error, api_error_status 429 and the text of the limit; the adapter raises AdapterError", "exit_status": 1, "recorded": "2026-10-18"}
   }
 }

@@ -154,6 +154,101 @@ def test_a_stream_whose_result_is_an_api_error_gives_the_end_state_failed(tmp_pa
     assert (result.exit_status, result.end_state, result.session_id) == (1, "failed", "2c4ee840-1107-4928-874f-fde608ad16bb")
 
 
+def test_a_failed_result_puts_its_text_in_the_reason(tmp_path, monkeypatch):
+    # The 404 of a model that does not exist is an error of the request, not a failure of the harness (#271).
+    claude_fake.install(tmp_path, monkeypatch, "failed.jsonl", exit_status=1)
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.end_state == "failed"
+    assert result.reason == (
+        "There's an issue with the selected model (no-such-model-xyz). It may not exist or you may not have access to it. "
+        "Run --model to pick a different model."
+    )
+
+
+def test_a_usage_limit_of_the_harness_raises_an_adapter_error_with_the_text_of_the_result(tmp_path, monkeypatch):
+    # The recorded stream of a real session that hit the usage limit (#271).
+    claude_fake.install(tmp_path, monkeypatch, "usage-limit.jsonl", exit_status=1)
+
+    with pytest.raises(AdapterError) as raised:
+        adapters.get("claude-code").run(request(tmp_path))
+
+    assert "You've hit your session limit · resets 4pm (Pacific/Auckland)" in str(raised.value)
+    assert "python-specialist" in str(raised.value)
+
+
+def _stream_ending_with(tmp_path: Path, monkeypatch, **result: object) -> None:
+    """Install a `claude` that replays the failed stream, with the fields of `result` in its `result` event."""
+    lines = (claude_fake.FIXTURES / "failed.jsonl").read_text().splitlines()
+    event = {**json.loads(lines[-1]), **result}
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "stream.jsonl").write_text("\n".join([*lines[:-1], json.dumps(event)]) + "\n")
+    harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "stream.jsonl", exit_status=1)
+
+
+@pytest.mark.parametrize("status, text", [
+    pytest.param(429, "Rate limited", id="rate-limit-429"),
+    pytest.param(529, "Overloaded", id="overload-529"),
+    pytest.param(500, "Internal server error", id="api-error-500"),
+    pytest.param(None, "API Error: The response stopped arriving. The response above may be incomplete.", id="api-error-text"),
+    pytest.param(None, "You've hit your weekly limit · resets Mon 9am", id="usage-limit-text"),
+])
+def test_an_error_result_of_the_harness_raises_an_adapter_error_with_its_text(tmp_path, monkeypatch, status, text):
+    _stream_ending_with(tmp_path, monkeypatch, api_error_status=status, result=text)
+
+    with pytest.raises(AdapterError, match=re.escape(text)):
+        adapters.get("claude-code").run(request(tmp_path))
+
+
+@pytest.mark.parametrize("status, text", [
+    pytest.param(400, "Prompt is too long", id="bad-request-400"),
+    pytest.param(None, "The agent stopped: the tool failed", id="no-status"),
+])
+def test_an_error_result_that_is_no_failure_of_the_harness_ends_failed_with_its_text_as_the_reason(tmp_path, monkeypatch, status, text):
+    _stream_ending_with(tmp_path, monkeypatch, api_error_status=status, result=text)
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert (result.end_state, result.reason) == ("failed", text)
+
+
+def test_the_reason_of_a_failed_result_is_one_line_of_at_most_200_characters(tmp_path, monkeypatch):
+    first = "The tool failed:\n" + "x" * 300
+    _stream_ending_with(tmp_path, monkeypatch, api_error_status=None, result=first)
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert result.reason is not None
+    assert "\n" not in result.reason and len(result.reason) <= 200
+    assert result.reason.startswith("The tool failed: xxx")
+
+
+def test_a_failed_result_with_no_text_gives_the_texts_of_its_errors_as_the_reason(tmp_path, monkeypatch):
+    # The recorded capped stream shows the form: no `result` field, and an `errors` list of texts.
+    lines = (claude_fake.FIXTURES / "failed.jsonl").read_text().splitlines()
+    event = {key: value for key, value in json.loads(lines[-1]).items() if key not in ("result", "api_error_status")}
+    event.update(subtype="error_during_execution", errors=["The tool process ended", "No output"])
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "stream.jsonl").write_text("\n".join([*lines[:-1], json.dumps(event)]) + "\n")
+    harness_fake.install(tmp_path, monkeypatch, "claude", fixtures, "stream.jsonl", exit_status=1)
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert (result.end_state, result.reason) == ("failed", "The tool process ended; No output")
+
+
+def test_a_finished_result_gives_no_reason_and_a_finished_result_with_an_error_status_does_not_halt(tmp_path, monkeypatch):
+    # Only a result with `is_error` true is a failure.
+    _stream_ending_with(tmp_path, monkeypatch, is_error=False, api_error_status=429, result="Done")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    assert (result.end_state, result.reason) == ("finished", None)
+
+
 def test_a_finished_result_with_the_exit_status_of_sigterm_keeps_the_end_state_finished_and_the_exit_status(tmp_path, monkeypatch):
     # A coordinator stopped an idle session with SIGTERM after its last `result` event, a success.
     # The end state comes from the stream; the engine weighs the exit status itself.
@@ -377,6 +472,11 @@ def test_each_recorded_stream_names_the_harness_version_and_the_date_and_gives_t
         scenario = tmp_path / name
         scenario.mkdir()
         claude_fake.install(scenario, monkeypatch, name, exit_status=facts["exit_status"])
+        if facts["end_state"] == "halted":
+            # A failure of the harness gives no end state: the adapter raises, and the engine halts the run (#271).
+            with pytest.raises(AdapterError):
+                adapters.get("claude-code").run(request(scenario))
+            continue
         result = adapters.get("claude-code").run(request(scenario))
         assert result.end_state == facts["end_state"]
 

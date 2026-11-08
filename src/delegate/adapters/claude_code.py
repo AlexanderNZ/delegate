@@ -17,7 +17,10 @@ argv, so a long brief meets no argument limit and shows in no process list. The
 harness writes one JSON event on each line of standard output. The adapter
 copies that stream to the file that the request names, and reads the final
 `result` event from it. The end state comes from that event only: the exit
-status does not change it (see `AdapterResult`). After a valid report, the
+status does not change it (see `AdapterResult`). A `result` event with `is_error` that shows a usage limit, a rate limit,
+an overload or an API error is a failure of the harness, not of the work: the adapter raises `AdapterError` with the text
+of the result, so the engine halts the run (#271, see `HARNESS_TEXT`). For each other session that ends failed, the text
+of the result, on one line, is the reason of the result. After a valid report, the
 adapter ends a session that writes no event for the idle timeout of the request
 (see `process.py`). It also ends a session that runs past the agent timeout of the request, and sets `ended_timeout`.
 
@@ -134,6 +137,24 @@ SHELL_TOOL: str = "Bash"
 
 # The text of a tool result when a permission mode refused the tool, as Claude Code wrote it on 2026-10-18.
 REFUSAL = re.compile(r"Permission to use (\S+) has been denied because Claude Code is running in (.+?) mode")
+
+# The signs of a failure of the harness in a `result` event with `is_error` true (#271): a usage limit, a rate limit, an
+# overload, or an API error. The match comes from these sources, not from a guess:
+# - The stream of a real session that hit the usage limit, Claude Code 2.1.287, run 20261018T014240Z-661a (now
+#   `tests/fixtures/claude-code/usage-limit.jsonl`): the result has `"api_error_status": 429` and the text "You've hit
+#   your session limit · resets 4pm (Pacific/Auckland)". Its assistant event has `"error": "rate_limit"`.
+# - The Claude Code transcripts of 2.1.x sessions in `~/.claude/projects/`: an error of the server (`"error":
+#   "server_error"`) has a text that starts with "API Error:", for example "API Error: The response stopped arriving.".
+# - The errors page of the Claude API (https://docs.anthropic.com/en/api/errors): 429 is `rate_limit_error`, 500 is
+#   `api_error`, and 529 is `overloaded_error`. The status of a real 404 (`failed.jsonl`) shows that `api_error_status`
+#   holds the HTTP status.
+# Each other status, for example the 404 of a model that does not exist, is an error of the request: it keeps `failed`.
+HARNESS_RATE_LIMIT: int = 429
+HARNESS_SERVER_ERRORS: int = 500
+HARNESS_TEXT = re.compile(r"^(API Error\b|You've hit your (\w+ )?limit\b)")
+
+# The longest reason that the text of a failed `result` event gives.
+REASON_LENGTH: int = 200
 
 # The fields of a `usage` object that its count of new tokens adds: the input, the cache writes, and the output.
 NEW_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
@@ -275,13 +296,43 @@ def _end_state(result: dict[str, object]) -> str:
 
     The harness sets `subtype` to `error_max_turns` when the agent reaches the
     turn cap. An API error sets `is_error` to true and leaves `subtype` as
-    `success`, so `is_error` decides all other failures.
+    `success`, so `is_error` decides all other failures. `run` raises before it gives this end state when the result shows
+    a failure of the harness (see `_harness_failed`).
     """
     if result.get("subtype") == "error_max_turns":
         return CAPPED
     if result.get("is_error") or str(result.get("subtype", "")).startswith("error"):
         return FAILED
     return FINISHED
+
+
+def _result_text(result: dict[str, object]) -> str:
+    """The text of a `result` event: its `result` text, else the texts of its `errors` list, else an empty text."""
+    text = result.get("result")
+    if isinstance(text, str) and text.strip():
+        return text
+    errors = result.get("errors")
+    if isinstance(errors, list):
+        return "; ".join(str(error) for error in errors)
+    return ""
+
+
+def _harness_failed(result: dict[str, object]) -> bool:
+    """True when a `result` event shows a failure of the harness, not of the work (#271). See `HARNESS_TEXT`."""
+    if not result.get("is_error"):
+        return False
+    status = result.get("api_error_status")
+    if isinstance(status, int) and (status == HARNESS_RATE_LIMIT or status >= HARNESS_SERVER_ERRORS):
+        return True
+    return bool(HARNESS_TEXT.match(_result_text(result).strip()))
+
+
+def _one_line(text: str) -> str | None:
+    """The text on one line, cut to `REASON_LENGTH` characters, or None for an empty text."""
+    line = " ".join(text.split())
+    if not line:
+        return None
+    return line if len(line) <= REASON_LENGTH else line[:REASON_LENGTH - 1] + "…"
 
 
 class ClaudeCodeAdapter:
@@ -328,11 +379,12 @@ class ClaudeCodeAdapter:
                 f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
         end_state, session_id, final_text = FAILED, None, None
+        last_result: dict[str, object] | None = None
         refused: list[tuple[str, str]] = []
         events = read_events(stream)
         for event in events:
             if event.get("type") == "result":
-                end_state, session_id = _end_state(event), event["session_id"]
+                end_state, session_id, last_result = _end_state(event), event["session_id"], event
                 final_text = event["result"] if isinstance(event.get("result"), str) else final_text
             refused += _refusals(event)
         init = next((event for event in events if event.get("type") == "system" and event.get("subtype") == "init"), None)
@@ -344,9 +396,17 @@ class ClaudeCodeAdapter:
                 ended_timeout=process.ended_timeout, reason=f"the harness did not load the sealed agent {sealed.handle}",
                 command_errors=_command_errors(events), refused_commands=_refused_commands(events),
             )
+        if last_result is not None and _harness_failed(last_result):
+            # The harness failed, not the work: the same cause stops each later agent and each continuation (#271).
+            status = last_result.get("api_error_status")
+            raise AdapterError(
+                f"{COMMAND} ended the session of agent {request.agent!r} with an error of the harness"
+                f"{f' (API status {status})' if isinstance(status, int) else ''}: {_result_text(last_result).strip()}"
+            )
+        reason = _one_line(_result_text(last_result)) if end_state == FAILED and last_result is not None else None
         return AdapterResult(
             process.returncode, end_state, session_id, stream, process.ended_idle, tuple(refused), final_text=final_text,
-            ended_timeout=process.ended_timeout, command_errors=_command_errors(events),
+            ended_timeout=process.ended_timeout, reason=reason, command_errors=_command_errors(events),
             refused_commands=_refused_commands(events),
         )
 

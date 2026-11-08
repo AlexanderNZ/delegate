@@ -2397,7 +2397,8 @@ def _journal_timeout(journal: Journal, result: AdapterResult, stack: Stack, tick
 
 
 def _ended_reason(result: AdapterResult, who: str, stack: Stack) -> str:
-    """The reason that an agent run is no done session: the time limit when the adapter ended it there, else its end state and exit status."""
+    """The reason that an agent run is no done session: the time limit when the adapter ended it there, else the reason of
+    the adapter (for example the text of the failed result of the harness, #271), else its end state and exit status."""
     if result.ended_timeout:
         return f"{who} session ran past the agent-timeout of {_minutes_text(stack.agent_timeout)} minutes"
     if result.reason is not None:

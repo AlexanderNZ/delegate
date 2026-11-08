@@ -180,6 +180,19 @@ Two more rules apply:
 
 An API error (for example, a model that does not exist) gives `is_error` true with `subtype` `success`. The `is_error` field decides, not `subtype`.
 
+### The failure of the harness
+
+A `result` event with `is_error` true can show a failure of the harness, not of the work. Then the adapter gives no end state. It raises `AdapterError`, and the message holds the text of the result, for example `claude ended the session of agent 'python-specialist' with an error of the harness (API status 429): You've hit your session limit · resets 4pm (Pacific/Auckland)`. The engine halts the run, starts no continuation, and a [**resume**](../glossary.md#resume) goes on at the open step. See [a failure of the harness](run.md#a-failure-of-the-harness) (#271). These results show a failure of the harness:
+
+| Sign in the `result` event | Error |
+|---|---|
+| `api_error_status` is 429 | A usage limit or a rate limit. |
+| `api_error_status` is 500 or more, for example 529 | An API error or an overload. |
+| The text starts with `API Error` | An API error, for example a response that stopped. |
+| The text starts with `You've hit your` and a limit, for example `You've hit your session limit` | A usage limit. |
+
+The match comes from the stream of a real session that hit the usage limit (Claude Code 2.1.287, now `usage-limit.jsonl`), from the texts of the server errors in Claude Code transcripts, and from the errors page of the Claude API. Each other error result ends `failed`, for example the 404 of a model that does not exist. The adapter then puts the text of the result in the reason of the result: on one line, with at most 200 characters. A result with no text gives the texts of its `errors` list. The engine puts the reason in the reason of the failed step, for example `the specialist session failed: There's an issue with the selected model (no-such-model-xyz). ...`.
+
 ## The activity
 
 Each form of `delegate status`, and the [live view](status-and-watch.md#the-live-view) of `delegate watch`, read each stream through the method `activity` of the adapter. The stream can be the partial stream of an agent that still runs. The method gives the tokens so far, as two counts, and the time of the newest event:
@@ -200,7 +213,7 @@ The adapter has `supports_resume` set to true. For a continuation, the [**engine
 
 ## The start failure
 
-When the harness exits and writes no event, no end state can describe the [**run**](../glossary.md#run). An unknown agent, an unknown option, and a missing login do this. The adapter raises `AdapterError` with the exit status, the agent name, and the standard error text of the harness. The engine records the error as a crash and ends the run, because the same cause stops every later agent. See [a crash in a step](run.md#a-crash-in-a-step).
+When the harness exits and writes no event, no end state can describe the [**run**](../glossary.md#run). An unknown agent, an unknown option, and a missing login do this. The adapter raises `AdapterError` with the exit status, the agent name, and the standard error text of the harness. The same cause stops every later agent, so the engine halts the run. See [a failure of the harness](run.md#a-failure-of-the-harness).
 
 ## What the adapter does not set
 
@@ -210,15 +223,16 @@ The report path is in the [**state directory**](../glossary.md#state-directory) 
 
 ## The recorded streams
 
-The directory `tests/fixtures/claude-code/` holds one recorded stream for each end state and `manifest.json`. The manifest names the harness version, the date, the command, and what the redaction removed.
+The directory `tests/fixtures/claude-code/` holds one recorded stream for each end state, one recorded stream of [a failure of the harness](#the-failure-of-the-harness), and `manifest.json`. The manifest names the harness version, the date, the command, and what the redaction removed.
 
 | Fixture | End state | How it was made | Exit status |
 |---|---|---|---|
 | `finished.jsonl` | `finished` | Model `haiku`, agent `smoke-agent`, a prompt for one sentence. | 0 |
 | `capped.jsonl` | `capped` | Model `haiku`, `--max-turns 1`, a prompt that needs two tool calls. | 1 |
 | `failed.jsonl` | `failed` | Model `no-such-model-xyz`, which the API refuses with a 404. | 1 |
+| `usage-limit.jsonl` | none: the adapter raises `AdapterError` | A specialist session of a real run that hit the usage limit. The result has `api_error_status` 429. Recorded: 2026-10-18 (UTC). | 1 |
 
-Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC). In the `init` event of each stream, the list of agents holds the handles of the two sealed agents of the tests, `delegate-seal-python-specialist:python-specialist` and `delegate-seal-python-verifier:python-verifier`. The recording listed no agent, so the lists were set for the tests of the sealed agent. A request that seals another agent gets the failure `the harness did not load the sealed agent`.
+Version: Claude Code 2.1.287. Recorded: 2026-10-08 (UTC), and `usage-limit.jsonl` on 2026-10-18 (UTC). In the `init` event of each stream, the list of agents holds the handles of the two sealed agents of the tests, `delegate-seal-python-specialist:python-specialist` and `delegate-seal-python-verifier:python-verifier`. The lists were set for the tests of the sealed agent. A request that seals another agent gets the failure `the harness did not load the sealed agent`.
 
 The directory `tests/fixtures/claude-code-progress/` holds parts of a stream of a real run, with their own `manifest.json`: `heartbeats.jsonl` holds four `tool_progress` heartbeat events, and `thinking.jsonl` holds two `thinking_tokens` events. These events have no `timestamp`. A test puts a part after the timed events of a recorded stream, to check [the activity](#the-activity) of a stream that ends with them. Version: Claude Code 2.1.287. Recorded: 2026-10-16 (UTC).
 
