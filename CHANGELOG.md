@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.19.2] - 2026-11-08
+
 ### Added
 
 - In `economy` mode, `--retry <tip>` with no `--coordinator-commit` goes on with a chain whose verification failed (#269). `<tip>` is the ticket at the tip of the chain. The retry goes on at the phase `chain`: it builds the other tickets of the chain again, runs the gates again on the tip, and starts a fresh verifier. The fix-up rounds before the retry do not count against the limit. Before, the engine refused the retry: "the verification of the chain failed it". A gate that fails one time and then passes needs no commit, so the coordinator had to run the verifier outside the engine. The engine refuses the retry when a commit of the step changes a hotspot path, and a retry of another ticket of the chain names the tip. The engine also refuses a plain `--retry <tip>` while a stop of the agent check before a chain fix-up waits: the retry line then names the stopped ticket, with `--agents-changed`. The retry line at the end of the run names `--retry <tip>`, and adds `--coordinator-commit <sha>` only when the newest report of a fix-up of the chain names a hotspot path. The dry run of a resume prints the phase of an accepted retry, for example `retry b: phase chain, revives a`.
