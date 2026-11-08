@@ -4,6 +4,9 @@
 writes its standard output to the event stream of the request. It waits for the
 process to exit.
 
+A command that cannot start (it is not on PATH, or it is not executable) raises `AdapterError` that names the command
+(#272): it is a failure of the harness, so the engine halts the run and the probe of the guard refuses the start.
+
 A request can set an idle timeout and a report check (see
 `AdapterRequest`). Then the helper also watches the stream while the process
 runs. When the stream did not grow for the idle timeout and the report check is
@@ -30,7 +33,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from ..ports.harness import AdapterRequest
+from ..ports.harness import AdapterError, AdapterRequest
 from .environment import process_environment
 
 # The seconds that a process has to exit after SIGTERM, before SIGKILL.
@@ -85,10 +88,14 @@ def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[st
     with tempfile.TemporaryFile("w+") as prompt, tempfile.TemporaryFile("w+") as stderr, request.event_stream.open("w") as out:
         prompt.write(request.prompt)
         prompt.seek(0)
-        process = subprocess.Popen(
-            list(command), stdin=prompt, stdout=out, stderr=stderr, text=True, cwd=request.cwd,
-            env=dict(env) if env is not None else None, start_new_session=True,
-        )
+        try:
+            process = subprocess.Popen(
+                list(command), stdin=prompt, stdout=out, stderr=stderr, text=True, cwd=request.cwd,
+                env=dict(env) if env is not None else None, start_new_session=True,
+            )
+        except OSError as error:
+            # A command that is not on PATH, or not executable, is a failure of the harness, as a harness that is not logged in is (#272).
+            raise AdapterError(f"the harness command {command[0]!r} cannot start: {error.strerror or error}") from None
         try:
             ended_idle, ended_timeout = _wait(process, request)
         except BaseException:

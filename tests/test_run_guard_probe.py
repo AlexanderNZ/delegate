@@ -12,6 +12,7 @@ adapter, so it covers what the adapter gives the harness.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -378,3 +379,20 @@ def test_the_result_comes_from_the_facts_of_the_session_and_not_from_words_in_a_
     else:
         assert code == 1
         assert f"guard probe {result}" in err
+
+
+def test_a_harness_command_that_does_not_exist_stops_the_start_with_one_line_that_names_it_and_no_traceback(tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"'))
+    write_project_agents(repo)
+    bin_dir = tmp_path / "git-only-bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(shutil.which("git"))
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == 1
+    assert len(err.strip().splitlines()) == 1
+    assert "claude" in err and "guard probe" in err
+    assert "Traceback" not in err
+    assert "guard-probe" not in event_names(read_journal(out))

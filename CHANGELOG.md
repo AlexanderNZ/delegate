@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- A harness command that is not on `PATH` halts the run, and the guard probe refuses it with no traceback (#272). Before, `subprocess.Popen` raised `FileNotFoundError`, and the engine treated it as a crash: it wrote `step-end failed`, skipped each later ticket and wrote `run-end failed`, and the guard probe printed a traceback and wrote no event. Now the harness helper turns an `OSError` from the start of the command into an `AdapterError` that names the command and the error, for example `the harness command 'claude' cannot start: No such file or directory`. A missing command in an agent session gives `halted`, and the run stays resumable. See "A failure of the harness" in `docs/reference/run.md`.
+
 ## [1.19.2] - 2026-11-08
 
 ### Added

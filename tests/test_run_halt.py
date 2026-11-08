@@ -9,6 +9,7 @@ Each case calls `delegate.main` against a real temporary git repository with the
 """
 
 import json
+import shutil
 
 from delegate.ports.harness import AdapterError
 
@@ -167,3 +168,27 @@ def test_an_adapter_error_from_the_verifier_of_the_chain_halts_an_economy_run_an
     assert code == 0, err
     events = read_journal_file(repo, run_dir.name)
     assert (events[-1]["event"], events[-1]["result"], events[-1]["built"]) == ("run-end", "built", ["a", "b", "c"])
+
+
+def only_git_on_path(tmp_path, monkeypatch) -> None:
+    """Make `git` the only command on PATH, so the harness command of an adapter does not exist."""
+    bin_dir = tmp_path / "git-only-bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(shutil.which("git"))
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
+def test_a_harness_command_that_does_not_exist_halts_the_run_and_names_the_command(tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path, (HEAD + ticket("a")).replace('adapter = "scripted"', 'adapter = "opencode"'))
+    only_git_on_path(tmp_path, monkeypatch)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+
+    assert code == RUN_HALTED, err
+    (run_dir,) = (state_dir(repo) / "runs").iterdir()
+    events = read_journal_file(repo, run_dir.name)
+    assert event_names(events)[-1] == "halted"
+    assert "opencode" in events[-1]["message"]
+    assert not [e for e in events if e["event"] in ("run-end", "step-end")]
+    assert "opencode" in err
+    assert "Traceback" not in err
