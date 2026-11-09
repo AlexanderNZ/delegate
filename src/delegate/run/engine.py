@@ -181,7 +181,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from traceback import format_exception
@@ -200,7 +200,7 @@ from .brief import (
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
-from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, RUN_START, SCHEMA_VERSION
+from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, RESUME, RUN_START, SCHEMA_VERSION
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
@@ -912,6 +912,60 @@ def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str
             raise EngineError(f"workflow {workflow_path} differs from run {run_id}: {name} was {run_start[name]!r}, is now {value!r}")
 
 
+def _configuration_record(workflow: Workflow) -> dict[str, object]:
+    """The configuration of the run as the journal records it, in the field `configuration` of `run-start` and of `resume` (#289).
+
+    The record holds each field of each stack except its name, and the top-level fields `ticket_start` and
+    `keep_worktrees`. It is canonical: the JSON form of the values, so a record that the journal gives back is equal to
+    the record of the same workflow. A new field of `Stack` goes into the record with no change here.
+    """
+    stacks = {name: {key: value for key, value in asdict(stack).items() if key != "name"} for name, stack in sorted(workflow.stacks.items())}
+    record = {"stacks": stacks, "ticket_start": workflow.ticket_start, "keep_worktrees": workflow.keep_worktrees}
+    return json.loads(json.dumps(record))
+
+
+def _recorded_configuration(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The newest record of the configuration of a run: the `configuration` of the newest `resume` that has one, or else of `run-start`.
+
+    None when the journal records none: an earlier version of the engine started the run.
+    """
+    records = [event["configuration"] for event in events if event["event"] in (RUN_START, RESUME) and "configuration" in event]
+    return records[-1] if records else None  # type: ignore[return-value]
+
+
+def _configuration_changes(old: dict[str, object], new: dict[str, object]) -> list[str]:
+    """Each change of the configuration from the record `old` to the record `new`, as `stack '<name>': <fields>` or `<field>`.
+
+    A stack that only one record has is not a change: no ticket of the run used a new stack, and a ticket of a removed
+    stack is not in the plan. A field that `old` does not hold is not compared: a later version of the engine added it.
+    """
+    changes: list[str] = []
+    old_stacks, new_stacks = old["stacks"], new["stacks"]
+    for name in sorted(old_stacks.keys() & new_stacks.keys()):  # type: ignore[attr-defined]
+        recorded, now = old_stacks[name], new_stacks[name]  # type: ignore[index]
+        fields = [key for key in recorded if recorded[key] != now.get(key)]
+        if fields:
+            changes.append(f"stack {name!r}: {', '.join(fields)}")
+    changes.extend(key for key in ("ticket_start", "keep_worktrees") if key in old and old[key] != new[key])
+    return changes
+
+
+def _check_same_configuration(workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str) -> None:
+    """Refuse a resume when the configuration of a stack, or a top-level field of the record, differs from the newest record (#289).
+
+    The message names each stack with its changed fields, and each changed top-level field. A journal with no record
+    passes: the resume writes the record (see `_execute`).
+    """
+    recorded = _recorded_configuration(events)
+    changes = [] if recorded is None else _configuration_changes(recorded, _configuration_record(workflow))
+    if changes:
+        raise EngineError(
+            f"workflow {workflow_path} changes the configuration of run {run_id}: {'; '.join(changes)}; "
+            "the journal records the configuration under which the run checks its tickets, and a resume does not change it: "
+            "put the recorded values back in the workflow file, or start a new run"
+        )
+
+
 def _plan_of(workflow: Workflow) -> list[domain.PlanTicket]:
     """The plan of a workflow: each ticket in plan order, with its stack, its blockers, the SHA-256 of its text, and its tier."""
     return [
@@ -1065,6 +1119,7 @@ def _review(
         reason = f" ({abandoned['reason']})" if abandoned.get("reason") else ""
         raise EngineError(f"run {run_id!r} cannot be resumed: it ended abandoned{reason}; start a new run")
     _check_same_run(workflow, workflow_path, events[0], run_id)
+    _check_same_configuration(workflow, workflow_path, events, run_id)
     old_order, new_plan = plan_ids(events), _plan_of(workflow)
     new_order = [t.id for t in new_plan]
     violations = [event for event in events if event["event"] == "invariant-violation"]
@@ -2033,7 +2088,7 @@ def _execute(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
             plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
-            agents=sealed,
+            agents=sealed, configuration=_configuration_record(workflow),
         )
         progress = _Progress()
     else:
@@ -2052,9 +2107,14 @@ def _execute(
                     "the agents are sealed now, at the resume, from the main checkout"
                 )
                 agent_fields["agents_note"] = agents_note
+        # The checks passed. So the newest record differs from the workflow only where the check accepts it: a stack that only
+        # one of them has, or a field that the record does not hold. Or the journal has no record at all (#289). The resume
+        # then records the configuration, so the next resume compares with it.
+        configuration = _configuration_record(workflow)
+        configuration_fields = {} if _recorded_configuration(events) == configuration else {"configuration": configuration}
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
-            skipped=list(progress.skipped), open=progress.open_ticket, **agent_fields,
+            skipped=list(progress.skipped), open=progress.open_ticket, **agent_fields, **configuration_fields,
         )
         if workflow.mode == domain.ECONOMY:
             # Before a plan change: the verification of a chain reads only the events after the newest plan change.

@@ -119,6 +119,17 @@ class SealedAgentRecord(TypedDict):
     files: list[SealedFileRecord]
 
 
+class ConfigurationRecord(TypedDict):
+    """The configuration of a run (#289), in `run-start` and in `resume`: what a resume compares with the workflow file.
+
+    `stacks` holds each stack by its name, with each field of the stack except the name, in the JSON form of its value.
+    """
+
+    stacks: dict[str, dict[str, object]]
+    ticket_start: str
+    keep_worktrees: bool
+
+
 class RunStart(TypedDict):
     run_id: str
     workflow: str
@@ -133,6 +144,9 @@ class RunStart(TypedDict):
     schema: NotRequired[int]
     # The sealed agents of the roles of the run, from the main checkout. In a journal of version 1 the field holds the record of #205: the agent, the path and the SHA-256 of each agent file. Absent in a journal of version 0.
     agents: NotRequired[list[SealedAgentRecord]]
+    # The configuration of each stack and the top-level fields that change the work (#289). Absent in a journal that an
+    # earlier version of the kit wrote.
+    configuration: NotRequired[ConfigurationRecord]
 
 
 class StepStart(TypedDict):
@@ -278,6 +292,9 @@ class Resume(TypedDict):
     # (#205, #217): the new record of the seals, and the note that says that the journal had none.
     agents: NotRequired[list[SealedAgentRecord]]
     agents_note: NotRequired[str]
+    # Only a resume whose journal has no record of the configuration, or whose newest record differs from the workflow in a
+    # way that the check accepts (a stack that only one of them has), has it (#289): the record of the workflow file.
+    configuration: NotRequired[ConfigurationRecord]
 
 
 class AgentsChanged(TypedDict):
