@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-11-09
+
 ### Changed
 
 - The live view of `delegate watch` writes only the lines that changed (#282). Before, each draw wrote each line of the frame, and while an agent runs the spinner draws each 0.125 seconds, so over SSH each draw sent the full screen and the screen updated slowly and flickered. Now the view keeps the lines of the frame that it drew last and the size of the terminal. A frame with the same lines writes nothing. When the size of the terminal is the same, each changed line gets the sequence that moves the cursor to it, the line, and the sequence that clears to the end of the line, in one synchronized update, and a frame with fewer lines clears the screen below its last line. The first frame, and a frame after a change of the size of the terminal, are drawn in full. The output to a file or a pipe, and the output of `--raw` and `--json`, do not change. See "The live view" in `docs/reference/status-and-watch.md`.
