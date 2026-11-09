@@ -216,6 +216,7 @@ class GateResult(TypedDict):
     timed_out: bool
     output_tail: str
     clean: bool
+    changed: NotRequired[list[str]]
     name: NotRequired[str]
 
 
