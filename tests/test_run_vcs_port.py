@@ -121,15 +121,16 @@ def test_the_rebase_the_commit_ranges_the_verifier_copy_and_the_run_branch_move_
     assert git(repo, "rev-parse", "run/demo").strip() == git(repo, "rev-parse", "run/demo-a").strip()
 
 
-def test_a_port_that_cannot_rebase_fails_the_ticket_and_leaves_the_run_branch_where_it_was(tmp_path, scripted_adapter):
+def test_a_port_that_cannot_rebase_stops_the_run_with_a_crash_and_leaves_the_run_branch_where_it_was(tmp_path, scripted_adapter):
     repo = make_repo(tmp_path)
     before = git(repo, "rev-parse", "main").strip()
     vcs = SpyVcs(refuse="rebase_onto")
 
     result = start_run(repo, vcs, scripted_adapter)
 
-    assert result.failed == ["a"]
-    assert "rebase_onto refused by the test" in result.failures["a"]
+    # A crash leaves the step open, so a resume goes on with it (#281).
+    assert (result.failed, result.crashed_at) == ([], "the gates of ticket a")
+    assert result.crashed is not None and "rebase_onto refused by the test" in result.crashed
     assert git(repo, "rev-parse", "run/demo").strip() == before
 
 

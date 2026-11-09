@@ -8,7 +8,8 @@ with a run that stopped or paused, from its journal. `--retry <ticket>` with it 
 with one failed step of that run, also when the run ended, and `--coordinator-commit <sha>` with it names a commit of the
 coordinator that changes only hotspot paths (#225). A run that `delegate
 pause` stopped at a step boundary exits with `EXIT_PAUSED`. A run that a failure of the harness (an `AdapterError`)
-halted exits with `EXIT_HALTED`: it has no `run-end`, and `--resume` goes on at the open step.
+halted exits with `EXIT_HALTED`: it has no `run-end`, and `--resume` goes on at the open step. A run that a crash stopped
+exits with `EXIT_HALTED` too, for the same reason (#281).
 
 A resume with a workflow whose tickets differ from the newest plan of the run is
 a plan change. `--reviewed <ids>` names the later tickets that the coordinator
@@ -84,7 +85,7 @@ from .title import SEPARATOR, Title
 # The exit status of a run that a pause request stopped at a step boundary (see `delegate pause`).
 EXIT_PAUSED: int = 3
 
-# The exit status of a run that a failure of the harness halted: an `AdapterError` (#177).
+# The exit status of a run that a failure of the harness halted: an `AdapterError` (#177). A crash stops a run with it too (#281).
 EXIT_HALTED: int = 4
 
 # The paint role of the result of a run in its summary line (tokens.md): the result word is bold.
@@ -494,6 +495,12 @@ def main(argv: list[str] | None = None) -> int:
         if result.halted is not None:
             print(f"delegate run: halted at {result.halted_at}: {result.halted}", file=sys.stderr)
             print(f"halted at {result.halted_at}; go on with delegate run --resume {result.run_id}")
+            return EXIT_HALTED
+        if result.crashed is not None:
+            trace = f"; traceback {result.traceback}" if result.traceback is not None else ""
+            print(f"delegate run: crashed at {result.crashed_at}: {result.crashed}{trace}", file=sys.stderr)
+            again = f" --retry {result.crashed_retry}" if result.crashed_retry is not None else ""
+            print(f"crashed at {result.crashed_at}; go on with delegate run --resume {result.run_id}{again}")
             return EXIT_HALTED
         return 0 if result.ok else 1
     state: Path | None = None

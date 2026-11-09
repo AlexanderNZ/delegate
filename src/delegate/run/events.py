@@ -48,6 +48,7 @@ LOCK_BROKEN: str = "lock-broken"
 PAUSE_REQUESTED: str = "pause-requested"
 PAUSED: str = "paused"
 HALTED: str = "halted"
+CRASHED: str = "crashed"
 INTERRUPTED: str = "interrupted"
 SKIP: str = "skip"
 REBASE: str = "rebase"
@@ -364,6 +365,25 @@ class Halted(TypedDict):
     message: str
 
 
+# The `phase` of a `crashed` event that is not a phase of a running step: a crash before the `step-start` of the step,
+# and a crash of the verification of an `economy` chain. The other values are the phases of a step: `specialist`,
+# `gates`, `verifier` and `fix-up`.
+CRASH_PHASE_SETUP: str = "setup"
+CRASH_PHASE_CHAIN: str = "chain"
+
+
+class Crashed(TypedDict):
+    ticket: str
+    phase: str
+    # The type of the exception, and its message.
+    error: str
+    message: str
+    # The path of the file that holds the traceback (#194). Not there when the engine could not write the file.
+    traceback: NotRequired[str]
+    # Only for a crash of the step of a `--retry`: true. `--retry` goes on with that step again.
+    retry: NotRequired[bool]
+
+
 class Interrupted(TypedDict):
     run_id: str
 
@@ -504,7 +524,8 @@ class StepEnd(TypedDict):
     ticket: str
     state: str
     reason: str | None
-    # Only the `step-end` of a crash has it: the path of the file that holds the traceback (#194).
+    # Only the `step-end` of a crash in a journal of an earlier version has it: the path of the file that holds the
+    # traceback (#194). A crash now writes `crashed` (#281).
     traceback: NotRequired[str]
 
 
@@ -560,6 +581,7 @@ EVENTS: dict[str, type] = {
     PAUSE_REQUESTED: PauseRequested,
     PAUSED: Paused,
     HALTED: Halted,
+    CRASHED: Crashed,
     INTERRUPTED: Interrupted,
     SKIP: Skip,
     REBASE: Rebase,

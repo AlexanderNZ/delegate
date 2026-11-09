@@ -350,13 +350,14 @@ def _leftover_copies(events: list[dict[str, object]]) -> list[Path]:
 
 
 def _crash_files(events: list[dict[str, object]], run_directory: Path) -> list[Path]:
-    """The files of a crash traceback (#194) that the `step-end` events name and that are still on the disk.
+    """The files of a crash traceback (#194) that the `crashed` events name, and the `step-end` events of a journal of an
+    earlier version (#281), and that are still on the disk.
 
     Only a file of the shape that the engine makes counts: `crash-<number>.txt` in the directory of the run.
     """
     found: list[Path] = []
     for event in events:
-        if event["event"] != "step-end" or "traceback" not in event:
+        if event["event"] not in ("crashed", "step-end") or "traceback" not in event:
             continue
         trace = Path(str(event["traceback"]))
         shaped = trace.name.startswith(CRASH_FILE_PREFIX) and trace.suffix == ".txt"

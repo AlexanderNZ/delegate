@@ -60,7 +60,7 @@ def test_an_adapter_error_halts_the_run_and_a_resume_builds_the_open_step_and_th
     assert (events[-1]["result"], events[-1]["built"]) == ("built", ["a", "b", "c"])
 
 
-def test_an_exception_that_is_not_an_adapter_error_fails_the_step_as_before(tmp_path, capsys, scripted):
+def test_an_exception_that_is_not_an_adapter_error_is_a_crash_and_not_a_halt(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, CHAIN)
 
     def explode(request):
@@ -71,13 +71,12 @@ def test_an_exception_that_is_not_an_adapter_error_fails_the_step_as_before(tmp_
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
-    assert code == 1
+    assert code == 4  # a crash leaves the step open and exits with the code of a halt (#281)
     (run_dir,) = (state_dir(repo) / "runs").iterdir()
     events = read_journal_file(repo, run_dir.name)
-    assert "halted" not in event_names(events)
-    step_end = next(e for e in events if e["event"] == "step-end" and e["ticket"] == "b")
-    assert step_end["state"] == "failed" and "harness binary missing" in step_end["reason"]
-    assert event_names(events)[-1] == "run-end" and events[-1]["result"] == "failed"
+    assert "halted" not in event_names(events) and "run-end" not in event_names(events)
+    assert (events[-1]["event"], events[-1]["ticket"], events[-1]["message"]) == ("crashed", "b", "harness binary missing")
+    assert ("b", "failed") not in [(e["ticket"], e["state"]) for e in events if e["event"] == "step-end"]
 
 
 def test_an_adapter_error_from_the_verifier_halts_the_run_and_a_resume_goes_on(tmp_path, capsys, scripted):

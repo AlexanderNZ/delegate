@@ -51,7 +51,10 @@ from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output
 from .engine import StateLocation
-from .journal import ABANDONED, JournalError, abandon_note, activity_files, halt_of, is_paused, last_change, newest_run_end, plan_ids, read_new_events
+from .journal import (
+    ABANDONED, JournalError, abandon_note, activity_files, crash_note, crash_of, halt_of, is_paused, last_change, newest_run_end, plan_ids,
+    read_new_events,
+)
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
 
@@ -75,6 +78,7 @@ PAUSED: str = "paused"
 # A failure of the harness stopped the run, and the run wrote no `run-end`: a resume goes on (#177).
 HALTED: str = "halted"
 # A run with no `run-end`, no pause, no halt and no live process: a crash, a kill, Ctrl-C, or a stop of the machine. A resume goes on (#193).
+# A run whose newest `crashed` comes after its newest `resume` is stopped also while its process ends (#281).
 STOPPED: str = "stopped"
 
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
@@ -711,7 +715,9 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     end = newest_run_end(events)
     paused = end is None and is_paused(events)
     halt = halt_of(events) if end is None and not paused else None
-    live = end is not None or paused or halt is not None or _has_live_process(journal)
+    # A crash ends the run process: the run is stopped, also in the moment before the process releases its lock (#281).
+    crash = crash_of(events) if end is None and not paused and halt is None else None
+    live = end is not None or paused or halt is not None or (crash is None and _has_live_process(journal))
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
@@ -744,7 +750,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
     chains = _chains(events, plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
-    state, note = _state(end, paused, journal, halt, live)
+    state, note = _state(end, paused, journal, halt, live, crash)
     pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
@@ -769,13 +775,14 @@ def _has_live_process(journal: Path) -> bool:
 
 def _state(
     end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None, live: bool = True,
+    crash: dict[str, object] | None = None,
 ) -> tuple[str, str | None]:
     """The state of a run and its note.
 
     The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
     request waits and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
     and no live process, or `running`. The note of a halted run is `halt_note`. The note of a stopped run is
-    `stopped_note`. The note of an abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
+    `stopped_note`, or `journal.crash_note` when a crash (`crash`, its `crashed` event) stopped it (#281). The note of an abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
     and None otherwise.
     """
     requested = pause_requested(journal)
@@ -784,6 +791,9 @@ def _state(
     if end is None and not paused and requested and live:
         return PAUSING, None
     if end is None and not paused and not live:
+        if crash is not None:
+            removes = "; the resume removes the pause request that waits" if requested else ""
+            return STOPPED, crash_note(crash, journal.parent.name) + removes
         return STOPPED, stopped_note(journal.parent.name, requested)
     note = PAUSE_REQUEST_NOTE if requested else None
     if end is not None and end["result"] == ABANDONED:

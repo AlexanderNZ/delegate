@@ -23,7 +23,8 @@ at the prompt ends the command as before it finds a run: `delegate: interrupted`
 `--from`, this module goes on in the journal of the newest run from the position. With no active run and no `--from`,
 the newest run gets one line and no replay of its journal:
 a run that ended (`delegate.run.watch.EndedRun`) exits with the code of its result, and a run that stopped
-(`delegate.run.watch.StoppedRun`) with the code of a pause, or the code of an error on stderr. A newest run that failed
+(`delegate.run.watch.StoppedRun`) with the code of a pause, of a halt (also after a crash, #281), or the code of an error
+on stderr. A newest run that failed
 at start (`delegate.run.runs.FailedStart`) has no journal, also with `--from`: its line gives the last line of its log,
 and the exit code is `watch.EXIT_FAILED`.
 
@@ -179,6 +180,8 @@ class _Titled:
             self._result = "paused"
         elif event["event"] == "halted":
             self._result = "halted"
+        elif event["event"] == "crashed":
+            self._result = "crashed"
         elif problem is not None:
             self._result = "problem"
         self._sink.event(event, reported, problem)
@@ -233,13 +236,16 @@ def _error(text: str, raw: bool) -> None:
 def _newest_run(newest: watch.EndedRun | watch.StoppedRun, raw: bool) -> int:
     """Print the one line of the newest run when no run is active, and return its exit code.
 
-    The line of a run that stopped with no pause is an error, so it goes to stderr, and the title is not set. With
+    The line of a run that stopped with no pause, no halt and no crash is an error, so it goes to stderr, and the title is not set. With
     `--raw` (`raw`), the line is plain also on a terminal, as before #114.
     """
-    if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None:
+    if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None and newest.crashed is None:
         _error(newest.line(), raw)
         return newest.code
-    result = newest.result if isinstance(newest, watch.EndedRun) else "halted" if newest.halted is not None else "paused"
+    if isinstance(newest, watch.EndedRun):
+        result = newest.result
+    else:
+        result = "halted" if newest.halted is not None else "crashed" if newest.crashed is not None else "paused"
     Title(sys.stdout).set(f"delegate watch{SEPARATOR}{short_run_id(newest.run_id)}{SEPARATOR}{result}")
     print(newest.line() if raw else newest.painted())
     return newest.code
@@ -307,9 +313,9 @@ def main(argv: list[str] | None = None) -> int:
                 return _newest_run(watch.newest_run(runs.chosen), args.raw)
             elif not runs.active and args.from_position is None:
                 # --json: a script wants the events, so the journal of the newest run is replayed. A run that stopped with
-                # no pause and no halt has no end to follow: the error line goes to stderr, as for the other forms.
+                # no pause, no halt and no crash has no end to follow: the error line goes to stderr, as for the other forms.
                 newest = watch.newest_run(runs.chosen)
-                if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None:
+                if isinstance(newest, watch.StoppedRun) and not newest.paused and newest.halted is None and newest.crashed is None:
                     _error(newest.line(), args.raw)
                     return newest.code
                 journal = runs.chosen

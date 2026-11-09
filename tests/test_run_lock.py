@@ -152,8 +152,9 @@ def test_a_crashed_run_releases_its_lock(tmp_path, capsys, scripted):
     scripted.on_specialist = raise_in_b
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
     run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
-    assert code == 1
+    assert code == 4  # a crash stops the run as a halt does (#281)
+    scripted.on_specialist = None
 
     code, out, err = resume_main(repo, capsys, run_id)
 
-    assert code == 1 and "lock" not in err
+    assert (code, err) == (0, "")

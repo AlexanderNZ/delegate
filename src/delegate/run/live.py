@@ -40,7 +40,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import domain, output, status
-from .journal import JournalError
+from .journal import JournalError, crash_where
 
 # The text between two parts of a line of the feed.
 SEPARATOR: str = " · "
@@ -386,7 +386,7 @@ class LiveView:
         elif kind == "step-end":
             for key in [key for key in self._agents if key[0] == ticket]:
                 del self._agents[key]  # a crash ends the step with no result event
-        elif kind in ("run-end", "paused", "halted"):
+        elif kind in ("run-end", "paused", "halted", "crashed"):
             self._agents.clear()
         # A problem has the warning line in the place of the line of its event, which the warning says again. The result of
         # an agent is the exception: its line ends the agent that ran, and the warning comes below it.
@@ -456,6 +456,9 @@ class LiveView:
         if kind == "halted":
             self._add(when, "", [("", self._halted(event))], role="bad")
             return
+        if kind == "crashed":
+            self._add(when, "", [("", self._crashed(event))], role="bad")
+            return
         chain = kind in ("verify-start", "fixup-start", "fixup-refused")
         self._add(when, self._chain_subject(ticket, subject) if chain else subject, self._spans(kind, event), started=kind == "step-start")
 
@@ -522,6 +525,17 @@ class LiveView:
         run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
         where = f"the {event['role']} of ticket {event['ticket']}"
         return f"halted{SEPARATOR}{where}{SEPARATOR}{event['message']}{SEPARATOR}go on with delegate run --resume {run_id}"
+
+    def _crashed(self, event: dict[str, object]) -> str:
+        """The line of a crash (#281): where it stopped the run, the error, the name of the file of its traceback, and the
+        command that goes on with the run. The live view cuts each path to its name (`output.without_paths`)."""
+        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
+        where = crash_where(event.get("ticket"), event.get("phase"))
+        parts = ["crashed", where, f"{event['error']}: {output.without_paths(str(event['message']))}"]
+        if event.get("traceback"):
+            parts.append(f"traceback {Path(str(event['traceback'])).name}")
+        again = f" --retry {event.get('ticket')}" if event.get("retry") else ""
+        return SEPARATOR.join([*parts, f"go on with delegate run --resume {run_id}{again}"])
 
     def _spans(self, kind: str, event: dict[str, object]) -> list[Span]:
         """The parts of the line of an event that has a line of its own. An event that this version does not know shows its name."""

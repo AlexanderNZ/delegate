@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .events import JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT
+from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT
 
 # The events whose line must be on the disk before the engine goes on: a run that ended, a move of the run branch, and a
 # verdict. A power loss then cannot take a fact that the repository already shows.
@@ -161,6 +161,41 @@ def halt_of(events: list[dict[str, object]]) -> dict[str, object] | None:
         if event["event"] == "halted":
             return event
     return None
+
+
+def crash_of(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The newest `crashed` event of the run of the events, or None: the run crashed when it comes after the newest `resume`.
+
+    A crash stops a run (#281). The run process ends with no `step-end` and no `run-end`, and a resume goes on with the
+    open step. A journal of an earlier version records a crash in a `step-end` and a `run-end`, and has no `crashed`.
+    """
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return None
+        if event["event"] == "crashed":
+            return event
+    return None
+
+
+def crash_where(ticket: object, phase: object) -> str:
+    """Where a crash stopped the run, from the `ticket` and the `phase` of its `crashed` event: `the verifier of ticket a`."""
+    if phase == CRASH_PHASE_SETUP:
+        return f"the start of ticket {ticket}"
+    if phase == CRASH_PHASE_CHAIN:
+        return f"the verification of the chain at ticket {ticket}"
+    return f"the {phase} of ticket {ticket}"
+
+
+def crash_note(crash: dict[str, object], run_id: str) -> str:
+    """The text of a crash: where it stopped the run, the error, the file of its traceback, and the command that goes on.
+
+    The command of a crash of the step of a `--retry` (`retry` is true) names `--retry` again: the step keeps its old
+    `step-end` with the state `failed`, so a plain resume does not go on with it.
+    """
+    trace = f" (traceback {crash['traceback']})" if crash.get("traceback") else ""
+    where = crash_where(crash.get("ticket"), crash.get("phase"))
+    again = f" --retry {crash.get('ticket')}" if crash.get("retry") else ""
+    return f"crashed at {where}: {crash['error']}: {crash['message']}{trace}; go on with delegate run --resume {run_id}{again}"
 
 
 # The fields of an event that name a file whose change is activity: the event stream of an agent, the log of a gate,

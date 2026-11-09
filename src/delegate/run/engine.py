@@ -143,6 +143,13 @@ the round and the message), and no `step-end` and no `run-end`. The run process
 ends and releases the lock, and a resume goes on at the open step, as after a
 pause. Each other exception is a crash.
 
+A crash stops the run, and leaves the step open (#281). The journal and git hold
+the state of the step, as after a kill. The engine writes the traceback to a
+file of the run directory, and writes `crashed` (the ticket, the phase, the type
+and the message of the exception, and the path of the file), and no `step-end`
+and no `run-end` (see `_record_crash`). A resume goes on at the open step. An
+invariant violation and a moved run branch are no crash: they end the run.
+
 Ctrl-C (SIGINT) stops a run at once, and does not wait for a step boundary. The
 engine releases the lock, records `interrupted` in the journal, and raises
 `RunInterrupted`. The run writes no `run-end`, so a resume goes on as after a
@@ -188,12 +195,12 @@ from .brief import (
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
-from .events import RUN_START, SCHEMA_VERSION
+from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, RUN_START, SCHEMA_VERSION
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
 )
-from .journal import Journal, JournalError, abandoned_end, plan_ids, read_events
+from .journal import Journal, JournalError, abandoned_end, crash_where, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, probe_guard, refusal, stream_path
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
@@ -205,8 +212,17 @@ GATE_OUTPUT_TAIL_CHARS: int = 4000
 # The directory of the run that holds the log file of each gate run, in one directory for each ticket.
 GATE_LOG_DIRECTORY: str = "gates"
 
-# The file of the run directory that holds the traceback of a crash: this prefix, the `seq` of the `step-end`, `.txt`.
+# The file of the run directory that holds the traceback of a crash: this prefix, the `seq` of the `crashed` event (of
+# the `step-end` in a journal of an earlier version), `.txt`.
 CRASH_FILE_PREFIX: str = "crash-"
+
+# The phase of a step that an event of the step starts, for the `phase` of a `crashed` event. An `agent-start` starts
+# the phase of its role, and a valid `report-validation` starts the gates.
+CRASH_PHASE_OF_EVENT: dict[str, str] = {
+    "step-start": domain.PHASE_SPECIALIST, "continuation": domain.PHASE_SPECIALIST, "rebase": domain.PHASE_GATES,
+    "gate-start": domain.PHASE_GATES, "verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP,
+}
+CRASH_PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
 
 BUILT: str = "built"
 FAILED: str = "failed"
@@ -336,6 +352,13 @@ class RunResult:
     # The message of the `AdapterError` that halted the run, or None when it did not halt. `halted_at` says where.
     halted: str | None = None
     halted_at: str | None = None
+    # `<exception type>: <message>` of a crash that stopped the run, or None (#281). `crashed_at` says where, and
+    # `traceback` is the file that holds the traceback, or None when the engine could not write it.
+    crashed: str | None = None
+    crashed_at: str | None = None
+    traceback: str | None = None
+    # The ticket of the step of a `--retry` that the crash stopped, or None: `--retry` goes on with it again.
+    crashed_retry: str | None = None
     # The note of a resume that recorded the hashes of the agent files because its journal holds no record, or None (#205).
     agents_note: str | None = None
 
@@ -427,30 +450,85 @@ def _holds(vcs: VersionControl, repo: Path, ancestor: str, descendant: str) -> b
         return False
 
 
+def _ends_the_run(error: Exception) -> bool:
+    """True for an error that ends the run for good: an invariant violation and a moved run branch. Any other error is a crash."""
+    return isinstance(error, (InvariantViolation, _RunBranchMoved))
+
+
 def _halt_reason(error: Exception) -> str:
-    """The reason a step fails when `error` ends it: an invariant violation and a moved run branch halt the run, any other error is a crash."""
+    """The reason a step fails when an error that ends the run (`_ends_the_run`) ends it."""
     if isinstance(error, InvariantViolation):
         return f"invariant violation: {error}"
-    if isinstance(error, _RunBranchMoved):
-        return f"run branch moved: {error}"
-    return f"crashed: {type(error).__name__}: {error}"
+    return f"run branch moved: {error}"
 
 
-def _crash_fields(journal: Journal, error: Exception) -> dict[str, object]:
-    """The `traceback` field of the `step-end` that records a crash, or no field for any other failure.
+def _crash_phase(events: Sequence[dict[str, object]], ticket_id: str) -> str:
+    """The phase of the step of `ticket_id` that a crash stopped: the phase that the newest event of its newest step started.
+
+    A ticket with no `step-start` crashed before its step started: the phase is `setup`.
+    """
+    own = [e for e in events if e.get("ticket") == ticket_id]
+    starts = [index for index, e in enumerate(own) if e["event"] == "step-start"]
+    if not starts:
+        return CRASH_PHASE_SETUP
+    phase = domain.PHASE_SPECIALIST
+    for event in own[starts[-1] :]:
+        kind = str(event["event"])
+        if kind == "agent-start":
+            phase = CRASH_PHASE_OF_ROLE.get(str(event.get("role")), phase)
+        elif kind == "report-validation" and event.get("valid"):
+            phase = domain.PHASE_GATES
+        elif kind == "gate-start" and event.get("phase") == PHASE_FIXUP:
+            continue  # a gate of a fix-up round is part of the round
+        elif kind in CRASH_PHASE_OF_EVENT:
+            phase = CRASH_PHASE_OF_EVENT[kind]
+    return phase
+
+
+@dataclass(frozen=True)
+class _Crash:
+    """A crash that stopped the run: where, the error, and the file of its traceback (None when it could not be written)."""
+
+    ticket: str
+    phase: str
+    error: str
+    traceback: str | None
+    retry: bool
+
+    @property
+    def where(self) -> str:
+        """Where the crash stopped the run, for the lines of `delegate run`."""
+        return crash_where(self.ticket, self.phase)
+
+
+def _record_crash(journal: Journal, ticket_id: str, error: Exception, phase: str | None = None, retry: bool = False) -> _Crash:
+    """Write the traceback of a crash to a file, and write `crashed` (#281). Return the crash.
 
     The traceback goes to `crash-<seq>.txt` in the run directory, where `<seq>` is the `seq` that the next event gets,
-    so it is the `seq` of the `step-end` (#194). A file that cannot be written does not hide the crash: the event then
-    has no `traceback`.
+    so it is the `seq` of the `crashed` event (#194). A file that cannot be written does not hide the crash: the event
+    then has no `traceback`. The phase is `phase`, or else the phase of the step of the ticket (`_crash_phase`). The
+    engine writes no `step-end` and no `run-end`: the step stays open, and a resume goes on with it, as after a kill.
+
+    `retry` is true for a crash of the step that a `--retry` goes on with. That step keeps its old `step-end` with the
+    state `failed`, so a plain resume does not go on with it: `--retry` goes on with it again. The event then has
+    `retry: true`, and the resume command that the lines of the run give names `--retry`.
     """
-    if isinstance(error, (InvariantViolation, _RunBranchMoved)):
-        return {}
-    trace = journal.path.parent / f"{CRASH_FILE_PREFIX}{journal.next_seq}.txt"
+    if phase is None:
+        try:
+            phase = _crash_phase(read_events(journal.path), ticket_id)
+        except JournalError:
+            phase = CRASH_PHASE_SETUP
+    path = journal.path.parent / f"{CRASH_FILE_PREFIX}{journal.next_seq}.txt"
+    trace: str | None = str(path)
     try:
-        trace.write_text("".join(format_exception(error)))
+        path.write_text("".join(format_exception(error)))
     except OSError:
-        return {}
-    return {"traceback": str(trace)}
+        trace = None
+    journal.append(
+        CRASHED, ticket=ticket_id, phase=phase, error=type(error).__name__, message=str(error),
+        **({"traceback": trace} if trace is not None else {}), **({"retry": True} if retry else {}),
+    )
+    return _Crash(ticket_id, phase, f"{type(error).__name__}: {error}", trace, retry)
 
 
 def _expected_tip(events: list[dict[str, object]]) -> str | None:
@@ -1931,6 +2009,7 @@ def _execute(
     ended_early = False
     paused: str | None = None
     stopped_by: _Halted | None = None
+    crash: _Crash | None = None
     for position, ticket in enumerate(order):
         if ticket.id in complete:
             continue
@@ -1959,19 +2038,22 @@ def _execute(
             stopped_by = halt
             break
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
-            # An exception that the engine did not plan for leaves the state of the
-            # step unknown, so the run ends here. The journal says why. A verifier
-            # that changed the real worktree also ends the run: the state of the
-            # worktree can no longer be trusted.
-            halted, ended_early = isinstance(error, (InvariantViolation, _RunBranchMoved)), True
+            if not _ends_the_run(error):
+                # A crash: an exception that the engine did not plan for. The journal and git hold the state of the
+                # step, as after a kill, so the step stays open and a resume goes on with it (#281).
+                crash = _record_crash(journal, ticket.id, error, retry=plan is not None and ticket.id == plan.ticket)
+                break
+            # A verifier that changed the real worktree ends the run: the state of the worktree can no longer be
+            # trusted. A moved run branch ends it too. The journal says why.
+            ended_early = True
             reason = _halt_reason(error)
-            journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason, **_crash_fields(journal, error))
+            journal.append("step-end", ticket=ticket.id, state=FAILED, reason=reason)
             failed.append(ticket.id)
             failures[ticket.id] = reason
             for unreached in order[position + 1 :]:
                 if unreached.id in complete:
                     continue  # a retry: the ticket ended in the run before
-                skipped[unreached.id] = domain.unreached_reason(ticket.id, halted)
+                skipped[unreached.id] = domain.unreached_reason(ticket.id, True)
                 journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
             break
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)
@@ -1981,14 +2063,24 @@ def _execute(
         else:
             built.append(ticket.id)
     unmapped: list[str] = []
-    if workflow.mode == "economy" and built and not ended_early and paused is None and stopped_by is None:
+    if workflow.mode == "economy" and built and not ended_early and paused is None and stopped_by is None and crash is None:
         chain = _ChainRun(workflow, order, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, built, failed, failures)
+        # The events of the chain verification name the last ticket of the chain. `verify` can fail tickets, so take it first.
+        tip = [t.id for t in order if t.id in built][-1]
         try:
             unmapped = chain.verify()
         except _Paused as stop:
             paused = str(stop)
         except _Halted as halt:
             stopped_by = halt
+        except Exception as error:  # noqa: BLE001 - `verify` raises only a crash; the journal records it
+            crash = _record_crash(journal, tip, error, CRASH_PHASE_CHAIN)
+    if crash is not None:
+        # A crashed run has no `run-end` either: a resume goes on with the open step (#281).
+        return RunResult(
+            run_id, journal.path, built, failed, failures, skipped, unmapped, crashed=crash.error, crashed_at=crash.where,
+            traceback=crash.traceback, crashed_retry=crash.ticket if crash.retry else None, agents_note=agents_note,
+        )
     if stopped_by is not None:
         # A halted run has no `run-end` either: a resume goes on with it.
         where = f"the {stopped_by.role} of ticket {stopped_by.ticket}"
@@ -3655,21 +3747,17 @@ class _ChainRun:
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket
             return self._verify_stacks()
-        except (_Paused, _Halted):
-            raise  # a pause and a halt are no failure of the chain: `_execute` ends the run process with no `run-end`
         except Exception as error:  # noqa: BLE001 - the journal records it and the command reports it
+            if not _ends_the_run(error):
+                raise  # a crash, a pause and a halt are no failure of the chain: `_execute` ends the run process with no `run-end`
             reason = _halt_reason(error)
-            self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built}, error)
+            self._fail({ticket.id: reason for ticket in self.chain if ticket.id in self.built})
             return []
 
-    def _fail(self, reasons: dict[str, str], error: Exception | None = None) -> None:
-        """Fail the built tickets in `reasons`. The newest `step-end` of a ticket wins, so the journal keeps both.
-
-        With the `error` that ended the verification, each `step-end` of a crash names its own file of the traceback.
-        """
+    def _fail(self, reasons: dict[str, str]) -> None:
+        """Fail the built tickets in `reasons`. The newest `step-end` of a ticket wins, so the journal keeps both."""
         for ticket_id, reason in reasons.items():
-            fields = {} if error is None else _crash_fields(self.journal, error)
-            self.journal.append("step-end", ticket=ticket_id, state=FAILED, reason=reason, **fields)
+            self.journal.append("step-end", ticket=ticket_id, state=FAILED, reason=reason)
             self.built.remove(ticket_id)
             self.failed.append(ticket_id)
             self.failures[ticket_id] = reason

@@ -63,6 +63,12 @@ def halted(ticket: str) -> tuple[str, dict[str, object]]:
     return "halted", {"ticket": ticket, "role": "specialist", "message": "the harness failed"}
 
 
+def crashed(ticket: str) -> tuple[str, dict[str, object]]:
+    return "crashed", {
+        "ticket": ticket, "phase": "gates", "error": "EngineError", "message": "git: disk full", "traceback": "/state/runs/r1/crash-9.txt",
+    }
+
+
 # The journal of the report of the owner: a second continuation, then the session, the gate and the verdict of the same ticket.
 def run_past_a_second_continuation(*after: tuple[str, dict[str, object]]) -> tuple[tuple[str, dict[str, object]], ...]:
     return (
@@ -154,8 +160,9 @@ def test_the_row_of_the_ticket_keeps_a_warning_mark_until_the_next_event_of_that
         (run_end("failed", [], ["R5"]), 1),
         (paused("R5"), 7),
         (halted("R5"), 8),
+        (crashed("R5"), 8),
     ],
-    ids=["built", "failed", "paused", "halted"],
+    ids=["built", "failed", "paused", "halted", "crashed"],
 )
 def test_the_live_view_exits_at_the_end_of_the_run_after_a_problem(tmp_path, capsys, monkeypatch, end, code):
     repo = bare_repo(tmp_path)
@@ -166,6 +173,22 @@ def test_the_live_view_exits_at_the_end_of_the_run_after_a_problem(tmp_path, cap
         result, _, err = watch(repo, capsys, monkeypatch, terminal=True)
 
     assert (result, err) == (code, "")
+
+
+def test_the_live_view_ends_at_a_crash_with_a_line_that_names_the_file_of_the_traceback_and_the_resume_command(tmp_path, capsys, monkeypatch):
+    # A crash leaves the step open, and the run process ends (#281): the live view stops there, as at a halt.
+    repo = bare_repo(tmp_path)
+    path = write_journal(repo, "r1", run_start("r1", "R5"), step_start("R5"))
+    ends_with(monkeypatch, path, crashed("R5"))
+
+    with live_lock(path):
+        code, out, err = watch(repo, capsys, monkeypatch, terminal=True)
+
+    assert (code, err) == (8, "")
+    line = next(line for line in frames(out)[-1] if "crashed" in line)
+    assert line.endswith(
+        "crashed · the gates of ticket R5 · EngineError: git: disk full · traceback crash-9.txt · go on with delegate run --resume r1"
+    )
 
 
 def test_the_live_view_goes_on_at_a_problem_that_is_the_newest_event_of_the_replay(tmp_path, capsys, monkeypatch):

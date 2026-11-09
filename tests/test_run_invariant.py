@@ -115,6 +115,7 @@ def test_a_verifier_that_changes_the_real_worktree_halts_the_run_and_the_journal
     assert event_names(events)[-1] == "run-end"
     assert events[-1]["result"] == "failed"
     assert next(e for e in events if e["event"] == "step-end")["state"] == "failed"
+    assert "crashed" not in event_names(events)  # a violation is no crash: it ends the run for good (#281)
     assert "run-branch-advance" not in event_names(events)
     assert git(repo, "rev-parse", "run/demo").strip() == base_tip  # an ACCEPT on disk does not advance the run branch
 
@@ -228,8 +229,8 @@ def test_a_git_failure_of_the_guard_names_the_worktree_where_git_ran(tmp_path, c
 
     code, out, err = run(repo, capsys)
 
-    assert code == 1
-    reason = next(e for e in read_journal(out) if e["event"] == "step-end")["reason"]
+    assert code == 4  # a crash stops the run as a halt does, and leaves the step open (#281)
+    (crashed,) = [e for e in read_journal(out) if e["event"] == "crashed"]
     # The worktree is outside every repository now, so git fails at its first command: the one that reads HEAD.
-    assert reason.startswith("crashed: GuardError: git ")
-    assert f" failed in {real_worktree(repo)}: fatal:" in reason
+    assert crashed["error"] == "GuardError" and crashed["message"].startswith("git ")
+    assert f" failed in {real_worktree(repo)}: fatal:" in crashed["message"]

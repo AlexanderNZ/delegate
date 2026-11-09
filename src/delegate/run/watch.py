@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Protocol
 
 from . import output
-from .journal import ACTIVITY_FIELDS, JournalError, before_after_end, halt_of, is_paused, last_change, read_new_events
+from .journal import (
+    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, crash_of, halt_of, is_paused, last_change, read_new_events,
+)
 
 # A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
 Part = tuple[str, str]
@@ -76,7 +78,10 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     EXIT_STALL: "`--stall-minutes` is set and nothing changed for that time.",
     EXIT_TIME_LIMIT: "`--max-minutes` is set and the time is used.",
     EXIT_PAUSED: "The journal holds `paused`: a pause request stopped the run at a step boundary.",
-    EXIT_HALTED: "The journal holds `halted`: a failure of the harness stopped the run. See [the halt](run.md#a-failure-of-the-harness).",
+    EXIT_HALTED: (
+        "The journal holds `halted` or `crashed`: a failure of the harness or a crash stopped the run. "
+        "See [the halt](run.md#a-failure-of-the-harness) and [the crash](run.md#a-crash-in-a-step)."
+    ),
     EXIT_INTERRUPTED: "Ctrl-C stopped the watch. The run goes on. See [Ctrl-C](#ctrl-c).",
 }
 
@@ -90,7 +95,7 @@ EXIT_CODES: dict[int, str] = {
     EXIT_STALL: "stall",
     EXIT_TIME_LIMIT: "time limit",
     EXIT_PAUSED: "run paused",
-    EXIT_HALTED: "run halted",
+    EXIT_HALTED: "run halted or crashed",
     EXIT_INTERRUPTED: "interrupted",
 }
 
@@ -200,17 +205,20 @@ def ended_run(journal: Path) -> EndedRun | None:
 class StoppedRun:
     """A run with no `run-end` and no live process: its id, the time of the newest event of its journal, and whether it
     is paused. A pause, a halt, a crash, a kill and Ctrl-C stop a run so. `delegate run --resume` goes on with it.
-    `halted` is the message of the `halted` event of a run that a failure of the harness stopped, or None."""
+    `halted` is the message of the `halted` event of a run that a failure of the harness stopped, or None. `crashed` is
+    the text of the `crashed` event of a run that a crash stopped (`journal.crash_note`), or None (#281)."""
 
     run_id: str
     stopped: datetime
     paused: bool
     halted: str | None = None
+    crashed: str | None = None
 
     @property
     def code(self) -> int:
-        """`EXIT_PAUSED` for a paused run, `EXIT_HALTED` for a halted run, and `EXIT_ERROR` for a run that stopped: there is no run to follow."""
-        if self.halted is not None:
+        """`EXIT_PAUSED` for a paused run, `EXIT_HALTED` for a halted or crashed run, and `EXIT_ERROR` for a run that
+        stopped otherwise: there is no run to follow."""
+        if self.halted is not None or self.crashed is not None:
             return EXIT_HALTED
         return EXIT_PAUSED if self.paused else EXIT_ERROR
 
@@ -233,6 +241,9 @@ class StoppedRun:
                 ("", f"no run is active; the newest run {self.run_id} "), ("bad", "halted"), ("", " at "), ("dim", at),
                 ("", f": {self.halted}; {resume}"),
             ]
+        if self.crashed is not None:
+            # The note of the crash ends with the command that goes on.
+            return [("", f"no run is active; the newest run {self.run_id} stopped at "), ("dim", at), ("", ": "), ("bad", self.crashed)]
         if self.paused:
             return [("", f"no run is active; the newest run {self.run_id} "), ("warn", "paused"), ("", " at "), ("dim", at), ("", f"; {resume}")]
         return [("", f"no run is active; the newest run {self.run_id} stopped at {at} with no run-end, and no process works on it; {resume}")]
@@ -242,7 +253,8 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
     """The one line of the newest run when no run is active: the run ended (`ended_run`), or it stopped.
 
     The caller knows that the run is not active. A run whose newest event is not `run-end` then has no live process.
-    It is paused when its newest `paused` comes after its newest `resume`, and halted when its newest `halted` does. Raise JournalError when the journal is not valid.
+    It is paused when its newest `paused` comes after its newest `resume`, halted when its newest `halted` does, and
+    crashed when its newest `crashed` does. Raise JournalError when the journal is not valid.
     """
     ended = ended_run(journal)
     if ended is not None:
@@ -250,9 +262,10 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
     events, _ = read_new_events(journal, 0, 1)
     if not events:
         raise JournalError(f"journal {journal} holds no event")
-    halt = halt_of(events)
+    halt, crash = halt_of(events), crash_of(events)
     return StoppedRun(
         journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), is_paused(events), None if halt is None else str(halt["message"]),
+        None if crash is None else crash_note(crash, journal.parent.name),
     )
 
 
@@ -298,14 +311,14 @@ def _result_code(result: object) -> int:
     return EXIT_SUCCEEDED if result == "built" else EXIT_FAILED
 
 
-# The events that stop the run process, and so end a watch: the end of the run, a pause at a step boundary, and a halt
-# (a failure of the harness).
-RUN_STOPS: tuple[str, ...] = ("run-end", "paused", "halted")
+# The events that stop the run process, and so end a watch: the end of the run, a pause at a step boundary, a halt
+# (a failure of the harness), and a crash (#281).
+RUN_STOPS: tuple[str, ...] = ("run-end", "paused", "halted", "crashed")
 
 
 def _stop_code(event: dict[str, object]) -> int:
     """The exit code of an event of `RUN_STOPS`."""
-    if event["event"] == "halted":
+    if event["event"] in ("halted", "crashed"):
         return EXIT_HALTED
     return EXIT_PAUSED if event["event"] == "paused" else _result_code(event["result"])
 

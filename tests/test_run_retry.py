@@ -30,6 +30,27 @@ def first_run(repo, capsys):
     return code, next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
 
 
+def as_an_earlier_version_ended_the_crash(repo, run_id, unreached):
+    """Make the journal of a run that crashed what the engine of 1.19.2 and before wrote: no `crashed`, but a `step-end`
+    `failed`, a `skip` for each ticket in `unreached`, and a `run-end` `failed`. A crash now leaves the step open (#281).
+    Git holds the same state after both versions, so only the end of the journal differs.
+    """
+    path = journal_path(repo, run_id)
+    events = read_journal_file(repo, run_id)
+    crashed = events.pop()
+    assert crashed["event"] == "crashed"
+    path.write_text("".join(json.dumps(event) + "\n" for event in events))
+    ticket_id = crashed["ticket"]
+    built = [e["ticket"] for e in events if e["event"] == "step-end" and e["state"] == "built"]
+    reason = f"the run ended after ticket {ticket_id} crashed"
+    append_events(
+        path,
+        ("step-end", {"ticket": ticket_id, "state": "failed", "reason": f"crashed: {crashed['error']}: {crashed['message']}"}),
+        *[("skip", {"ticket": t, "blockers": [], "reason": reason}) for t in unreached],
+        ("run-end", {"result": "failed", "built": built, "failed": [ticket_id], "skipped": list(unreached)}),
+    )
+
+
 def end_with_no_verdict(scripted, scoped_only):
     """The harness ends a verifier at its time limit: exit status -9, and no report. `scoped_only` limits it to the fix-up verifier."""
 
@@ -389,14 +410,15 @@ def test_the_dry_run_of_a_resume_says_that_the_dependant_of_a_ticket_that_runs_a
 def test_the_dry_run_of_a_resume_says_that_a_ticket_that_a_crash_left_unreached_stays_skipped_until_a_retry_of_that_step(
     tmp_path, capsys, scripted
 ):
-    # The verifier of a raises, so the step crashes, the run ends, and b is not reached. A plan change adds c.
+    # The verifier of a raises, so the step crashes. The engine of an earlier version then ended the run, and b is not
+    # reached. A plan change adds c.
     def crash(request):
         raise RuntimeError("the harness broke")
 
     scripted.during_verifier = crash
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
     code, run_id = first_run(repo, capsys)
-    assert code == 1
+    as_an_earlier_version_ended_the_crash(repo, run_id, ["b"])
     (repo / "workflow.toml").write_text(HEAD + ticket("a") + ticket("b") + ticket("c"))
 
     code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
@@ -412,15 +434,51 @@ def test_the_dry_run_of_a_resume_says_that_a_ticket_that_a_crash_left_unreached_
     assert skipped_section(out) == ["  ticket b: runs again"]
 
 
+def test_a_crash_in_the_step_of_a_retry_names_the_retry_again_and_a_second_retry_builds_the_step(tmp_path, capsys, scripted):
+    # The step keeps its old `step-end` failed after the crash, so a plain resume would not go on with it (#281).
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    end_with_no_verdict(scripted, scoped_only=False)
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+
+    def crash(request):
+        raise RuntimeError("the harness broke")
+
+    scripted.during_verifier = crash
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert code == 4
+    crashed = read_journal_file(repo, run_id)[-1]
+    assert (crashed["event"], crashed["ticket"], crashed["phase"], crashed["retry"]) == ("crashed", "a", "verifier", True)
+    assert f"crashed at the verifier of ticket a; go on with delegate run --resume {run_id} --retry a" in out
+    assert delegate_status_note(repo, capsys).endswith(f"; go on with delegate run --resume {run_id} --retry a")
+    healthy(scripted, "ACCEPT")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, "")
+    end = read_journal_file(repo, run_id)[-1]
+    assert (end["event"], end["result"], end["built"], end["failed"]) == ("run-end", "built", ["a"], [])
+
+
+def delegate_status_note(repo, capsys):
+    """The note of `delegate status --json` for the newest run of `repo`."""
+    from delegate.cli import delegate
+
+    assert delegate.main(["status", "--repo", str(repo), "--json"]) == 0
+    return json.loads(capsys.readouterr().out)["note"]
+
+
 def test_an_assure_retry_of_a_step_that_crashed_builds_the_tickets_that_the_run_did_not_reach(tmp_path, capsys, scripted):
-    # The verifier of a raises, so the step crashes, the run ends, and b, which does not wait on a, is not reached.
+    # The verifier of a raises, so the step crashes. The engine of an earlier version then ended the run, and b, which
+    # does not wait on a, is not reached. A retry of that journal still goes on as before (#281).
     def crash(request):
         raise RuntimeError("the harness broke")
 
     scripted.during_verifier = crash
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
     code, run_id = first_run(repo, capsys)
-    assert code == 1
+    as_an_earlier_version_ended_the_crash(repo, run_id, ["b"])
     (skip,) = [e for e in read_journal_file(repo, run_id) if e["event"] == "skip"]
     assert (skip["ticket"], skip["reason"]) == ("b", "the run ended after ticket a crashed")
     healthy(scripted, "ACCEPT", "ACCEPT")
@@ -443,7 +501,7 @@ def test_a_run_that_ends_with_a_skipped_ticket_and_no_failed_step_exits_one(tmp_
     scripted.during_verifier = crash
     repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b"))
     code, run_id = first_run(repo, capsys)
-    assert code == 1
+    as_an_earlier_version_ended_the_crash(repo, run_id, ["b"])
     append_events(
         journal_path(repo, run_id),
         ("resume", {"run_id": run_id, "built": [], "failed": ["a"], "skipped": ["b"], "open": None}),

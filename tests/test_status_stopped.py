@@ -63,3 +63,35 @@ def test_a_run_whose_lock_holder_is_alive_is_running(tmp_path, capsys):
     assert (json_code, json_err) == (0, "")
     snapshot = json.loads(printed)
     assert (snapshot["state"], snapshot["note"]) == ("running", None)
+
+
+CRASHED = ("crashed", {"ticket": "a", "phase": "gates", "error": "EngineError", "message": "disk full", "traceback": "/x/crash-3.txt"})
+CRASH_NOTE = "note: crashed at the gates of ticket a: EngineError: disk full (traceback /x/crash-3.txt); go on with delegate run --resume r1"
+
+
+def test_a_crashed_run_is_stopped_with_the_crash_and_the_resume_command_also_before_its_process_releases_the_lock(tmp_path, capsys):
+    # A crash ends the run process (#281): the run is stopped from its `crashed` event, not only when the lock is gone.
+    repo = bare_repo(tmp_path)
+    journal = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), CRASHED)
+
+    with live_lock(journal):
+        code, out, err = status(repo, capsys, "r1")
+        json_code, printed, _ = status(repo, capsys, "r1", "--json")
+
+    assert (code, err) == (0, "")
+    assert out.splitlines()[:2] == ["run r1: stopped (mode assure, adapter scripted)", CRASH_NOTE]
+    snapshot = json.loads(printed)
+    assert (json_code, snapshot["state"], snapshot["note"], snapshot["eta"]) == (0, "stopped", CRASH_NOTE.removeprefix("note: "), None)
+
+
+def test_a_crash_that_a_resume_follows_is_history_and_the_resumed_run_is_running(tmp_path, capsys):
+    repo = bare_repo(tmp_path)
+    resume = ("resume", {"run_id": "r1", "built": [], "failed": [], "skipped": {}, "open": "a"})
+    journal = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), CRASHED, resume)
+
+    with live_lock(journal):
+        code, out, err = status(repo, capsys, "r1")
+
+    assert (code, err) == (0, "")
+    assert out.splitlines()[0] == "run r1: running (mode assure, adapter scripted)"
+    assert "crashed" not in out
