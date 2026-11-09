@@ -294,6 +294,37 @@ def test_the_idle_end_also_ends_the_child_processes_of_the_session(tmp_path, mon
     assert gone, "a child process of the session stayed alive"
 
 
+def test_a_process_that_the_harness_left_in_the_background_ends_with_the_session(tmp_path, monkeypatch):
+    # A harness that exits 0 can leave a background process (`nohup ... &`) that writes to the worktree later (#274).
+    child_pid = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    child = int(child_pid.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the session left its child alive
+    assert gone, "a background process of the session stayed alive after the session"
+    assert (result.exit_status, result.end_state, result.ended_idle, result.ended_timeout) == (0, "finished", False, False)
+
+
+def test_the_end_of_the_group_keeps_the_exit_status_of_a_session_that_exited_with_an_error(tmp_path, monkeypatch):
+    child_pid = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", exit_status=3)
+
+    result = adapters.get("claude-code").run(request(tmp_path))
+
+    child = int(child_pid.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)
+    assert gone, "a background process of the session stayed alive after the session"
+    assert (result.exit_status, result.end_state) == (3, "finished")
+
+
 def test_a_session_whose_report_is_not_valid_is_not_ended_at_the_idle_timeout(tmp_path, monkeypatch):
     claude_fake.install(tmp_path, monkeypatch, "finished.jsonl", hold_seconds=1.5)
     started = time.monotonic()

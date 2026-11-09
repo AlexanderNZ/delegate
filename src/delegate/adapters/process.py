@@ -19,7 +19,8 @@ the report is, the helper ends it in the same way and tells the caller that it e
 
 The process starts in a session of its own, so it is the leader of a process group that holds each process it starts
 (#178). `end_group` sends the signals to the group, not to the leader only: no child of the harness stays alive after
-the helper ended it. An interrupt, as Ctrl-C or SIGTERM to the engine raises it, or any other exception while the helper
+the helper ended it. After each exit of the process, also a normal one, the helper ends the group too (#274): a process that
+the harness left in the background does not outlive the session. A process that left the group (`setsid`) is out of scope. An interrupt, as Ctrl-C or SIGTERM to the engine raises it, or any other exception while the helper
 waits, ends the group before the exception leaves the helper, so the engine releases its lock after the group is gone.
 """
 
@@ -38,6 +39,9 @@ from .environment import process_environment
 
 # The seconds that a process has to exit after SIGTERM, before SIGKILL.
 TERMINATE_GRACE_SECONDS: float = 10.0
+
+# The seconds that a process left in the group has to exit after SIGTERM, when the leader of the group exited already.
+LEFTOVER_GRACE_SECONDS: float = 2.0
 
 # The longest time between two looks at the stream while the process runs.
 POLL_SECONDS: float = 1.0
@@ -66,6 +70,29 @@ def end_group(process: subprocess.Popen, grace: float | None = None) -> None:
     finally:
         _signal_group(process, signal.SIGKILL)
     process.wait()
+
+
+def _group_is_alive(process: subprocess.Popen) -> bool:
+    """True when a process of the group of `process` can still get a signal."""
+    try:
+        os.killpg(process.pid, 0)
+    except (ProcessLookupError, PermissionError):  # no group, or a group that holds only zombies
+        return False
+    return True
+
+
+def end_leftovers(process: subprocess.Popen, grace: float = LEFTOVER_GRACE_SECONDS) -> None:
+    """End each process that stays in the group of `process` after its leader exited (#274).
+
+    A harness can leave a background process (`nohup ... &`, a test runner in watch mode, a server). The process can write to the
+    worktree after the session. This sends SIGTERM to the group, waits up to `grace` seconds for the group to empty, and sends SIGKILL.
+    It returns at once when no process is left. A process that left the group (`setsid`) is out of scope.
+    """
+    _signal_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while _group_is_alive(process) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    _signal_group(process, signal.SIGKILL)
 
 
 @dataclass(frozen=True)
@@ -101,6 +128,7 @@ def run_harness(command: Sequence[str], request: AdapterRequest, env: Mapping[st
         except BaseException:
             end_group(process)  # an interrupt or an error: no process of the harness stays alive after the helper
             raise
+        end_leftovers(process)  # the process exited: no process that it started stays alive after the session (#274)
         stderr.seek(0)
         return HarnessExit(process.returncode, stderr.read(), ended_idle, ended_timeout)
 
