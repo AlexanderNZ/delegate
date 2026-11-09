@@ -237,3 +237,13 @@ def test_the_committed_abbreviations_file_matches_the_committed_glossary():
     """The drift test of the file. A change of `docs/glossary.md` with no `delegate docs` fails it."""
     assert delegate.main(["docs", "--check", "--root", str(ROOT)]) == 0, "run `delegate docs` and commit the result"
     assert (ROOT / FILE).is_file()
+
+
+@outside_the_package
+def test_the_hover_text_of_fix_up_names_each_cause_of_a_fix_up_round():
+    """The hover text is the first sentence of the entry. A split of that sentence must keep all three causes."""
+    line = next(l for l in (ROOT / FILE).read_text().splitlines() if l.startswith("*[fix-up]:"))
+    hover = line.split(": ", 1)[1]
+    assert "REJECT" in hover
+    assert "red gates after a fix-up" in hover
+    assert "economy" in hover
