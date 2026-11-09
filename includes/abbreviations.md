@@ -114,10 +114,10 @@
 *[Finding codes]: A finding code is the code that the validator writes for one problem in a rendered agent file, for example MISSING_TWIN.
 *[finding code]: A finding code is the code that the validator writes for one problem in a rendered agent file, for example MISSING_TWIN.
 *[finding codes]: A finding code is the code that the validator writes for one problem in a rendered agent file, for example MISSING_TWIN.
-*[Fix-up]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of the chain in economy mode: the specialist adds a new commit for the findings or the red gates, and a fresh verifier checks the delta.
-*[Fix-ups]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of the chain in economy mode: the specialist adds a new commit for the findings or the red gates, and a fresh verifier checks the delta.
-*[fix-up]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of the chain in economy mode: the specialist adds a new commit for the findings or the red gates, and a fresh verifier checks the delta.
-*[fix-ups]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of the chain in economy mode: the specialist adds a new commit for the findings or the red gates, and a fresh verifier checks the delta.
+*[Fix-up]: A fix-up is the round that follows a REJECT.
+*[Fix-ups]: A fix-up is the round that follows a REJECT.
+*[fix-up]: A fix-up is the round that follows a REJECT.
+*[fix-ups]: A fix-up is the round that follows a REJECT.
 *[Fixup]: See Fix-up.
 *[Frontmatter hook]: See Harness hook.
 *[Gate]: A gate is a command that proves that a change is good in a repository, for example the test suite or the build.
