@@ -20,7 +20,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import (
-    Terminal, append_events, bare_repo, frames, live_lock, run_end, run_start, step_end, step_start, without_titles,
+    Terminal, append_events, bare_repo, final_screen, frames, live_lock, run_end, run_start, step_end, step_start, without_titles,
     write_journal,
 )
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
@@ -123,7 +123,7 @@ def test_on_a_terminal_the_answer_2_follows_the_second_run_in_the_live_view(
     assert out.count(PROMPT) == 1
     drawn = frames(out)
     assert drawn and all(frame[0].startswith("run assure  ") for frame in drawn)
-    assert out.splitlines()[-1] == "position 6"
+    assert final_screen(out)[-1] == "position 6"
 
 
 def test_on_a_terminal_watch_from_a_position_shows_the_picker_and_goes_on_from_the_position_in_the_chosen_run(

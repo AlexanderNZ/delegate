@@ -709,11 +709,6 @@ class Terminal(io.StringIO):
 # A control sequence of the terminal: the live view moves the cursor, clears lines, hides the cursor and begins a synchronized update with them.
 CONTROL = re.compile(r"\x1b\[[?0-9;]*[A-Za-z]")
 
-# The sequences that start and end one frame of the live view: the cursor goes home, and the screen is cleared below the frame.
-FRAME_START = "\x1b[H"
-FRAME_END = "\x1b[J"
-
-
 # The OSC 2 sequence that sets the title of the terminal (ESC ] 2 ; <title> BEL). `delegate` writes it on a terminal.
 TITLE = re.compile("\x1b\\]2;([^\x07]*)\x07")
 
@@ -747,9 +742,58 @@ def without_titles(out: str) -> str:
     return TITLE.sub("", out)
 
 
+# The sequences that move the cursor or clear, and the end of a synchronized update. The rest is text and paint.
+_MOVES = re.compile(r"\x1b\[(?:(\d+);1H|(H)|(K)|(J)|(2J)|\?25[lh]|\?2026h|(\?2026l))|\n")
+
+
+def replay(out: str) -> tuple[list[list[str]], list[str]]:
+    """Replay the output of the live view of `watch` on a terminal.
+
+    Return the screen after each synchronized update, in order, and the screen at the end. A screen is the lines that the
+    terminal shows, each with its paint. The sequences that move the cursor to a line, clear to the end of a line and clear
+    below the cursor change the screen as they do on a terminal. A draw that writes nothing is not an update, so it adds no
+    screen.
+    """
+    text, shown, screen = TITLE.sub("", out), [], []
+    row, at_start, position = 0, True, 0
+    for move in _MOVES.finditer(text):
+        chunk = text[position:move.start()]
+        if chunk:
+            screen.extend([""] * (row + 1 - len(screen)))
+            screen[row], at_start = chunk, False
+        position = move.end()
+        if move.group(0) == "\n":
+            row, at_start = row + 1, True
+        elif move.group(1):
+            row, at_start = int(move.group(1)) - 1, True
+        elif move.group(2):
+            row, at_start = 0, True
+        elif move.group(4):  # clear from the cursor: the line of the cursor stays when text was written on it
+            del screen[row if at_start else row + 1:]
+        elif move.group(5):
+            screen = []
+        elif move.group(6):
+            shown.append(list(screen))
+    chunk = text[position:]
+    if chunk:
+        screen.extend([""] * (row + 1 - len(screen)))
+        screen[row] = chunk
+    return shown, screen
+
+
+def screens(out: str) -> list[list[str]]:
+    """The screen that the live view of `watch` shows after each synchronized update, in order, as the lines of the frame."""
+    return replay(out)[0]
+
+
+def final_screen(out: str) -> list[str]:
+    """The lines that the terminal shows at the end of the output, with no paint: the frame, and the lines after it."""
+    return [CONTROL.sub("", line) for line in replay(out)[1]]
+
+
 def frames(out: str) -> list[list[str]]:
     """The frames that the live view of `watch` drew, in order, each as its lines with no control sequence."""
-    return [CONTROL.sub("", chunk.split(FRAME_END)[0]).splitlines() for chunk in out.split(FRAME_START)[1:]]
+    return [[CONTROL.sub("", line) for line in screen] for screen in screens(out)]
 
 
 def write_project_agents(repo: Path) -> None:

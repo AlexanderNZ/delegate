@@ -101,9 +101,8 @@ def test_under_30_seconds_the_live_tail_and_the_waiting_line_show_a_spinner_that
 def test_from_30_seconds_the_live_tail_and_the_waiting_line_show_quiet_in_dim_and_do_not_move(tmp_path, monkeypatch):
     drawn, seconds, out = watch_waits(tmp_path, monkeypatch, idle=45, waits=2)
 
-    # Two polls and the last frame: no redraw between two polls.
-    assert len(drawn) == 3
-    assert drawn[0] == drawn[1]
+    # Two polls and the last frame: the second poll has the frame of the first, so it writes nothing (#282).
+    assert len(drawn) == 2
     assert drawn[0][ROW_OF_70].endswith("  quiet 45s")
     assert drawn[0][-1] == "16:56  #70  verifier running · 45s · 0 new · 0 cache · quiet 45s"
     assert "\x1b[2mquiet 45s\x1b[0m" in out
@@ -114,8 +113,7 @@ def test_from_30_seconds_the_live_tail_and_the_waiting_line_show_quiet_in_dim_an
 def test_past_the_stall_time_the_live_tail_shows_the_idle_warning_and_does_not_move(tmp_path, monkeypatch):
     drawn, seconds, out = watch_waits(tmp_path, monkeypatch, idle=400, waits=2)
 
-    assert len(drawn) == 3
-    assert drawn[0] == drawn[1]
+    assert len(drawn) == 2  # the second poll has the frame of the first, so it writes nothing (#282)
     assert drawn[0][ROW_OF_70].endswith("  ⚠ idle 6m40s")
     assert drawn[0][-1].endswith(" · ⚠ idle 6m40s")
     assert "\x1b[33m⚠ idle 6m40s\x1b[0m" in out
@@ -143,8 +141,7 @@ def test_with_no_color_there_is_no_spinner_and_the_line_reads_active_ago(tmp_pat
 
     drawn, seconds, out = watch_waits(tmp_path, monkeypatch, idle=20, waits=2)
 
-    assert len(drawn) == 3
-    assert drawn[0] == drawn[1]
+    assert len(drawn) == 2  # the second poll has the frame of the first, so it writes nothing (#282)
     assert drawn[0][ROW_OF_70].endswith("  active 20s ago")
     assert drawn[0][-1] == "16:56  #70  verifier running · 20s · 0 new · 0 cache · active 20s ago"
     assert not set(SPINNER) & set(out)

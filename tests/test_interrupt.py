@@ -22,7 +22,7 @@ from delegate.cli import delegate
 from .support import state_dir
 from .support import (
     TITLE, Terminal, bare_repo, event_names, frames, journal_path, live_lock, make_repo, read_journal, read_journal_file,
-    resume_main, run_start, step_start, ticket_of, write_journal,
+    resume_main, run_start, step_start, ticket_of, without_titles, write_journal,
 )
 from .test_run_multi import HEAD, ticket
 
@@ -100,7 +100,7 @@ def test_ctrl_c_in_the_live_view_restores_the_cursor_the_end_of_the_frame_and_th
     assert "Traceback" not in err
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
     # The output ends with the end of a whole frame and its synchronized update, and the sequence that shows the cursor.
-    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
+    assert without_titles(out).endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
     assert any("#a   started" in line for line in frames(out)[-1])
     # The title no longer gives the progress: it gives the reason that the watch ended.
     assert TITLE.findall(out)[-1] == "delegate watch · r1 · interrupted"
@@ -130,7 +130,7 @@ def test_ctrl_c_while_a_frame_is_written_draws_a_whole_frame_before_the_line(tmp
 
     assert code == INTERRUPTED
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
-    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
+    assert without_titles(out).endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
     assert any("#a   started" in line for line in frames(out)[-1])
 
 
@@ -155,7 +155,7 @@ def test_a_stop_signal_in_the_live_view_ends_the_watch_as_ctrl_c_does_and_shows_
 
     assert code == INTERRUPTED
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
-    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
+    assert without_titles(out).endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
     assert restored is unhandled  # the watch puts the handler of before back
 
 
@@ -174,7 +174,7 @@ def test_an_error_of_the_journal_in_the_live_view_shows_the_cursor_again_before_
 
     assert code == 2
     assert err.startswith("delegate watch: ") and "Traceback" not in err
-    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
+    assert without_titles(out).endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
 
 
 @pytest.mark.parametrize("command", [["status", "r1"], ["pause", "r1"], ["status", "--json"]])

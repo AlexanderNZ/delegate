@@ -30,7 +30,7 @@ import pytest
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import CONTROL, TITLE, Terminal, bare_repo, frames, hold_lock, journal_path, without_titles
+from .support import CONTROL, TITLE, Terminal, bare_repo, final_screen, frames, hold_lock, journal_path, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 PYTEST = "nix develop -c python3 -m pytest -q"
@@ -225,7 +225,7 @@ def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_runn
         "─" * 200,
         *FEED,
     ]
-    assert CONTROL.sub("", out).splitlines()[-1] == f"position {run.seq}"
+    assert final_screen(out)[-1] == f"position {run.seq}"
 
 
 HIDE_CURSOR = "\x1b[?25l"
@@ -253,8 +253,11 @@ def test_the_live_view_hides_the_cursor_before_the_first_frame_draws_each_frame_
     assert len(updates) == 2 == shown.count(SYNC_END)
     assert all(update.count(SYNC_END) == 1 for update in updates)
     assert updates[0].endswith("\x1b[J\n" + SYNC_END)
-    # The cursor shows again after the last frame, before the line `position`.
-    assert updates[1].endswith("\x1b[J\n" + SYNC_END + SHOW_CURSOR + f"position {run.seq}\n")
+    # The first frame has 11 lines, and the last frame has 10: the update writes the lines that changed, and the cursor goes
+    # to line 11, under the frame, and clears the screen below it (#282). The cursor shows again after the update, before the
+    # line `position`.
+    assert "\x1b[H" not in updates[1]
+    assert updates[1].endswith("\x1b[11;1H\x1b[J" + SYNC_END + SHOW_CURSOR + f"position {run.seq}\n")
     assert shown.count(SHOW_CURSOR) == 1
 
 
@@ -357,7 +360,7 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
         "16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json",
     ]
     assert last[-3:-1] == first[-2:]
-    assert CONTROL.sub("", out).splitlines()[-1] == "position 6"
+    assert final_screen(out)[-1] == "position 6"
 
 
 def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its_stack_and_joins_the_end_of_the_run(
@@ -566,7 +569,7 @@ def test_each_end_reason_has_the_exit_code_and_the_position_of_before_on_a_termi
     live, live_out = watch(repo, monkeypatch, *extra, terminal=True, sleep=poll)
 
     assert piped == live == code
-    assert raw_out.splitlines()[-1] == CONTROL.sub("", live_out).splitlines()[-1] == f"position {run.seq}"
+    assert raw_out.splitlines()[-1] == final_screen(live_out)[-1] == f"position {run.seq}"
     if raw is not None:
         assert raw_out == raw.format(dir=run.dir)
     assert re.fullmatch(feed_end, frames(live_out)[-1][-1]), frames(live_out)[-1]

@@ -155,8 +155,9 @@ def test_the_live_view_parses_an_unchanged_stream_of_a_running_agent_once_over_m
 
     drawn = frames(out.getvalue())
     assert (code, len(waits)) == (0, 3)
-    assert len(drawn) >= 4  # the first poll, two more with the agent running, and the last frame
-    assert any("12k new" in line for line in drawn[1]), drawn[1]
+    # Three polls with the agent running, and the last frame. The polls draw one frame, so the view writes it once (#282).
+    assert len(drawn) == 2
+    assert any("12k new" in line for line in drawn[0]), drawn[0]
     assert reader.parsed.count("a.specialist.stream.jsonl") == 1
 
 

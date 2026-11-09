@@ -27,7 +27,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, frames
+from .support import TITLE, Terminal, bare_repo, frames, screens
 from .test_watch_live import PYTEST, START, Run
 
 # The ticket ids and the blockers of the frames of the design (screen-map.md): 72 after 66, 67 after 72, 70 after 69,
@@ -547,8 +547,7 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
 
 def painted_frames(out: str) -> list[list[str]]:
     """The frames as the terminal gets them, with the paint of each role, and with no other control sequence."""
-    chunks = TITLE.sub("", out).split("\x1b[H")[1:]
-    return [chunk.split("\x1b[J")[0].replace("\x1b[K", "").replace("\x1b[2J", "").splitlines() for chunk in chunks]
+    return screens(out)
 
 
 def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch):
