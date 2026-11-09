@@ -788,6 +788,19 @@ end.
    stays ready, also when the retry stopped before its step. A ticket with a
    blocker that is still not built stays skipped. A run that ends with a
    failed step or a skipped ticket exits 1.
+   A resume reads the workflow file again, and refuses a change of the
+   configuration of a stack: its gates, its hotspots, its `prepare`, its MCP
+   servers, its notes or its timeouts. A wrong gate, a timeout that is too
+   short, or an MCP server that moved can need such a change. Edit the stack
+   in the workflow file, run
+   `delegate run --resume <run-id> --stack-changed --dry-run`, and show the
+   difference to the owner. Then add `--stack-changed` to the resume or to the
+   retry, for example
+   `delegate run --detach --resume <run-id> --retry <ticket> --stack-changed`.
+   The engine writes `stack-change` with the old and the new value of each
+   changed field, before `resume`. A later resume compares with it, so it
+   needs no flag. The flag with no change of a stack is refused. A change of
+   `ticket-start` or `keep-worktrees` is never accepted: start a new run.
    An invariant violation halts a run for good: a resume, a plan change and a
    retry of that run are refused. Start a new run.
 
@@ -872,6 +885,7 @@ and show its output to the owner with the command.
 | --- | --- |
 | An invalid verdict: the verifier wrote a verdict that the engine refuses, and the step failed | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket>`. The retry uses the worktree and the commits again. |
 | A failed economy chain: the gates or the verifier of the chain failed after the fix-up rounds, also for a gate that failed one time and then passes | Tell the owner. Then run `delegate run --detach --resume <run-id> --retry <tip>`, where `<tip>` is the ticket at the tip of the chain: the retry line at the end of the run names it. The retry needs no commit. It builds the other tickets of the chain again, runs the gates on the tip again, and starts a fresh verifier. The fix-up rounds before the retry do not count. Do not run the verifier outside the engine. |
+| A stack of the run must change in the middle of the run: a gate that is wrong (it fails for a cause that is not the work), a timeout that is too short, or an MCP server that moved | Tell the owner what changes and why. Edit the stack in the workflow file. Run `delegate run --resume <run-id> --stack-changed --dry-run` and show the difference to the owner: it exits 0 and says that the resume records it. Then run `delegate run --detach --resume <run-id> --stack-changed`, with `--retry <ticket>` when a step failed because of the stack. The journal records `stack-change`. Without the flag, the engine refuses the resume and names it. Do not give the flag when no stack changes: the engine refuses that too. |
 | A specialist reported `partial` or `blocked` for a cause that is not a hotspot, in `assure` mode: for example, the permission mode of the host refused the edit of a file | Tell the owner. Remove the cause, for example give the permission that the host refused. Then run `delegate run --detach --resume <run-id> --retry <ticket>`. The specialist continues in the worktree of the step, with its commits, and the continuation brief gives the `blocked_reason` of its report. The retry line at the end of the run names this retry. Do not start the ticket again with a new text: that loses the commits of the specialist. When the reason names a hotspot path, use the next row. |
 | Red gates that need a change of a hotspot path, for example a committed agent pair that is not the render of the code: the specialist or the fix-up specialist reported `partial` or `blocked`, and named the coordinator | Make the change yourself, as one commit on the branch of the ticket, in its worktree. In `economy` mode, use the ticket at the tip of the chain. The commit changes only hotspot paths. Then run `delegate run --detach --resume <run-id> --retry <ticket> --coordinator-commit <sha>`. The hotspot check does not count that commit, and the gates and the verifier check it. Do not finish the chain outside the engine. |
 | A new ruling of the owner in the middle of a run, for a ticket that failed | Edit the text of that ticket in the workflow. Run `delegate run --resume <run-id> --retry <ticket> --dry-run` and show the verdict to the owner. Then run `delegate run --detach --resume <run-id> --retry <ticket> --reviewed all`. In `economy` mode, the text of a ticket that the verification of the chain failed cannot change: add new tickets after the chain, as the next row tells. |

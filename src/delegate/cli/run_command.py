@@ -155,6 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
         "it as the agents of the run; without it, a file of a seal that differs from the record of the run fails the step",
     )
     parser.add_argument(
+        "--stack-changed", action="store_true",
+        help="with --resume, go on with a workflow file that changes the configuration of a stack, and record the change in a "
+        "stack-change event before the resume event, with the old and the new value of each changed field; later resumes compare "
+        "with it; the flag with no change of a stack is refused; with --dry-run it prints the difference and exits 0",
+    )
+    parser.add_argument(
         "--break-lock", action="store_true",
         help="not necessary, and 2.0.0 removes it: a lock that no process holds is free, so the run takes it; with the flag, "
         "the run prints that the lock is free",
@@ -237,6 +243,16 @@ def _detach(argv: list[str], run_id: str, repo: Path, resume: bool, vcs: GitVers
     return 0
 
 
+def _print_stack_changes(review: PlanReview) -> None:
+    """Print the difference that `--stack-changed` lets the resume record (#290), and say that the resume records it. Print nothing without it."""
+    for change in review.stack_changes:
+        print(f"stack {change.stack!r}: {', '.join(change.fields)}")
+        for name, (old, new) in change.fields.items():
+            print(f"  {name}: was {json.dumps(old)}, now {json.dumps(new)}")
+    if review.stack_changes:
+        print("the resume will record the change in a stack-change event")
+
+
 def _print_review(review: PlanReview) -> int:
     """Print what a resume does with the plan of the run: the orders, the verdict of each rule, and the later tickets.
 
@@ -245,6 +261,7 @@ def _print_review(review: PlanReview) -> int:
     if review.check is None:
         print(f"run {review.run_id}: no plan change")
         print(f"order: {', '.join(review.new_order)}")
+        _print_stack_changes(review)
         _print_skipped(review)
         _print_retry(review)
         problems = [*review.problems(), *_retry_problem(review)]
@@ -257,6 +274,7 @@ def _print_review(review: PlanReview) -> int:
     print(f"new order: {', '.join(review.new_order)}")
     for rule, verdict, detail in review.verdicts():
         print(f"rule {rule}: {verdict}: {PLAN_RULES[rule]}: {detail}")
+    _print_stack_changes(review)
     if check.later:
         print(f"later tickets to review, in plan order: {', '.join(check.later)}")
     for ticket in review.new_order:
@@ -342,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--reviewed needs --resume RUN_ID")
     if args.agents_changed and args.resume is None:
         parser.error("--agents-changed needs --resume RUN_ID")
+    if args.stack_changed and args.resume is None:
+        parser.error("--stack-changed needs --resume RUN_ID")
     reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
@@ -376,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
             review = review_plan_change(
                 workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location,
                 coordinator_commit=args.coordinator_commit, config_paths=project_config_paths(adapters.get(workflow.adapter)),
+                stack_changed=args.stack_changed,
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -396,7 +417,7 @@ def main(argv: list[str] | None = None) -> int:
                 location = check_start(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
                     break_lock=args.break_lock, reviewed=reviewed, retry=args.retry,
-                    coordinator_commit=args.coordinator_commit, detach=True, location=location,
+                    coordinator_commit=args.coordinator_commit, detach=True, location=location, stack_changed=args.stack_changed,
                 )
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
@@ -420,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
                     agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit, location=location,
+                    stack_changed=args.stack_changed,
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

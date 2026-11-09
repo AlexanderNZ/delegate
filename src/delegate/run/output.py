@@ -238,3 +238,8 @@ def gate_name_of(event: dict[str, object]) -> str:
 def without_paths(text: str) -> str:
     """The text with each absolute path cut to its last part."""
     return ABSOLUTE_PATH.sub(lambda match: match.group(1), text)
+
+
+def stack_change_line(event: dict[str, object]) -> str:
+    """The one line of a `stack-change` event (#290): `stack python changed: gates, agent_timeout`. It names the stack and the changed fields, and no value."""
+    return f"stack {event['stack']} changed: {', '.join(event['changes'])}"  # type: ignore[call-overload]

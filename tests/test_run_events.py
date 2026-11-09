@@ -39,6 +39,7 @@ PROSE: dict[str, set[str]] = {
     "step-end": {"economy", "failed"},
     "cleanup": {"built"},
     "run-end": {"abandoned"},
+    "stack-change": {"resume"},
 }
 
 

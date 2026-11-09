@@ -556,6 +556,8 @@ class LiveView:
             return f"started{SEPARATOR}{event['agent']}"
         if kind == "retry":
             return f"retry at the {event['phase']}"
+        if kind == "stack-change":
+            return output.stack_change_line(event)
         if kind == "continuation-limit":
             return f"continuation limit {event['limit']} reached"
         if kind == "hotspot-finding":

@@ -110,6 +110,7 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         f"run {start['run_id']}: {snap.state} (mode {start['mode']}, adapter {start['adapter']})",
         *([f"note: {snap.note}"] if snap.note else []),
         f"progress: {_run_progress(snap)}", f"journal {journal}",
+        *[output.stack_change_line(e) for e in events if e["event"] == "stack-change"],
         *[
             f"kept: branch {e['failed_branch']} holds the old work of ticket {e['ticket']}, which a retry started again; delegate clean removes it"
             for e in events if e["event"] == "retry" and e.get("failed_branch") and e["failed_branch"] not in deleted

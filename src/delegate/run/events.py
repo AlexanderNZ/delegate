@@ -41,6 +41,7 @@ CONTINUATION: str = "continuation"
 CONTINUATION_LIMIT: str = "continuation-limit"
 RESUME: str = "resume"
 AGENTS_CHANGED: str = "agents-changed"
+STACK_CHANGE: str = "stack-change"
 GUARD_PROBE: str = "guard-probe"
 PLAN_CHANGE: str = "plan-change"
 RETRY: str = "retry"
@@ -295,6 +296,17 @@ class Resume(TypedDict):
     # Only a resume whose journal has no record of the configuration, or whose newest record differs from the workflow in a
     # way that the check accepts (a stack that only one of them has), has it (#289): the record of the workflow file.
     configuration: NotRequired[ConfigurationRecord]
+
+
+class StackChange(TypedDict):
+    """A deliberate change of a stack at a resume (#290): the stack, and the old and the new value of each changed field.
+
+    `changes` holds each changed field of the stack by its name, as `{"old": ..., "new": ...}` in the JSON form of the values. The
+    engine writes one event for each changed stack, before the `resume` event, and only with `--stack-changed`.
+    """
+
+    stack: str
+    changes: dict[str, dict[str, object]]
 
 
 class AgentsChanged(TypedDict):
@@ -593,6 +605,7 @@ EVENTS: dict[str, type] = {
     CONTINUATION_LIMIT: ContinuationLimit,
     RESUME: Resume,
     AGENTS_CHANGED: AgentsChanged,
+    STACK_CHANGE: StackChange,
     GUARD_PROBE: GuardProbe,
     PLAN_CHANGE: PlanChange,
     RETRY: Retry,
