@@ -87,7 +87,7 @@ The worktree must be clean after `prepare`. Add each directory that it writes to
 
 Without a limit, a gate or an agent that hangs stops the run for ever. Set both limits for each stack, in minutes.
 
-- `gate-timeout` is the limit of one gate run. Give it more than your slowest full gate run. A gate past the limit is a red gate.
+- `gate-timeout` is the limit of one gate run. Give it more than your slowest full gate run. With no `gate-timeout`, the limit is 120 minutes. A gate past the limit is a red gate.
 - `agent-timeout` is the limit of one [**session**](../glossary.md#session) of an agent. Give it more than your longest specialist session. An agent past the limit has no valid report.
 
 See [time limits](../reference/workflow.md#time-limits) for what the engine does at each limit.

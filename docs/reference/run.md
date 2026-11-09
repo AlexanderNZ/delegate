@@ -168,7 +168,7 @@ ok gate-names: stack python: each gate has its own short name: pytest
 
 | Id | One line for each | `warn` when | Effect of the missing setting | The field that clears it |
 |---|---|---|---|---|
-| `gate-timeout` | stack | The stack has no `gate-timeout`. | A gate that hangs stops the run with no limit. | `gate-timeout` of the stack. See [time limits](workflow.md#time-limits). |
+| `gate-timeout` | stack | Never. A stack with no `gate-timeout` gets the default limit of 120 minutes, and its line is `ok` with the words `(the default)`. | A gate that hangs ends at the limit, and it is red. | `gate-timeout` of the stack, to change the limit. See [time limits](workflow.md#time-limits). |
 | `agent-timeout` | stack | The stack has no `agent-timeout`. | An agent that hangs stops the run with no limit. | `agent-timeout` of the stack. See [time limits](workflow.md#time-limits). |
 | `ticket-start` | workflow | The mode is `assure`, the workflow has `ticket-start = "base-branch"`, and two or more tickets have no `blocked-by`. | Each such ticket after the first runs its gates again after the rebase. This doubles the gate time and the chance of a flaky failure. | `ticket-start = "run-branch"`, or no `ticket-start`. See [ticket start](workflow.md#ticket-start). |
 | `hotspots` | stack | The stack has `hotspots = []`. | Only the built-in agent directories are guarded, so a specialist can change the CI and the configuration. | `hotspots` of the stack, with the paths to guard. See [the hotspot guard](#the-hotspot-guard). |
@@ -782,7 +782,7 @@ The summary gives the result of the run (`built`, `failed`, `paused` or `halted`
 
 On a terminal, the result has the colour of its role: `run built` is green, `run failed` is red, `run paused` is yellow, `run halted` is red, and each is bold. The token counts are faint. When the environment variable `NO_COLOR` is set and not empty, or when stdout is not a terminal, the lines have no colour code. When the locale is not UTF-8, the separator `·` is `.`.
 
-At its start, before the three lines, the command prints each `warn` line of [the quality check](#the-quality-check) on stderr, for example `delegate run: warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit`. A `warn` line does not change the exit code.
+At its start, before the three lines, the command prints each `warn` line of [the quality check](#the-quality-check) on stderr, for example `delegate run: warn agent-timeout: stack python: set agent-timeout; without it, an agent that hangs stops the run with no limit`. A `warn` line does not change the exit code.
 
 With `--detach`, the command prints `run <run id>` and `log <path>`, and exits 0 when the run process started. The run process writes its own output to the log. A check that fails before the start prints its error on stderr, exits 1, and starts no run process. See [the detached run](#the-detached-run).
 
@@ -1013,4 +1013,4 @@ A reader outside the kit reads `schema` of the first line first, and it checks t
 - In `economy` mode, a defect shows only at the end of the chain. That is also true for a defect that the gates find. The stack of a rejected chain fails as a whole when no finding names a ticket.
 - In `economy` mode, a fix-up commit goes on the chain tip. A stack that the engine verified before it does not see that commit, also when the commit changes a file of that stack. The verifier of the fix-up sees only the delta. A stack that the engine verifies after it sees the commit only when the commit changes a file of the stack. See [the fix-ups and the other stacks](#the-fix-ups-and-the-other-stacks).
 - In `economy` mode, `--retry` cannot go on with a step that a later built ticket went past, or whose chain start moved. The engine does not rebase in `economy` mode, so the branch of the step cannot join the chain again.
-- A gate has no time limit when its stack has no `gate-timeout`, and an agent has no time limit when its stack has no `agent-timeout`. The quality check of the dry run warns about each one. See [time limits](workflow.md#time-limits).
+- A gate has the default time limit of 120 minutes when its stack has no `gate-timeout` (#275), and an agent has no time limit when its stack has no `agent-timeout`. The quality check of the dry run shows the default limit of a gate, and warns about the missing limit of an agent. See [time limits](workflow.md#time-limits).

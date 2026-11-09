@@ -10,6 +10,7 @@ import time
 import pytest
 
 from delegate import adapters
+from delegate.adapters.shell import ShellGateRunner
 from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 
 from . import claude_fake
@@ -118,15 +119,30 @@ def test_a_workflow_with_no_limit_runs_as_before(tmp_path, capsys, scripted):
     code, out, err = run(repo, capsys)
 
     assert code == 0
-    # The only lines on stderr are the warnings of the quality check about the two missing limits (#247).
-    assert [line.split()[:4] for line in err.splitlines()] == [
-        ["delegate", "run:", "warn", "gate-timeout:"], ["delegate", "run:", "warn", "agent-timeout:"],
-    ]
+    # The only line on stderr is the warning of the quality check about the missing agent limit (#247). A gate has the default limit (#275).
+    assert [line.split()[:4] for line in err.splitlines()] == [["delegate", "run:", "warn", "agent-timeout:"]]
     events = read_journal(out)
     assert next(e for e in events if e["event"] == "step-end")["state"] == "built"
     assert [(e["green"], e["timed_out"]) for e in events if e["event"] == "gate-result"] == [(True, False)]
     assert "agent-timeout" not in event_names(events)
     assert [call.agent_timeout for call in [*scripted.calls, *scripted.verifier_calls]] == [None, None]
+
+
+def test_a_gate_of_a_stack_with_no_gate_timeout_gets_the_default_limit_of_120_minutes_in_seconds(tmp_path, capsys, scripted, monkeypatch):
+    limits = []
+    real = ShellGateRunner.run
+
+    def spy(self, command, worktree, log=None, timeout=None, environment=None):
+        limits.append(timeout)
+        return real(self, command, worktree, log=log, timeout=timeout, environment=environment)
+
+    monkeypatch.setattr(ShellGateRunner, "run", spy)
+    repo = make_repo(tmp_path, WORKFLOW)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 0
+    assert limits == [7200.0]
 
 
 def test_each_agent_gets_the_agent_timeout_of_its_stack_in_seconds(tmp_path, capsys, scripted):

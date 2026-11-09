@@ -47,7 +47,7 @@ def quality_checks(workflow: Workflow) -> list[Check]:
     """
     stacks = list(workflow.stacks.values())
     return [
-        *(_timeout("gate-timeout", stack.name, stack.gate_timeout, "a gate") for stack in stacks),
+        *(_gate_timeout(stack) for stack in stacks),
         *(_timeout("agent-timeout", stack.name, stack.agent_timeout, "an agent") for stack in stacks),
         _ticket_start(workflow),
         *(_hotspots(stack) for stack in stacks),
@@ -55,6 +55,13 @@ def quality_checks(workflow: Workflow) -> list[Check]:
         *(_gate_names(stack) for stack in stacks),
         *(check for stack in stacks for check in _verifier_tools(stack)),
     ]
+
+
+def _gate_timeout(stack: Stack) -> Check:
+    """A gate always has a limit (#275): the `gate-timeout` of the stack, or the default."""
+    if stack.gate_timeout is None:
+        return Check(OK, "gate-timeout", f"stack {stack.name}: gate-timeout = {stack.gate_limit:g} minutes (the default)")
+    return _timeout("gate-timeout", stack.name, stack.gate_timeout, "a gate")
 
 
 def _timeout(check_id: str, stack: str, minutes: float | None, what: str) -> Check:

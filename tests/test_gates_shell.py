@@ -191,6 +191,30 @@ def test_the_time_limit_also_ends_the_children_of_the_gate(tmp_path):
     assert gone, "a background child of the gate stayed alive after the time limit"
 
 
+def test_a_gate_ends_with_its_command_and_a_background_process_of_the_gate_does_not_hold_it(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    started = time.monotonic()
+
+    result = ShellGateRunner().run(f"sleep 30 & echo $! > '{pid_file}'; echo hi", tmp_path)
+
+    elapsed = time.monotonic() - started
+    child = int(pid_file.read_text())
+    gone = is_gone(child, 5)
+    if not gone:
+        os.kill(child, signal.SIGKILL)  # keep the machine clean when the gate left its child alive
+    assert elapsed < 5
+    assert (result.exit_status, result.green, result.timed_out) == (0, True, False)
+    assert result.output == "hi\n"
+    assert gone, "a background process of the gate stayed alive after the gate ended"
+
+
+def test_the_exit_status_of_a_gate_is_the_status_of_bash_when_a_background_process_ends_with_the_gate(tmp_path):
+    result = ShellGateRunner().run("sleep 30 & echo before; exit 3", tmp_path)
+
+    assert (result.exit_status, result.green, result.timed_out) == (3, False, False)
+    assert result.output == "before\n"
+
+
 def test_a_gate_with_no_time_limit_waits_for_the_gate(tmp_path):
     result = ShellGateRunner().run("sleep 1; echo late", tmp_path, timeout=None)
 

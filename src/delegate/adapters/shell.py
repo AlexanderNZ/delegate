@@ -14,6 +14,11 @@ for the terminal of the engine (#178). It starts in a session of its own, so it 
 process it starts. When an interrupt or an error leaves the wait, the backend ends the whole group before it lets the
 exception go on (see `process.end_group`).
 
+A gate ends with its `bash` process (#275). A process that the gate started in the background keeps the pipes open after `bash`
+exits, so the backend does not wait for the pipes to close. When `bash` exits, the readers get a short grace time to read the rest of
+the output, then the backend ends the process group of the gate. The exit status of the result is the exit status of `bash`. A
+process that left the group (`setsid`) is out of scope.
+
 A caller can give a time limit (#179). When the command runs longer, the backend ends the whole group in the same way, keeps
 the output up to that point, and returns a result with `timed_out` set. That result is not green.
 
@@ -32,7 +37,7 @@ from pathlib import Path
 from typing import IO, BinaryIO
 
 from ..ports.gates import GateResult
-from .process import end_group
+from .process import end_group, end_leftovers
 from .environment import process_environment
 
 # The most bytes that one read from a pipe of the command takes.
@@ -40,6 +45,9 @@ READ_SIZE: int = 65536
 
 # The most seconds that the backend waits for the output of a command that it ended at the time limit.
 READER_GRACE_SECONDS: float = 5.0
+
+# The seconds that the readers have to read the rest of the output after `bash` exited, before the backend ends the group (#275).
+OUTPUT_GRACE_SECONDS: float = 1.0
 
 
 def _copy(pipe: IO[bytes], parts: list[bytes], log: BinaryIO | None, lock: threading.Lock) -> None:
@@ -87,13 +95,14 @@ class ShellGateRunner:
 
                 timed_out = False
                 try:
-                    for reader in readers:
-                        reader.join(remaining())
-                    if any(reader.is_alive() for reader in readers):
-                        raise subprocess.TimeoutExpired(command, timeout)  # type: ignore[arg-type]
                     status = process.wait(timeout=remaining())
+                    for reader in readers:
+                        reader.join(OUTPUT_GRACE_SECONDS)  # the rest of the output; a background process can hold the pipes
+                    end_leftovers(process)  # the gate ended with `bash`: no process of its group stays alive
+                    for reader in readers:
+                        reader.join(READER_GRACE_SECONDS)  # a process that left the group can still hold a pipe
                 except subprocess.TimeoutExpired:
-                    # The command, or a process that holds its pipes, ran past the limit. Ending the group closes the pipes.
+                    # The command ran past the limit. Ending the group closes the pipes.
                     end_group(process)
                     for reader in readers:
                         reader.join(READER_GRACE_SECONDS)  # a process that left the group can still hold a pipe

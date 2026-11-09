@@ -582,7 +582,7 @@ scopes each fix-up, and records each step in a journal.
 - Before each launch and each resume, run `delegate run <workflow> --dry-run`
   and read its section `quality check`. An `ok` line names a feature that the
   workflow uses. A `warn` line names a setting to add or change, for example
-  a missing `gate-timeout`, and its effect on the quality or the time of the
+  a missing `agent-timeout`, and its effect on the quality or the time of the
   run. Set the setting, or tell the owner why the run goes on without it. A
   workflow that you copy from an older run does not have the fields that a
   later version added. A run without `--dry-run` prints each `warn` line on
@@ -603,7 +603,8 @@ scopes each fix-up, and records each step in a journal.
   before the specialist starts, and in the copy of each verifier before it
   makes the proof copy. A `prepare` command that fails ends the step.
 - Give each stack a `gate-timeout` and an `agent-timeout`, in minutes.
-  Without them, a gate or an agent that hangs stops the run with no limit. A
+  Without `gate-timeout`, a gate has a limit of 120 minutes. Without
+  `agent-timeout`, an agent that hangs stops the run with no limit. A
   gate past its limit is a red gate. An agent past its limit has no valid
   report, and the continuation rules apply.
 

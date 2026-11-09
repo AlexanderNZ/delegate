@@ -39,7 +39,7 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
 
 The docs are at **[alexandernz.github.io/delegate](https://alexandernz.github.io/delegate/)**, built from [`docs/`](docs/overview.md). Start with [the overview](docs/overview.md): the problem, the idea, the team and the loop from a ticket to a merge. Then follow [the tutorial](docs/tutorial.md) from install to one verified ticket. To write the workflow of a real run, follow [how to write a workflow for a run](docs/how-to/write-a-workflow-for-a-run.md). Each term is in [the glossary](docs/glossary.md).
 
-Before each launch and each resume of a run, run `delegate run <workflow> --dry-run`, and read its quality check. A `warn` line names a setting to add or change, for example a `gate-timeout` that is missing, and its effect on the quality or the time of the run. A workflow that you copy from an older run does not have the fields that a later version added, and the quality check shows them. See [the quality check](docs/reference/run.md#the-quality-check). The help of each command (`--help`) names the docs site and the reference page of the command.
+Before each launch and each resume of a run, run `delegate run <workflow> --dry-run`, and read its quality check. A `warn` line names a setting to add or change, for example an `agent-timeout` that is missing, and its effect on the quality or the time of the run. A workflow that you copy from an older run does not have the fields that a later version added, and the quality check shows them. See [the quality check](docs/reference/run.md#the-quality-check). The help of each command (`--help`) names the docs site and the reference page of the command.
 
 ## Status
 

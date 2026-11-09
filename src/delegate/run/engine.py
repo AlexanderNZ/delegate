@@ -3259,7 +3259,7 @@ def _fixup_gates(step: _Step, round_number: int) -> None:
     red = [
         label for gate in step.stack.gates
         if (label := _run_gate(
-            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_timeout,
+            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_limit,
             step.stack.gate_names.get(gate),
         ))
     ]
@@ -3870,7 +3870,7 @@ class _ChainRun:
             tip = _tip(self.vcs, self.repo, step.branch)
             outcomes = [
                 _run_gate_with_output(
-                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN, step.stack.gate_timeout,
+                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_CHAIN, step.stack.gate_limit,
                     step.stack.gate_names.get(gate),
                 )
                 for gate in step.stack.gates
@@ -3961,7 +3961,7 @@ def _run_gate(
 
     `round_number` is 0 for the first build and the fix-up round for a later run.
     `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
-    `gate_timeout` is the time limit of the gate in minutes, or None (see `_run_gate_with_output`).
+    `gate_timeout` is the time limit of the gate in minutes: the `gate_limit` of the stack, with its default (see `_run_gate_with_output`).
     `name` is the name that the workflow gives to the gate, or None (see `_run_gate_with_output`).
     """
     outcome = _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase, gate_timeout, name)
@@ -3982,7 +3982,7 @@ def _gate_outcomes(
     commit: str | None = head
     for gate in stack.gates:
         outcome = _run_gate_with_output(
-            gates, vcs, gate, ticket, worktree, journal, round_number, phase, stack.gate_timeout, stack.gate_names.get(gate), commit=commit,
+            gates, vcs, gate, ticket, worktree, journal, round_number, phase, stack.gate_limit, stack.gate_names.get(gate), commit=commit,
         )
         outcomes.append(outcome)
         commit = outcome.commit if outcome.log is None else None
@@ -3997,7 +3997,8 @@ def _run_gate_with_output(
 
     `phase` can also be PHASE_CHAIN: the gates on the tip of an `economy` chain.
 
-    `gate_timeout` is the time limit of the gate in minutes (#179). A gate that runs longer gets its process group ended by
+    `gate_timeout` is the time limit of the gate in minutes (#179). The callers give the `gate_limit` of the stack: 120 minutes
+    when the stack has no `gate-timeout` (#275). With None the runner waits for the gate with no limit. A gate that runs longer gets its process group ended by
     the runner. The result then has `timed_out`, and it is red. The engine writes `gate-result` with `green` false and
     `timed_out` true, and ends the output with a line that names the limit, so the specialist and a reader see the cause.
     The step goes on as for any red gate.

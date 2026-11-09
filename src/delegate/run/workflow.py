@@ -78,6 +78,10 @@ def _ticket_id_problem(ticket_id: str) -> str | None:
 BUILT_IN_HOTSPOTS: tuple[str, ...] = (".claude/agents/", ".opencode/agents/")
 
 
+# The time limit of one gate run, in minutes, for a stack with no `gate-timeout` (#275). A gate that runs longer is red with `timed_out`.
+DEFAULT_GATE_TIMEOUT_MINUTES: float = 120.0
+
+
 @dataclass(frozen=True)
 class Stack:
     name: str
@@ -91,7 +95,8 @@ class Stack:
     # The text that the engine adds to each brief of a role of this stack (#156). None: no notes.
     specialist_notes: str | None = None
     verifier_notes: str | None = None
-    # The time limit of one gate run and of one agent session of this stack, in minutes (#179). None: no limit.
+    # The time limit of one gate run and of one agent session of this stack, in minutes (#179). None: the field is not set.
+    # An agent session with no field has no limit. A gate with no field has `DEFAULT_GATE_TIMEOUT_MINUTES` (#275): see `gate_limit`.
     gate_timeout: float | None = None
     agent_timeout: float | None = None
     # The name that the workflow gives to a gate, by its command (#223). A gate with no entry has no name: the views
@@ -108,6 +113,11 @@ class Stack:
         for command in self.gates:
             by_name.setdefault(gate_name(command, self.gate_names.get(command)), []).append(command)
         return [(name, commands) for name, commands in by_name.items() if len(commands) > 1]
+
+    @property
+    def gate_limit(self) -> float:
+        """The time limit of one gate run of this stack, in minutes: `gate-timeout`, or the default of 120 minutes (#275)."""
+        return DEFAULT_GATE_TIMEOUT_MINUTES if self.gate_timeout is None else self.gate_timeout
 
     @property
     def all_hotspots(self) -> list[str]:

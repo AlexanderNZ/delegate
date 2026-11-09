@@ -77,12 +77,12 @@ def test_the_section_follows_the_plan_and_comes_before_the_setup_check(tmp_path,
     assert ticket < lines.index("quality check") < setup
 
 
-def test_a_stack_with_no_gate_timeout_warns_and_names_the_field_and_the_effect(tmp_path, capsys):
+def test_a_stack_with_no_gate_timeout_gets_the_default_limit_of_120_minutes_and_the_dry_run_shows_it(tmp_path, capsys):
     code, section, err = dry_run(tmp_path, capsys, BASE)
 
     assert code == 0
     assert check(section, "gate-timeout") == [
-        "warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit"
+        "ok gate-timeout: stack python: gate-timeout = 120 minutes (the default)"
     ]
     assert "warn" not in err
 
@@ -125,7 +125,7 @@ def test_each_stack_gets_its_own_line_of_a_stack_check(tmp_path, capsys):
 
     assert code == 0
     assert check(section, "gate-timeout") == [
-        "warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit",
+        "ok gate-timeout: stack python: gate-timeout = 120 minutes (the default)",
         "ok gate-timeout: stack docs: gate-timeout = 5 minutes",
     ]
 
@@ -231,7 +231,7 @@ def test_a_workflow_with_only_warnings_exits_0_and_prints_no_warning_on_stderr(t
 
     assert code == 0
     assert [line.split()[:2] for line in section if line.startswith("warn ")] == [
-        ["warn", "gate-timeout:"], ["warn", "agent-timeout:"], ["warn", "ticket-start:"], ["warn", "hotspots:"], ["warn", "gate-names:"],
+        ["warn", "agent-timeout:"], ["warn", "ticket-start:"], ["warn", "hotspots:"], ["warn", "gate-names:"],
     ]
     assert err == ""
 
@@ -251,7 +251,6 @@ def test_a_run_without_dry_run_prints_the_warn_lines_on_stderr_and_no_ok_line(tm
 
     assert code == 0
     assert err.splitlines() == [
-        "delegate run: warn gate-timeout: stack python: set gate-timeout; without it, a gate that hangs stops the run with no limit",
         "delegate run: warn agent-timeout: stack python: set agent-timeout; without it, an agent that hangs stops the run with no limit",
         "delegate run: warn hotspots: stack python: hotspots = []; set hotspots; without them, only the built-in agent "
         "directories are guarded, and a specialist can change the CI and the configuration",
@@ -279,7 +278,7 @@ def test_a_detached_run_writes_the_warn_lines_to_its_log_and_not_to_the_stderr_o
     _, log = printed(out)
     text = wait_for_ends(log, 1)
     warnings = [line for line in text.splitlines() if line.startswith("delegate run: warn ")]
-    assert [line.split()[3] for line in warnings] == ["gate-timeout:", "agent-timeout:"]
+    assert [line.split()[3] for line in warnings] == ["agent-timeout:"]
 
 
 SERVERS = """
