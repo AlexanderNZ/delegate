@@ -175,7 +175,7 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 |---|---|---|
 | `specialist` | string | The name of the specialist agent for this stack. |
 | `verifier` | string | The name of the verifier agent for this stack. |
-| [**`gates`**](../glossary.md#gate) | list of strings or tables | The gates. The engine runs them. At least one is required. A gate is a command string, or a table `{ name = "<name>", command = "<command>" }`. See [Gate names](#gate-names). |
+| [**`gates`**](../glossary.md#gate) | list of strings or tables | The gates. The engine runs them. At least one is required. A gate is a command string, or a table `{ name = "<name>", command = "<command>" }`. See [Gate names](#gate-names). A gate must not change a tracked file. See [A gate leaves the tracked files as they are](#a-gate-leaves-the-tracked-files-as-they-are). |
 | [**`hotspots`**](../glossary.md#hotspot) | list of strings | The path patterns that only the coordinator can change. The list can be empty (`hotspots = []`), but the field is required. The engine stops a [**step**](../glossary.md#step) that changes a path which matches. The engine adds the built-in hotspots `.claude/agents/` and `.opencode/agents/` to the list of each stack, also when the list is empty. See [the pattern rules](run.md#the-hotspot-guard). |
 | `mcp-servers` | table | The MCP servers that the agents of this stack get. See [MCP servers](#mcp-servers). With no table, the agents get no MCP server. |
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
@@ -205,6 +205,16 @@ hotspots = []
 ```
 
 The `name` and the `command` are strings that are not empty, and a table has no other field. When two gates of a stack have the same short name, the [quality check](run.md#the-quality-check) of `delegate run --dry-run` prints a `warn gate-names` line on stdout that names the gates and says to give each one a `name`. The warning does not refuse the workflow, and the exit code is not changed by it. The journal gets the `name` in `gate-start`, `gate-result` and `gate-skip` of a gate that has one. The verifier guard and the `gateCommands` of the declaration use the commands only.
+
+### A gate leaves the tracked files as they are
+
+A gate result is a fact about the commit that the gate ran on. So a gate must not change a file that git tracks, for example a formatter that writes the files again, or a test that writes its snapshots again (#276).
+
+- After each gate, the engine reads the changes of the worktree that are not committed. It does this in each phase: the build, the rebase, a fix-up round and the gates of an `economy` chain.
+- A gate that changed a tracked file is red, also when its exit status is 0. The journal gets `gate-result` with `green` false, `clean` false and the paths in `changed`. The output of the gate ends with a line that names the paths, and the reason of a failed step names the gate, as `gates red: ruff format . (the gate changed tracked files: `src/app.py`)`.
+- The engine then puts the tracked files and the index back to the commit, so the next gate runs on the commit.
+- A file that git ignores does not count, and a new file that git does not track does not count. A gate that writes only such files stays green, and its result has `clean` true.
+- The engine runs a gate again on a commit for which it holds a green result only when that result has `clean` true. See [one green gate run for each commit](run.md#one-green-gate-run-for-each-commit).
 
 ### Time limits
 

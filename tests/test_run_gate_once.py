@@ -18,8 +18,8 @@ from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import event_names, git, kill_a_run, make_repo, read_journal_file, tree
-from .test_run_multi import HEAD, ticket
+from .support import committed_repo, event_names, git, kill_a_run, make_repo, read_journal_file, state_dir, tree
+from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
 
 GATE = "ls *.txt"
 
@@ -154,3 +154,71 @@ def test_a_resume_after_a_stop_at_the_verifier_runs_no_gate_on_the_commit_whose_
     assert len(scripted.verifier_calls) == 1 and scripted.calls == []
     assert "a.txt" in tree(repo, "run/demo")
     assert git(repo, "rev-parse", "run/demo").strip() == commit
+
+
+# A gate result is a fact about the commit that it names (#176), so a gate that changes a tracked file is red (#276).
+# `seed.txt` is a tracked file of the repository. The second gate is green only on a tree with no change to a tracked file.
+CHANGES_SEED = "echo formatted >> seed.txt"
+TREE_CLEAN = "git diff --quiet HEAD --"
+CHANGED_REASON = "the gate changed tracked files"
+
+
+def with_gates(workflow: str, commands: list[str]) -> str:
+    return workflow.replace(f'gates = ["{GATE}"]', "gates = [" + ", ".join(f"'{command}'" for command in commands) + "]")
+
+
+def gate_results(events, phase):
+    return [e for e in events if e["event"] == "gate-result" and e["phase"] == phase]
+
+
+def test_a_gate_that_changes_a_tracked_file_is_red_with_the_path_and_the_next_gate_runs_on_the_commit(tmp_path, scripted):
+    repo = make_repo(tmp_path, with_gates(HEAD + ticket("a"), [CHANGES_SEED, TREE_CLEAN]))
+
+    result = start_run(repo, scripted, SpyGates())
+
+    assert not result.ok
+    assert CHANGED_REASON in result.failures["a"] and "seed.txt" in result.failures["a"]
+    events = read_journal_file(repo, result.run_id)
+    changer, checker = gate_results(events, "build")[:2]
+    assert (changer["command"], changer["exit_status"], changer["green"], changer["clean"]) == (CHANGES_SEED, 0, False, False)
+    assert changer["changed"] == ["seed.txt"]
+    assert CHANGED_REASON in changer["output_tail"] and "seed.txt" in changer["output_tail"]
+    assert (checker["command"], checker["green"], checker["clean"]) == (TREE_CLEAN, True, True)
+    assert "changed" not in checker
+    # The engine put the tracked file back to the commit, and a red result is never reused.
+    worktree = state_dir(repo) / "worktrees" / result.run_id / "a"
+    assert (worktree / "seed.txt").read_text() == "seed\n"
+    assert not any(e["event"] == "gate-skip" and e["command"] == CHANGES_SEED for e in events)
+
+
+def test_a_gate_that_writes_only_ignored_files_stays_green_and_clean(tmp_path, scripted):
+    workflow = with_gates(HEAD + ticket("a"), ["mkdir -p build && echo log > build/gate.log", TREE_CLEAN])
+    repo = committed_repo(tmp_path / "repo", {"seed.txt": "seed\n", ".gitignore": "build/\n", "workflow.toml": workflow})
+    gates = SpyGates()
+
+    result = start_run(repo, scripted, gates)
+
+    assert result.ok and result.built == ["a"]
+    events = read_journal_file(repo, result.run_id)
+    assert [(e["green"], e["clean"]) for e in gate_results(events, "build")] == [(True, True), (True, True)]
+    # The rebase keeps the commit, so both clean green results are reused, and each gate ran once.
+    assert len(gates.calls) == 2
+    assert [e["phase"] for e in events if e["event"] == "gate-skip"] == ["rebase", "rebase"]
+
+
+def test_the_gates_after_a_rebase_are_checked_for_changes_to_tracked_files(tmp_path, scripted):
+    # Ticket b starts from the base of the run, so the rebase puts the work of ticket a under it. The first gate changes
+    # seed.txt only in a tree that holds the files of a and b: the tree of the rebase of b.
+    change_after_rebase = "test ! -f a.txt -o ! -f b.txt || echo formatted >> seed.txt"
+    workflow = with_gates(BASE_BRANCH_START + HEAD + ticket("a") + ticket("b"), [change_after_rebase, TREE_CLEAN])
+    repo = make_repo(tmp_path, workflow)
+
+    result = start_run(repo, scripted, SpyGates())
+
+    assert result.built == ["a"] and result.failed == ["b"]
+    assert CHANGED_REASON in result.failures["b"] and "after the rebase" in result.failures["b"]
+    events = of_ticket(read_journal_file(repo, result.run_id), "b")
+    assert [(e["green"], e["clean"]) for e in gate_results(events, "build")] == [(True, True), (True, True)]
+    changer, checker = gate_results(events, "rebase")
+    assert (changer["green"], changer["clean"], changer["changed"]) == (False, False, ["seed.txt"])
+    assert (checker["green"], checker["clean"]) == (True, True)

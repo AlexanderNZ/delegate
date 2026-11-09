@@ -310,6 +310,9 @@ class GitVersionControl:
         out = _git_raw(worktree, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
         return [PathChange(entry[:2], entry[3:]) for entry in out.split("\0") if entry]
 
+    def restore_tracked(self, worktree: Path) -> None:
+        _git(worktree, "reset", "--hard", "--quiet", "HEAD")
+
     def hooks_directory(self, worktree: Path) -> Path:
         return Path(_git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
 

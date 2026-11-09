@@ -220,6 +220,14 @@ class VersionControl(Protocol):
         """
         ...
 
+    def restore_tracked(self, worktree: Path) -> None:
+        """Put each tracked path of the worktree, and the index, back to the commit that the worktree has checked out.
+
+        A path that the commit does not hold and that is not staged stays as it is, and so does a path that the
+        repository ignores. HEAD does not move.
+        """
+        ...
+
     def hooks_directory(self, worktree: Path) -> Path:
         """The absolute path of the directory whose hooks run for the worktree."""
         ...

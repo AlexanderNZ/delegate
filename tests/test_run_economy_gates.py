@@ -211,3 +211,23 @@ def test_an_assure_run_runs_the_gates_of_each_ticket_after_its_build_and_its_reb
     assert len(scripted.verifier_calls) == 2
     for call in scripted.calls:
         assert "The engine runs these gates after your report" in call.prompt and "tip of the chain" not in call.prompt
+
+
+def test_each_gate_of_the_chain_is_checked_for_changes_to_tracked_files_and_the_next_gate_runs_on_the_commit(tmp_path, scripted):
+    # `seed.txt` is a tracked file. The first gate changes it, and the second gate is green only on the commit (#276).
+    changes_seed, tree_clean = "echo formatted >> seed.txt", "git diff --quiet HEAD --"
+    repo = make_repo(tmp_path, workflow([changes_seed, tree_clean]))
+
+    result = start_run(repo, scripted, SpyGates(scripted))
+
+    assert not result.ok
+    assert "the gate changed tracked files" in result.failures["c"] and "seed.txt" in result.failures["c"]
+    events = read_journal_file(repo, result.run_id)
+    chain = [(e["round"], e["command"], e["green"], e["clean"], e.get("changed")) for e in events if e["event"] == "gate-result"]
+    # On the tip of the chain, and again after each fix-up round, the first gate is red and the second is green.
+    assert chain == [
+        (round_number, command, command == tree_clean, command == tree_clean, None if command == tree_clean else ["seed.txt"])
+        for round_number in (0, 1, 2) for command in (changes_seed, tree_clean)
+    ]
+    assert not scripted.verifier_calls
+    assert (state_dir(repo) / "worktrees" / result.run_id / "c" / "seed.txt").read_text() == "seed\n"

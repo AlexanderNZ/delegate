@@ -212,6 +212,9 @@ GATE_OUTPUT_TAIL_CHARS: int = 4000
 # The directory of the run that holds the log file of each gate run, in one directory for each ticket.
 GATE_LOG_DIRECTORY: str = "gates"
 
+# The reason of a gate that left a change to a tracked file in the worktree (#276).
+GATE_CHANGED_TRACKED_FILES: str = "the gate changed tracked files"
+
 # The file of the run directory that holds the traceback of a crash: this prefix, the `seq` of the `crashed` event (of
 # the `step-end` in a journal of an earlier version), `.txt`.
 CRASH_FILE_PREFIX: str = "crash-"
@@ -4021,6 +4024,10 @@ def _run_gate_with_output(
 
     `commit` is the HEAD of the worktree when the caller read it after the last step that can move it. With None the
     engine reads it here.
+
+    After the gate, the engine checks the worktree (see `_changed_by_gate`). A gate that changed a tracked file is red,
+    whatever its exit status is: its `gate-result` has `clean` false and the paths in `changed`, its output ends with a
+    line that names the paths, and its label gives the reason. Each other result has `clean` true (#276).
     """
     if commit is None:
         commit = _head(vcs, worktree)
@@ -4039,13 +4046,39 @@ def _run_gate_with_output(
     journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log), **named)
     result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout), environment=_worktree_environment(vcs, worktree))
     output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
+    labels: list[str] = []
     if result.timed_out:
         output += f"\n[delegate: the gate ran past the gate-timeout of {_minutes_text(gate_timeout)} minutes, and the engine ended it]\n"
+        labels.append("timed out")
+    changed = _changed_by_gate(vcs, worktree)
+    if changed:
+        paths = ", ".join(f"`{path}`" for path in changed)
+        output += f"\n[delegate: {GATE_CHANGED_TRACKED_FILES}: {paths}; the engine put them back to the commit]\n"
+        labels.append(f"{GATE_CHANGED_TRACKED_FILES}: {paths}")
+    green = result.green and not changed
     journal.append(
         "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
-        exit_status=result.exit_status, green=result.green, timed_out=result.timed_out, output_tail=output, clean=True, **named,
+        exit_status=result.exit_status, green=green, timed_out=result.timed_out, output_tail=output, clean=not changed,
+        **({"changed": changed} if changed else {}), **named,
     )
-    return _GateRun(command, result.green, output, f"{shown} (timed out)" if result.timed_out else shown, log, commit)
+    return _GateRun(command, green, output, f"{shown} ({'; '.join(labels)})" if labels else shown, log, commit)
+
+
+def _changed_by_gate(vcs: VersionControl, worktree: Path) -> list[str]:
+    """Check the worktree after a gate, and give the tracked paths that the gate changed, in the order of the paths.
+
+    A gate result is a fact about the commit that it names (#176), so a gate must leave the tracked files as the
+    commit holds them (#276). The check is the check before the gates (see `_uncommitted_before_gates`), with no path
+    that no commit holds: a file that the gate made and that git does not ignore stays, as a file of a red gate does.
+    When a path changed, the engine puts the tracked files and the index back to the commit, so the next gate runs on
+    the commit. The tree was clean before the gate: the engine checks it before the first gate of a phase, and after
+    each gate, and a rebase needs a clean tree.
+    """
+    with _vcs_errors():
+        changed = [change.path for change in vcs.uncommitted_changes(worktree) if change.code != "??"]
+        if changed:
+            vcs.restore_tracked(worktree)
+    return changed
 
 
 def _copy_gate_logs(red: Sequence[_GateRun], scratch: Path) -> list[GateLogCopy]:
@@ -4095,8 +4128,8 @@ def _green_result(journal: Journal, command: str, commit: str) -> dict[str, obje
     """The first green `gate-result` of `command` on `commit` in the journal, or None when it holds none.
 
     Only a result with `clean: true` counts: the worktree had no change that was
-    not committed when the gate ran (#176). A result of an older journal has no
-    such field, so it skips no gate.
+    not committed when the gate ran (#176), and the gate changed no tracked file
+    (#276). A result of an older journal has no such field, so it skips no gate.
     """
     for event in read_events(journal.path):
         if (
