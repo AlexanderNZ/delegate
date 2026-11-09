@@ -74,7 +74,9 @@ a `step-end` is complete, and the engine never builds it again. A step with a
 `run-branch-advance` has its commit on the run branch already, so the engine
 only closes it. In `assure` mode, a step whose newest verdict is ACCEPT, and whose accepted commit the run branch
 holds, is closed the same way: the process stopped after it moved the run branch and before it wrote
-`run-branch-advance`, so the resume writes that event with `recovered: true` (see `_recover_advance`). Any other open step restarts in its own worktree, which the
+`run-branch-advance`, so the resume writes that event with `recovered: true` (see `_recover_advance`). In `economy` mode
+the resume does the same for the chain, before it plans more work: when the newest verdict of the chain is ACCEPT and
+the run branch holds its commit (see `_recover_chain_advance`). Any other open step restarts in its own worktree, which the
 engine makes again if it is gone. A specialist whose report the journal shows as
 valid is not spawned again. A verifier run that ended with no verdict does not
 count against the fix-up limit: the resume runs that round again.
@@ -2010,6 +2012,9 @@ def _execute(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket, **agent_fields,
         )
+        if workflow.mode == domain.ECONOMY:
+            # Before a plan change: the verification of a chain reads only the events after the newest plan change.
+            _recover_chain_advance(workflow, vcs, repo, journal, events)
         if review.check is not None:
             _record_plan_change(journal, workflow, review.check, progress)
     if on_start is not None:
@@ -2808,6 +2813,35 @@ def _recover_advance(workflow: Workflow, ticket: Ticket, vcs: VersionControl, re
         "run-branch-advance", ticket=ticket.id, run_branch=run_branch, from_commit=from_commit, to_commit=accepted, recovered=True
     )
     return True
+
+
+def _recover_chain_advance(workflow: Workflow, vcs: VersionControl, repo: Path, journal: Journal, events: list[dict[str, object]]) -> None:
+    """Write the `run-branch-advance` of an `economy` chain that a stop left out (#279).
+
+    The engine moves the run branch to the tip of the chain first, and writes `run-branch-advance` after it. A stop
+    between the two leaves a chain whose work is on the run branch with no record. The chain is closed when the newest
+    verdict after the newest `run-branch-advance` is ACCEPT and the run branch holds the commit of the `verify-start` of
+    that verdict: the event then has `recovered: true`, and names the ticket of that verdict, as `_advance_run_branch`
+    does. The verification of the chain then finds the work on the run branch, and starts no agent. In any other case,
+    and for a journal with no recorded tip, write nothing.
+    """
+    last = max((index for index, e in enumerate(events) if e["event"] == "run-branch-advance"), default=-1)
+    since = events[last + 1 :]
+    verdicts = [index for index, e in enumerate(since) if e["event"] == "verdict"]
+    if not verdicts or not domain.is_accepted(str(since[verdicts[-1]]["verdict"])):
+        return
+    starts = [e for e in since[: verdicts[-1]] if e["event"] == "verify-start"]
+    from_commit = _expected_tip(events)
+    if not starts or from_commit is None:
+        return
+    accepted = str(starts[-1]["commit"])
+    run_branch = workflow.run_branch
+    if not _holds(vcs, repo, accepted, f"refs/heads/{run_branch}"):
+        return
+    journal.append(
+        "run-branch-advance", ticket=str(since[verdicts[-1]]["ticket"]), run_branch=run_branch, from_commit=from_commit,
+        to_commit=accepted, recovered=True,
+    )
 
 
 def _build_with_continuations(
