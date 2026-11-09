@@ -10,6 +10,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 - Tests: a test cannot start a command against the repository of the kit itself (#285). During the run of 1.20.0, a draft test called `delegate run` with no `--repo` in the worktree of a specialist. The default of `--repo` is the current directory, so the engine found the state root that the kit records, made the branches `run/demo` and `run/demo-a` and a worktree in the kit, and started a real session. Now an autouse fixture in `tests/conftest.py` fails each test whose code looks up the top level or the git common directory of the kit through the version control port, the boundary that each command uses. The failure names the test and tells the author to pass `--repo` with a test repository. A test that reads a file of the kit by path is not affected. A test that must use the kit has the marker `kit_repository`. The dry-run cases of `tests/test_run_ticket_start.py` that gave no `--repo` now give it. See "Write the test first" in `CONTRIBUTING.md`.
 
+### Fixed
+
+- The check for a stale report compares the report file before and after the session, not with the clock (#286). Before, the engine compared the modification time of the report with `time.time_ns()` at the start of the session. On Linux, ext4 and tmpfs set file times from a coarse kernel clock that can be 1 to 4 ms behind, so a report that a fast session wrote could read as stale, and a test with a scripted adapter could fail at random. Now the engine records the state of the report file before each specialist session: absent, or its modification time and size. After the session, the report is stale only when the file has the same modification time and size as before. A report that was absent before is new. The rule of #278 for a session that ended before a kill does not change. See "The continuation" in `docs/reference/run.md`.
+
 ## [1.20.0] - 2026-11-09
 
 ### Changed

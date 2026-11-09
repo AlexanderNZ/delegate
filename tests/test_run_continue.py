@@ -364,16 +364,25 @@ def test_an_invalid_report_on_a_branch_with_no_commit_fails_the_step_and_the_spe
 
 
 def age_the_report_of_a_continuation(request):
-    """Make the report of the session before a continuation older than the start of the continuation, as a real gap does."""
+    """Change the time of the report that the session before a continuation wrote: a new report then differs from it by time and not only by text."""
     if "## Continuation" in request.prompt and request.report_path.is_file():
         os.utime(request.report_path, (1_000_000_000, 1_000_000_000))
+
+
+class BackdatingAdapter(ScriptedAdapter):
+    """A scripted adapter that sets the time of the report that it wrote to a time before the session began, as a coarse file clock can."""
+
+    def run(self, request):
+        result = super().run(request)
+        if request.report_path.is_file():
+            os.utime(request.report_path, (1_000_000_000, 1_000_000_000))
+        return result
 
 
 def test_a_continuation_that_writes_no_report_and_ends_idle_is_not_judged_on_the_report_of_the_session_before_it(tmp_path, capsys, scripted):
     scripted.files = {"other.txt": "no feature file\n"}  # the first run leaves red gates and a valid report
     scripted.continuation_files = [{"feature.txt": "feature\n"}]  # the gates would be green on the second run
     scripted.idle_roles = {"specialist"}
-    scripted.on_specialist = age_the_report_of_a_continuation
 
     def report(request, head):
         if len(scripted.continuation_calls) == 1:  # the first continuation writes nothing
@@ -416,3 +425,20 @@ def test_a_continuation_that_writes_a_new_report_is_judged_on_that_report(tmp_pa
     assert [e["status"] for e in events if e["event"] == "report-validation"] == ["committed", "blocked"]
     step_end = next(e for e in events if e["event"] == "step-end")
     assert step_end["state"] == "failed" and "needs a decision" in step_end["reason"]
+
+
+def test_a_report_that_a_session_wrote_with_a_time_before_its_start_is_new_when_the_file_was_absent_before(tmp_path, capsys):
+    adapter = BackdatingAdapter()
+    adapters.register("scripted", adapter)
+    try:
+        repo = make_repo(tmp_path)
+
+        code, out, err = run(repo, capsys)
+    finally:
+        adapters.unregister("scripted")
+
+    assert (code, err) == (0, "")
+    events = read_journal(out)
+    assert adapter.continuation_calls == []
+    assert [e["valid"] for e in events if e["event"] == "report-validation"] == [True]
+    assert [e["state"] for e in events if e["event"] == "step-end"] == ["built"]
