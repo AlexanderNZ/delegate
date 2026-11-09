@@ -1112,7 +1112,8 @@ def _failed_chain(workflow: Workflow, events: list[dict[str, object]], run_id: s
 
 def review_plan_change(
     workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
-    retry: str | None = None, *, location: StateLocation | None = None, coordinator: bool = False,
+    retry: str | None = None, *, location: StateLocation | None = None, coordinator_commit: str | None = None,
+    config_paths: Sequence[str] = (),
 ) -> PlanReview:
     """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
 
@@ -1124,7 +1125,9 @@ def review_plan_change(
     or None to look it up here.
 
     The result also holds what the resume does with each ticket that the run skipped (see `_skipped_outlook`).
-    `coordinator` tells that the resume has `--coordinator-commit`.
+    `coordinator_commit` is the commit of `--coordinator-commit`, or None. With it, the review makes the checks of
+    the commit that the resume makes (`_coordinator_commit`), and a refusal has the text of the refusal of the resume
+    (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too.
     """
     location = location or locate_state(repo, vcs)
     top, state_dir = location.top, location.state_directory(run_id)
@@ -1136,28 +1139,31 @@ def review_plan_change(
         raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
     with _vcs_errors():
         review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
-    refusal, outlook = _retry_outcome(workflow, events, run_id, review, retry, coordinator)
-    return replace(
-        review, skipped=_skipped_outlook(workflow, events, run_id, review, retry, coordinator),
-        retry_refusal=refusal, retry_outlook=outlook,
-    )
+    refusal, outlook = _retry_outcome(workflow, events, run_id, review, retry, coordinator_commit, vcs, top, config_paths)
+    skipped = () if refusal is not None else _skipped_outlook(workflow, events, run_id, review, retry, coordinator_commit is not None)
+    return replace(review, skipped=skipped, retry_refusal=refusal, retry_outlook=outlook)
 
 
 def _retry_outcome(
-    workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None, coordinator: bool,
+    workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None,
+    coordinator_commit: str | None, vcs: VersionControl, repo: Path, config_paths: Sequence[str],
 ) -> tuple[str | None, str | None]:
     """The message with which the rules of the retry (`_retry_plan`) refuse the retry of `retry` (#261), and the line that
     tells the phase of the retry that they accept (#269). One of the two is None, and both are None with no `retry`.
 
     The line is `retry <ticket>: phase <phase>`, and it ends with `, revives <tickets>` when the retry builds again other
-    tickets that the verification of the chain failed. The check of the commit of `--coordinator-commit`, and the check
-    of the hotspots of a retry at the phase `chain`, need the repository, so the resume makes them, not this function.
+    tickets that the verification of the chain failed. With `coordinator_commit`, the function also makes the checks of
+    the commit that the resume makes (`_coordinator_commit`, with the hotspot check of the chain), and their refusal has
+    the same text (#283). The hotspot check of a retry at the phase `chain` with no commit needs the repository too, so
+    the resume makes it, not this function.
     """
     if retry is None:
         return None, None
     restart = review.check is not None and retry in review.check.restarted
     try:
-        plan = _retry_plan(workflow, restore_progress(events, run_id, retrying=True), run_id, retry, restart, coordinator)
+        plan = _retry_plan(workflow, restore_progress(events, run_id, retrying=True), run_id, retry, restart, coordinator_commit is not None)
+        if coordinator_commit is not None:
+            _coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit, config_paths)
     except EngineError as error:
         return str(error), None
     revives = f", revives {', '.join(plan.revive)}" if plan.revive else ""

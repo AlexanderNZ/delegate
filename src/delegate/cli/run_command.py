@@ -372,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             review = review_plan_change(
                 workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location,
-                coordinator=args.coordinator_commit is not None,
+                coordinator_commit=args.coordinator_commit, config_paths=project_config_paths(adapters.get(workflow.adapter)),
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

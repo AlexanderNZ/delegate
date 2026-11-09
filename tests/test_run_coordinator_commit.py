@@ -434,3 +434,78 @@ def test_an_assure_retry_of_a_partial_report_without_a_coordinator_commit_is_ref
     render = coordinator_commits(worktree_of(repo, run_id, "a"), {"LICENSE": "rendered\n"})
     code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render, "--dry-run")
     assert (code, err) == (0, ""), err
+
+
+def dry_run_changes_nothing(repo, capsys, run_id, *argv):
+    """Resume with `--dry-run` and `argv`. Check that the journal and each branch stay as they were. Return the result."""
+    before = journal_path(repo, run_id).read_bytes()
+    tips = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+
+    result = resume_main(repo, capsys, run_id, *argv, "--dry-run")
+
+    assert journal_path(repo, run_id).read_bytes() == before
+    assert git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads") == tips
+    return result
+
+
+def test_the_dry_run_of_a_coordinator_commit_that_changes_a_path_outside_the_hotspots_exits_1_with_the_refusal_of_the_resume(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path, workflow(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    render = coordinator_commits(scripted.calls[0].cwd, {"LICENSE": "rendered\n", "notes.txt": "a note\n"})
+    argv = ("--retry", "a", "--coordinator-commit", render)
+
+    code, out, dry_err = dry_run_changes_nothing(repo, capsys, run_id, *argv)
+    real_err = refused(repo, capsys, run_id, scripted, *argv)
+
+    assert code == 1 and "Traceback" not in dry_err
+    (message,) = [line for line in real_err.splitlines() if "changes paths that are no hotspot" in line]
+    assert message in dry_err.splitlines()
+    assert "`notes.txt`" in message
+
+
+def test_the_dry_run_of_a_coordinator_commit_that_is_not_the_tip_of_the_branch_exits_1_with_the_refusal_of_the_resume(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path, workflow(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    worktree = scripted.calls[0].cwd
+    render = coordinator_commits(worktree, {"LICENSE": "rendered\n"})
+    coordinator_commits(worktree, {"NOTICE": "later\n"})
+    argv = ("--retry", "a", "--coordinator-commit", render)
+
+    code, out, dry_err = dry_run_changes_nothing(repo, capsys, run_id, *argv)
+    real_err = refused(repo, capsys, run_id, scripted, *argv)
+
+    assert code == 1
+    (message,) = [line for line in real_err.splitlines() if "is not on top of the branch" in line]
+    assert message in dry_err.splitlines()
+
+
+def test_the_dry_run_of_a_coordinator_commit_that_names_no_commit_exits_1_with_the_refusal_of_the_resume(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, workflow(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    argv = ("--retry", "a", "--coordinator-commit", "no-such-commit")
+
+    code, out, dry_err = dry_run_changes_nothing(repo, capsys, run_id, *argv)
+    real_err = refused(repo, capsys, run_id, scripted, *argv)
+
+    assert code == 1
+    (message,) = [line for line in real_err.splitlines() if "names no commit" in line]
+    assert message in dry_err.splitlines()
+
+
+def test_the_dry_run_of_a_coordinator_commit_that_changes_only_hotspot_paths_exits_0_and_changes_nothing(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, workflow(ticket("a")))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    render = coordinator_commits(scripted.calls[0].cwd, {"LICENSE": "rendered\n", "NOTICE": "notice\n"})
+
+    code, out, err = dry_run_changes_nothing(repo, capsys, run_id, "--retry", "a", "--coordinator-commit", render)
+
+    assert (code, err) == (0, ""), err
+    assert "retry a: phase " in out
