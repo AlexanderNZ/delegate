@@ -49,14 +49,10 @@ does.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
-import signal
 import subprocess
 import sys
-import threading
 import tomllib
-from collections.abc import Iterator
 from pathlib import Path
 
 from .. import adapters
@@ -79,6 +75,7 @@ from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .epilog import RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .setup_check import check_setup
+from .stop_signals import stop_signals_as_ctrl_c
 from .status import stream_reader_of, utc_now
 from .title import SEPARATOR, Title
 
@@ -106,46 +103,6 @@ RUN_EPILOG: str = (
     "Before each launch and each resume, run delegate run <workflow> --dry-run and read its quality check. "
     "A warn line names a setting to add or change, and its effect on the quality or the time of the run."
 )
-
-
-# The signals that stop a run as Ctrl-C does.
-STOP_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGHUP)
-
-
-@contextlib.contextmanager
-def _stop_signals_as_ctrl_c() -> Iterator[None]:
-    """For the block, SIGTERM and SIGHUP raise `KeyboardInterrupt` in the main thread, as SIGINT does. Restore the old handlers after.
-
-    SIGINT also raises it when the process inherited SIGINT as ignored, as a run that a background shell started does
-    (#198). With the default handler of Python, SIGINT is left as it is.
-
-    Only the first signal raises: the engine ends the child process group and releases the lock while it handles the
-    interrupt, and a second exception would cut that off. A thread other than the main thread cannot set a handler,
-    and then the block runs with the handlers as they are.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    raised = False
-
-    def handler(signum: int, frame: object) -> None:
-        nonlocal raised
-        if not raised:
-            raised = True
-            raise KeyboardInterrupt
-
-    handled = list(STOP_SIGNALS)
-    if signal.getsignal(signal.SIGINT) == signal.SIG_IGN:
-        # A shell that is not interactive sets SIGINT to ignored for a background command, and each process of a run that
-        # starts from it inherits that (#198). Python then installs no handler, and SIGINT does nothing. Handle it as the
-        # others.
-        handled.append(signal.SIGINT)
-    old = {signum: signal.signal(signum, handler) for signum in handled}
-    try:
-        yield
-    finally:
-        for signum, previous in old.items():
-            signal.signal(signum, previous)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -455,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             started.append(run_id)
 
         try:
-            with _stop_signals_as_ctrl_c():
+            with stop_signals_as_ctrl_c():
                 result = run_workflow(
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,

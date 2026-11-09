@@ -28,6 +28,11 @@ on stderr. A newest run that failed
 at start (`delegate.run.runs.FailedStart`) has no journal, also with `--from`: its line gives the last line of its log,
 and the exit code is `watch.EXIT_FAILED`.
 
+The live view hides the cursor with its first frame, and writes each frame as one synchronized update (`SYNC_BEGIN` and
+`SYNC_END`), so a frame that comes in parts, as over SSH, shows at once (#280). Each end of the watch shows the cursor again,
+before its last line: the end of the run, a pause, a stall, a time limit, Ctrl-C, an error, and SIGTERM and SIGHUP, which
+end the live view as Ctrl-C does (`delegate.cli.stop_signals`). The other forms write none of these sequences.
+
 Ctrl-C ends the watch with `watch.EXIT_INTERRUPTED` (130), and the run goes on. The live view draws its last frame, and
 this module shows the cursor and sets the title to the reason `interrupted`. It then prints one line on stderr with the
 position to go on from, and no line `position <seq>`.
@@ -36,6 +41,7 @@ position to go on from, and no line `position <seq>`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import shutil
 import sys
 from pathlib import Path
@@ -48,6 +54,7 @@ from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
 from .status import stream_reader_of, utc_now
+from .stop_signals import stop_signals_as_ctrl_c
 from .title import SEPARATOR, Title
 
 # The terminal control sequences of the live view: clear the screen, move the cursor to the top left, clear to the end
@@ -60,9 +67,16 @@ CLEAR_DOWN: str = "\x1b[J"
 # The prompt of the run picker. The default answer, 1, is the newest active run.
 PROMPT: str = "watch which? [1] "
 
-# The terminal control sequence that shows the cursor. Ctrl-C can come while a frame is written, so the command writes
-# it after the last frame.
+# The terminal control sequences that hide and show the cursor. The live view hides the cursor with its first frame, so the
+# reader does not see it move down the screen, and the command shows it on each end of the watch (#280). Ctrl-C can come
+# while a frame is written, so the command writes SHOW_CURSOR after the last frame.
+HIDE_CURSOR: str = "\x1b[?25l"
 SHOW_CURSOR: str = "\x1b[?25h"
+
+# The terminal control sequences that begin and end a synchronized update (#280): the terminal shows the whole frame at once,
+# also when a frame comes in parts, as over SSH. A terminal that does not know them ignores them.
+SYNC_BEGIN: str = "\x1b[?2026h"
+SYNC_END: str = "\x1b[?2026l"
 
 
 def _positive(text: str) -> float:
@@ -138,7 +152,8 @@ def _emit(line: str) -> None:
 
 
 class _Screen:
-    """The terminal that the live view draws on. The first frame clears the screen; each frame starts at the top left."""
+    """The terminal that the live view draws on. The first frame hides the cursor and clears the screen; each frame
+    starts at the top left, and is one synchronized update."""
 
     def __init__(self, out: TextIO) -> None:
         self._out = out
@@ -151,11 +166,17 @@ class _Screen:
         return size.columns, size.lines
 
     def draw(self, lines: list[str]) -> None:
-        start = HOME if self._drawn else CLEAR_SCREEN + HOME
+        start = SYNC_BEGIN + HOME if self._drawn else HIDE_CURSOR + SYNC_BEGIN + CLEAR_SCREEN + HOME
         self._drawn = True
         # The screen below the frame is cleared before the last newline, so a line printed after the frame starts clean.
-        self._out.write(start + "\n".join(f"{line}{CLEAR_LINE_END}" for line in lines) + CLEAR_DOWN + "\n")
+        self._out.write(start + "\n".join(f"{line}{CLEAR_LINE_END}" for line in lines) + CLEAR_DOWN + "\n" + SYNC_END)
         self._out.flush()
+
+    def restore(self) -> None:
+        """Show the cursor again, when a frame hid it. Each end of the watch calls this."""
+        if self._drawn:
+            self._out.write(SHOW_CURSOR)
+            self._out.flush()
 
 
 class _Titled:
@@ -326,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         sink: watch.Sink = watch.RawSink(_emit)
         json_sink = watch.JsonSink(_emit)
+        screen: _Screen | None = None
         if args.json:
             sink = json_sink
         elif live_view:
@@ -334,14 +356,17 @@ def main(argv: list[str] | None = None) -> int:
         title = Title(sys.stdout)
         if title.enabled and not args.json:  # the title sequence is no JSON
             sink = _Titled(sink, journal, title)
-        result = watch.follow(journal, options, sink)
+        try:
+            # SIGTERM and SIGHUP end the live view as Ctrl-C does, so the cursor shows again (#280).
+            with stop_signals_as_ctrl_c() if live_view else contextlib.nullcontext():
+                result = watch.follow(journal, options, sink)
+        finally:
+            if screen is not None:
+                screen.restore()  # on each end of the watch, also on an error, before the line of the end
     except (RunsError, JournalError) as error:
         _error(str(error), args.raw)
         return watch.EXIT_ERROR
     if result.code == watch.EXIT_INTERRUPTED:
-        if live_view:
-            sys.stdout.write(SHOW_CURSOR)
-            sys.stdout.flush()
         run_id = journal.parent.name
         print(
             f"watch: stopped at position {result.position}; the run goes on. "

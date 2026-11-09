@@ -706,8 +706,8 @@ class Terminal(io.StringIO):
         return True
 
 
-# A control sequence of the terminal: the live view moves the cursor and clears lines with them.
-CONTROL = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# A control sequence of the terminal: the live view moves the cursor, clears lines, hides the cursor and begins a synchronized update with them.
+CONTROL = re.compile(r"\x1b\[[?0-9;]*[A-Za-z]")
 
 # The sequences that start and end one frame of the live view: the cursor goes home, and the screen is cleared below the frame.
 FRAME_START = "\x1b[H"

@@ -225,7 +225,54 @@ def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_runn
         "─" * 200,
         *FEED,
     ]
-    assert out.splitlines()[-1] == f"position {run.seq}"
+    assert CONTROL.sub("", out).splitlines()[-1] == f"position {run.seq}"
+
+
+HIDE_CURSOR = "\x1b[?25l"
+SHOW_CURSOR = "\x1b[?25h"
+SYNC_BEGIN = "\x1b[?2026h"
+SYNC_END = "\x1b[?2026l"
+
+
+def test_the_live_view_hides_the_cursor_before_the_first_frame_draws_each_frame_as_one_synchronized_update_and_shows_the_cursor_after_the_last(
+    tmp_path, monkeypatch
+):
+    repo = bare_repo(tmp_path)
+    run = a_live_run(repo)
+    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
+
+    code, out = watch(repo, monkeypatch, then=lambda: ticket_b_ends(run))
+
+    assert code == 0
+    shown = without_titles(out)
+    # The cursor is hidden once, before the first frame, which starts a synchronized update and clears the screen.
+    assert shown.startswith(HIDE_CURSOR + SYNC_BEGIN + "\x1b[2J\x1b[H")
+    assert shown.count(HIDE_CURSOR) == 1
+    # Two frames: each is one synchronized update, from its start sequence to its end sequence, with no other frame inside.
+    updates = shown.split(SYNC_BEGIN)[1:]
+    assert len(updates) == 2 == shown.count(SYNC_END)
+    assert all(update.count(SYNC_END) == 1 for update in updates)
+    assert updates[0].endswith("\x1b[J\n" + SYNC_END)
+    # The cursor shows again after the last frame, before the line `position`.
+    assert updates[1].endswith("\x1b[J\n" + SYNC_END + SHOW_CURSOR + f"position {run.seq}\n")
+    assert shown.count(SHOW_CURSOR) == 1
+
+
+@pytest.mark.parametrize(
+    ("terminal", "extra"),
+    [pytest.param(False, (), id="pipe"), pytest.param(True, ("--raw",), id="raw"), pytest.param(True, ("--json",), id="json"),
+     pytest.param(False, ("--json",), id="json-to-a-pipe")],
+)
+def test_a_watch_that_is_not_the_live_view_writes_no_cursor_and_no_synchronized_update_sequence(tmp_path, monkeypatch, terminal, extra):
+    repo = bare_repo(tmp_path)
+    run = a_live_run(repo)
+    ticket_b_ends(run)
+
+    code, out = watch(repo, monkeypatch, *extra, terminal=terminal)
+
+    assert code == 0
+    for sequence in (HIDE_CURSOR, SHOW_CURSOR, SYNC_BEGIN, SYNC_END):
+        assert sequence not in out
 
 
 def test_before_the_first_step_the_feed_holds_the_line_of_the_start_of_the_run(tmp_path, monkeypatch, local_zone):
@@ -310,7 +357,7 @@ def test_a_problem_is_a_line_that_starts_with_a_cross_and_names_a_file_with_no_p
         "16:36  ✗ #a the specialist returned no valid result: report missing: a.specialist.json",
     ]
     assert last[-3:-1] == first[-2:]
-    assert out.splitlines()[-1] == "position 6"
+    assert CONTROL.sub("", out).splitlines()[-1] == "position 6"
 
 
 def test_the_verification_of_an_economy_chain_is_one_group_its_verdict_names_its_stack_and_joins_the_end_of_the_run(
@@ -519,7 +566,7 @@ def test_each_end_reason_has_the_exit_code_and_the_position_of_before_on_a_termi
     live, live_out = watch(repo, monkeypatch, *extra, terminal=True, sleep=poll)
 
     assert piped == live == code
-    assert raw_out.splitlines()[-1] == live_out.splitlines()[-1] == f"position {run.seq}"
+    assert raw_out.splitlines()[-1] == CONTROL.sub("", live_out).splitlines()[-1] == f"position {run.seq}"
     if raw is not None:
         assert raw_out == raw.format(dir=run.dir)
     assert re.fullmatch(feed_end, frames(live_out)[-1][-1]), frames(live_out)[-1]

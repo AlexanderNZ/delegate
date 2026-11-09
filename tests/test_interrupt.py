@@ -10,6 +10,7 @@ boundary, as Ctrl-C on a terminal does: the wait between two polls of `watch`
 from __future__ import annotations
 
 import io
+import signal
 import subprocess
 import sys
 import time
@@ -28,9 +29,10 @@ from .test_run_multi import HEAD, ticket
 # The exit status of a process that SIGINT ended, as a shell gives it.
 INTERRUPTED = 130
 
-# The control sequence that shows the cursor of the terminal, and the end of a frame of the live view.
+# The control sequences of the live view: show the cursor, end a frame, and end one synchronized update (#280).
 SHOW_CURSOR = "\x1b[?25h"
 FRAME_END = "\x1b[J"
+SYNC_END = "\x1b[?2026l"
 
 
 def ctrl_c(*args, **kwargs):
@@ -97,8 +99,8 @@ def test_ctrl_c_in_the_live_view_restores_the_cursor_the_end_of_the_frame_and_th
     assert code == INTERRUPTED
     assert "Traceback" not in err
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
-    # The output ends with the end of a whole frame and the sequence that shows the cursor.
-    assert out.endswith(FRAME_END + "\n" + SHOW_CURSOR)
+    # The output ends with the end of a whole frame and its synchronized update, and the sequence that shows the cursor.
+    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
     assert any("#a   started" in line for line in frames(out)[-1])
     # The title no longer gives the progress: it gives the reason that the watch ended.
     assert TITLE.findall(out)[-1] == "delegate watch · r1 · interrupted"
@@ -112,7 +114,7 @@ class _InterruptedTerminal(Terminal):
         self.cut = False
 
     def write(self, text: str) -> int:
-        if not self.cut and text.startswith("\x1b[2J"):
+        if not self.cut and "\x1b[2J" in text:
             self.cut = True
             super().write(text[: len(text) // 2])
             raise KeyboardInterrupt
@@ -128,8 +130,51 @@ def test_ctrl_c_while_a_frame_is_written_draws_a_whole_frame_before_the_line(tmp
 
     assert code == INTERRUPTED
     assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
-    assert out.endswith(FRAME_END + "\n" + SHOW_CURSOR)
+    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
     assert any("#a   started" in line for line in frames(out)[-1])
+
+
+@pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGHUP])
+def test_a_stop_signal_in_the_live_view_ends_the_watch_as_ctrl_c_does_and_shows_the_cursor(tmp_path, monkeypatch, capsys, stop_signal):
+    repo = bare_repo(tmp_path)
+    a_run_that_goes_on(repo)
+
+    def unhandled(signum, frame):
+        pytest.fail(f"{signal.Signals(signum).name} ended the watch with no handler: the cursor stays hidden")
+
+    def send_the_signal(seconds):
+        signal.raise_signal(stop_signal)
+
+    previous = signal.signal(stop_signal, unhandled)  # a watch that handles no signal fails here, and the test process stays alive
+    try:
+        monkeypatch.setattr(time, "sleep", send_the_signal)
+        code, out, err = watch(monkeypatch, capsys, Terminal(), "r1", "--repo", str(repo))
+        restored = signal.getsignal(stop_signal)
+    finally:
+        signal.signal(stop_signal, previous)
+
+    assert code == INTERRUPTED
+    assert err == "watch: stopped at position 2; the run goes on. Resume with delegate watch r1 --from 2\n"
+    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
+    assert restored is unhandled  # the watch puts the handler of before back
+
+
+def test_an_error_of_the_journal_in_the_live_view_shows_the_cursor_again_before_the_line_of_the_error(tmp_path, monkeypatch, capsys):
+    repo = bare_repo(tmp_path)
+    path = journal_path(repo, "r1")
+    a_run_that_goes_on(repo)
+
+    def corrupt_the_journal(seconds):
+        with path.open("a") as handle:
+            handle.write("this is not JSON\n")
+
+    monkeypatch.setattr(time, "sleep", corrupt_the_journal)
+
+    code, out, err = watch(monkeypatch, capsys, Terminal(), "r1", "--repo", str(repo))
+
+    assert code == 2
+    assert err.startswith("delegate watch: ") and "Traceback" not in err
+    assert out.endswith(FRAME_END + "\n" + SYNC_END + SHOW_CURSOR)
 
 
 @pytest.mark.parametrize("command", [["status", "r1"], ["pause", "r1"], ["status", "--json"]])

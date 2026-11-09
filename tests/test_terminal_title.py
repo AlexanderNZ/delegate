@@ -20,7 +20,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, journal_path, live_lock, make_repo, without_titles
+from .support import CONTROL, TITLE, Terminal, bare_repo, journal_path, live_lock, make_repo, without_titles
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -132,7 +132,7 @@ def test_watch_on_a_terminal_shows_the_progress_and_the_local_eta_in_the_title_a
         "delegate watch · ab12 · built",
     ]
     # A title is not visible on the terminal, and the output holds no other change.
-    assert without_titles(out.getvalue()).splitlines()[-1] == f"position {run.seq}"
+    assert CONTROL.sub("", without_titles(out.getvalue())).splitlines()[-1] == f"position {run.seq}"
 
 
 @pytest.mark.parametrize(

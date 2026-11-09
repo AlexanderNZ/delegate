@@ -554,6 +554,8 @@ run e05a  paused  ████████░░░░░░░░ 50%  3/6 ende
 
 Each part of the frame has the colour of its role, from the 16 ANSI colours of the theme of the terminal: green for a result that is good (`✓`, `●` built, `gates green`, the done phases, the bar), cyan for the ticket that runs now, yellow for `REJECT`, a fix-up, a continuation, a pause and `⚠ idle`, red for a failure, a problem and `gates red`, and blue for the rail and the ids in `after`. Faint text (SGR 2) is for the facts to read second: the times, the tokens, the header, the divider, and the rows that ended or are pending. Bold marks the short run id, the ticket that runs now, the verdict word, and the result of the run. The view sets no background colour. Each state also has a glyph or a word, so the view reads the same with no colour. When `NO_COLOR` is set and not empty, the frame has no SGR code. When the locale is not UTF-8 (`LC_ALL`, `LC_CTYPE`, `LANG`), the run line, the table, the divider and the glyph of a problem line use the ASCII glyphs `+ x > . * o - # . | - !`, in the same columns. The ids in `after` stay as they are. The lines of the feed and the title keep the separator `·`.
 
+The view hides the cursor with its first frame (`ESC [ ? 25 l`), so the reader does not see the cursor move down the screen. It writes each frame as one synchronized update: the frame starts with the sequence that begins a synchronized update (`ESC [ ? 2026 h`) and ends with the sequence that ends it (`ESC [ ? 2026 l`). A terminal that knows the sequences shows the whole frame at once, also when the frame comes in parts, as over SSH, and a terminal that does not know them ignores them. The view shows the cursor again (`ESC [ ? 25 h`) at each end of the watch, before its last line: the end of the run, a pause, a halt, a crash, a stall, a time limit, `--until verdict`, Ctrl-C, SIGTERM, SIGHUP, and an error. `--raw`, `--json` and a standard output that is not a terminal get none of these sequences.
+
 The view cuts each line to the width of the terminal. A frame fits the height of the terminal, with the last line free for the cursor. The table gets the rows that are left after the run line, the blank line, the header, the divider and 4 lines of the feed. When the plan has more rows than that, rows fold:
 
 1. The rows show from the top, in plan order, and the rows of the tail fold into one last row, directly above the divider. The row gives the count and the state of the folded tickets, as `· 13 pending`, the range of their ids in `after`, as `126–144`, and the range of their rows, as `rows 28–40 folded`.
@@ -739,7 +741,7 @@ The journal names the [**event stream**](../glossary.md#event-stream) of an agen
 
 ### Ctrl-C
 
-Ctrl-C stops the watch. It does not stop the run. `watch` then does these steps:
+Ctrl-C stops the watch. It does not stop the run. In the live view, SIGTERM and SIGHUP stop the watch in the same way, with the same steps, the same line and the same exit code. `watch` then does these steps:
 
 1. On a terminal, it draws the last frame of the live view, shows the cursor, and sets the title to `delegate watch · <short run id> · interrupted`. Thus the terminal is clean also when Ctrl-C comes while `watch` draws a frame. See [the terminal title](#the-terminal-title).
 2. It prints one line on stderr, and no line `position <seq>`. See the line below.
