@@ -7,6 +7,7 @@ no model.
 """
 
 import json
+import os
 
 import pytest
 
@@ -360,3 +361,58 @@ def test_an_invalid_report_on_a_branch_with_no_commit_fails_the_step_and_the_spe
     assert "continuation" not in event_names(read_journal(out))
     step_end = next(e for e in read_journal(out) if e["event"] == "step-end")
     assert step_end["state"] == "failed" and "gates_green" in step_end["reason"]
+
+
+def age_the_report_of_a_continuation(request):
+    """Make the report of the session before a continuation older than the start of the continuation, as a real gap does."""
+    if "## Continuation" in request.prompt and request.report_path.is_file():
+        os.utime(request.report_path, (1_000_000_000, 1_000_000_000))
+
+
+def test_a_continuation_that_writes_no_report_and_ends_idle_is_not_judged_on_the_report_of_the_session_before_it(tmp_path, capsys, scripted):
+    scripted.files = {"other.txt": "no feature file\n"}  # the first run leaves red gates and a valid report
+    scripted.continuation_files = [{"feature.txt": "feature\n"}]  # the gates would be green on the second run
+    scripted.idle_roles = {"specialist"}
+    scripted.on_specialist = age_the_report_of_a_continuation
+
+    def report(request, head):
+        if len(scripted.continuation_calls) == 1:  # the first continuation writes nothing
+            return None
+        branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        return json.dumps(valid_report("a", branch, head))
+
+    scripted.report_text = report
+    repo = make_repo(tmp_path, RED_GATE_WORKFLOW)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    events = read_journal(out)
+    assert [e["trigger"] for e in events if e["event"] == "continuation"] == ["gates-red", "report-missing"]
+    # The old report stays where it was: the engine does not delete it, and the new one replaces it only when it is written.
+    assert [e["valid"] for e in events if e["event"] == "report-validation"] == [True, False, True]
+    assert [e["state"] for e in events if e["event"] == "step-end"] == ["built"]
+
+
+def test_a_continuation_that_writes_a_new_report_is_judged_on_that_report(tmp_path, capsys, scripted):
+    scripted.files = {"other.txt": "no feature file\n"}
+    scripted.continuation_files = [{"feature.txt": "feature\n"}]
+    scripted.on_specialist = age_the_report_of_a_continuation
+
+    def report(request, head):
+        branch = git(request.cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        if len(scripted.continuation_calls) == 1:  # the new report says blocked: the step fails on it, not on the old report
+            return json.dumps(valid_report("a", branch, head, status="blocked", blocked_reason="needs a decision"))
+        return json.dumps(valid_report("a", branch, head))
+
+    scripted.report_text = report
+    repo = make_repo(tmp_path, RED_GATE_WORKFLOW)
+
+    code, out, err = run(repo, capsys)
+
+    assert code == 1
+    events = read_journal(out)
+    assert [e["trigger"] for e in events if e["event"] == "continuation"] == ["gates-red"]
+    assert [e["status"] for e in events if e["event"] == "report-validation"] == ["committed", "blocked"]
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "failed" and "needs a decision" in step_end["reason"]

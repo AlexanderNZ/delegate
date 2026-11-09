@@ -174,6 +174,7 @@ import secrets
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -2424,6 +2425,33 @@ def _report_check(read: Callable[[], object]) -> Callable[[], bool]:
     return valid
 
 
+def _report_is_stale(report_path: Path, started_ns: int | None) -> bool:
+    """True when the report file is older than the session that began at `started_ns` (`time.time_ns()`).
+
+    Such a file is the report of an earlier session (#278). `started_ns` is None for a session that ended before a kill:
+    its report counts. A missing or unreadable file is not stale: the read of the report gives that error.
+    """
+    if started_ns is None:
+        return False
+    try:
+        return report_path.stat().st_mtime_ns < started_ns
+    except OSError:
+        return False
+
+
+def _read_session_report(report_path: Path, ticket: str, started_ns: int | None) -> SpecialistReport:
+    """Read the specialist report of a session that began at `started_ns`. A report that the session did not write is a missing report.
+
+    The engine does not delete or move an older report: it stays as evidence.
+    """
+    if _report_is_stale(report_path, started_ns):
+        raise ReportError(
+            f"report missing: the specialist wrote no file at {report_path} in this session; "
+            "the file there is the report of an earlier session"
+        )
+    return read_specialist_report(report_path, ticket)
+
+
 def _request(
     agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
     report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
@@ -2834,15 +2862,17 @@ def _build_with_continuations(
     resume_session: str | None = None
     leftovers: frozenset[str] = frozenset()  # the paths that red gates left in the worktree (see `_uncommitted_before_gates`)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
+    started_ns: int | None = None  # the start of the session, as `time.time_ns()`; None for a session that ended before a kill
     while True:
         if spawned:
-            spawned, result = False, None
+            spawned, result, started_ns = False, None, None
         else:
             try:
                 sealed = _check_agent_file(journal, stack.specialist, ticket.id, ROLE_SPECIALIST, 0)
             except _StepFailed as failed:
                 return str(failed)
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
+            started_ns = time.time_ns()
             result = _run_agent(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
                 _request(
@@ -2866,7 +2896,7 @@ def _build_with_continuations(
             reason = _ended_reason(result, "the specialist", stack)
         else:
             try:
-                report = read_specialist_report(report_path, ticket.id)
+                report = _read_session_report(report_path, ticket.id, started_ns)
             except ReportError as error:
                 journal.append(
                     "report-validation", ticket=ticket.id, valid=False, path=str(report_path), reason=str(error),
@@ -2875,7 +2905,8 @@ def _build_with_continuations(
                 # A report that is missing or not valid, on a branch with work, gets a continuation for the report only.
                 if not _commit_lines(vcs, repo, since, branch):
                     return str(error)
-                trigger = TRIGGER_REPORT_INVALID if report_path.is_file() else TRIGGER_REPORT_MISSING
+                missing = not report_path.is_file() or _report_is_stale(report_path, started_ns)
+                trigger = TRIGGER_REPORT_MISSING if missing else TRIGGER_REPORT_INVALID
                 reason, problems = str(error), error.problems
             else:
                 journal.append(
