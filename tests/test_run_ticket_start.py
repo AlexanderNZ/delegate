@@ -154,7 +154,7 @@ def test_with_ticket_start_run_branch_the_work_of_a_ticket_counts_from_the_run_b
 def test_the_dry_run_names_the_run_branch_as_the_start_of_each_ticket(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, workflow("run-branch"))
 
-    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run", "--repo", str(repo)])
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")
@@ -164,7 +164,7 @@ def test_the_dry_run_names_the_run_branch_as_the_start_of_each_ticket(tmp_path, 
 def test_the_dry_run_of_an_assure_workflow_without_ticket_start_names_the_run_branch_as_the_default(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, workflow())
 
-    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run", "--repo", str(repo)])
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")
@@ -175,7 +175,7 @@ def test_the_dry_run_of_an_assure_workflow_without_ticket_start_names_the_run_br
 def test_the_dry_run_does_not_name_a_ticket_start_for_base_branch_or_for_economy_mode(tmp_path, capsys, scripted, mode, ticket_start):
     repo = make_repo(tmp_path, workflow(ticket_start, mode=mode))
 
-    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run", "--repo", str(repo)])
 
     out, err = capsys.readouterr()
     assert (code, err) == (0, "")
@@ -185,7 +185,7 @@ def test_the_dry_run_does_not_name_a_ticket_start_for_base_branch_or_for_economy
 def test_a_ticket_start_that_is_not_known_is_an_error_that_names_the_field_and_the_values(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, workflow("previous-ticket"))
 
-    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run", "--repo", str(repo)])
 
     out, err = capsys.readouterr()
     assert (code, out) == (1, "")
@@ -195,7 +195,7 @@ def test_a_ticket_start_that_is_not_known_is_an_error_that_names_the_field_and_t
 def test_ticket_start_run_branch_in_economy_mode_is_an_error_because_the_chain_sets_the_start(tmp_path, capsys, scripted):
     repo = make_repo(tmp_path, workflow("run-branch", mode="economy"))
 
-    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run"])
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--dry-run", "--repo", str(repo)])
 
     out, err = capsys.readouterr()
     assert (code, out) == (1, "")

@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Changed
+
+- Tests: a test cannot start a command against the repository of the kit itself (#285). During the run of 1.20.0, a draft test called `delegate run` with no `--repo` in the worktree of a specialist. The default of `--repo` is the current directory, so the engine found the state root that the kit records, made the branches `run/demo` and `run/demo-a` and a worktree in the kit, and started a real session. Now an autouse fixture in `tests/conftest.py` fails each test whose code looks up the top level or the git common directory of the kit through the version control port, the boundary that each command uses. The failure names the test and tells the author to pass `--repo` with a test repository. A test that reads a file of the kit by path is not affected. A test that must use the kit has the marker `kit_repository`. The dry-run cases of `tests/test_run_ticket_start.py` that gave no `--repo` now give it. See "Write the test first" in `CONTRIBUTING.md`.
+
 ## [1.20.0] - 2026-11-09
 
 ### Changed

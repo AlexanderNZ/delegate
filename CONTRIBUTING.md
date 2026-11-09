@@ -55,6 +55,8 @@ A bug fix starts the same way. Write a test that shows the bug, watch it fail, a
 
 A test drives a public entry point, such as `main(argv)` or the adapter interface. It checks what a user can see: an exit code, a standard output, a file, or the state of git. A test never imports a private function and never checks a log line. A test that needs git uses a real temporary git repository. A mock stands only at a system boundary, such as the harness process.
 
+A test never starts a command against the repository of the kit itself. Without `--repo`, `delegate run` and the other commands use the current directory. In a test, that directory is the checkout of the kit. The engine then makes branches and a worktree in the kit, and it finds the state root that the kit records. Pass `--repo` with a real temporary git repository. An autouse fixture in `tests/conftest.py` enforces this. A test fails when its code looks up the top level or the git common directory of the kit through the version control port. The failure names the test and tells the author to pass `--repo`. A test that reads a file of the kit by path is not affected: a page of the docs, a skill, a committed agent. A test that must look up the kit itself has the marker `@pytest.mark.kit_repository`, and a comment that says why.
+
 ## Regenerate the docs
 
 Some sections of the reference pages are generated from the code. Do not edit the text between the `generated:begin` and `generated:end` markers. After you change a flag, an exit code, a guard command or a finding code, run this command from the root of the repository. Then commit the pages that it changed:

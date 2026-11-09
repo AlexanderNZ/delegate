@@ -1,8 +1,10 @@
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from delegate.adapters.git import GitVersionControl
 from delegate.definitions.declaration import load_declaration
 from delegate.definitions.render import render
 from delegate.shared.tiers import load_tiers
@@ -22,6 +24,10 @@ def pytest_configure(config):
     The dev shell sets PYTHONPATH only in a git checkout. A copy with no `.git` entry, as the proof copy of a verifier
     (#153), has no PYTHONPATH from it, so `python -m delegate...` in a test did not find the package (#170).
     """
+    config.addinivalue_line(
+        "markers",
+        "kit_repository: the test looks up the repository of the kit itself through the version control port (#285); say why in the test",
+    )
     entries = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
     if entries[:1] != [str(SOURCE)]:
         os.environ["PYTHONPATH"] = os.pathsep.join([str(SOURCE), *entries])
@@ -88,6 +94,55 @@ def isolated_state_home(tmp_path_factory, monkeypatch) -> Path:
     monkeypatch.setenv("XDG_STATE_HOME", str(path))
     monkeypatch.delenv("DELEGATE_STATE_ROOT", raising=False)
     return path
+
+
+def _kit_paths() -> tuple[Path, Path] | None:
+    """The top level and the git common directory of the repository that holds this tree, or None when the tree is no repository.
+
+    A copy with no `.git` entry (the proof copy of a verifier, #153) has no repository of its own: the guard of
+    `no_run_against_the_kit` then has nothing to guard.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(SOURCE.parent), "rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    top, common = result.stdout.splitlines()
+    return Path(top).resolve(), Path(common).resolve()
+
+
+KIT_PATHS = _kit_paths()
+
+
+@pytest.fixture(autouse=True)
+def no_run_against_the_kit(monkeypatch, request):
+    """Fail a test whose code looks up the paths of the repository of the kit itself (#285).
+
+    Each command of the engine finds its repository through `repository_paths` of the version control port: the state
+    directory, the branches and the worktrees all follow from the paths that it returns. A test that calls `delegate run`
+    with no `--repo` in the checkout of the kit looked up the kit, so it made branches and a worktree there and found the
+    state root that the kit records. The check covers the top level and the git common directory, so each worktree of the
+    kit counts. A test that reads a file of the kit by path does not look up the repository, so it is not affected. A test
+    that needs the repository of the kit has `@pytest.mark.kit_repository` and says why.
+    """
+    if KIT_PATHS is None or request.node.get_closest_marker("kit_repository"):
+        return
+    real = GitVersionControl.repository_paths
+
+    def guarded(self, path: Path) -> tuple[Path, Path]:
+        top, common = real(self, path)
+        if top.resolve() == KIT_PATHS[0] or common.resolve() == KIT_PATHS[1]:
+            pytest.fail(
+                f"{request.node.nodeid} looked up the repository of the kit itself ({KIT_PATHS[0]}) from {path}. "
+                "A test of the engine must pass --repo with a test repository (a real temporary git repository), so no "
+                "branch, worktree or state directory of the kit is made. If the test needs the kit, mark it "
+                "@pytest.mark.kit_repository and say why.",
+                pytrace=False,
+            )
+        return top, common
+
+    monkeypatch.setattr(GitVersionControl, "repository_paths", guarded)
 
 
 @pytest.fixture
