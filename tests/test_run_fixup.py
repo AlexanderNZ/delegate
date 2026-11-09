@@ -232,16 +232,56 @@ def test_a_fixup_specialist_that_fails_caps_or_reports_badly_fails_the_step_and_
     assert [e["verdict"] for e in events if e["event"] == "verdict"] == ["REJECT"]
 
 
-def test_a_fixup_that_turns_a_gate_red_fails_the_step_whatever_the_specialist_claims(tmp_path, capsys, scripted):
+def test_red_gates_after_the_first_fixup_start_a_second_fixup_with_the_gate_output_and_its_scoped_verifier_accepts(
+    tmp_path, capsys, scripted
+):
+    scripted.verdict_sequence = ["REJECT", "ACCEPT"]
+    scripted.verdict_findings = [FINDING]
+    # Green on the build, red after the first fix-up, and green again after the second fix-up.
+    gate = "test ! -f fixup-1.txt || test -f fixup-2.txt || { echo RED-GATE-5127 fixup-2.txt is missing; exit 1; }"
+    repo = make_repo(tmp_path, WORKFLOW.replace('gates = ["test -f feature.txt"]', f"gates = ['{gate}']"))
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    built, red, green = git(repo, "rev-list", "--reverse", "main..run/demo-a").split()
+    assert git(repo, "show", "--name-only", "--format=", green).split() == ["fixup-2.txt"]
+    assert tip(repo, "run/demo") == green
+    first, second = scripted.fixup_calls
+    assert "RED-GATE-5127 fixup-2.txt is missing" in second.prompt and gate in second.prompt
+    assert f"The gates of the engine are red on the commit `{red}`" in second.prompt
+    assert FINDING not in second.prompt
+    # No verifier ran between the two fix-ups. The scoped verifier reads the findings and the delta of both fix-ups.
+    full, scoped = scripted.verifier_calls
+    assert scoped.prompt.startswith("## Findings under verification") and FINDING in scoped.prompt
+    assert f"git diff {built}..run/demo-a" in scoped.prompt
+    assert "+++ b/fixup-1.txt" in scoped.prompt and "+++ b/fixup-2.txt" in scoped.prompt
+    events = read_journal(out)
+    assert [(e["round"], e["rejected_commit"], e["trigger"]) for e in events if e["event"] == "fixup-start"] == [
+        (1, built, "reject"), (2, red, "gates-red"),
+    ]
+    assert [(e["round"], e["green"]) for e in events if e["event"] == "gate-result"] == [(0, True), (1, False), (2, True)]
+    assert [(e["mode"], e["round"], e["verdict"]) for e in events if e["event"] == "verdict"] == [
+        ("full", 0, "REJECT"), ("fix-up", 2, "ACCEPT"),
+    ]
+
+
+def test_red_gates_after_the_last_allowed_fixup_fail_the_step_and_the_reason_names_the_gates(tmp_path, capsys, scripted):
     scripted.verdict = "REJECT"
     scripted.verdict_findings = [FINDING]
     workflow = WORKFLOW.replace('gates = ["test -f feature.txt"]', 'gates = ["test ! -f fixup-1.txt"]')
     repo = make_repo(tmp_path, workflow)
+    base_tip = tip(repo, "main")
 
     code, out, err = run(repo, capsys)
 
     assert code == 1
-    assert "gates red: test ! -f fixup-1.txt" in err
-    assert len(scripted.verifier_calls) == 1
-    gates = [(e["round"], e["green"]) for e in read_journal(out) if e["event"] == "gate-result"]
-    assert gates == [(0, True), (1, False)]  # the build, then the fix-up; the rebase keeps the commit of the build
+    assert "gates red after 2 fix-up rounds: test ! -f fixup-1.txt" in err
+    assert len(scripted.fixup_calls) == 2 and len(scripted.verifier_calls) == 1
+    assert "The gates of the engine are red" in scripted.fixup_calls[1].prompt
+    assert tip(repo, "run/demo") == base_tip
+    events = read_journal(out)
+    # The build, the first fix-up, and the second fix-up; the rebase keeps the commit of the build.
+    assert [(e["round"], e["green"]) for e in events if e["event"] == "gate-result"] == [(0, True), (1, False), (2, False)]
+    step_end = next(e for e in events if e["event"] == "step-end")
+    assert step_end["state"] == "failed" and "gates red after 2 fix-up rounds: test ! -f fixup-1.txt" in step_end["reason"]

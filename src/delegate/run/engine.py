@@ -1344,8 +1344,8 @@ def _retry_plan(
     """The first phase of the failed step of `ticket_id` that did not complete. Raise EngineError when it cannot be retried.
 
     The phase comes from the journal events of the step. The round is the
-    number of verdicts, because a verifier run that ended with no verdict does
-    not count against the fix-up limit:
+    number of rounds that the step used (see `_rounds_used`): a verifier run that ended with no verdict does
+    not count against the fix-up limit, and a fix-up round that red gates started does:
 
     - No verifier started: the gates.
     - The last verifier started after the last verdict: that verifier again.
@@ -1353,6 +1353,7 @@ def _retry_plan(
       scoped verifier of the fix-up commit.
     - The last verdict is a REJECT, and the fix-up specialist of the next round
       reported committed work: the gates of that fix-up, then its scoped verifier.
+      Red gates of that fix-up start the next round while rounds remain (#277).
 
     A retry of `assure` mode spawns no specialist, with two exceptions that the agent check (#205) makes. A step that it
     stopped before a specialist session (`_stopped_before_specialist`) has the plan: the specialist. A step that it stopped
@@ -1411,7 +1412,7 @@ def _retry_plan(
         )
     starts = [index for index, e in enumerate(prior) if e["event"] == "verify-start"]
     verdicts = [index for index, e in enumerate(prior) if e["event"] == "verdict"]
-    round_number = len(verdicts)
+    round_number = _rounds_used(prior)
     if not starts:
         return _RetryPlan(ticket_id, RETRY_GATES, 0, prior)
     if not verdicts:
@@ -1423,7 +1424,7 @@ def _retry_plan(
     findings = tuple(str(finding) for finding in last["findings"])  # type: ignore[union-attr]
     if starts[-1] > verdicts[-1]:
         return _RetryPlan(ticket_id, RETRY_SCOPED_VERIFIER, round_number, prior, rejected, findings)
-    if round_number > domain.fixup_round_limit(workflow.mode):
+    if int(last["round"]) >= domain.fixup_round_limit(workflow.mode):  # type: ignore[call-overload]
         raise EngineError(f"{refused}: its verifier rejected it after the last fix-up round")
     if _stopped_before_fixup(prior, round_number):
         return _RetryPlan(ticket_id, RETRY_FIXUP, round_number, prior, rejected, findings)
@@ -1436,6 +1437,18 @@ def _retry_plan(
                 "--retry goes on only at the gates, the verifier or the scoped verifier" + _coordinator_hint(report, ticket_id)
             )
     return _RetryPlan(ticket_id, RETRY_GATES, round_number, prior, rejected, findings)
+
+
+def _rounds_used(prior: Sequence[dict[str, object]]) -> int:
+    """The number of rounds that the journal events `prior` of an `assure` step use: the round of a resume or a retry.
+
+    It is the number of verdicts, because a verifier run that ended with no verdict does not count against the fix-up
+    limit. A fix-up round that red gates started has no verdict before it (#277), so a `fixup-start` of a later round
+    sets the count to its round.
+    """
+    verdicts = sum(1 for e in prior if e["event"] == "verdict")
+    fixups = [int(e["round"]) for e in prior if e["event"] == "fixup-start"]  # type: ignore[call-overload]
+    return max([verdicts, *fixups])
 
 
 def _unfinished_report(reports: Sequence[dict[str, object]]) -> dict[str, object] | None:
@@ -2700,8 +2713,8 @@ def _build_ticket(
         else:
             specialist_done, continuations = _specialist_committed(tuple(prior)), 0
         completed = _coordinator_completes(_ticket_events(read_events(journal.path), ticket.id))
-        # A verifier run that ended with no verdict does not count against the fix-up limit.
-        verify_rounds = sum(1 for e in prior if e["event"] == "verdict")
+        # A verifier run that ended with no verdict does not count against the fix-up limit; a red-gate fix-up round does.
+        verify_rounds = _rounds_used(prior)
         rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
         if rebases:
             rebased_onto = str(rebases[-1]["onto_commit"])
@@ -3090,8 +3103,12 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     on the commit under verification, so the verifier does not run them again
     (see `_engine_gates_text`).
 
-    A resume sets `first_round` to the number of verdicts that the journal
-    holds. The first pass of the resume is a full verification at that round
+    Red gates after a fix-up start the next fix-up round with the gate output,
+    while rounds remain, and no verifier runs before it (see `_fixup_gates`).
+    Such a round counts against the limit as each other round does (#277).
+
+    A resume sets `first_round` to the number of rounds that the journal
+    holds (see `_rounds_used`). The first pass of the resume is a full verification at that round
     number, and the limit counts across the stop. A retry that goes on at the
     scoped verifier gives the rejected commit and the findings text of its
     fix-up round in `first_fixup`: the first pass is then the scoped verifier
@@ -3102,10 +3119,8 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     if used_up:
         raise _StepFailed(used_up)
     rejected, findings_text = first_fixup if first_fixup is not None else ("", None)
-    report: VerifierReport | None = None
-    for round_number in domain.verification_rounds(mode, first_round):
-        if report is not None:
-            findings_text = _fixup_round(step, round_number, rejected, report.findings)
+    round_number = first_round
+    while True:
         # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves the
         # gates text, the brief and the verifier (#239).
         verified = _tip(step.vcs, step.repo, step.branch)
@@ -3117,24 +3132,26 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
         report = _verify_round(step, round_number, fixup_body, gates_text, verified=verified)
         if domain.is_accepted(report.verdict):
             return verified
+        if round_number >= domain.fixup_round_limit(mode):
+            raise _Rejected(domain.rejection_reason(mode, report.findings), report.findings)
         rejected = verified
-    assert report is not None
-    raise _Rejected(domain.rejection_reason(mode, report.findings), report.findings)
+        round_number, findings_text = _fixup_round(step, round_number + 1, rejected, report.findings)
 
 
-def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> str:
-    """Run one fix-up round and return the findings text for the scoped brief of the fresh verifier.
+def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> tuple[int, str]:
+    """Run one fix-up round. Return the round of the scoped verifier, and the findings text for its scoped brief.
 
     The engine writes the findings to a file and sends the specialist a fix-up
     brief in the same worktree (see `_run_fixup`). The fix must be a new commit
     on top of the rejected commit, which the brief generator checks before any
-    gate runs. The engine then runs the gates itself. The caller makes the
-    scoped brief after the gates, so the brief holds their green output.
+    gate runs. The engine then runs the gates itself. Red gates start the next
+    round (see `_fixup_gates`), so the round of the scoped verifier can be
+    later than `round_number`. The caller makes the scoped brief after the
+    gates, so the brief holds their green output.
     """
-    findings_text = _run_fixup(step, round_number, rejected, _findings_text(findings))
+    findings_text = _run_fixup(step, round_number, rejected, _findings_text(findings), fields={"trigger": TRIGGER_REJECT})
     _checked_fixup_brief(step, round_number, rejected, findings_text)
-    _fixup_gates(step, round_number)
-    return findings_text
+    return _fixup_gates(step, round_number), findings_text
 
 
 def _engine_gates_text(step: _Step, commit: str) -> str | None:
@@ -3257,17 +3274,32 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
 
 
-def _fixup_gates(step: _Step, round_number: int) -> None:
-    """Run the gates after the fix-up of a round. Raise `_StepFailed` when one is red."""
-    red = [
-        label for gate in step.stack.gates
-        if (label := _run_gate(
-            step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, step.stack.gate_limit,
-            step.stack.gate_names.get(gate),
-        ))
-    ]
-    if red:
-        raise _StepFailed("gates red: " + "; ".join(red))
+def _fixup_gates(step: _Step, round_number: int) -> int:
+    """Run the gates after the fix-up of `round_number`, until they are green. Return the round of the last fix-up.
+
+    Red gates start the next fix-up round while rounds remain, as on the tip of an `economy` chain (#277). The findings
+    of that round are the names and the output of the red gates on the fix-up commit, and its rejected commit is that
+    fix-up commit. No verifier runs before it. Raise `_StepFailed`, whose reason names the red gates, when the gates are
+    red after the last fix-up round of the mode.
+    """
+    mode = step.workflow.mode
+    while True:
+        tip = _head(step.vcs, step.worktree)
+        outcomes = _gate_outcomes(
+            step.gates, step.vcs, step.stack, step.ticket.id, step.worktree, step.journal, round_number, PHASE_FIXUP, tip,
+        )
+        red = [outcome for outcome in outcomes if not outcome.green]
+        if not red:
+            return round_number
+        if round_number >= domain.fixup_round_limit(mode):
+            raise _StepFailed(domain.fixup_gates_reason(mode, [outcome.label for outcome in red]))
+        round_number += 1
+        copies = _copy_gate_logs(red, _scratch_directory(step.run_dir, step.ticket.id, ROLE_FIXUP))
+        findings_text = _run_fixup(
+            step, round_number, tip, _red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red], copies, "the fix-up commit"),
+            True, {"trigger": TRIGGER_GATES_RED},
+        )
+        _checked_fixup_brief(step, round_number, tip, findings_text)
 
 
 def _journal_violation(journal: Journal, ticket: str, round_number: int, violation: InvariantViolation) -> None:
@@ -3570,22 +3602,22 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
             # The branch holds no fix-up commit: the stop came before the fix-up session. Run that fix-up again.
             if plan.rejected is None or not fixup_held:
                 return f"the branch {step.branch} no longer holds the rejected commit of round {plan.round}, so its fix-up cannot run again"
-            # On the rejected commit, with the findings of the REJECT: not a new round.
-            findings_text = _fixup_round(step, plan.round, plan.rejected, list(plan.findings))
+            # On the rejected commit, with the findings of the REJECT: not a new round. Red gates after it can start the next round.
+            round_number, findings_text = _fixup_round(step, plan.round, plan.rejected, list(plan.findings))
             if on_tip:
-                return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
+                return _advance_run_branch(step, _accepted_commit(step, round_number, (plan.rejected, findings_text)))
             # The run branch moved after the stop: rebase the branch with its fix-up, then a full verifier, as for any other phase.
             reason = _rebase_onto_run_branch(step)
             if reason:
                 return reason
-            return _advance_run_branch(step, _accepted_commit(step, plan.round))
+            return _advance_run_branch(step, _accepted_commit(step, round_number))
         if plan.rejected is not None and fixup_held:
             findings_text = _findings_text(list(plan.findings))
             _checked_fixup_brief(step, plan.round, plan.rejected, findings_text)
             if on_tip:
-                if goes_on == RETRY_GATES:
-                    _fixup_gates(step, plan.round)
-                return _advance_run_branch(step, _accepted_commit(step, plan.round, (plan.rejected, findings_text)))
+                # Red gates of the fix-up start the next round while rounds remain (#277).
+                round_number = _fixup_gates(step, plan.round) if goes_on == RETRY_GATES else plan.round
+                return _advance_run_branch(step, _accepted_commit(step, round_number, (plan.rejected, findings_text)))
         elif goes_on == RETRY_VERIFIER:
             return _advance_run_branch(step, _accepted_commit(step, plan.round))
         reason = _rebase_onto_run_branch(step)
@@ -3925,11 +3957,16 @@ class _ChainRun:
         return unmapped
 
 
-def _red_gates_text(commit: str, red: list[tuple[str, str]], copies: Sequence[GateLogCopy] = ()) -> str:
-    """The findings of a fix-up round for red gates: each red gate on `commit`, its output, and the copy of each full log (#246)."""
+def _red_gates_text(
+    commit: str, red: list[tuple[str, str]], copies: Sequence[GateLogCopy] = (), place: str = "the tip of the chain"
+) -> str:
+    """The findings of a fix-up round for red gates: each red gate on `commit`, its output, and the copy of each full log (#246).
+
+    `place` names `commit` for the specialist: the tip of an `economy` chain, or the fix-up commit of `assure` mode (#277).
+    """
     gates = "".join(f"- The gate `{gate}` is red.\n" for gate, _ in red)
     output = "\n\n".join(f"$ {gate}\n{text.rstrip(chr(10))}" for gate, text in red)
-    text = f"The engine ran the gates on the tip of the chain, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
+    text = f"The engine ran the gates on {place}, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
     return text + (f"\n{gate_log_copies_text(copies)}\n" if copies else "")
 
 
@@ -3954,21 +3991,6 @@ class _GateRun(NamedTuple):
     label: str
     log: Path | None = None
     commit: str | None = None
-
-
-def _run_gate(
-    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    gate_timeout: float | None = None, name: str | None = None,
-) -> str | None:
-    """Run one gate command in the worktree through `gates`, and record the result. Return None when it is green, else its label.
-
-    `round_number` is 0 for the first build and the fix-up round for a later run.
-    `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP.
-    `gate_timeout` is the time limit of the gate in minutes: the `gate_limit` of the stack, with its default (see `_run_gate_with_output`).
-    `name` is the name that the workflow gives to the gate, or None (see `_run_gate_with_output`).
-    """
-    outcome = _run_gate_with_output(gates, vcs, command, ticket, worktree, journal, round_number, phase, gate_timeout, name)
-    return None if outcome.green else outcome.label
 
 
 def _gate_outcomes(
@@ -3996,9 +4018,10 @@ def _run_gate_with_output(
     gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
     gate_timeout: float | None = None, name: str | None = None, *, commit: str | None = None,
 ) -> _GateRun:
-    """Run one gate command as `_run_gate` does. Return its outcome: whether it is green, and the tail of its output.
+    """Run one gate command in the worktree through `gates`, and record the result. Return its outcome: whether it is green, and the tail of its output.
 
-    `phase` can also be PHASE_CHAIN: the gates on the tip of an `economy` chain.
+    `round_number` is 0 for the first build and the fix-up round for a later run.
+    `phase` is one of PHASE_BUILD, PHASE_REBASE and PHASE_FIXUP, or PHASE_CHAIN: the gates on the tip of an `economy` chain.
 
     `gate_timeout` is the time limit of the gate in minutes (#179). The callers give the `gate_limit` of the stack: 120 minutes
     when the stack has no `gate-timeout` (#275). With None the runner waits for the gate with no limit. A gate that runs longer gets its process group ended by

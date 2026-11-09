@@ -154,7 +154,8 @@ def test_a_fix_up_whose_gates_were_red_goes_on_at_its_gates_and_then_the_scoped_
     scripted.verdict_sequence, scripted.verdict_findings = ["REJECT"], [FINDING]
     repo = make_repo(tmp_path, gate_workflow(f"test ! -f fixup-1.txt || test -f {flag}"))
     code, run_id = first_run(repo, capsys)
-    assert code == 1 and len(scripted.fixup_calls) == 1
+    # The gates are red after the first fix-up, so the second fix-up round gets their output; they stay red after it (#277).
+    assert code == 1 and len(scripted.fixup_calls) == 2
     flag.touch()
     healthy(scripted, "ACCEPT")
 
@@ -165,9 +166,9 @@ def test_a_fix_up_whose_gates_were_red_goes_on_at_its_gates_and_then_the_scoped_
     (verifier,) = scripted.verifier_calls
     assert verifier.prompt.startswith(SCOPED)
     retried = after_retry(read_journal_file(repo, run_id))
-    assert {k: retried[0][k] for k in ("phase", "round")} == {"phase": "gates", "round": 1}
-    assert [(e["phase"], e["round"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("fixup", 1, True)]
-    assert "fixup-1.txt" in tree(repo, "run/demo")
+    assert {k: retried[0][k] for k in ("phase", "round")} == {"phase": "gates", "round": 2}
+    assert [(e["phase"], e["round"], e["green"]) for e in retried if e["event"] == "gate-result"] == [("fixup", 2, True)]
+    assert {"fixup-1.txt", "fixup-2.txt"} <= set(tree(repo, "run/demo"))
 
 
 def test_a_retry_after_the_run_branch_moved_rebases_runs_the_gates_and_verifies_the_whole_branch(tmp_path, capsys, scripted):
@@ -692,6 +693,16 @@ def refused(repo, capsys, run_id, scripted, ticket_id, *words):
     assert journal_path(repo, run_id).read_bytes() == before
     assert git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads") == tips
     assert scripted.calls == [] and scripted.continuation_calls == [] and scripted.verifier_calls == []
+
+
+def test_a_retry_after_a_reject_of_the_verifier_of_the_last_round_is_refused_when_red_gates_used_a_round(tmp_path, capsys, scripted):
+    # The gates are red after the first fix-up and green after the second; the scoped verifier of round 2 rejects (#277).
+    scripted.verdict_sequence, scripted.verdict_findings = ["REJECT", "REJECT"], [FINDING]
+    repo = make_repo(tmp_path, gate_workflow("test ! -f fixup-1.txt || test -f fixup-2.txt"))
+    code, run_id = first_run(repo, capsys)
+    assert code == 1 and len(scripted.fixup_calls) == 2 and len(scripted.verifier_calls) == 2
+
+    refused(repo, capsys, run_id, scripted, "a", "rejected it after the last fix-up round")
 
 
 def test_an_economy_retry_of_a_step_that_a_later_built_ticket_went_past_exits_one_and_changes_nothing(tmp_path, capsys, scripted):

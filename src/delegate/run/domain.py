@@ -38,8 +38,9 @@ VERIFIER_TIER: str = "verifier"
 # A REJECT starts at most this many fix-up rounds. Each round is one fix-up
 # commit and one fresh verifier. The limit depends on the mode: `assure` verifies
 # each ticket, and `economy` verifies each stack once, at the end of the chain.
-# In `economy` mode, red gates on the tip of the chain also start a fix-up round,
-# and the rounds of red gates and of a REJECT count together against the limit.
+# Red gates after a fix-up start a fix-up round too, in both modes (#277), and in
+# `economy` mode, red gates on the tip of the chain also start a fix-up round.
+# The rounds of red gates and of a REJECT count together against the limit.
 FIXUP_ROUND_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 2}
 
 # The `phase` of a gate run on the tip of an `economy` chain, in the journal.
@@ -73,7 +74,7 @@ def role_tier(mode: str, role: str, overrides: Mapping[str, str]) -> str:
 
 
 def fixup_round_limit(mode: str) -> int:
-    """The number of fix-up rounds that a REJECT can start in the mode."""
+    """The number of fix-up rounds that a REJECT or red gates can start in the mode."""
     return FIXUP_ROUND_LIMIT[mode]
 
 
@@ -244,6 +245,11 @@ def rejection_reason(mode: str, findings: Sequence[str]) -> str:
 def chain_rejection_reason(mode: str, findings: Sequence[str]) -> str:
     """The reason a ticket of a chain fails when the verifier rejects the chain after the last fix-up round."""
     return f"the verifier rejected the chain after {_rounds_text(mode)}: " + "; ".join(findings)
+
+
+def fixup_gates_reason(mode: str, red: Sequence[str]) -> str:
+    """The reason a step of `assure` mode fails when its gates are red after the last fix-up round (#277)."""
+    return f"gates red after {_rounds_text(mode)}: " + "; ".join(red)
 
 
 def chain_gates_reason(mode: str, red: Sequence[str]) -> str:

@@ -2,7 +2,7 @@
 
 `delegate run` has two [**modes**](../glossary.md#mode), [**`assure`**](../glossary.md#assure) and [**`economy`**](../glossary.md#economy). They trade cost against the time it takes to learn that something is wrong. I did not want one fixed choice, because the work I delegate is not one kind of work.
 
-The modes came out of the review loop that played football: reject, fix, reject, pass, and then a full re-check after a two-line fix, with no stop rule and a massive token bill. Both modes cap the [**fix-up**](../glossary.md#fix-up) rounds, and a fix-up check reads only the new commits. What the modes choose between is when the check happens.
+The modes came out of the review loop that played football: reject, fix, reject, pass, and then a full re-check after a two-line fix, with no stop rule and a massive token bill. Both modes cap the [**fix-up**](../glossary.md#fix-up) rounds, and a fix-up check reads only the new commits. Both modes also use one rule for red [**gates**](../glossary.md#gate) after a fix-up: while a round remains, the red gates start the next fix-up round with their output, and that round counts against the same cap. What the modes choose between is when the check happens.
 
 ## Two kinds of work
 

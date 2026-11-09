@@ -295,6 +295,7 @@ class AgentsChanged(TypedDict):
     # Only for a stop before a chain fix-up of the verification of `economy` mode (#209).
     stack: NotRequired[str]
     tickets: NotRequired[list[str]]
+    # Only for the role `fix-up`: `gates-red` or `reject`. A journal of an earlier version has it only for a chain fix-up (#277).
     trigger: NotRequired[str]
 
 
