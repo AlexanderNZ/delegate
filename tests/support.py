@@ -533,6 +533,15 @@ def kill_a_run(repo: Path, kill_before_call: int) -> tuple[str, int]:
     return run_dir.name, child.pid
 
 
+# The note on stderr of a run that took over a lock file that no process holds, for example the lock file of a killed run (#288).
+TAKE_OVER_NOTE = re.compile(r"delegate run: took over the lock of \S+ from run \S+, process \d+, which holds the lock no longer")
+
+
+def without_take_over(err: str) -> str:
+    """`err` with no line of the note of a run that took over a lock (`TAKE_OVER_NOTE`)."""
+    return "".join(line for line in err.splitlines(keepends=True) if not TAKE_OVER_NOTE.fullmatch(line.rstrip("\n")))
+
+
 def is_gone(pid: int, seconds: float = 10.0) -> bool:
     """True when no process has the id `pid`, also after a wait of `seconds` for the end of a process that got a signal."""
     import time

@@ -15,6 +15,7 @@ import json
 
 from delegate.cli import delegate
 
+from .support import without_take_over
 from .support import state_dir
 from .support import (
     bare_repo, journal_path, kill_a_run, live_lock, make_repo, read_journal_file, resume_main, run_end, run_start, step_end,
@@ -90,9 +91,9 @@ def test_run_resume_goes_on_with_the_run_of_a_short_id(tmp_path, capsys, scripte
     repo = make_repo(tmp_path, HEAD + ticket("a"))
     run_id, _ = kill_a_run(repo, 1)  # killed as the first specialist starts
 
-    code, out, err = resume_main(repo, capsys, run_id.rsplit("-", 1)[-1], "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id.rsplit("-", 1)[-1])
 
-    assert (code, err) == (0, "")
+    assert (code, without_take_over(err)) == (0, "")
     assert out.splitlines()[0] == f"run {run_id}"
     events = read_journal_file(repo, run_id)
     assert [e["event"] for e in events].count("resume") == 1

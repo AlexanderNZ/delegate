@@ -19,8 +19,9 @@ A run is cleaned only when the newest `run-end` of its journal after its newest
 holds the lock of its run branch. Each other run keeps everything, and its line
 gives the reason: it is active, it failed, it is paused, or it stopped. The
 clean takes the lock of the run branch while it works, so a resume cannot start
-in the middle. When the clean removes a stale lock of the run, the journal gets `lock-broken` with the run id and the
-process id of the old holder, as for `delegate run --break-lock` (#207), before the clean changes anything else.
+in the middle. It takes the kernel lock as a run does (#288): a lock file that no process holds is free. When that file
+names an old holder, the journal gets `lock-broken` with the run id and the process id of the old holder, as for a
+resume that takes over a lock (#207), before the clean changes anything else.
 
 The journal of each cleaned run gets one `cleanup` event after its `run-end`,
 with what went, what stayed and why, the copies removed, the scratch directory removed, and the bytes freed.
@@ -186,8 +187,8 @@ def _run(repo: Path, state: Path, journal: Path, merged: bool, dry_run: bool, vc
     if dry_run:
         return _clean_run(repo, state, journal, events, merged, dry_run, vcs)
     try:
-        # The lock keeps a resume out while the clean works. A stale lock names no live process, so it goes.
-        with run_lock(state, run_branch, run_id, break_stale=True) as broken:
+        # The lock keeps a resume out while the clean works. A lock file that no process holds is free.
+        with run_lock(state, run_branch, run_id) as broken:
             if broken is not None:
                 _record_lock_broken(Journal.reopen(journal)[0], broken)
             events = read_events(journal, torn_tail=True)  # the journal can change before the lock
@@ -460,8 +461,8 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
             f"stop that run with delegate stop {holder.run_id}, then abandon this one"
         )
     try:
-        # The lock keeps a resume out while the command works. A stale lock names no live process, so it goes.
-        with run_lock(state, run_branch, run_id, break_stale=True) as broken:
+        # The lock keeps a resume out while the command works. A lock file that no process holds is free.
+        with run_lock(state, run_branch, run_id) as broken:
             return _abandon_run(location.top, state, journal, reason, delete_run_branch, vcs, broken)
     except LockError as error:
         raise AbandonError(f"run {run_id} has a live process: {error}; stop it with delegate stop {run_id}, then abandon it") from None
@@ -470,7 +471,7 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
 
 
 def _record_lock_broken(handle: Journal, broken: LockHolder) -> None:
-    """Append `lock-broken` with the run id and the process id of the old holder, as `delegate run --break-lock` does (#207)."""
+    """Append `lock-broken` with the run id and the process id of the old holder, as a resume that takes over a lock does (#207)."""
     handle.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
 
 

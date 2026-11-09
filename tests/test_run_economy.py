@@ -11,6 +11,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import without_take_over
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
 
 ECONOMY = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')
@@ -360,9 +361,9 @@ def test_a_resume_after_a_stop_before_the_verifier_verifies_the_chain_and_spawns
     run_id, _ = kill_a_run(repo, 4)  # killed as the verifier of the chain starts
     assert tip(repo, "run/demo") == tip(repo, "main")
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert (code, without_take_over(err)) == (0, "")
     assert scripted.calls == []
     (call,) = scripted.verifier_calls
     assert "Ticket a" in call.prompt and "Ticket b" in call.prompt and "Ticket c" in call.prompt

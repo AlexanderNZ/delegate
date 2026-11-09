@@ -3,14 +3,15 @@
 A killed run is a real one: a child process runs `delegate run` with a scripted
 adapter and SIGKILLs itself at a chosen adapter call. It leaves what a kill
 leaves, an open journal, a lock, and a worktree. A resume of such a run takes over
-the lock, because the lock names the same run and a process that no longer exists.
-These cases pass `--break-lock`, so the resume prints no note. A case that needs another
+the lock, because no process holds it (#288). The resume then prints one note on stderr,
+which names the old holder. A case that needs another
 journal state cuts a finished journal, which is the file a kill at that point
 would leave. Each case calls `delegate.main` against a real temporary git
 repository.
 """
 
 import json
+import re
 import shutil
 
 from delegate.cli import delegate
@@ -22,6 +23,12 @@ from .support import (
 from .test_run_multi import HEAD, ticket
 
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
+
+
+def took_over_only(err: str, run_id: str) -> bool:
+    """True when stderr holds only the note of a resume that took over the lock that the killed process of `run_id` left."""
+    note = rf"delegate run: took over the lock of run/demo from run {run_id}, process \d+, which holds the lock no longer\n"
+    return re.fullmatch(note, err) is not None
 
 
 def cut_journal_after(repo, run_id, event, ticket_id=None, nth=1):
@@ -45,9 +52,9 @@ def test_a_stopped_run_builds_the_remaining_tickets_on_resume_and_an_accepted_ti
     run_id, _ = kill_a_run(repo, 3)  # killed as the specialist of ticket b starts
     assert tree(repo, "run/demo").count("a.txt") == 1 and "b.txt" not in tree(repo, "run/demo")
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
     assert [ticket_of(c) for c in scripted.verifier_calls] == ["b", "c"]
     assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
@@ -62,9 +69,9 @@ def test_a_resume_appends_to_the_journal_and_never_rewrites_a_line(tmp_path, cap
     run_id, _ = kill_a_run(repo, 3)
     before = journal_path(repo, run_id).read_bytes()
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     after = journal_path(repo, run_id).read_bytes()
     assert after.startswith(before) and len(after) > len(before)
     events = read_journal_file(repo, run_id)
@@ -80,9 +87,9 @@ def test_a_step_whose_specialist_finished_does_not_spawn_the_specialist_again_an
     run_id, _ = kill_a_run(repo, 2)  # killed as the verifier of ticket a starts, after the specialist reported
     committed = git(repo, "rev-parse", "run/demo-a").strip()
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     assert [ticket_of(c) for c in scripted.calls] == ["b"]
     assert scripted.continuation_calls == [] and scripted.fixup_calls == []
     assert [ticket_of(c) for c in scripted.verifier_calls] == ["a", "b"]
@@ -98,9 +105,9 @@ def test_a_step_that_was_stopped_before_any_commit_runs_its_specialist_in_the_sa
     run_id, _ = kill_a_run(repo, 1)  # killed as the first specialist starts
     started = next(e for e in read_journal_file(repo, run_id) if e["event"] == "step-start")
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     (call,) = scripted.calls
     assert str(call.cwd) == started["worktree"]
     assert "## Continuation" not in call.prompt
@@ -113,9 +120,9 @@ def test_a_step_whose_worktree_is_gone_gets_it_back_on_the_same_branch(tmp_path,
     started = next(e for e in read_journal_file(repo, run_id) if e["event"] == "step-start")
     git(repo, "worktree", "remove", "--force", started["worktree"])
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     assert str(scripted.calls[0].cwd) == started["worktree"] and scripted.calls[0].cwd.is_dir()
     assert "a.txt" in tree(repo, "run/demo")
 
@@ -207,7 +214,7 @@ def test_a_workflow_that_differs_from_the_run_is_refused_and_the_message_names_t
     (repo / "workflow.toml").write_text(THREE.replace('run-branch = "run/demo"', 'run-branch = "run/other"'))
     before = journal_path(repo, run_id).read_bytes()
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
     assert code == 1 and "run_branch" in err and run_id in err
     assert journal_path(repo, run_id).read_bytes() == before
@@ -221,9 +228,9 @@ def test_a_resume_can_name_the_workflow_file_on_the_command_line(tmp_path, capsy
     moved.write_text((repo / "workflow.toml").read_text())
     (repo / "workflow.toml").unlink()
 
-    code, out, err = run_main(capsys, str(moved), "--resume", run_id, "--repo", str(repo), "--break-lock")
+    code, out, err = run_main(capsys, str(moved), "--resume", run_id, "--repo", str(repo))
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
 
 
@@ -318,9 +325,9 @@ def test_a_verifier_that_a_stop_ended_with_no_verdict_does_not_count_against_the
     run_id, _ = kill_a_run(repo, 2)  # killed as the verifier of ticket a starts: verify-start, and no verdict
     scripted.verdict_sequence = ["REJECT", "REJECT", "ACCEPT"]
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert code == 0 and took_over_only(err, run_id)
     assert len(scripted.fixup_calls) == 2
     starts = [e for e in read_journal_file(repo, run_id) if e["event"] == "verify-start"]
     assert [e["round"] for e in starts] == [0, 0, 1, 2]

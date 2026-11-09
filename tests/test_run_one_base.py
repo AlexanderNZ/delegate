@@ -20,6 +20,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
+from .support import without_take_over
 from .support import (
     ScriptedAdapter, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree,
 )
@@ -187,9 +188,9 @@ def test_a_resume_starts_a_ticket_from_the_base_of_the_run_and_not_from_the_tip_
     run_id, _ = kill_a_run(repo, 3)  # killed as the specialist of ticket b starts
     land_on_base(repo, "landed.txt")
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, warned(err)) == (0, ["ticket-start"])
+    assert (code, warned(without_take_over(err))) == (0, ["ticket-start"])
     events = read_journal_file(repo, run_id)
     assert events[0]["base_commit"] == run_base
     assert step_start(events, "c")["base_commit"] == run_base
@@ -209,9 +210,9 @@ def test_a_resume_of_a_journal_with_no_base_commit_takes_the_base_of_the_run_fro
     path.write_text(json.dumps(first) + "\n" + "".join(lines[1:]))
     land_on_base(repo, "landed.txt")
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, warned(err)) == (0, ["ticket-start"])
+    assert (code, warned(without_take_over(err))) == (0, ["ticket-start"])
     events = read_journal_file(repo, run_id)
     assert step_start(events, "c")["base_commit"] == run_base
     assert LANDED not in subjects(repo, run_base, "run/demo")

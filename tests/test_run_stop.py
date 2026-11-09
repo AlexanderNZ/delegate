@@ -137,6 +137,27 @@ def test_stop_of_a_run_with_no_live_process_exits_1_and_names_the_resume(tmp_pat
     assert "delegate run --resume 20261029T000000Z-0002" in err
 
 
+def test_stop_of_a_run_whose_lock_file_names_a_live_process_that_holds_no_lock_sends_no_signal(tmp_path, capsys):
+    # After a reuse of the process id, the lock file of a killed run names a process of the user that is not the run (#288).
+    repo = bare_repo(tmp_path)
+    journal = write_journal(repo, "20261029T000000Z-0005", run_start("20261029T000000Z-0005", "a"))
+    stale_lock(journal)
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        (lock,) = (state_dir(repo) / "locks").glob("*.lock")
+        lock.write_text(json.dumps({"run_id": "20261029T000000Z-0005", "pid": other.pid}))
+
+        code, out, err = stop(repo, capsys, "20261029T000000Z-0005")
+
+        time.sleep(0.5)  # a signal would end the process in this time
+        assert other.poll() is None, "the stop sent a signal to a process that holds no lock"
+    finally:
+        other.kill()
+        other.wait()
+    assert (code, out) == (1, "")
+    assert "no live process" in err and "delegate run --resume 20261029T000000Z-0005" in err
+
+
 def test_stop_of_a_paused_run_exits_1_and_names_the_resume(tmp_path, capsys):
     repo = bare_repo(tmp_path)
     write_journal(repo, "20261029T000000Z-0003", run_start("20261029T000000Z-0003", "a"), ("paused", {"before": "a"}))

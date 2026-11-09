@@ -10,7 +10,8 @@ there, so it never cuts off an agent. It writes `pause-requested` and `paused`,
 removes the file, and the run process ends with no `run-end`. `delegate run
 --resume` goes on from a paused run as from a stopped one.
 
-A run that works now has a live process that holds the lock of its run branch.
+A run that works now has a live process that holds the kernel lock of its run
+branch (`lock.live_holder`, #288). A lock file that no process holds does not count.
 A request for any other run is refused and writes no file: a run that ended, a
 run that is paused, and a run whose process stopped. A stopped run needs no
 pause, and a request that no process reads would pause its next resume.

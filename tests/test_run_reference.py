@@ -188,7 +188,7 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
 
         repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
         run_id, _ = kill_a_run(repo, 3)
-        code, _, _ = resume_main(repo, capsys, run_id, "--break-lock")
+        code, _, _ = resume_main(repo, capsys, run_id)
     finally:
         adapters.unregister("scripted")
     assert code == 0
@@ -263,7 +263,7 @@ def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_o
 
         repo = make_repo(tmp_path, HEAD + ticket("a"))
         run_id, _ = kill_a_run(repo, 1)
-        code, _, _ = resume_main(repo, capsys, run_id, "--break-lock")
+        code, _, _ = resume_main(repo, capsys, run_id)
     finally:
         adapters.unregister("scripted")
     assert code == 0

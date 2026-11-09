@@ -353,7 +353,7 @@ class RunResult:
     failures: dict[str, str]
     skipped: dict[str, str]
     unmapped: list[str] = field(default_factory=list)
-    # The holder of a lock of this run whose process no longer exists, which the resume took over without `break_lock`.
+    # The old holder that the free lock file named, for example a run that a kill ended, which the run took over (#288).
     taken_over: LockHolder | None = None
     # Where a pause request stopped the run, for example `before the verifier of ticket a`, or None when it did not pause.
     paused: str | None = None
@@ -1849,7 +1849,8 @@ def check_start(
     would be only in its log, and the journal would not show it (#240). The foreground run makes these checks after the lock.
 
     `location` is the location that the command looked up (see `locate_state`), or None to look it up here. Return the
-    location, so the caller passes it on and does not look it up again (#239).
+    location, so the caller passes it on and does not look it up again (#239). `break_lock` has no effect, and 2.0.0
+    removes it: a lock file that no process holds is free (#288).
     """
     location = location or locate_state(repo, vcs)
     repo = location.top
@@ -1857,7 +1858,7 @@ def check_start(
     try:
         # The lock of a run that started before #200 is in `<git common dir>/delegate`, so a run there counts too.
         for directory in location.directories:
-            check_free(directory, workflow.run_branch, run_id, break_stale=break_lock)
+            check_free(directory, workflow.run_branch)
     except LockError as error:
         raise EngineError(str(error)) from None
     if resume:
@@ -1895,11 +1896,10 @@ def run_workflow(
     cannot be retried.
 
     The run first makes the checks of `check_start`. A refused run creates nothing, so the lock is taken last.
-    The run holds the lock of its run branch until it ends. Raise EngineError,
-    which names the holder, when another run holds the lock. A resume takes over
-    a lock of its own run whose process no longer exists, and the result names
-    that holder in `taken_over`. `break_lock` also removes a lock of another run
-    whose process no longer exists. No lock whose process is alive is removed.
+    The run holds the lock of its run branch until it ends: a kernel lock that its process holds (see `lock`).
+    Raise EngineError, which names the holder, when another process holds the lock. A lock file that no process
+    holds is free. When it names an old holder, for example a run that a kill ended, the run takes it over, and the
+    result names that holder in `taken_over`. `break_lock` has no effect, and 2.0.0 removes it (#288).
 
     `on_start` gets the run id and the path of the journal when the run holds its lock and the journal records its
     start (`run-start`, or `resume` and a plan change), before the first step. A resume that the engine refuses does not
@@ -1939,7 +1939,7 @@ def run_workflow(
     record_state_root(location, state_dir)
     roles = _roles(workflow, tiers, adapter.tier_column)
     try:
-        with run_lock(state_dir, workflow.run_branch, run_id, break_stale=break_lock) as broken:
+        with run_lock(state_dir, workflow.run_branch, run_id) as broken:
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
@@ -1948,7 +1948,7 @@ def run_workflow(
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
                 raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id)) from None
-            return result if break_lock else replace(result, taken_over=broken)
+            return replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
 

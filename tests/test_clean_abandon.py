@@ -10,6 +10,7 @@ Each case makes a real run with `delegate.main` and the scripted adapter in a re
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -291,3 +292,20 @@ def test_abandon_of_a_run_with_no_lock_records_no_lock_broken(tmp_path, capsys, 
 
     assert (code, err) == (0, "")
     assert "lock-broken" not in event_names(read_journal_file(repo, run_id))
+
+
+def test_abandon_of_a_run_whose_lock_file_names_a_live_process_that_holds_no_lock_takes_the_lock(tmp_path, capsys, scripted):
+    # After a reuse of the process id, the lock file of a killed run names a process that exists and is not the run (#288).
+    repo, run_id = a_paused_run(tmp_path, capsys, scripted)
+    stale_lock(journal_path(repo, run_id))
+    (lock_file,) = (state_dir(repo) / "locks").glob("*.lock")
+    lock_file.write_text(json.dumps({"run_id": run_id, "pid": os.getpid()}))
+
+    code, out, err = abandon(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    events = read_journal_file(repo, run_id)
+    (broken,) = [e for e in events if e["event"] == "lock-broken"]
+    assert (broken["run_id"], broken["pid"]) == (run_id, os.getpid())
+    assert [e["result"] for e in events if e["event"] == "run-end"] == ["abandoned"]
+    assert not lock_file.exists()

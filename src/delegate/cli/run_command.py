@@ -43,7 +43,9 @@ checks of the run that need no agent (`engine.check_start`): the workflow, the
 tiers, the lock, for a new run the base branch and a free run branch, and for a
 resume the rules of a plan change with `--reviewed`. A check that fails prints
 its error on stderr, exits 1, and starts no process, as a run in the foreground
-does.
+does. The command only looks at the lock. The run process takes the lock, so the
+kernel lock is on the run process, and the kernel releases it when that process
+ends (#288).
 """
 
 from __future__ import annotations
@@ -154,7 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--break-lock", action="store_true",
-        help="remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays",
+        help="not necessary, and 2.0.0 removes it: a lock that no process holds is free, so the run takes it; with the flag, "
+        "the run prints that the lock is free",
     )
     parser.add_argument(
         "--detach", action="store_true",
@@ -430,10 +433,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"journal {stop.journal}")
             print(f"delegate run: interrupted; the run {stop.run_id} stopped. Go on with delegate run --resume {stop.run_id}", file=sys.stderr)
             return EXIT_INTERRUPTED
+        if args.break_lock:
+            print(
+                f"delegate run: --break-lock: the lock of {workflow.run_branch} is free, because no process holds it; "
+                "the flag is not necessary, and 2.0.0 removes it",
+                file=sys.stderr,
+            )
         if result.taken_over is not None:
             print(
                 f"delegate run: took over the lock of {workflow.run_branch} from run {result.taken_over.run_id}, "
-                f"process {result.taken_over.pid}, which no longer exists",
+                f"process {result.taken_over.pid}, which holds the lock no longer",
                 file=sys.stderr,
             )
         if result.agents_note is not None:

@@ -21,7 +21,7 @@ RULES: list[tuple[str, tuple[str, ...]]] = [
     ("show the output of status as it is, and write no script to read the journal or an event stream",
      ("`delegate status`", "as it is", "does not write its own script", "journal", "event stream")),
     ("report a stalled agent at once", ("stalled agent", "`--stall-minutes", "at once")),
-    ("resume a stopped run, and break the lock of a process that no longer exists", ("`delegate run --detach --resume <run-id>`", "`--break-lock`", "no longer exists")),
+    ("resume a stopped run, and take over a lock that no process holds with no flag", ("`delegate run --detach --resume <run-id>`", "no process holds", "no flag")),
 ]
 
 

@@ -20,6 +20,7 @@ from delegate import adapters
 from delegate.cli import delegate
 from delegate.run.journal import Journal
 
+from .support import without_take_over
 from .support import (
     ScriptedAdapter, event_names, kill_a_run, live_lock, make_repo, read_journal, resume_main, run_end, run_start, step_end,
     step_start, write_journal,
@@ -155,9 +156,9 @@ def test_a_run_that_started_in_the_git_directory_resumes_with_run_resume_and_sta
     journal = move_to_the_git_directory(repo, run_id)
     before = journal.read_bytes()
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert (code, without_take_over(err)) == (0, "")
     assert journal.read_bytes().startswith(before) and len(journal.read_bytes()) > len(before)
     events = [json.loads(line) for line in journal.read_text().splitlines()]
     assert event_names(events).count("resume") == 1 and events[-1]["event"] == "run-end"

@@ -170,7 +170,7 @@ def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_t
     assert [step.command for step in resumed] == [f"delegate run --resume {run_id}"]  # the page has no --break-lock command
     assert resumed[0].code == 0
     assert resumed[0].err.startswith(f"delegate run: took over the lock of run/demo from run {run_id}, process ")
-    assert resumed[0].err.rstrip().endswith("which no longer exists")
+    assert resumed[0].err.rstrip().endswith("which holds the lock no longer")
     assert [call.cwd.name for call in adapter.calls] == ["2"]
 
 

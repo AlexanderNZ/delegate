@@ -8,7 +8,7 @@ ACCEPT is the verdict that a verifier gives when the work does what the ticket a
 
 ## Active run
 
-An active run is a run that a live process works on now. Its journal has no `run-end` after its newest `resume`, and the lock of its run branch names a process that exists. `delegate status` and `delegate watch` with no run id choose the run from the active runs. A run that stopped, paused or ended is not active. See [the run with no run id](reference/status-and-watch.md#the-run-with-no-run-id).
+An active run is a run that a live process works on now. Its journal has no `run-end` after its newest `resume`, and a process holds the lock of its run branch. `delegate status` and `delegate watch` with no run id choose the run from the active runs. A run that stopped, paused or ended is not active. See [the run with no run id](reference/status-and-watch.md#the-run-with-no-run-id).
 
 ## Adapter
 
@@ -378,7 +378,7 @@ The run branch is the branch that the engine owns, and only accepted work lands 
 
 ## Run lock
 
-The run lock is a file that stops a second run on one run branch. Two runs cannot race on one branch, and `--break-lock` removes the lock of a process that no longer exists. See [the run lock](reference/run.md#the-run-lock).
+The run lock is a kernel lock on a file that stops a second run on one run branch. The process of the run holds it, and the kernel releases it when that process ends, also after a kill. Two runs cannot race on one branch, and a lock file that no process holds is free. See [the run lock](reference/run.md#the-run-lock).
 
 ## Sealed agent
 

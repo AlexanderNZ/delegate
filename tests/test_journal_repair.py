@@ -15,6 +15,7 @@ from delegate.run.journal import Journal, read_events
 
 from .test_run_multi import HEAD, ticket
 from .test_run_resume import cut_journal_after
+from .support import without_take_over
 from .support import (
     bare_repo, finished_run, journal_path, make_repo, read_journal_file, resume_main, run_end, run_start, step_start, write_journal,
 )
@@ -108,9 +109,9 @@ def test_a_run_with_a_torn_last_line_resumes_and_its_journal_holds_journal_repai
     torn = b'{"seq": 99, "time": "2026-10'
     path.write_bytes(path.read_bytes() + torn)
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert (code, without_take_over(err)) == (0, "")
     events = read_journal_file(repo, run_id)
     repaired = [e for e in events if e["event"] == "journal-repaired"]
     assert [e["bytes_removed"] for e in repaired] == [len(torn)]

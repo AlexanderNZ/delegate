@@ -8,14 +8,14 @@ line of each journal. It needs no adapter and no workflow file.
 
 `runs_of` also finds the active runs. A run is active when its journal has no
 `run-end` after its newest `resume` (`journal.newest_run_end`, the rule of
-`delegate status`), and the lock of its run branch names the run and a process
-that exists (`lock.live_holder`, the lock check of `delegate run` and `delegate
-pause`). A run with no `run-end` and no live process stopped: a crash, a kill,
+`delegate status`), and a process holds the kernel lock of its run branch, and
+the lock file names the run (`lock.live_holder`, the lock check of `delegate
+run` and `delegate pause`, #288). A run with no `run-end` and no live process stopped: a crash, a kill,
 Ctrl-C, or a pause. It is not active.
 
 A run that `delegate run --detach` started and that ended before it wrote its
 journal failed at start (`FailedStart`): its directory holds a `run.log` with
-text and no journal, and no lock names the run and a process that exists. The
+text and no journal, and no process holds a lock whose file names the run. The
 rule of the lock is the rule of an active run: a run process takes its lock
 before it writes its journal. The log is empty until the run process writes to
 it, so a run whose process starts has not failed. A failed start has no run
@@ -216,7 +216,7 @@ class Runs:
 
 
 def has_live_process(journal: Path) -> bool:
-    """True when the lock of the run branch of `journal` names the run and a process that exists.
+    """True when a process holds the lock of the run branch of `journal`, and the lock file names the run.
 
     Raise RunsError when its lock file cannot be read. Raise JournalError when the first line of the journal is not JSON,
     or when it is not an event.

@@ -48,7 +48,7 @@ def test_the_command_writes_the_options_of_run_into_the_run_page_and_keeps_the_p
 
     text = page.read_text()
     assert (code, err) == (0, "")
-    assert "| `--break-lock` | Remove the lock of the run branch when its process no longer exists; a lock whose process is alive stays. |" in text
+    assert "| `--break-lock` | Not necessary, and 2.0.0 removes it: a lock that no process holds is free, so the run takes it; with the flag, the run prints that the lock is free. |" in text
     assert "--old-flag" not in text
     assert "## What a run does" in text  # the prose around the section stays
     assert "docs/reference/run.md" in out

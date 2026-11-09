@@ -9,6 +9,7 @@ the run as it halts for an invariant violation.
 
 import pytest
 
+from .support import without_take_over
 from .support import WORKFLOW, event_names, git, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, tree
 from .test_run_multi import HEAD, ticket
 
@@ -104,7 +105,7 @@ def test_a_resume_halts_when_the_run_branch_moved_between_the_runs_and_a_second_
     assert "a.txt" in tree(repo, "run/demo")
     move_run_branch(repo, evil)
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
     events = read_journal_file(repo, run_id)
     assert code == 1
@@ -115,7 +116,7 @@ def test_a_resume_halts_when_the_run_branch_moved_between_the_runs_and_a_second_
     assert "b.txt" not in tree(repo, "run/demo")
     assert git(repo, "rev-parse", "run/demo").strip() == evil
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
     assert code == 1
     assert "start a new run" in err
@@ -143,9 +144,9 @@ def test_a_resume_of_a_run_that_nothing_else_moved_goes_on(tmp_path, capsys, scr
     repo = make_repo(tmp_path, TWO)
     run_id, _ = kill_a_run(repo, 3)
 
-    code, out, err = resume_main(repo, capsys, run_id, "--break-lock")
+    code, out, err = resume_main(repo, capsys, run_id)
 
-    assert (code, err) == (0, "")
+    assert (code, without_take_over(err)) == (0, "")
     assert "run-branch-moved" not in event_names(read_journal_file(repo, run_id))
     assert {"a.txt", "b.txt"} <= set(tree(repo, "run/demo"))
 

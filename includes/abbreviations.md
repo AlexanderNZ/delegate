@@ -232,10 +232,10 @@
 *[Run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branch]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
-*[Run lock]: The run lock is a file that stops a second run on one run branch.
-*[Run locks]: The run lock is a file that stops a second run on one run branch.
-*[run lock]: The run lock is a file that stops a second run on one run branch.
-*[run locks]: The run lock is a file that stops a second run on one run branch.
+*[Run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.
+*[Run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
+*[run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.
+*[run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[Sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
 *[Sealed agents]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
 *[sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.

@@ -14,6 +14,7 @@ shell.
 """
 
 import json
+import os
 import sys
 
 import pytest
@@ -22,6 +23,7 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from .support import state_dir
+from .support import bare_repo, run_start, stale_lock, write_journal
 from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree
 from .test_run_multi import HEAD, ticket
 
@@ -270,6 +272,20 @@ def test_a_pause_of_a_run_whose_process_stopped_is_refused_and_names_the_resume(
 
     assert code == 1 and "no live process" in err and f"delegate run --resume {run_id}" in err
     assert not (journal_path(repo, run_id).parent / "pause-request").exists()
+
+
+def test_a_pause_of_a_run_whose_lock_file_names_a_live_process_that_holds_no_lock_is_refused(tmp_path, capsys):
+    # After a reuse of the process id, the lock file of a killed run names a process that exists and is not the run (#288).
+    repo = bare_repo(tmp_path)
+    journal = write_journal(repo, "20261029T000000Z-0006", run_start("20261029T000000Z-0006", "a"))
+    stale_lock(journal)
+    (lock,) = (state_dir(repo) / "locks").glob("*.lock")
+    lock.write_text(json.dumps({"run_id": "20261029T000000Z-0006", "pid": os.getpid()}))
+
+    code, out, err = pause(repo, capsys, "20261029T000000Z-0006")
+
+    assert code == 1 and "no live process" in err and "delegate run --resume 20261029T000000Z-0006" in err
+    assert not (journal.parent / "pause-request").exists()
 
 
 def test_a_pause_of_a_run_that_is_paused_is_refused(tmp_path, capsys, scripted):

@@ -11,8 +11,10 @@ that starts it.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
+import signal
 import time
 from pathlib import Path
 
@@ -51,6 +53,15 @@ def wait_for_ends(log: Path, ends: int) -> str:
             return text
         time.sleep(0.2)
     raise AssertionError(f"the detached run did not end in {WAIT_SECONDS} seconds; the log holds:\n{text}")
+
+
+def status_of(repo: Path, capsys, run_id: str) -> tuple[int, str, str]:
+    """Call `delegate status <run_id>` and return the exit code, stdout and stderr."""
+    from delegate.cli import delegate
+
+    code = delegate.main(["status", run_id, "--repo", str(repo)])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
 
 
 def test_detach_exits_at_once_prints_the_run_id_and_the_run_goes_on_in_a_new_session(tmp_path, monkeypatch, capsys):
@@ -191,3 +202,42 @@ def test_detach_with_a_retry_that_the_engine_refuses_exits_1_with_the_error_of_t
     assert log.read_text() == log_before
     assert read_journal_file(repo, run_id) == events_before
     assert len(fake.calls()) == calls_before
+
+
+def test_a_detached_run_holds_the_lock_in_its_own_process_and_a_kill_of_that_process_frees_it(tmp_path, monkeypatch, capsys):
+    # The kernel lock is on the run process, not on the command that started it (#288). The command ran in the test
+    # process, which stays alive: when it held the lock, the run would show as running after the kill of the run process.
+    child_pid = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HARNESS_CHILD", str(child_pid))
+    fake = claude_fake.install(tmp_path, monkeypatch, "", hold_seconds=300)
+    repo = make_repo(tmp_path, CLAUDE_CODE)
+    write_project_agents(repo)
+    code, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
+    assert code == 0
+    run_id, _ = printed(out)
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not (fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit()):
+        assert time.monotonic() < deadline, "the harness did not start"
+        time.sleep(0.1)
+    harness, child = fake.calls()[0]["pid"], int(child_pid.read_text())
+    (lock,) = (state_dir(repo) / "locks").glob("*.lock")
+    engine = int(json.loads(lock.read_text())["pid"])
+    try:
+        running = status_of(repo, capsys, run_id)
+        os.kill(engine, signal.SIGKILL)
+        deadline = time.monotonic() + WAIT_SECONDS
+        while True:
+            stopped = status_of(repo, capsys, run_id)
+            if ": stopped " in stopped[1] or time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+    finally:
+        for pid in (engine, harness, child):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        with contextlib.suppress(ChildProcessError):
+            os.waitpid(engine, 0)
+
+    assert engine != os.getpid()
+    assert running[0] == 0 and running[1].splitlines()[0] == f"run {run_id}: running (mode assure, adapter claude-code)"
+    assert stopped[1].splitlines()[0] == f"run {run_id}: stopped (mode assure, adapter claude-code)"

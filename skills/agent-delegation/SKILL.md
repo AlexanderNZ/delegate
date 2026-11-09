@@ -778,10 +778,8 @@ end.
    `interrupted` in its journal, prints one line that tells how to resume,
    and exits 130.
    When the run process stops or pauses before the run ends, go on with
-   `delegate run --detach --resume <run-id>`. The resume takes over the lock
-   of the same run when its process no longer exists. If the lock belongs to
-   another run and to a process that no longer exists, add `--break-lock`.
-   First make sure that no other run uses the run branch.
+   `delegate run --detach --resume <run-id>`. The resume takes over a lock
+   that no process holds, with no flag. `--break-lock` is not necessary.
    A failed step goes on with
    `delegate run --detach --resume <run-id> --retry <ticket>`, also in a run
    that ended. When the retry builds the step, the engine also builds each

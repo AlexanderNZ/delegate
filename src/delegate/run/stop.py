@@ -5,8 +5,10 @@ process that holds the lock of the run. The engine handles the signal as it hand
 group of its child, writes `interrupted` to the journal, and releases the lock. The run writes no `run-end`, so
 `delegate run --resume` goes on from a stopped run.
 
-The stop waits a fixed time for the lock to be free. A run with no live process holder is refused and gets no signal: a
-run that ended, a run that is paused, and a run whose process stopped.
+The stop sends the signal only while a process holds the kernel lock of the run (`lock.live_holder`), and only to the
+process id that the lock file names (#288). A lock file that no process holds can name a process id that the system
+gave to another process, so a free lock gets no signal. The stop waits a fixed time for the lock to be free. A run with
+no live process holder is refused and gets no signal: a run that ended, a run that is paused, and a run whose process stopped.
 """
 
 from __future__ import annotations
