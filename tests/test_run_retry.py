@@ -2,8 +2,9 @@
 
 A failed step has a `step-end`, so a plain resume never builds it again, and a
 run that ended cannot be resumed at all. `--retry` uses the worktree and the
-commits of the step again. It spawns no specialist, and goes on at the gates,
-at the verifier, or at the scoped verifier of the fix-up round. Each case calls
+commits of the step again. In `assure` mode it spawns no specialist, and goes on at the gates,
+at the verifier, or at the scoped verifier of the fix-up round. After a report of the specialist that says partial or
+blocked for a cause that is not a hotspot, it continues the specialist (#284). Each case calls
 `delegate.main` against a real temporary git repository, with the scripted
 adapter in the place of the harness.
 """
@@ -11,6 +12,13 @@ adapter in the place of the harness.
 import json
 
 import pytest
+
+from delegate import adapters
+from delegate.adapters.git import GitVersionControl
+from delegate.adapters.shell import ShellGateRunner
+from delegate.run.engine import run_workflow
+from delegate.run.workflow import load_workflow
+from delegate.shared.tiers import load_tiers
 
 from .support import state_dir
 from .support import (
@@ -568,6 +576,110 @@ def test_a_retry_of_a_step_whose_specialist_gave_no_valid_report_exits_one_and_s
     assert "ticket 'a'" in err and "specialist" in err
     assert journal_path(repo, run_id).read_bytes() == before
     assert scripted.calls == [] and scripted.verifier_calls == []
+
+
+# #284: in `assure` mode the specialist reports partial or blocked for a cause that is not a hotspot: for example, the
+# permission mode of the host refused the edit of a file. The retry continues the specialist in the worktree of the step.
+REFUSED_EDIT = "the permission mode of the host refused the edit of gradle/wrapper/gradle-wrapper.properties"
+
+
+def specialist_stops(tmp_path, capsys, scripted, status, files):
+    """An `assure` run: the specialist commits `files` (no commit when empty), and reports `status` with `REFUSED_EDIT`.
+
+    Return the repository, the run id, the stdout of the run, and the commits of the branch of the ticket after the run.
+    """
+    scripted.files_by_ticket["a"] = files
+    scripted.report_text = lambda request, head: json.dumps(
+        valid_report("a", "run/demo-a", head, status=status, blocked_reason=REFUSED_EDIT)
+    )
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    run_id = next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
+    assert code == 1 and len(scripted.calls) == 1 and scripted.verifier_calls == []
+    scripted.report_text = None
+    scripted.continuation_files = [{"gradle.txt": "wrapper\n"}]
+    healthy(scripted, "ACCEPT")
+    return repo, run_id, out, git(repo, "rev-list", "run/demo-a").split()
+
+
+def test_an_assure_retry_after_a_partial_specialist_report_continues_the_specialist_in_its_worktree_and_builds_the_step(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, out, first = specialist_stops(tmp_path, capsys, scripted, "partial", {"a.txt": "a\n"})
+    worktree = state_dir(repo) / "worktrees" / run_id / "a"
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, ""), err
+    (continued,) = scripted.continuation_calls
+    assert continued.cwd == worktree and scripted.calls == []
+    retried = after_retry(read_journal_file(repo, run_id))
+    assert {k: retried[0][k] for k in ("ticket", "phase", "round")} == {"ticket": "a", "phase": "specialist", "round": 0}
+    # The continuation limit counts from 0 again: the spawn of the retry is no continuation.
+    assert "continuation" not in event_names(retried)
+    # The commits of the first session stay on the branch, under the commit of the continuation.
+    assert git(repo, "merge-base", "--is-ancestor", first[0], "run/demo") == ""
+    assert {"a.txt", "gradle.txt"} <= set(tree(repo, "run/demo"))
+    assert len(scripted.verifier_calls) == 1
+    end = retried[-1]
+    assert (end["event"], end["result"], end["built"]) == ("run-end", "built", ["a"])
+
+
+@pytest.mark.parametrize(("status", "files"), [("partial", {"a.txt": "a\n"}), ("blocked", {})], ids=["partial-with-commit", "blocked-no-commit"])
+def test_the_continuation_brief_of_an_assure_retry_says_the_coordinator_retried_and_gives_the_blocked_reason_of_the_report(
+    tmp_path, capsys, scripted, status, files
+):
+    repo, run_id, out, first = specialist_stops(tmp_path, capsys, scripted, status, files)
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a")
+
+    assert (code, err) == (0, ""), err
+    (continued,) = scripted.continuation_calls
+    continuation = continued.prompt.split("## Continuation", 1)[1]
+    assert REFUSED_EDIT in continuation and f"status {status!r}" in continuation
+    assert "the coordinator retried the step" in continuation
+
+
+def test_the_end_of_an_assure_run_after_a_partial_specialist_report_names_the_plain_retry_and_its_dry_run_gives_the_phase_specialist(
+    tmp_path, capsys, scripted
+):
+    repo, run_id, first_out, first = specialist_stops(tmp_path, capsys, scripted, "partial", {"a.txt": "a\n"})
+    short = run_id.rsplit("-", 1)[-1]
+    assert [line for line in first_out.splitlines() if line.startswith("retry with ")] == [
+        f"retry with delegate run --resume {short} --retry a"
+    ]
+    before = journal_path(repo, run_id).read_bytes()
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "a", "--dry-run")
+
+    assert (code, err) == (0, ""), err
+    assert "retry a: phase specialist" in out.splitlines()
+    assert journal_path(repo, run_id).read_bytes() == before
+    assert scripted.calls == [] and scripted.continuation_calls == []
+
+
+class FastForwardRefused:
+    """The real git backend, except that `fast_forward_branch` does not move the branch: another writer moved it first."""
+
+    def __init__(self) -> None:
+        self._inner = GitVersionControl()
+
+    def __getattr__(self, name):
+        if name == "fast_forward_branch":
+            return lambda *args, **kwargs: False
+        return getattr(self._inner, name)
+
+
+def test_an_assure_retry_of_a_step_that_failed_after_its_verifier_accepted_it_is_still_refused(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+    tiers = load_tiers()
+    workflow = load_workflow(repo / "workflow.toml", tiers, adapters.registered_names())
+    result = run_workflow(workflow, repo / "workflow.toml", repo, tiers, scripted, FastForwardRefused(), ShellGateRunner())
+    events = read_journal_file(repo, result.run_id)
+    assert [e["verdict"] for e in events if e["event"] == "verdict"] == ["ACCEPT"]
+    assert [e["state"] for e in events if e["event"] == "step-end"] == ["failed"]
+
+    refused(repo, capsys, result.run_id, scripted, "a", "its verifier accepted it")
 
 
 @pytest.mark.parametrize("mode", ["assure", "economy"])

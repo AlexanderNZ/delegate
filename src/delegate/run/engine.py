@@ -90,10 +90,13 @@ each later ticket the section "Plan change" (see `_plan_change_note`).
 
 A resume with `retry` goes on with one failed step, also in a run that ended
 (see `_retry_plan`). It uses the worktree and the commits of the step again,
-and goes on at the first phase that did not complete. In `assure` mode it
-spawns no specialist, and that phase is the gates, the verifier, or the scoped
-verifier. When the run branch moved after the step failed, the retry rebases,
-runs the gates, and verifies the whole branch. In `economy` mode the phase is
+and goes on at the first phase that did not complete. In `assure` mode that
+phase is the gates, the verifier, or the scoped verifier, and no specialist
+spawns. After a valid report of the specialist that says partial or blocked,
+and names no hotspot, the phase is the specialist, which continues in the
+worktree with the continuation limit of the mode again (#284). When the run
+branch moved after the step failed, the retry rebases, runs the gates, and
+verifies the whole branch. In `economy` mode the phase is
 the specialist, which continues with the continuation limit of the mode again,
 or the check of its report. The tickets after the step that the run skipped are
 checked again, and the chain then goes on: the verification of the chain
@@ -1140,7 +1143,9 @@ def review_plan_change(
     with _vcs_errors():
         review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry)
     refusal, outlook = _retry_outcome(workflow, events, run_id, review, retry, coordinator_commit, vcs, top, config_paths)
-    skipped = () if refusal is not None else _skipped_outlook(workflow, events, run_id, review, retry, coordinator_commit is not None)
+    skipped = () if refusal is not None else _skipped_outlook(
+        workflow, events, run_id, review, retry, coordinator_commit is not None, config_paths
+    )
     return replace(review, skipped=skipped, retry_refusal=refusal, retry_outlook=outlook)
 
 
@@ -1161,7 +1166,8 @@ def _retry_outcome(
         return None, None
     restart = review.check is not None and retry in review.check.restarted
     try:
-        plan = _retry_plan(workflow, restore_progress(events, run_id, retrying=True), run_id, retry, restart, coordinator_commit is not None)
+        progress = restore_progress(events, run_id, retrying=True)
+        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None, config_paths)
         if coordinator_commit is not None:
             _coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit, config_paths)
     except EngineError as error:
@@ -1195,9 +1201,11 @@ def retry_hints(workflow: Workflow, journal: Path, run_id: str, config_paths: Se
     after a stop before a chain fix-up the ticket that ends the stack (#209). So the hints name that ticket once. The
     retry of the tip goes on with no commit (#269). Its hint names a commit of the coordinator (#225) only when the newest
     report of a chain fix-up names a hotspot path (see `_chain_report_names_hotspot`). In `assure` mode, the hint
-    of a step whose report says partial or blocked names the retry with a commit of the coordinator (#264): the work can
-    need a hotspot, and the retry with a new text of the ticket that the rules also accept starts the work again. Return
-    no hint when the journal cannot be read.
+    of a step whose report says partial or blocked names the retry with a commit of the coordinator (#264) when the
+    rules refuse the retry with no commit: the report of a fix-up specialist, or a report of the specialist that names a
+    hotspot. The work can need a hotspot, and the retry with a new text of the ticket that the rules also accept starts
+    the work again. A report of the specialist that names no hotspot has the plain hint: the specialist continues (#284).
+    Return no hint when the journal cannot be read.
     """
     try:
         events = read_events(journal, torn_tail=True)
@@ -1208,7 +1216,7 @@ def retry_hints(workflow: Workflow, journal: Path, run_id: str, config_paths: Se
 
     def plan(ticket_id: str, coordinator: bool = False, restart: bool = False) -> _RetryPlan | None:
         try:
-            return _retry_plan(workflow, progress, run_id, ticket_id, restart, coordinator)
+            return _retry_plan(workflow, progress, run_id, ticket_id, restart, coordinator, config_paths)
         except EngineError:
             return None
 
@@ -1238,8 +1246,17 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
         if e["event"] == "plan-change" or (e["event"] == "retry" and e.get("phase") != RETRY_CHAIN_FIXUP)
     ]
     report = _unfinished_report([e for e in events[starts[-1] + 1 if starts else 0 :] if e["event"] == "fixup-report"])
-    ticket = next((t for t in workflow.tickets if report is not None and t.id == report["ticket"]), None)
-    if report is None or ticket is None or not report.get("blocked_reason"):
+    return report is not None and _report_names_hotspot(workflow, report, config_paths)
+
+
+def _report_names_hotspot(workflow: Workflow, report: dict[str, object], config_paths: Sequence[str]) -> bool:
+    """True when a word of the `blocked_reason` of the report event `report` matches a hotspot of the stack of its ticket.
+
+    `config_paths` are the project configuration paths of the adapter, which are hotspots too (#273). A report with no
+    `blocked_reason`, or of a ticket that the workflow does not hold, names no hotspot.
+    """
+    ticket = next((t for t in workflow.tickets if t.id == report["ticket"]), None)
+    if ticket is None or not report.get("blocked_reason"):
         return False
     words = [word.strip("`'\".,;:()[]") for word in str(report["blocked_reason"]).split()]
     return bool(hotspot_matches(words, workflow.stacks[ticket.stack].all_hotspots(config_paths)))
@@ -1247,6 +1264,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
 
 def _skipped_outlook(
     workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None, coordinator: bool,
+    config_paths: Sequence[str] = (),
 ) -> tuple[SkippedTicket, ...]:
     """What a resume does with each ticket that the run skipped, in plan order. Empty when the run skipped no ticket (#260).
 
@@ -1259,7 +1277,7 @@ def _skipped_outlook(
     try:
         progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
         restart = retry is not None and review.check is not None and retry in review.check.restarted
-        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator) if retry is not None else None
+        plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator, config_paths) if retry is not None else None
     except EngineError:
         return ()
     was_skipped = set(progress.skipped)
@@ -1355,7 +1373,8 @@ def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[
 
 
 def _retry_plan(
-    workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str, restart: bool = False, coordinator: bool = False
+    workflow: Workflow, progress: _Progress, run_id: str, ticket_id: str, restart: bool = False, coordinator: bool = False,
+    config_paths: Sequence[str] = (),
 ) -> _RetryPlan:
     """The first phase of the failed step of `ticket_id` that did not complete. Raise EngineError when it cannot be retried.
 
@@ -1371,13 +1390,16 @@ def _retry_plan(
       reported committed work: the gates of that fix-up, then its scoped verifier.
       Red gates of that fix-up start the next round while rounds remain (#277).
 
-    A retry of `assure` mode spawns no specialist, with two exceptions that the agent check (#205) makes. A step that it
+    A retry of `assure` mode spawns no specialist, with three exceptions. Two come from the agent check (#205). A step that it
     stopped before a specialist session (`_stopped_before_specialist`) has the plan: the specialist. A step that it stopped
     before the fix-up session of a round (`_stopped_before_fixup`) has the plan: the fix-up of that round, again, on the same
-    rejected commit with the same findings, and it is not a new round. So a step whose specialist,
-    or whose fix-up specialist, gave no valid report that says committed is
-    refused. So is a step that the verifier accepted, or rejected after the
-    last fix-up round. For `economy` mode, see `_economy_retry_plan`.
+    rejected commit with the same findings, and it is not a new round. The third is a valid report of the specialist that
+    says partial or blocked, and whose `blocked_reason` names no hotspot of the stack (`config_paths` are hotspots too, see
+    `_report_names_hotspot`). Its plan is the specialist (#284): it continues in the worktree of the step, with its
+    commits, and with the continuation limit of the mode again (see `_build_ticket`). A specialist can do such work, for
+    example after the permission mode of the host refused an edit. Any other step whose specialist, or whose fix-up
+    specialist, gave no valid report that says committed is refused. So is a step that the verifier accepted, or rejected
+    after the last fix-up round. For `economy` mode, see `_economy_retry_plan`.
 
     A run that an invariant violation halted is refused in each mode: the state
     of the worktree that the verifier changed cannot be trusted.
@@ -1394,7 +1416,8 @@ def _retry_plan(
     tip of the branch. A valid report of the fix-up specialist of round N that says partial or blocked has the plan: the
     gates of that fix-up, then its scoped verifier, with the rejected commit and the findings of round N. It is not a new
     round. Without `coordinator`, the message of the refusal names the retry with `--coordinator-commit <sha>` when the
-    report gives a reason.
+    report gives a reason. A report of the specialist that names a hotspot is such a refusal: no specialist can change a
+    hotspot path.
     """
     refused = _refused(ticket_id, run_id)
     violations = [e for e in progress.events if e["event"] == "invariant-violation"]
@@ -1418,10 +1441,11 @@ def _retry_plan(
     if _stopped_before_specialist(prior):
         return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior)
     if not _specialist_committed(prior):
-        validations = [e for e in prior if e["event"] == "report-validation"] if _specialist_done(list(prior)) else []
-        report = _unfinished_report(validations)
+        report = _unfinished_report(_specialist_reports(prior))
         if coordinator and report is not None:
             return _RetryPlan(ticket_id, RETRY_GATES, 0, prior)
+        if report is not None and not _report_names_hotspot(workflow, report, config_paths):
+            return _RetryPlan(ticket_id, RETRY_SPECIALIST, 0, prior)
         raise EngineError(
             f"{refused}: its specialist gave no valid report that says committed; "
             "--retry goes on only at the gates, the verifier or the scoped verifier" + _coordinator_hint(report, ticket_id)
@@ -1492,8 +1516,9 @@ def _coordinator_hint(report: dict[str, object] | None, ticket_id: str) -> str:
 def _stopped_before_specialist(prior: tuple[dict[str, object], ...]) -> bool:
     """True when the agent check (#205) stopped the step before a specialist session, and no agent started after it.
 
-    The step then holds no work of that session, so a retry of `assure` mode can spawn the specialist. It is the only
-    case where a retry of `assure` mode spawns one, with a new text of the ticket excepted (see `_restart_step`).
+    The step then holds no work of that session, so a retry of `assure` mode can spawn the specialist. A retry of
+    `assure` mode also spawns one after a report of the specialist that says partial or blocked and names no hotspot
+    (#284), and after a new text of the ticket (see `_restart_step`).
     """
     stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
     if not stops or prior[stops[-1]]["role"] != ROLE_SPECIALIST:
@@ -1970,7 +1995,10 @@ def _resume_checks(
     _check_run_branch_at_resume(journal, events, vcs, repo, workflow.run_branch, progress.built, progress.failed, progress.skipped)
     # A step that cannot be retried is refused before the journal changes.
     restart = retry is not None and review.check is not None and retry in review.check.restarted
-    plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None) if retry is not None else None
+    plan = (
+        _retry_plan(workflow, progress, run_id, retry, restart, coordinator_commit is not None, config_paths)
+        if retry is not None else None
+    )
     if plan is not None and workflow.mode == domain.ECONOMY and not plan.restart:
         # A ticket of a later stack that the stop failed does not count: the retried ticket starts from the chain before it (#209).
         before = [t.id for t in order[: [t.id for t in order].index(plan.ticket)]]
@@ -2618,6 +2646,11 @@ def _session_done(result: AdapterResult, report_valid: Callable[[], bool]) -> bo
     return result.exit_status == 0 or report_valid()
 
 
+def _specialist_reports(prior: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    """The `report-validation` events of the step when a valid report of the specialist came after its last spawn, else none."""
+    return [e for e in prior if e["event"] == "report-validation"] if _specialist_done(list(prior)) else []
+
+
 def _specialist_done(prior: list[dict[str, object]]) -> bool:
     """True when the journal shows a valid specialist report after the last time the specialist was spawned."""
     spawned = valid = -1
@@ -2735,8 +2768,10 @@ def _build_ticket(
 
     - In `economy` mode, for each retry that goes on in this function: at the specialist, or at the check of its
       report (see `_economy_retry_plan`). A retry that goes on at the chain fix-up does not call this function.
-    - In `assure` mode, only for a step that the agent check stopped before a specialist session (see
-      `_stopped_before_specialist`): the plan is the specialist. The other retries of `assure` mode go on in
+    - In `assure` mode, for a step that the agent check stopped before a specialist session (see
+      `_stopped_before_specialist`), and for a step whose specialist gave a valid report that says partial or blocked
+      and names no hotspot (#284): the plan is the specialist. The continuation brief of such a report gives its
+      `blocked_reason`, also when the branch holds no commit. The other retries of `assure` mode go on in
       `_retry_ticket`, with no specialist: at the gates, at a verifier, or, after a stop before a fix-up session, at the fix-up of
       the same round (see `_stopped_before_fixup`).
     """
@@ -2794,7 +2829,8 @@ def _build_ticket(
         workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
         _scratch_directory(state_dir / "runs" / run_id, ticket.id, ROLE_SPECIALIST),
         spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
-        stop_reason="the run was interrupted" if retried is None else f"the step failed: {retried}", completed=completed,
+        stop_reason="the run was interrupted" if retried is None else f"the step failed: {retried}; after that, the coordinator retried the step",
+        completed=completed, reported=retried is not None and _unfinished_report(_specialist_reports(prior)) is not None,
     )
     if reason:
         return reason
@@ -2879,7 +2915,7 @@ def _build_with_continuations(
     workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, model: str, repo: Path,
     worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, scratch: Path, spawned: bool = False,
     continuations: int = 0, interrupted: bool = False,
-    stop_reason: str = "the run was interrupted", completed: bool = False,
+    stop_reason: str = "the run was interrupted", completed: bool = False, reported: bool = False,
 ) -> str | None:
     """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
 
@@ -2892,7 +2928,11 @@ def _build_with_continuations(
     `continuations` to the number the journal holds, so the limit counts across
     the stop. It sets `interrupted` for a step that a stop left open: when the
     branch holds commits already, the first prompt is a continuation brief,
-    with `stop_reason` as the reason that the last run stopped. It sets
+    with `stop_reason` as the reason that the last run stopped. A retry after a
+    valid report of the specialist that says partial or blocked also sets
+    `reported`: the first prompt is then a continuation brief also when the
+    branch holds no commit, so the specialist gets the `blocked_reason` of its
+    report (#284). It sets
     `completed` when a commit of the coordinator completes the work of a report
     that says partial or blocked (see `_coordinator_completes`): the first pass
     then checks that report as if it said committed.
@@ -2918,7 +2958,7 @@ def _build_with_continuations(
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
-        if so_far:
+        if so_far or reported:
             prompt = continuation_brief(
                 ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
@@ -3646,6 +3686,9 @@ def _retry_ticket(step: _Step, plan: _RetryPlan, failure: str, start_ref: str) -
     In `economy` mode the step goes on as an open step does after a stop, at
     the specialist or at the check of its report (see `_build_ticket`). The phase `chain-fixup` builds nothing: it writes
     `retry` and returns, and the chain verification runs the stopped fix-up again (see `_ChainRun`).
+
+    The phase `specialist` of `assure` mode goes on in `_build_ticket`, as in `economy` mode: the specialist continues
+    in its worktree (see `_stopped_before_specialist`, and #284 in `_retry_plan`).
 
     The phase `fixup` of `assure` mode runs the stopped fix-up again (see `_stopped_before_fixup`), with the same rejected
     commit and the same findings, then goes on to the gates and the scoped verifier of that round.

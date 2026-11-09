@@ -28,6 +28,8 @@ HEADING = "## Tell the owner before you change the course of a run"
 CASES: dict[str, str] = {
     "invalid verdict": "delegate run --detach --resume <run-id> --retry <ticket>",
     "economy chain": "delegate run --detach --resume <run-id> --retry <tip>",
+    # #284: a report that says partial or blocked for a cause that is not a hotspot continues the specialist, with no commit.
+    "not a hotspot": "delegate run --detach --resume <run-id> --retry <ticket>`. The specialist continues",
     "new ruling": "--retry <ticket>",
     "stop now": "delegate stop <run-id>",
     "give up": "delegate clean --abandon <run-id> --reason",
