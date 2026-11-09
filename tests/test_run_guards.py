@@ -326,3 +326,62 @@ def test_a_fixup_that_changes_a_hotspot_path_fails_the_step_and_no_second_verifi
     (finding,) = [e for e in events if e["event"] == "hotspot-finding"]
     assert (finding["phase"], finding["round"]) == ("fixup", 1)
     assert len(adapter.verifier_calls) == 1
+
+
+def make_project_config_parents(request):
+    (request.cwd / ".opencode" / "plugins").mkdir(parents=True, exist_ok=True)
+
+
+@pytest.mark.parametrize("path", ["opencode.json", "opencode.jsonc", ".opencode/plugins/steal.js"])
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+def test_an_opencode_run_stops_at_the_hotspot_check_when_the_specialist_commits_project_configuration_and_no_verifier_starts(
+    tmp_path, capsys, registered, path, mode
+):
+    from delegate.adapters.opencode import OpenCodeAdapter
+
+    repo = make_repo(tmp_path, hotspot_workflow(mode=mode, hotspots="[]"))
+    adapter = registered(
+        ScriptedAdapter(
+            files={"feature.txt": "feature\n", path: "{}\n"}, on_specialist=make_project_config_parents,
+            project_config_paths=OpenCodeAdapter.project_config_paths,
+        )
+    )
+    base_tip = git(repo, "rev-parse", "main").strip()
+
+    code, out, err = run(repo, capsys)
+
+    events = read_journal(out)
+    assert code == 1
+    assert f"delegate run: ticket a: hotspot finding: {path} matches the hotspot" in err
+    (finding,) = [e for e in events if e["event"] == "hotspot-finding"]
+    assert [m["path"] for m in finding["matches"]] == [path]
+    assert adapter.verifier_calls == []
+    assert "verify-start" not in event_names(events)
+    assert git(repo, "rev-parse", "run/demo").strip() == base_tip
+
+
+@pytest.mark.parametrize("path", ["opencode.json", ".opencode/plugins/steal.js"])
+def test_a_claude_code_run_does_not_stop_when_the_specialist_commits_opencode_configuration(tmp_path, capsys, registered, path):
+    from delegate.adapters.claude_code import ClaudeCodeAdapter
+
+    repo = make_repo(tmp_path, hotspot_workflow())
+    adapter = registered(
+        ScriptedAdapter(
+            files={"feature.txt": "feature\n", path: "{}\n"}, on_specialist=make_project_config_parents,
+            project_config_paths=ClaudeCodeAdapter.project_config_paths,
+        )
+    )
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert len(adapter.verifier_calls) == 1
+    assert "hotspot-finding" not in event_names(read_journal(out))
+
+
+def test_the_project_configuration_paths_of_each_adapter_are_the_paths_that_its_harness_loads():
+    from delegate.adapters.claude_code import ClaudeCodeAdapter
+    from delegate.adapters.opencode import OpenCodeAdapter
+
+    assert ClaudeCodeAdapter.project_config_paths == ()
+    assert OpenCodeAdapter.project_config_paths == (".opencode/", "opencode.json", "opencode.jsonc")

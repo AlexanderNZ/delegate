@@ -1173,7 +1173,15 @@ class RetryHint:
     coordinator: bool = False
 
 
-def retry_hints(workflow: Workflow, journal: Path, run_id: str) -> list[RetryHint]:
+def project_config_paths(adapter: object) -> tuple[str, ...]:
+    """The project configuration paths that the harness of `adapter` loads from its working directory (#273).
+
+    An adapter with no such attribute loads none. The paths are hotspots of each stack of the run (see `Stack.all_hotspots`).
+    """
+    return tuple(getattr(adapter, "project_config_paths", ()))
+
+
+def retry_hints(workflow: Workflow, journal: Path, run_id: str, config_paths: Sequence[str] = ()) -> list[RetryHint]:
     """The retries that the rules of the retry (`_retry_plan`) accept for the failed steps of a run, in plan order (#261).
 
     A failed ticket whose retry the rules refuse has no hint. A retry that the rules accept only with a new text of the
@@ -1204,7 +1212,7 @@ def retry_hints(workflow: Workflow, journal: Path, run_id: str) -> list[RetryHin
 
     plain = [ticket_id for ticket_id in failed if accepted(ticket_id) or accepted(ticket_id, restart=True)]
     hints = {ticket_id: RetryHint(ticket_id) for ticket_id in plain}
-    if workflow.mode == domain.ECONOMY and _chain_report_names_hotspot(workflow, events):
+    if workflow.mode == domain.ECONOMY and _chain_report_names_hotspot(workflow, events, config_paths):
         tips = [t for t in plain if (p := plan(t)) is not None and p.phase == RETRY_CHAIN]
         hints.update({t: RetryHint(t, coordinator=True) for t in tips})
     if workflow.mode == domain.ASSURE:
@@ -1212,7 +1220,7 @@ def retry_hints(workflow: Workflow, journal: Path, run_id: str) -> list[RetryHin
     return [hints[ticket_id] for ticket_id in failed if ticket_id in hints]
 
 
-def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, object]]) -> bool:
+def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, object]], config_paths: Sequence[str]) -> bool:
     """True when the newest report of a fix-up of the last verification of the chain names a hotspot path (#269).
 
     The report is valid and says partial or blocked (see `_unfinished_report`), and a word of its `blocked_reason` matches
@@ -1229,7 +1237,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     if report is None or ticket is None or not report.get("blocked_reason"):
         return False
     words = [word.strip("`'\".,;:()[]") for word in str(report["blocked_reason"]).split()]
-    return bool(hotspot_matches(words, workflow.stacks[ticket.stack].all_hotspots))
+    return bool(hotspot_matches(words, workflow.stacks[ticket.stack].all_hotspots(config_paths)))
 
 
 def _skipped_outlook(
@@ -1627,7 +1635,9 @@ def _step_since(prior: Sequence[dict[str, object]]) -> str:
     return domain.work_starts_at(base, str(rebases[-1]["onto_commit"]) if rebases else None)
 
 
-def _coordinator_commit(workflow: Workflow, plan: _RetryPlan, vcs: VersionControl, repo: Path, run_id: str, given: str) -> _CoordinatorCommit:
+def _coordinator_commit(
+    workflow: Workflow, plan: _RetryPlan, vcs: VersionControl, repo: Path, run_id: str, given: str, config_paths: Sequence[str]
+) -> _CoordinatorCommit:
     """Check the commit of `--coordinator-commit` for the retry of `plan`, and return it with its paths (#225).
 
     The commit must be the tip of the branch of the ticket, beyond the start of the work of the step, and each path
@@ -1659,19 +1669,19 @@ def _coordinator_commit(workflow: Workflow, plan: _RetryPlan, vcs: VersionContro
         if not own:
             raise EngineError(f"{refused}: the coordinator commit {commit} is not on top of the branch {branch}: it is no commit beyond {since}")
         paths = vcs.changed_paths(repo, own[1].id if len(own) > 1 else since, commit)
-    outside = [path for path in paths if not hotspot_matches([path], stack.all_hotspots)]
+    outside = [path for path in paths if not hotspot_matches([path], stack.all_hotspots(config_paths))]
     if outside:
         raise EngineError(
             f"{refused}: the coordinator commit {commit} changes paths that are no hotspot of the stack {ticket.stack}: "
             + ", ".join(f"`{path}`" for path in outside) + "; a coordinator commit changes only hotspot paths"
         )
     if plan.phase == RETRY_CHAIN:
-        _check_chain_hotspots(workflow, plan, vcs, repo, run_id, commit)
+        _check_chain_hotspots(workflow, plan, vcs, repo, run_id, config_paths, commit)
     return _CoordinatorCommit(commit, tuple(paths))
 
 
 def _check_chain_hotspots(
-    workflow: Workflow, plan: _RetryPlan, vcs: VersionControl, repo: Path, run_id: str, coordinator: str | None = None
+    workflow: Workflow, plan: _RetryPlan, vcs: VersionControl, repo: Path, run_id: str, config_paths: Sequence[str], coordinator: str | None = None
 ) -> None:
     """Refuse a retry at the phase `chain` when a commit of the step changes a hotspot path of the stack (#225, #269).
 
@@ -1686,7 +1696,7 @@ def _check_chain_hotspots(
     with _vcs_errors():
         tip = coordinator or _tip(vcs, repo, _ticket_branch(workflow, ticket))
         excluded = {commit for commit, _ in _coordinator_commits(vcs, repo, plan.prior)} | ({coordinator} if coordinator else set())
-        matches = hotspot_matches(_paths_without(vcs, repo, since, tip, True, excluded), workflow.stacks[ticket.stack].all_hotspots)
+        matches = hotspot_matches(_paths_without(vcs, repo, since, tip, True, excluded), workflow.stacks[ticket.stack].all_hotspots(config_paths))
     if not matches:
         return
     found = "; ".join(f"{m.path} matches the hotspot {m.pattern!r}" for m in matches)
@@ -1829,7 +1839,7 @@ def check_start(
                 events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
             except JournalError as error:
                 raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
-            _resume_checks(workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None)
+            _resume_checks(workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None, project_config_paths(adapter))
     else:
         _check_branches(workflow, repo, vcs)
     return location
@@ -1927,7 +1937,7 @@ def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
 def _resume_checks(
     workflow: Workflow, workflow_path: Path, order: list[Ticket], vcs: VersionControl, repo: Path, run_id: str,
     events: list[dict[str, object]], reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None,
-    journal: Journal | None,
+    journal: Journal | None, config_paths: Sequence[str],
 ) -> tuple[PlanReview, _Progress, str, _RetryPlan | None]:
     """The checks that refuse a resume, a retry or a plan change, in the order of the engine. Return what they find.
 
@@ -1962,9 +1972,9 @@ def _resume_checks(
         chain = [*progress.built, *(t for t in plan.revive if t in before)]
         _check_chain_start(workflow, order, chain, plan, vcs, repo, run_base, run_id)
     if plan is not None and coordinator_commit is not None:
-        plan = replace(plan, coordinator=_coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit))
+        plan = replace(plan, coordinator=_coordinator_commit(workflow, plan, vcs, repo, run_id, coordinator_commit, config_paths))
     elif plan is not None and plan.phase == RETRY_CHAIN:
-        _check_chain_hotspots(workflow, plan, vcs, repo, run_id)
+        _check_chain_hotspots(workflow, plan, vcs, repo, run_id, config_paths)
     return review, progress, run_base, plan
 
 
@@ -1996,7 +2006,8 @@ def _execute(
     else:
         journal, events = _journal_events(state_dir, run_id)
         review, progress, run_base, plan = _resume_checks(
-            workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal
+            workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
+            project_config_paths(adapter),
         )
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
@@ -2882,14 +2893,14 @@ def _build_with_continuations(
     each_ticket = domain.gates_each_ticket(workflow.mode)
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
-        ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, gates_at_chain_end=not each_ticket,
+        ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, gates_at_chain_end=not each_ticket,
         plan_change=plan_change, notes=stack.specialist_notes, scratch=scratch,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, so_far,
+                ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
                 notes=stack.specialist_notes, scratch=scratch,
             )
@@ -2952,7 +2963,7 @@ def _build_with_continuations(
                     return unfinished
                 if not _commit_lines(vcs, repo, since, branch):
                     return f"branch {branch} holds no commit beyond {since}, though the report says committed"
-                stop = _hotspot_stop(vcs, journal, ticket.id, stack, worktree, since, True, PHASE_BUILD, 0)
+                stop = _hotspot_stop(vcs, journal, ticket.id, stack.all_hotspots(project_config_paths(adapter)), worktree, since, True, PHASE_BUILD, 0)
                 if stop:
                     return stop
                 # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
@@ -2990,7 +3001,7 @@ def _build_with_continuations(
             prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems, scratch=scratch)
         else:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots, stack.gates, report_path, commits, reason,
+                ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
                 plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths, scratch=scratch,
                 gate_logs=gate_logs,
@@ -3032,7 +3043,7 @@ def _uncommitted_reason(paths: Sequence[str]) -> str:
 
 
 def _hotspot_stop(
-    vcs: VersionControl, journal: Journal, ticket: str, stack: Stack, worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
+    vcs: VersionControl, journal: Journal, ticket: str, hotspots: Sequence[str], worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
 ) -> str | None:
     """Compare the paths that the specialist changed since `since` with the hotspot patterns of the stack.
 
@@ -3049,7 +3060,7 @@ def _hotspot_stop(
             paths = _paths_without(vcs, worktree, since, None, merge_base, excluded)
     else:
         paths = changed_paths(vcs, worktree, since, merge_base=merge_base)
-    matches = hotspot_matches(paths, stack.all_hotspots)
+    matches = hotspot_matches(paths, hotspots)
     if not matches:
         return None
     journal.append(
@@ -3269,7 +3280,7 @@ def _run_fixup(
     leftovers = frozenset(_uncommitted_paths(step.vcs, step.worktree))
     scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_FIXUP)
     prompt = specialist_brief(
-        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots, step.stack.gates, report_path, rejected, findings_text,
+        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots(project_config_paths(step.adapter)), step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes, scratch=scratch,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
@@ -3328,7 +3339,7 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
     """
     ticket = step.ticket
     stop = _hotspot_stop(
-        step.vcs, step.journal, ticket.id, step.stack, step.worktree, rejected, False, PHASE_FIXUP, round_number
+        step.vcs, step.journal, ticket.id, step.stack.all_hotspots(project_config_paths(step.adapter)), step.worktree, rejected, False, PHASE_FIXUP, round_number
     )
     if stop:
         raise _StepFailed(stop)

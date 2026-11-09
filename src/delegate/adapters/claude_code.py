@@ -342,6 +342,8 @@ class ClaudeCodeAdapter:
     checks_setup: bool = True
     probes_guard: bool = True
     supports_resume: bool = True
+    # Claude Code starts with `--setting-sources user` and `--strict-mcp-config`, so it loads no project configuration (#273).
+    project_config_paths: tuple[str, ...] = ()
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         sealed = request.sealed

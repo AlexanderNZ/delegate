@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import re
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -119,10 +119,19 @@ class Stack:
         """The time limit of one gate run of this stack, in minutes: `gate-timeout`, or the default of 120 minutes (#275)."""
         return DEFAULT_GATE_TIMEOUT_MINUTES if self.gate_timeout is None else self.gate_timeout
 
-    @property
-    def all_hotspots(self) -> list[str]:
-        """The built-in hotspots, then the hotspots that the workflow names for this stack, each one once."""
-        return [*BUILT_IN_HOTSPOTS, *(pattern for pattern in self.hotspots if pattern not in BUILT_IN_HOTSPOTS)]
+    @staticmethod
+    def built_in_hotspots(project_config_paths: Sequence[str] = ()) -> list[str]:
+        """The hotspots that every stack has: the agent directories, then the project configuration paths of the adapter.
+
+        `project_config_paths` are the paths that the harness of the run loads from its working directory (#273,
+        `Adapter.project_config_paths`): the verifier loads them from its copy of the tree, so no specialist commit changes them.
+        """
+        return [*BUILT_IN_HOTSPOTS, *(path for path in project_config_paths if path not in BUILT_IN_HOTSPOTS)]
+
+    def all_hotspots(self, project_config_paths: Sequence[str] = ()) -> list[str]:
+        """The built-in hotspots (see `built_in_hotspots`), then the hotspots that the workflow names for this stack, each one once."""
+        built_in = self.built_in_hotspots(project_config_paths)
+        return [*built_in, *(pattern for pattern in self.hotspots if pattern not in built_in)]
 
 
 @dataclass(frozen=True)

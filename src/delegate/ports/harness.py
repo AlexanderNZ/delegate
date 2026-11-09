@@ -270,6 +270,13 @@ class Adapter(Protocol):
     other than a denial ends the run. An adapter whose harness cannot run an agent from its seal outside the repository
     leaves it false, and an adapter that does not have the attribute counts as false.
 
+    `project_config_paths` holds the paths, relative to the root of a tree, that the harness loads as project
+    configuration from its working directory (#273): a directory ends with `/`. A verifier works in a copy of the
+    tree under review, so a file at one of these paths in a specialist commit would load in the blind verifier. The
+    engine adds these paths to the built-in hotspots of each stack, so a specialist commit that changes one of them
+    stops at the hotspot check. An adapter whose harness loads no project configuration gives an empty tuple, and an
+    adapter that does not have the attribute counts as empty.
+
     `activity` reads a stream that this adapter captured. A live stream can end
     in half a line, which it ignores. It raises AdapterError when the file is
     missing or a line before the last one is not JSON, and the error of the file
@@ -281,6 +288,7 @@ class Adapter(Protocol):
     supports_resume: bool
     checks_setup: bool
     probes_guard: bool
+    project_config_paths: tuple[str, ...]
 
     def run(self, request: AdapterRequest) -> AdapterResult: ...
 

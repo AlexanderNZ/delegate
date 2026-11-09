@@ -528,7 +528,7 @@ The engine installs the push guard in each worktree that it makes, also in a wor
 
 ### The hotspot guard
 
-After the specialist reports `committed` and the branch holds a commit, and before the gates run, the engine compares the paths that the branch changed since the point where it started (the `base_commit` of `step-start`) with the `hotspots` of the stack and with the built-in hotspots `.claude/agents/` and `.opencode/agents/`, which every stack has (#188). After a fix-up specialist, the engine compares the paths that changed since the rejected commit. The engine does this in every mode.
+After the specialist reports `committed` and the branch holds a commit, and before the gates run, the engine compares the paths that the branch changed since the point where it started (the `base_commit` of `step-start`) with the `hotspots` of the stack and with the built-in hotspots, which every stack has: `.claude/agents/` and `.opencode/agents/` (#188), and the project configuration paths of the adapter of the run (#273). The `claude-code` adapter has no such path. The `opencode` adapter has `.opencode/`, `opencode.json` and `opencode.jsonc`, because a verifier works in a copy of the tree and OpenCode loads the project configuration of that copy. `delegate run --dry-run` prints the built-in hotspots of the adapter for each stack, in the line `stack <name> built-in hotspots: <paths>`. After a fix-up specialist, the engine compares the paths that changed since the rejected commit. The engine does this in every mode.
 
 - A changed path is a path that is added, changed, or deleted. A rename counts as its old path and its new path.
 - A pattern that ends with `/` names a directory. It matches every path below the directory.

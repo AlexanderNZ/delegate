@@ -67,7 +67,7 @@ from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
     EngineError, PlanReview, RetryHint, RunInterrupted, StateLocation, StateRootError, check_start, new_run_id, record_state_root,
-    retry_hints, review_plan_change, run_workflow, state_directory,
+    project_config_paths, retry_hints, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
 from ..run.output import glyphs, short_run_id, styled
@@ -488,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
         for ticket, reason in result.skipped.items():
             print(f"delegate run: ticket {ticket}: skipped: {reason}", file=sys.stderr)
         snap = status.snapshot_of_journal(result.journal, stream_reader_of, utc_now())
-        print("\n".join(_end_lines(snap, retry_hints(workflow, result.journal, result.run_id))))
+        print("\n".join(_end_lines(snap, retry_hints(workflow, result.journal, result.run_id, project_config_paths(adapter)))))
         if result.paused is not None:
             print(f"paused {result.paused}; go on with delegate run --resume {result.run_id}")
             return EXIT_PAUSED
@@ -523,7 +523,10 @@ def main(argv: list[str] | None = None) -> int:
             f"ticket {ticket.id} ({number}/{len(workflow.tickets)}): stack {ticket.stack}, blocked by {blocked}, "
             f"specialist tier {specialist_tier(workflow, ticket)}"
         )
+    config_paths = project_config_paths(adapters.get(workflow.adapter))
     for stack in workflow.stacks.values():
+        # The paths that no specialist commit changes, whatever the workflow names (#188, #273).
+        print(f"stack {stack.name} built-in hotspots: {', '.join(stack.built_in_hotspots(config_paths))}")
         for command in stack.prepare:
             print(f"stack {stack.name} prepare: {command}")
         for role, notes in (("specialist", stack.specialist_notes), ("verifier", stack.verifier_notes)):

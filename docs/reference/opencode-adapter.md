@@ -126,6 +126,10 @@ Three cases need care:
 
 The adapter has no [guard probe](run.md#the-guard-probe): `probes_guard` is false. The probe needs a session whose model runs a command that the guard must deny, and nobody measured the enforcement of the `permission` map of a sealed agent in a live session (see [the sealed agent](#the-sealed-agent)). A run with this adapter starts as before, and the dry run prints no probe line for it.
 
+## The project configuration
+
+OpenCode loads the project configuration of its working directory: `opencode.json`, `opencode.jsonc` and the directory `.opencode/` (plugins, commands and tools). A verifier works in a copy of the tree under review and the adapter starts `opencode` there with `--dir <copy>`, so a file at one of these paths in a specialist commit would run inside the verifier. The adapter gives these paths in its attribute `project_config_paths`, and the engine adds them to the built-in [**hotspots**](../glossary.md#hotspot) of each stack (#273). A specialist commit that changes one of them fails the step at the hotspot check, and no verifier starts. See [the hotspot guard](run.md#the-hotspot-guard). The `claude-code` adapter gives no such path: it starts with `--setting-sources user` and `--strict-mcp-config`.
+
 ## The working directory
 
 The harness takes its project directory from the `PWD` variable that the caller inherits, not from the working directory of the process. A caller that sets the working directory and leaves `PWD` from its own shell makes the harness search the agents of the caller's directory, and run its tools there. Measured on OpenCode 1.15.10 on 2026-10-08: a run started in a scratch directory with the inherited `PWD` of another directory ended with the error `Agent not found`, and a run with `PWD` set to the scratch directory ran its tool in that directory. The adapter therefore always passes `--dir <directory>`, and a run with `--dir` ran its tool in the directory. The adapter also starts the process in that directory.

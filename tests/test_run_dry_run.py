@@ -392,3 +392,24 @@ def test_a_tiers_option_before_run_is_a_usage_error(tmp_path, capsys):
     out, err = capsys.readouterr()
     assert (code, out) == (2, "")
     assert "--tiers" in err
+
+
+def test_the_dry_run_lists_the_built_in_hotspots_of_the_adapter_for_each_stack(tmp_path, capsys):
+    repo = make_repo(tmp_path, VALID.replace('adapter = "claude-code"', 'adapter = "opencode"'))
+    write_project_agents(repo)
+
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
+
+    assert code == 0, err
+    for stack in ("python", "docs"):
+        assert f"stack {stack} built-in hotspots: .claude/agents/, .opencode/agents/, .opencode/, opencode.json, opencode.jsonc\n" in out
+
+
+def test_the_dry_run_of_a_claude_code_workflow_lists_the_agent_directories_only(tmp_path, capsys):
+    repo = make_repo(tmp_path, VALID)
+    write_project_agents(repo)
+
+    code, out, err = run(repo, capsys, "--dry-run", "--repo", str(repo))
+
+    assert code == 0, err
+    assert "stack python built-in hotspots: .claude/agents/, .opencode/agents/\n" in out

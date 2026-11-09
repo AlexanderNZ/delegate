@@ -256,7 +256,7 @@ class ScriptedAdapter:
 
     A request whose prompt asks for the command `touch delegate-guard-probe` is a guard probe (#219). It goes to
     `probe_calls`, not to `calls` or `verifier_calls`, and it writes no report. The adapter takes part only when
-    `probes_guard` is true. The result of the probe comes from `probe_outcomes` (a dictionary by agent name, `denied`
+    `probes_guard` is true. `project_config_paths` is the attribute of the same name of the adapter port (#273). The result of the probe comes from `probe_outcomes` (a dictionary by agent name, `denied`
     when the agent has no entry): `denied` ends the session with an error result of the probe command in
     `command_errors` that holds the text of a guard that denied the command, `ran` writes the file `delegate-guard-probe`
     into the working directory, and `inconclusive` ends the session with a text that tells of no command. `probe_commits` holds the number of commits of the working directory of each probe, and
@@ -321,6 +321,7 @@ class ScriptedAdapter:
     checks_setup: bool = False
     denials: dict[str, str] = field(default_factory=dict)
     probes_guard: bool = False
+    project_config_paths: tuple[str, ...] = ()
     probe_outcomes: dict[str, str] = field(default_factory=dict)
     probe_calls: list[AdapterRequest] = field(default_factory=list)
     probe_commits: list[int] = field(default_factory=list)

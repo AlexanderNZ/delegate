@@ -256,6 +256,9 @@ class OpenCodeAdapter:
     # enforcement of the permission map of a sealed agent in a live session (#213, owner decision D-e), so there is no probe.
     probes_guard: bool = False
     supports_resume: bool = True
+    # OpenCode starts with `--dir <copy>` and loads the project configuration of that copy (#273): `opencode.json`,
+    # `opencode.jsonc` and the directory `.opencode/` (plugins, commands, tools).
+    project_config_paths: tuple[str, ...] = (".opencode/", "opencode.json", "opencode.jsonc")
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         _warn_of_host_settings()
