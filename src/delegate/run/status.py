@@ -53,7 +53,7 @@ from . import domain, output
 from .engine import StateLocation
 from .journal import (
     ABANDONED, JournalError, abandon_note, activity_files, crash_note, crash_of, halt_of, is_paused, last_change, newest_run_end, plan_ids,
-    read_new_events,
+    read_new_events, setup_problem_note, setup_problem_of,
 )
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
@@ -718,7 +718,9 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     halt = halt_of(events) if end is None and not paused else None
     # A crash ends the run process: the run is stopped, also in the moment before the process releases its lock (#281).
     crash = crash_of(events) if end is None and not paused and halt is None else None
-    live = end is not None or paused or halt is not None or (crash is None and _has_live_process(journal))
+    # A stop by the check of the setup ends the run process too (#296).
+    setup = setup_problem_of(events) if end is None and not paused and halt is None and crash is None else None
+    live = end is not None or paused or halt is not None or (crash is None and setup is None and _has_live_process(journal))
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
@@ -751,7 +753,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
     chains = _chains(events, plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
-    state, note = _state(end, paused, journal, halt, live, crash)
+    state, note = _state(end, paused, journal, halt, live, crash, setup)
     pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
@@ -776,7 +778,7 @@ def _has_live_process(journal: Path) -> bool:
 
 def _state(
     end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None, live: bool = True,
-    crash: dict[str, object] | None = None,
+    crash: dict[str, object] | None = None, setup: dict[str, object] | None = None,
 ) -> tuple[str, str | None]:
     """The state of a run and its note.
 
@@ -795,6 +797,8 @@ def _state(
         if crash is not None:
             removes = "; the resume removes the pause request that waits" if requested else ""
             return STOPPED, crash_note(crash, journal.parent.name) + removes
+        if setup is not None:
+            return STOPPED, setup_problem_note(setup, journal.parent.name)
         return STOPPED, stopped_note(journal.parent.name, requested)
     note = PAUSE_REQUEST_NOTE if requested else None
     if end is not None and end["result"] == ABANDONED:

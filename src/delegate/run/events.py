@@ -43,6 +43,7 @@ RESUME: str = "resume"
 AGENTS_CHANGED: str = "agents-changed"
 STACK_CHANGE: str = "stack-change"
 GUARD_PROBE: str = "guard-probe"
+SETUP_PROBLEM: str = "setup-problem"
 PLAN_CHANGE: str = "plan-change"
 RETRY: str = "retry"
 LOCK_BROKEN: str = "lock-broken"
@@ -338,6 +339,12 @@ class GuardProbe(TypedDict):
     event_stream: str
 
 
+class SetupProblem(TypedDict):
+    """The stop of a run at its start (#296): one text for each gate that the guard of a verifier does not permit."""
+
+    problems: list[str]
+
+
 class PlanChange(TypedDict):
     added: list[str]
     changed: list[str]
@@ -625,6 +632,7 @@ EVENTS: dict[str, type] = {
     AGENTS_CHANGED: AgentsChanged,
     STACK_CHANGE: StackChange,
     GUARD_PROBE: GuardProbe,
+    SETUP_PROBLEM: SetupProblem,
     PLAN_CHANGE: PlanChange,
     RETRY: Retry,
     LOCK_BROKEN: LockBroken,

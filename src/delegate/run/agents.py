@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.harness import Adapter, McpTool, SealedAgent, SealedFile
-from .workflow import Workflow
+from .workflow import Stack, Workflow
 
 # The directory of the seals under the run directory.
 SEAL_DIRECTORY = "agents"
@@ -144,6 +144,19 @@ def denied_agents(events: list[dict[str, object]]) -> set[str]:
         if event["event"] in ("run-start", "resume") and _is_record(event.get("agents")):
             since = index
     return {str(e["agent"]) for e in events[since + 1 :] if e["event"] == "guard-probe" and e.get("result") == "denied"}
+
+
+def unpermitted_gates(adapter: Adapter, stack: Stack, verifier: SealedAgent) -> list[str]:
+    """One problem text for each gate of `stack` that the guard of the sealed `verifier` does not permit (#296).
+
+    The dry run (`cli/setup_check.py`) and the start of a run (`engine.py`) both use it, so they give the same text.
+    """
+    problems: list[str] = []
+    for gate in stack.gates:
+        reason = adapter.permits(verifier, gate)
+        if reason is not None:
+            problems.append(f"stack {stack.name}: the verifier {stack.verifier!r} ({verifier.source}) does not permit the gate {gate!r}: {reason}")
+    return problems
 
 
 def sealed_agent(entry: dict[str, object]) -> SealedAgent:

@@ -27,6 +27,7 @@ from pathlib import Path
 
 from ..ports.harness import Adapter, AdapterError, SealedAgent
 from ..ports.vcs import VcsError, VersionControl
+from ..run.agents import unpermitted_gates
 from ..run.probe import DENIED, PROBE_TIER, probe_guard, refusal
 from ..run.workflow import Stack, Workflow
 from ..shared.tiers import Tiers
@@ -99,9 +100,5 @@ def _stack_problems(name: str, adapter: Adapter, stack: Stack, repo: Path, scrat
         else:
             sealed[agent] = found
     if stack.verifier in sealed:
-        source = sealed[stack.verifier].source
-        for gate in stack.gates:
-            reason = adapter.permits(sealed[stack.verifier], gate)
-            if reason is not None:
-                problems.append(f"stack {stack.name}: the verifier {stack.verifier!r} ({source}) does not permit the gate {gate!r}: {reason}")
+        problems.extend(unpermitted_gates(adapter, stack, sealed[stack.verifier]))
     return problems, sealed.get(stack.verifier)

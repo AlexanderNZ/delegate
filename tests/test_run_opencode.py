@@ -17,6 +17,9 @@ from delegate.cli.run_command import EXIT_HALTED
 from . import opencode_fake
 from .support import WORKFLOW, make_repo, read_journal, run_main
 
+# A user directory that holds nothing: the gate check of a run (#296) judges the agent file of the machine that it finds there.
+pytestmark = pytest.mark.usefixtures("home")
+
 OPENCODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "opencode"')
 
 

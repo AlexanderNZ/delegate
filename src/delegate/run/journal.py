@@ -203,6 +203,23 @@ def crash_of(events: list[dict[str, object]]) -> dict[str, object] | None:
     return None
 
 
+def setup_problem_of(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """The newest `setup-problem` event of the run of the events, or None: the check of the setup stopped the run when it comes after the newest `resume` (#296)."""
+    for event in reversed(events):
+        if event["event"] == "resume":
+            return None
+        if event["event"] == "setup-problem":
+            return event
+    return None
+
+
+def setup_problem_note(problem: dict[str, object], run_id: str) -> str:
+    """The text of a stop by the check of the setup: each problem, and the command that goes on once the setup is right."""
+    texts = problem["problems"]
+    joined = "; ".join(str(text) for text in texts) if isinstance(texts, list) else str(texts)
+    return f"the setup check stopped the run before the first agent session: {joined}; change the setup, then go on with delegate run --resume {run_id}"
+
+
 def crash_where(ticket: object, phase: object) -> str:
     """Where a crash stopped the run, from the `ticket` and the `phase` of its `crashed` event: `the verifier of ticket a`."""
     if phase == CRASH_PHASE_SETUP:

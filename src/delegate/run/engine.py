@@ -195,14 +195,14 @@ from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import domain
-from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, verifier_mcp_tools
+from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
     gate_log_copies_text, green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
-from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, STACK_CHANGE
+from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
@@ -2207,6 +2207,7 @@ def _execute(
         on_start(run_id, journal.path)
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
+    _check_gates_permitted(adapter, journal, workflow)
     if tiers is not None:
         _probe_guards(adapter, vcs, tiers, journal, workflow, state_dir / "runs" / run_id, run_id)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
@@ -2523,6 +2524,27 @@ def _seal_agents(adapter: Adapter, repo: Path, run_dir: Path, workflow: Workflow
         return seal_agents(adapter, repo, run_dir, agent_names(workflow), verifier_mcp_tools(workflow))
     except AdapterError as error:
         raise EngineError(f"the agents of the run cannot be sealed: {error}") from None
+
+
+def _check_gates_permitted(adapter: Adapter, journal: Journal, workflow: Workflow) -> None:
+    """End the run before its first agent session when the verifier of a stack does not permit a gate of the stack (#296).
+
+    It is the check of the dry run (`unpermitted_gates`), applied to the sealed verifier of the record of seals. It
+    starts no session. An adapter whose `checks_setup` is not true gets no check, as in the dry run. A verifier that the
+    record holds no seal for is not checked. Each gate that the guard does not permit is a problem. The journal gets one
+    `setup-problem` event with the problems, and an `EngineError` gives them to the command. A resume checks again.
+    """
+    if not getattr(adapter, "checks_setup", False):
+        return
+    recorded = recorded_agents(journal.events) or []
+    problems: list[str] = []
+    for stack in workflow.stacks.values():
+        sealed, _change = check_agent(recorded, stack.verifier)
+        if sealed is not None:
+            problems.extend(unpermitted_gates(adapter, stack, sealed))
+    if problems:
+        journal.append(SETUP_PROBLEM, problems=problems)
+        raise EngineError("; ".join(problems))
 
 
 def _probe_guards(
