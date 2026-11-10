@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-11-10
+
 ### Consumer impact
 
 - Stop each running run of an older version before you update (#288). A run of an older version holds no `flock`, so a run or a resume of this version can take its lock while it still works.
