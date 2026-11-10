@@ -58,6 +58,9 @@ CONTINUATION_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 1}
 # that a harness gives one such command at most.
 IDLE_TIMEOUT_SECONDS: int = 900
 
+# The size in characters of the diff that a verifier brief holds inline, when the stack gives no `verifier-diff-limit` (#292).
+DEFAULT_VERIFIER_DIFF_LIMIT: int = 60_000
+
 # The two verdicts of a verifier.
 ACCEPT: str = "ACCEPT"
 REJECT: str = "REJECT"

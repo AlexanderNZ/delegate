@@ -305,6 +305,9 @@ class GitVersionControl:
     def diff_text(self, path: Path, since: str, until: str, *, from_merge_base: bool = False) -> str:
         return _git_raw(path, "diff", f"{since}{'...' if from_merge_base else '..'}{until}")
 
+    def diff_stat(self, path: Path, since: str, until: str, *, from_merge_base: bool = False) -> str:
+        return _git_raw(path, "diff", "--stat=200", f"{since}{'...' if from_merge_base else '..'}{until}")
+
     def uncommitted_changes(self, worktree: Path) -> list[PathChange]:
         # The state code starts with a space for a change that is not staged, so the output must not be stripped.
         out = _git_raw(worktree, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")

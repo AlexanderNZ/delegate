@@ -3539,7 +3539,10 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
     if stop:
         raise _StepFailed(stop)
     try:
-        return fixup_brief(step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text)
+        return fixup_brief(
+            step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text,
+            diff_limit=step.stack.verifier_diff_limit,
+        )
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise _StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
@@ -3647,7 +3650,9 @@ def _verify_round(
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
-                    chain_brief(step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups)
+                    chain_brief(
+                        step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups, step.stack.verifier_diff_limit,
+                    )
                     + plan_change_section(_plan_change_note(step.journal, step.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
@@ -3660,6 +3665,7 @@ def _verify_round(
                     step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
                     plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
                     notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator, scratch=own_scratch,
+                    diff_limit=step.stack.verifier_diff_limit,
                 )
             else:
                 prompt = (

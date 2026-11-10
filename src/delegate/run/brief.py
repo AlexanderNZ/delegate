@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
+from .domain import DEFAULT_VERIFIER_DIFF_LIMIT
 from .reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
     specialist_example, verifier_example,
@@ -203,6 +204,27 @@ def read_task(task: str) -> str:
 
 def _fenced_diff(diff: str) -> str:
     return "```diff\n" + diff.rstrip("\n") + "\n```"
+
+
+def _diff_block(
+    vcs: VersionControl, repo: str | Path, diff: str, command: str, since: str, until: str, limit: int, *, from_merge_base: bool,
+) -> str:
+    """The diff as a brief holds it (#292): the fenced diff up to `limit` characters, and above it the stat and the command.
+
+    Above the limit, the block gives the output of `git diff --stat` for the same range, and tells the verifier to read the
+    diff in its copy with `command`. The copy holds both refs of the command, so the verifier reads the whole diff without
+    a brief that is longer than its context.
+    """
+    if len(diff) <= limit:
+        return _fenced_diff(diff)
+    with _vcs_errors():
+        stat = vcs.diff_stat(Path(repo), since, until, from_merge_base=from_merge_base)
+    return (
+        f"The diff has {len(diff):,} characters. This is more than the limit of {limit:,} characters, so this brief does not hold it. "
+        "This is the stat of the diff:\n\n"
+        f"```\n{stat.rstrip(chr(10))}\n```\n\n"
+        f"Read the diff in your copy with this command: `{command}`. Your copy holds both refs of the command."
+    )
 
 
 def _field_list(fields: dict[str, str], values: dict[str, Sequence[str]]) -> str:
@@ -431,6 +453,7 @@ def full_brief(
     gate_commands: Sequence[str] | None = None,
     plan_change: str | None = None,
     gates_text: str | None = None,
+    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
 ) -> str:
     """The first-pass brief: the task, the three-dot diff, and the gates.
 
@@ -446,6 +469,8 @@ def full_brief(
     section "Plan change" after the task. `gates_text` replaces the whole text
     of the `## Gates` section, as in `chain_brief`: the engine gives the output
     of the gates that it ran green (see `green_gates_text`).
+
+    A diff of more than `diff_limit` characters is not in the brief: the brief holds its stat and the command instead (see `_diff_block`).
     """
     command = f"git diff {base}...{branch}"
     diff = _diff(vcs, repo, base, branch, from_merge_base=True)
@@ -461,7 +486,7 @@ def full_brief(
     return _sections(
         ("## Task", task),
         *plan,
-        ("## Diff", f"`{command}`\n\n" + _fenced_diff(diff)),
+        ("## Diff", f"`{command}`\n\n" + _diff_block(vcs, repo, diff, command, base, branch, diff_limit, from_merge_base=True)),
         ("## Gates", gates),
     )
 
@@ -542,6 +567,7 @@ def chain_brief(
     gates_text: str | None = None,
     fixups: tuple[str, str] | None = None,
     earlier_fixups: tuple[str, str] | None = None,
+    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
 ) -> str:
     """The first-pass brief for a chain: the task and the three-dot diff of each ticket, and the gates.
 
@@ -561,6 +587,8 @@ def chain_brief(
     that a ticket in `segments` changed (by its old or its new name), the brief
     holds their delta `git diff <start>..<tip>` and names those files. When
     they change no such file, the brief does not hold them.
+
+    Each diff follows the rule of `diff_limit` of `full_brief`.
     """
     tasks: list[str] = []
     diffs: list[str] = []
@@ -571,7 +599,8 @@ def chain_brief(
         if not diff.strip():
             raise BriefError(f"{command} is empty. The ticket {segment.ticket} holds no change to verify.")
         tasks.append(f"Ticket {segment.ticket}\n\n{segment.text.rstrip(chr(10))}")
-        diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n" + _fenced_diff(diff))
+        block = _diff_block(vcs, repo, diff, command, segment.base, segment.tip, diff_limit, from_merge_base=True)
+        diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n{block}")
         if earlier_fixups is not None:
             files.update(_paths(vcs, repo, segment.base, segment.tip, from_merge_base=True))
     if earlier_fixups is not None:
@@ -580,11 +609,12 @@ def chain_brief(
         if shared:
             command = f"git diff {start}..{tip}"
             names = ", ".join(f"`{name}`" for name in shared)
+            earlier = _diff(vcs, repo, start, tip, from_merge_base=False)
             diffs.append(
                 "### The fix-ups of the stacks before this stack\n\n"
                 f"The fix-up commits of the stacks that the engine verified before this stack change these files of "
                 f"the tickets of this stack: {names}. Check these changes against the tickets of this stack.\n\n"
-                f"`{command}`\n\n" + _fenced_diff(_diff(vcs, repo, start, tip, from_merge_base=False))
+                f"`{command}`\n\n" + _diff_block(vcs, repo, earlier, command, start, tip, diff_limit, from_merge_base=False)
             )
     if fixups is not None:
         start, tip = fixups
@@ -592,7 +622,8 @@ def chain_brief(
         diff = _diff(vcs, repo, start, tip, from_merge_base=False)
         diffs.append(
             f"### The fix-ups of the red gates\n\nThe gates were red on the commit `{start}`. "
-            f"These commits fix them.\n\n`{command}`\n\n" + _fenced_diff(diff)
+            f"These commits fix them.\n\n`{command}`\n\n"
+            + _diff_block(vcs, repo, diff, command, start, tip, diff_limit, from_merge_base=False)
         )
     return _sections(
         ("## Task", "\n\n".join(tasks)),
@@ -611,6 +642,7 @@ def fixup_brief(
     stacks: Sequence[str] = (),
     gate_commands: Sequence[str] | None = None,
     gates_text: str | None = None,
+    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
 ) -> str:
     """The scoped brief: the findings verbatim, the delta, and the gates.
 
@@ -620,7 +652,7 @@ def fixup_brief(
 
     The gates come from the delegation doc of the repository. `gate_commands`
     replaces them, as in `full_brief`. `gates_text` replaces the whole text of
-    the `## Gates` section, as in `chain_brief`.
+    the `## Gates` section, as in `chain_brief`. A delta of more than `diff_limit` characters follows the rule of `full_brief`.
     """
     with _vcs_errors():
         vcs.commit_of(Path(repo), rejected)
@@ -645,7 +677,9 @@ def fixup_brief(
     pairs = [(FINDINGS_HEADING, findings.rstrip("\n"))]
     if authorised:
         pairs.append(("## Coordinator-authorised additions", authorised))
-    pairs.append(("## Delta", f"`{command}`\n\n" + _fenced_diff(delta)))
+    pairs.append(
+        ("## Delta", f"`{command}`\n\n" + _diff_block(vcs, repo, delta, command, rejected, branch, diff_limit, from_merge_base=False))
+    )
     if gates_text is not None:
         gates = gates_text
     elif gate_commands is None:
@@ -939,6 +973,7 @@ def verifier_run_brief(
     plan_change: str | None = None, notes: str | None = None, gates_text: str | None = None,
     coordinator: Sequence[tuple[str, Sequence[str]]] = (),
     scratch: str | Path | None = None,
+    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
@@ -952,9 +987,10 @@ def verifier_run_brief(
     output in place of the gate commands, and the verifier does not run the gates. With `coordinator`, each commit of
     the coordinator on the branch and its paths, the section "Commit of the coordinator" comes before the notes (#225).
     With `scratch`, the brief names the scratch directory of the session (see `verifier_run_sections`).
+    `diff_limit` is the `verifier-diff-limit` of the stack (see `full_brief`).
     """
     return (
-        full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text)
+        full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text, diff_limit=diff_limit)
         + coordinator_section(coordinator)
         + notes_section(notes)
         + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None, scratch=scratch)

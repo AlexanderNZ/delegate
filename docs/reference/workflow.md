@@ -169,7 +169,7 @@ Give a ticket a stronger tier when other tickets build on its work, or when it h
 
 ## Stacks
 
-Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `gate-timeout`, `agent-timeout`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
+Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `verifier`, `gates`, and `hotspots` are required. The fields `mcp-servers`, `prepare`, `gate-timeout`, `agent-timeout`, `verifier-diff-limit`, `specialist-notes`, `specialist-notes-file`, `verifier-notes` and `verifier-notes-file` are optional.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -181,6 +181,7 @@ Each `[stacks.<name>]` table describes one stack. The fields `specialist`, `veri
 | `prepare` | list of strings | The commands that make a tree ready for the agents, for example the install of the dependencies. The engine runs them, not an agent. With the field, at least one command is required. With no field, the engine runs no command. See [Prepare](#prepare). |
 | `gate-timeout` | number | The time limit of one gate run, in minutes. A fraction is permitted: `0.5` is 30 seconds. The number must be greater than 0. With no field, a gate has the default limit of 120 minutes. See [Time limits](#time-limits). |
 | `agent-timeout` | number | The time limit of one run of an agent of this stack, in minutes, with the same rules as `gate-timeout`. With no field, the engine waits for an agent without a limit. See [Time limits](#time-limits). |
+| `verifier-diff-limit` | whole number | The size in characters of the diff that a verifier brief holds inline. The number must be greater than 0. With no field, the limit is 60000. A diff above the limit is not in the brief: the brief holds the output of `git diff --stat` and the `git diff` command, and the verifier reads the diff in its copy. See [The size of the diff in a verifier brief](#the-size-of-the-diff-in-a-verifier-brief). |
 | `specialist-notes` | string | The text that the engine adds to each specialist brief of this stack. Give at most one of `specialist-notes` and `specialist-notes-file`. See [Notes](#notes). |
 | `specialist-notes-file` | string | The path of a local file that holds the specialist notes. The path is relative to the directory of the workflow file. The file must exist, and it must not be empty. |
 | `verifier-notes` | string | The text that the engine adds to each verifier brief of this stack. Give at most one of `verifier-notes` and `verifier-notes-file`. See [Notes](#notes). |
@@ -235,6 +236,21 @@ agent-timeout = 90    # minutes for one run of an agent
 - `agent-timeout` is the time limit of each run of the specialist, the fix-up specialist and the verifier of the stack. The time counts from the start of the run of the agent. When it runs longer, whatever it does, the adapter ends its process group. The journal gets `agent-timeout`, just before the result event of the agent. The engine takes the run as one with no valid report. The [continuation rules](run.md#the-continuation) then apply: the specialist continues, and the fix-up specialist and the verifier fail the step. The idle timeout of 900 seconds is a different rule, and it applies only after a valid report.
 - Each limit is a number of minutes. The number is greater than 0, and it can be a fraction. The check refuses zero, a negative number, text, `true`, and `nan` or `inf`.
 - For a stack with no `agent-timeout`, the [quality check](run.md#the-quality-check) prints a `warn` line. A stack with no `gate-timeout` gets no `warn` line: its gate limit is the default.
+
+### The size of the diff in a verifier brief
+
+A diff that is longer than the context of the verifier makes its session fail. A lockfile, a generated file or a rendered agent file can make a diff that long. So a verifier brief holds a diff inline only up to the limit `verifier-diff-limit`, in characters. With no field, the limit is 60000.
+
+- A diff of at most the limit is in the brief, in a `diff` block, as before.
+- A diff of more than the limit is not in the brief. The brief holds the output of `git diff --stat` for the same range, and says that the verifier reads the diff in its copy with the exact `git diff` command that the brief gives. The copy of the verifier holds both refs of the command, and the guard of the verifier permits the command.
+- The rule holds for each diff of a verifier brief: the diff of a full brief, the changes of a [**fix-up**](../glossary.md#fix-up) brief, and each diff of a chain brief.
+- The limit counts the characters of the text of `git diff`. The number must be a whole number greater than 0. The check refuses zero, a negative number, a fraction, text and `true`.
+- The [quality check](run.md#the-quality-check) of the dry run prints the limit of each stack.
+
+```toml
+[stacks.python]
+verifier-diff-limit = 20000   # characters of diff that a verifier brief holds
+```
 
 ### Prepare
 
@@ -406,4 +422,5 @@ The check is in Python and starts no process. For example, the id `a.lock` is a 
 | A `specialist-notes-file` or a `verifier-notes-file` does not exist, or it is empty. | The stack, the field and the path. |
 | An MCP server has both `command` and `url`, or neither. | The server, for example `stacks.web.mcp-servers.browser`. |
 | An MCP server has `env` and `url`, or a value of `env` is not a string. | The field, for example `stacks.web.mcp-servers.tracker.env` or `stacks.web.mcp-servers.browser.env.NAME`. |
+| `verifier-diff-limit` is zero, a negative number, a fraction, text, or `true`. | The field, for example `stacks.python.verifier-diff-limit: must be a whole number of characters greater than 0, not 0`. |
 | `gate-timeout` or `agent-timeout` is zero, a negative number, text, or not a finite number. | The field, for example `stacks.python.gate-timeout: must be greater than 0 minutes, not 0`. |

@@ -16,7 +16,7 @@ from pathlib import Path
 from ..ports.harness import McpServer
 from ..shared.tiers import Tiers
 from . import domain
-from .domain import ASSURE, ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
+from .domain import ASSURE, DEFAULT_VERIFIER_DIFF_LIMIT, ECONOMY, MODES, START_BASE_BRANCH, START_RUN_BRANCH, TICKET_STARTS
 from .output import gate_name
 
 # The built-in harness adapters. A workflow can name these, and any adapter
@@ -102,6 +102,8 @@ class Stack:
     # The name that the workflow gives to a gate, by its command (#223). A gate with no entry has no name: the views
     # show the short name that they find in its command.
     gate_names: dict[str, str] = field(default_factory=dict)
+    # The size of the diff that a verifier brief holds inline, in characters (#292). A larger diff gives the stat and the command.
+    verifier_diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT
 
     def gate_name_clashes(self) -> list[tuple[str, list[str]]]:
         """The short names that more than one gate of this stack has (#223), each with the commands of those gates.
@@ -336,6 +338,16 @@ class _Reader:
             return None
         return float(value)
 
+    def characters(self, table: dict[str, object], key: str, field: str) -> int | None:
+        """An optional size in characters: a whole number greater than 0. None when the field is absent or not valid."""
+        if key not in table:
+            return None
+        value = table[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            self.problems.append(f"{field}: must be a whole number of characters greater than 0, not {value!r}")
+            return None
+        return value
+
     def gates(self, table: dict[str, object], key: str, field: str) -> tuple[list[str], dict[str, str]] | None:
         """The gates of a stack (#223): each is a command string, or a table `{ name = "...", command = "..." }`.
 
@@ -390,6 +402,7 @@ TOP_LEVEL_FIELDS: tuple[str, ...] = (
 STACK_FIELDS: tuple[str, ...] = (
     "specialist", "verifier", "gates", "hotspots", "mcp-servers", "prepare",
     "specialist-notes", "specialist-notes-file", "verifier-notes", "verifier-notes-file", "gate-timeout", "agent-timeout",
+    "verifier-diff-limit",
 )
 GATE_FIELDS: tuple[str, ...] = ("name", "command")
 MCP_SERVER_FIELDS: tuple[str, ...] = ("command", "url", "verifier-tools", "env")
@@ -417,6 +430,7 @@ def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]
         prepare = reader.string_list(stack, "prepare", f"{field}.prepare", at_least_one=True) if "prepare" in stack else []
         gate_timeout = reader.minutes(stack, "gate-timeout", f"{field}.gate-timeout")
         agent_timeout = reader.minutes(stack, "agent-timeout", f"{field}.agent-timeout")
+        diff_limit = reader.characters(stack, "verifier-diff-limit", f"{field}.verifier-diff-limit")
         problems = len(reader.problems)
         notes = {role: _read_notes(reader, stack, role, field, root) for role in ROLES}
         if None not in (specialist, verifier, gates, hotspots, servers, prepare) and len(reader.problems) == problems:
@@ -424,6 +438,7 @@ def _read_stacks(reader: _Reader, value: object, root: Path) -> dict[str, Stack]
                 name, specialist, verifier, gates, hotspots, servers, tuple(prepare),  # type: ignore[arg-type]
                 specialist_notes=notes["specialist"], verifier_notes=notes["verifier"],
                 gate_timeout=gate_timeout, agent_timeout=agent_timeout, gate_names=gate_names,
+                verifier_diff_limit=DEFAULT_VERIFIER_DIFF_LIMIT if diff_limit is None else diff_limit,
             )
     return stacks
 

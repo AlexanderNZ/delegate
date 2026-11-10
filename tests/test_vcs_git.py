@@ -945,6 +945,40 @@ def test_diff_text_is_empty_when_nothing_differs(tmp_path, vcs):
     assert vcs.diff_text(repo, "main", "main") == ""
 
 
+def test_diff_stat_from_the_merge_base_names_the_path_of_one_side_only_with_its_count(tmp_path, vcs):
+    repo, tip = repo_with_a_feature_branch(tmp_path)
+
+    stat = vcs.diff_stat(repo, "main", "feature", from_merge_base=True)
+
+    assert "feature.txt |" in stat
+    assert "main.txt" not in stat
+    assert "1 file changed, 1 insertion(+)" in stat
+
+
+def test_diff_stat_keeps_a_long_path_whole(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    path = "a-directory-with-a-long-name/another-directory-with-a-long-name/" + "x" * 60 + ".txt"
+    (repo / path).parent.mkdir(parents=True)
+    (repo / path).write_text("one\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "long path")
+
+    assert path in vcs.diff_stat(repo, "HEAD~1", "HEAD")
+
+
+def test_diff_stat_is_empty_when_nothing_differs(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    assert vcs.diff_stat(repo, "main", "main") == ""
+
+
+def test_diff_stat_of_a_ref_that_does_not_exist_is_an_error(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError, match="failed"):
+        vcs.diff_stat(repo, "no-such-ref", "main")
+
+
 def test_uncommitted_changes_names_each_changed_and_each_new_path_with_its_state(tmp_path, vcs):
     repo = make_repo(tmp_path)
     (repo / "seed.txt").write_text("changed\n")

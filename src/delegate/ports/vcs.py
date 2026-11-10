@@ -211,6 +211,14 @@ class VersionControl(Protocol):
         """
         ...
 
+    def diff_stat(self, path: Path, since: str, until: str, *, from_merge_base: bool = False) -> str:
+        """The summary of the changes between `since` and `until`: one line for each changed path with its count of changed lines (#292).
+
+        `from_merge_base` is as in `changed_paths`. The summary is the stat of the tool, exactly as the tool wrote it, and it is
+        empty when nothing differs. Raise VcsError when a name is no commit.
+        """
+        ...
+
     def uncommitted_changes(self, worktree: Path) -> list[PathChange]:
         """Each path of the worktree that differs from its newest commit, one entry for each file.
 

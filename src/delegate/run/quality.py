@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .domain import ASSURE, START_BASE_BRANCH, START_RUN_BRANCH, role_tier
+from .domain import ASSURE, DEFAULT_VERIFIER_DIFF_LIMIT, START_BASE_BRANCH, START_RUN_BRANCH, role_tier
 from .output import gate_name
 from .workflow import Stack, Workflow
 
@@ -53,6 +53,7 @@ def quality_checks(workflow: Workflow) -> list[Check]:
         *(_hotspots(stack) for stack in stacks),
         Check(OK, "verifier-tier", f"the verifier runs on the tier {role_tier(workflow.mode, 'verifier', workflow.tier_overrides)}"),
         *(_gate_names(stack) for stack in stacks),
+        *(_verifier_diff_limit(stack) for stack in stacks),
         *(check for stack in stacks for check in _verifier_tools(stack)),
     ]
 
@@ -111,6 +112,13 @@ def _gate_names(stack: Stack) -> Check:
         f'stack {stack.name}: {same}; give each one a name: {{ name = "<name>", command = "<command>" }}; '
         "without it, the views cannot tell the gates apart",
     )
+
+
+def _verifier_diff_limit(stack: Stack) -> Check:
+    """The size of the diff that the verifier brief of the stack holds inline (#292). Always `ok`: the field has a default."""
+    limit = stack.verifier_diff_limit
+    suffix = " (the default)" if limit == DEFAULT_VERIFIER_DIFF_LIMIT else ""
+    return Check(OK, "verifier-diff-limit", f"stack {stack.name}: verifier-diff-limit = {limit} characters{suffix}")
 
 
 def _verifier_tools(stack: Stack) -> list[Check]:
