@@ -228,13 +228,31 @@ def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Pat
     return journals
 
 
+@dataclass(frozen=True)
+class _FrozenClock:
+    """The clock of a figure (`delegate.run.clock.Clock`): the time of the figure, which does not move. The live view
+    draws the first frame before its first wait, so no wait happens."""
+
+    at: datetime
+
+    def now(self) -> float:
+        return self.at.timestamp()
+
+    def monotonic(self) -> float:
+        return 0.0
+
+    def sleep(self, seconds: float) -> None:
+        return None
+
+
 def _watch(figure: Figure, journal: Path, now: datetime) -> list[str]:
     def draw(lines: list[str]) -> None:
         raise _Drawn(lines)
 
-    view = live.LiveView(journal, stream_reader_of, lambda: now, lambda: (figure.columns, figure.rows), draw)
+    clock = _FrozenClock(now)
+    view = live.LiveView(journal, stream_reader_of, clock, lambda: (figure.columns, figure.rows), draw)
     try:
-        watch.follow(journal, watch.WatchOptions(), view)
+        watch.follow(journal, watch.WatchOptions(), view, clock)
     except _Drawn as drawn:
         return drawn.lines
     raise RuntimeError(f"the live view drew no frame of the figure {figure.name}")

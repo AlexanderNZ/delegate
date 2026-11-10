@@ -5,8 +5,8 @@ A case writes the journal of a run, with the time of each event, in the state
 directory of a real temporary git repository, and calls
 `delegate.main(["watch", ...])`. The system boundaries are faked: the terminal
 (a standard output whose `isatty` is true, and `COLUMNS` and `LINES`), the clock
-(`time.time`), the time zone (`TZ`), the locale (`LC_ALL`, which decides the glyph
-set), and the wait between two polls (`time.sleep`), which appends the next events
+(the `clock` fixture), the time zone (`TZ`), the locale (`LC_ALL`, which decides the glyph
+set), and the wait between two polls (the wait of the `clock` fixture), which appends the next events
 of a live run.
 
 Standard output that is not a terminal, and `--raw`, give the raw lines of the
@@ -30,7 +30,10 @@ import pytest
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import CONTROL, TITLE, Terminal, bare_repo, final_screen, frames, hold_lock, journal_path, without_titles
+from .support import CONTROL, TITLE, Terminal, bare_repo, fake_clock, final_screen, frames, hold_lock, journal_path, without_titles
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 PYTEST = "nix develop -c python3 -m pytest -q"
@@ -173,7 +176,7 @@ def watch(
         waits.append(seconds)
         then()
 
-    monkeypatch.setattr(time, "sleep", sleep or wait_once)
+    fake_clock().on_sleep = sleep or wait_once
     code = delegate.main(["watch", "r1", "--repo", str(repo), *extra])
     return code, out.getvalue()
 
@@ -208,7 +211,7 @@ def test_watch_on_a_terminal_draws_the_table_at_the_top_and_the_feed_of_the_runn
     local_zone("NZT-13")  # 13 hours east of UTC: the run starts at 03:00 UTC, 16:00 local time
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=3650)).timestamp()
 
     code, out = watch(repo, monkeypatch, then=lambda: ticket_b_ends(run))
 
@@ -239,7 +242,7 @@ def test_the_live_view_hides_the_cursor_before_the_first_frame_draws_each_frame_
 ):
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=3650)).timestamp()
 
     code, out = watch(repo, monkeypatch, then=lambda: ticket_b_ends(run))
 
@@ -307,7 +310,7 @@ def test_the_live_view_has_no_line_wider_than_the_terminal_no_absolute_path_and_
     local_zone("NZT-13")
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=3650)).timestamp()
 
     code, out = watch(repo, monkeypatch, columns=columns, then=lambda: ticket_b_ends(run))
 
@@ -325,7 +328,7 @@ def test_a_frame_of_a_run_that_goes_on_fits_the_height_of_the_terminal_and_keeps
     local_zone("NZT-13")
     repo = bare_repo(tmp_path)
     run = a_live_run(repo)
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=3650)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=3650)).timestamp()
 
     _, out = watch(repo, monkeypatch, rows=11, then=lambda: ticket_b_ends(run))
 

@@ -14,9 +14,16 @@ import pytest
 from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate
 
+from .conftest import KIT_PATHS
 from .support import WORKFLOW, make_repo
 
 KIT = Path(__file__).resolve().parents[1]
+
+# A case that needs the repository of the kit. The Nix build runs the suite in a copy of the source with no `.git` entry:
+# that copy is no repository, so the guard of `conftest` has nothing to guard, and the case has no repository to use.
+needs_the_kit_repository = pytest.mark.skipif(
+    KIT_PATHS is None, reason="the tree is a copy of the source with no .git entry, so it is no repository of the kit"
+)
 
 
 def kit_refs() -> str:
@@ -27,6 +34,7 @@ def kit_refs() -> str:
     )
 
 
+@needs_the_kit_repository
 def test_a_run_with_no_repo_in_the_repository_of_the_kit_fails_and_makes_nothing(
     scripted, tmp_path, monkeypatch, isolated_state_home, request
 ):
@@ -71,6 +79,7 @@ def test_a_look_up_of_a_linked_worktree_of_a_test_repository_works(tmp_path):
     assert common == (repo / ".git").resolve()
 
 
+@needs_the_kit_repository
 @pytest.mark.kit_repository
 def test_a_test_with_the_marker_may_look_up_the_repository_of_the_kit():
     top, common = GitVersionControl().repository_paths(KIT)
@@ -79,6 +88,7 @@ def test_a_test_with_the_marker_may_look_up_the_repository_of_the_kit():
     assert common.is_dir()
 
 
+@needs_the_kit_repository
 def test_a_look_up_of_a_subdirectory_of_the_kit_fails_at_the_port(request):
     with pytest.raises(pytest.fail.Exception) as failure:
         GitVersionControl().repository_paths(KIT / "src")

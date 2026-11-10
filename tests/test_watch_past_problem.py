@@ -6,18 +6,20 @@ later event of the run follows it (#222; before, only a `continuation` or a `ret
 
 A case writes the journal with the journal class of the engine in a real temporary git repository, holds the lock of
 the run branch as the process of a run that goes on does, and calls `delegate.main(["watch", ...])` with no run id. The
-wait between two polls (`time.sleep`) is the system boundary: it appends the next events of the live run.
+wait between two polls (the wait of the `clock` fixture) is the system boundary: it appends the next events of the live run.
 """
 
 from __future__ import annotations
 
-import time
 
 import pytest
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, live_lock, run_end, run_start, step_end, step_start, write_journal
+from .support import append_events, bare_repo, fake_clock, live_lock, run_end, run_start, step_end, step_start, write_journal
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 POLL = ["--poll-seconds", "0.02"]
 PROBLEM = 3
@@ -62,7 +64,7 @@ def test_watch_follows_the_run_past_a_specialist_failure_that_a_continuation_han
         repo, "r1", run_start("r1", "a", "b"), step_start("a"), specialist_result("a", "failed", 143), continuation("a"),
         specialist_result("a", "finished", 0), valid_report_event("a"), step_end("a"), step_start("b"),
     )
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, step_end("b"), run_end("built", ["a", "b"])))
+    fake_clock().on_sleep = lambda seconds: append_events(path, step_end("b"), run_end("built", ["a", "b"]))
 
     with live_lock(path):
         code, out, err = watch(repo, capsys, *extra)
@@ -83,7 +85,7 @@ def test_watch_follows_the_run_past_a_specialist_failure_that_a_continuation_han
 def test_watch_stops_at_a_problem_that_is_the_last_event_of_the_replay(tmp_path, capsys, monkeypatch, extra):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), specialist_result("a", "failed", 143))
-    monkeypatch.setattr(time, "sleep", no_more_polls)
+    fake_clock().on_sleep = no_more_polls
 
     with live_lock(path):
         code, out, err = watch(repo, capsys, *extra)
@@ -97,10 +99,10 @@ def test_watch_stops_at_a_problem_that_arrives_after_it_starts_also_when_a_conti
     path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"))
     # The problem and the continuation that handles it arrive in one read, after the replay.
     def append_once(seconds: float) -> None:
-        monkeypatch.setattr(time, "sleep", no_more_polls)
+        fake_clock().on_sleep = no_more_polls
         append_events(path, specialist_result("a", "failed", 143), continuation("a"))
 
-    monkeypatch.setattr(time, "sleep", append_once)
+    fake_clock().on_sleep = append_once
 
     with live_lock(path):
         code, out, err = watch(repo, capsys)
@@ -115,7 +117,7 @@ def test_watch_follows_a_resumed_run_past_a_failed_step_before_the_crash_when_th
     repo = bare_repo(tmp_path)
     resume = ("resume", {"run_id": "r1", "built": [], "failed": ["a"], "skipped": [], "open": None})
     path = write_journal(repo, "r1", run_start("r1", "a", "b"), step_start("a"), step_end("a", "failed", "boom"), resume, step_start("b"))
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, step_end("b"), run_end("failed", ["b"], ["a"])))
+    fake_clock().on_sleep = lambda seconds: append_events(path, step_end("b"), run_end("failed", ["b"], ["a"]))
 
     with live_lock(path):
         code, out, err = watch(repo, capsys)
@@ -146,7 +148,7 @@ def test_watch_replays_an_ended_run_past_a_problem_that_the_run_went_past(tmp_pa
     # The run is at its end when watch starts (#151): no process holds the lock, and the last event is the end.
     repo = bare_repo(tmp_path)
     write_journal(repo, "r1", *ended_run_with_a_handled_problem(*end))
-    monkeypatch.setattr(time, "sleep", no_more_polls)
+    fake_clock().on_sleep = no_more_polls
 
     code, out, err = watch(repo, capsys, "r1", *extra)
 
@@ -171,7 +173,7 @@ def test_watch_stops_an_ended_run_at_its_last_problem_when_no_later_event_goes_p
         repo, "r1", run_start("r1", "a", "b"), step_start("a"), specialist_result("a", "failed", 143),
         step_end("a", "failed", "boom"), *end,
     )
-    monkeypatch.setattr(time, "sleep", no_more_polls)
+    fake_clock().on_sleep = no_more_polls
 
     code, out, err = watch(repo, capsys, "r1", *extra)
 

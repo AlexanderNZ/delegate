@@ -18,15 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..ports.harness import Activity
-from ..run import status
+from ..run import clock, status
 from ..run.journal import JournalError
 from ..run.runs import FailedStart, RunsError, locate, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
@@ -69,8 +68,8 @@ def stream_reader_of(adapter: str) -> Callable[[Path], Activity] | None:
 
 
 def utc_now() -> datetime:
-    """The time of the clock, in UTC."""
-    return datetime.fromtimestamp(time.time(), timezone.utc)
+    """The time of the clock of the commands (`delegate.run.clock.current`), in UTC."""
+    return clock.utc_now(clock.current())
 
 
 def main(argv: list[str] | None = None) -> int:

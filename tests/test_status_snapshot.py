@@ -3,8 +3,8 @@
 A case writes the journal of a run in the state directory of a real temporary
 git repository, with the time of each event, as the engine writes it. The event
 streams are the recorded fixtures of the harness adapters, or a part of one for
-an agent that still runs. The clock (`time.time`) is the system boundary, so a
-case fixes it. `watch` waits between two polls with `time.sleep`, which a case
+an agent that still runs. The clock (the `clock` fixture) is the system boundary, so a
+case fixes it. `watch` waits between two polls with the `clock` fixture, which a case
 replaces, and a case gives it a terminal: a standard output whose `isatty` is true.
 """
 
@@ -14,7 +14,6 @@ import json
 import os
 import re
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -24,7 +23,10 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
-from .support import Terminal, bare_repo, frames, hold_lock, journal_path, status_row
+from .support import Terminal, bare_repo, fake_clock, frames, hold_lock, journal_path, status_row
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -78,7 +80,7 @@ def utf8_locale(monkeypatch):
 
 
 def frozen(monkeypatch, seconds: float) -> None:
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=seconds)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=seconds)).timestamp()
 
 
 def snapshot(repo: Path, capsys, *extra: str) -> dict:
@@ -341,7 +343,7 @@ def follow_lines(repo: Path, monkeypatch, run: Run) -> list[str]:
     out = Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.setattr(time, "sleep", lambda seconds: run.add(2000, "run-end", result="built", built=["a", "b"], failed=[], skipped=[]))
+    fake_clock().on_sleep = lambda seconds: run.add(2000, "run-end", result="built", built=["a", "b"], failed=[], skipped=[])
     assert delegate.main(["watch", run.path.parent.name, "--repo", str(repo)]) == 0
     return block_of(frames(out.getvalue())[0])
 
@@ -629,7 +631,7 @@ def follow(repo: Path, monkeypatch, run: Run, *extra: str, columns: int = 60) ->
         run.add(700, "step-end", ticket="b", state="built", reason=None)
         run.add(701, "run-end", result="built", built=["first-ticket-with-a-long-id", "b"], failed=[], skipped=[])
 
-    monkeypatch.setattr(time, "sleep", sleep)
+    fake_clock().on_sleep = sleep
     frozen(monkeypatch, 650)
     code = delegate.main(["watch", run.path.parent.name, "--repo", str(repo), *extra])
     return code, frames(out.getvalue()), waits

@@ -17,10 +17,15 @@ import os
 import re
 import shutil
 
+import pytest
+
 from .support import CONTROL, bare_repo, without_titles
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
 from .test_watch_frame import SEVEN, Clock, in_the_verifier, terminal_of_a_person, watch  # noqa: F401 - a fixture
 from .test_watch_liveness import ROW_OF_70, SPINNER, VERIFIER_START, watch_waits
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 SYNC_BEGIN = "\x1b[?2026h"
 SYNC_END = "\x1b[?2026l"
@@ -65,7 +70,7 @@ def test_a_draw_of_the_frame_that_was_drawn_before_writes_nothing(tmp_path, monk
 def test_a_new_size_of_the_terminal_draws_the_full_frame_with_no_other_change(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, VERIFIER_START + 45)  # quiet: no spinner, so the frame is the same at each poll
+    Clock(VERIFIER_START + 45)  # quiet: no spinner, so the frame is the same at each poll
     waits: list[float] = []
 
     def sleep(seconds: float) -> None:
@@ -89,7 +94,7 @@ def test_a_new_size_of_the_terminal_draws_the_full_frame_with_no_other_change(tm
 def test_a_frame_with_fewer_lines_than_the_frame_before_clears_the_screen_below_its_last_line(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, VERIFIER_START + 45)
+    Clock(VERIFIER_START + 45)
 
     def sleep(seconds: float) -> None:
         # The step fails: its three sub-rows go, and two lines join the feed.

@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import TextIO
 
 from ..adapters.git import GitVersionControl
-from ..run import live, status, watch
+from ..run import clock, live, status, watch
 from ..run.journal import JournalError
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, runs_of
@@ -377,21 +377,22 @@ def main(argv: list[str] | None = None) -> int:
                 journal = runs.chosen
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
-        sink: watch.Sink = watch.RawSink(_emit)
-        json_sink = watch.JsonSink(_emit)
+        the_clock = clock.current()
+        sink: watch.Sink = watch.RawSink(_emit, the_clock)
+        json_sink = watch.JsonSink(_emit, the_clock)
         screen: _Screen | None = None
         if args.json:
             sink = json_sink
         elif live_view:
             screen = _Screen(sys.stdout)
-            sink = live.LiveView(journal, stream_reader_of, utc_now, screen.size, screen.draw, args.stall_minutes)
+            sink = live.LiveView(journal, stream_reader_of, the_clock, screen.size, screen.draw, args.stall_minutes)
         title = Title(sys.stdout)
         if title.enabled and not args.json:  # the title sequence is no JSON
             sink = _Titled(sink, journal, title)
         try:
             # SIGTERM and SIGHUP end the live view as Ctrl-C does, so the cursor shows again (#280).
             with stop_signals_as_ctrl_c() if live_view else contextlib.nullcontext():
-                result = watch.follow(journal, options, sink)
+                result = watch.follow(journal, options, sink, the_clock)
         finally:
             if screen is not None:
                 screen.restore()  # on each end of the watch, also on an error, before the line of the end

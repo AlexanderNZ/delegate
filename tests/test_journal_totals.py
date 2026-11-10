@@ -2,14 +2,13 @@
 
 A case drives `delegate run`, `delegate status --json` or `delegate watch` against a real temporary git repository. The
 adapter is the system boundary: a scripted adapter, or a counting adapter that reads the recorded streams of Claude Code.
-The clock (`time.time`) and the wait between two polls (`time.sleep`) are faked.
+The clock (the `clock` fixture) and the wait between two polls (the wait of the `clock` fixture) are faked.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,9 +22,12 @@ from delegate.ports.harness import Activity, AdapterError
 
 from . import claude_fake
 from .support import (
-    ScriptedAdapter, Terminal, append_events, bare_repo, frames, make_repo, read_journal, run_main, run_start, step_end,
-    step_start, write_journal,
+    ScriptedAdapter, Terminal, append_events, bare_repo, fake_clock, frames, make_repo, read_journal, run_main,
+    run_start, step_end, step_start, write_journal,
 )
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 LAST = datetime(2026, 10, 16, 3, 5, 0, tzinfo=timezone.utc)
@@ -138,7 +140,7 @@ def test_the_live_view_parses_an_unchanged_stream_of_a_running_agent_once_over_m
         out = Terminal()
         monkeypatch.setattr(sys, "stdout", out)
         monkeypatch.setenv("COLUMNS", "120")
-        monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=120)).timestamp())
+        fake_clock().at = (START + timedelta(seconds=120)).timestamp()
         waits: list[float] = []
 
         def sleep(seconds: float) -> None:
@@ -147,7 +149,7 @@ def test_the_live_view_parses_an_unchanged_stream_of_a_running_agent_once_over_m
                 append_events(journal, ("step-end", {"ticket": "a", "state": "built", "reason": None}), (
                     "run-end", {"result": "built", "built": ["a"], "failed": [], "skipped": []}))
 
-        monkeypatch.setattr(time, "sleep", sleep)
+        fake_clock().on_sleep = sleep
 
         code = delegate.main(["watch", "r1", "--repo", str(repo)])
     finally:
@@ -175,7 +177,7 @@ def test_the_live_view_parses_a_stream_again_after_the_agent_wrote_to_it(tmp_pat
         append_events(journal, ("agent-start", {"ticket": "a", "role": "specialist", "round": 0, "event_stream": str(stream)}))
         monkeypatch.setattr(sys, "stdout", Terminal())
         monkeypatch.setenv("COLUMNS", "120")
-        monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=120)).timestamp())
+        fake_clock().at = (START + timedelta(seconds=120)).timestamp()
         waits: list[float] = []
 
         def sleep(seconds: float) -> None:
@@ -187,7 +189,7 @@ def test_the_live_view_parses_a_stream_again_after_the_agent_wrote_to_it(tmp_pat
                 append_events(journal, ("step-end", {"ticket": "a", "state": "built", "reason": None}), (
                     "run-end", {"result": "built", "built": ["a"], "failed": [], "skipped": []}))
 
-        monkeypatch.setattr(time, "sleep", sleep)
+        fake_clock().on_sleep = sleep
 
         assert delegate.main(["watch", "r1", "--repo", str(repo)]) == 0
     finally:
@@ -217,13 +219,13 @@ def test_an_agent_that_ended_with_totals_is_not_parsed_by_the_live_view(tmp_path
         out = Terminal()
         monkeypatch.setattr(sys, "stdout", out)
         monkeypatch.setenv("COLUMNS", "120")
-        monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=120)).timestamp())
+        fake_clock().at = (START + timedelta(seconds=120)).timestamp()
 
         def sleep(seconds: float) -> None:
             append_events(journal, ("step-end", {"ticket": "a", "state": "built", "reason": None}), (
                 "run-end", {"result": "built", "built": ["a"], "failed": [], "skipped": []}))
 
-        monkeypatch.setattr(time, "sleep", sleep)
+        fake_clock().on_sleep = sleep
 
         assert delegate.main(["watch", "r1", "--repo", str(repo)]) == 0
     finally:

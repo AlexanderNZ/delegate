@@ -1,7 +1,12 @@
 """The live view of `delegate watch` of an abandoned run shows the state `abandoned` and the reason (#201)."""
 
+import pytest
+
 from .support import bare_repo, frames
 from .test_watch_live import Run, local_zone, watch  # noqa: F401 - local_zone is a fixture
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 REASON = "the owner cancelled the work"
 

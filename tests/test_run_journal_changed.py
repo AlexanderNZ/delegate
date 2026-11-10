@@ -285,7 +285,7 @@ def test_a_new_run_of_three_tickets_reads_its_journal_no_time(tmp_path, capsys, 
     assert reads == 0
 
 
-def test_delegate_watch_shows_a_journal_change_as_a_change_of_the_journal_and_not_of_the_worktree(tmp_path, monkeypatch):
+def test_delegate_watch_shows_a_journal_change_as_a_change_of_the_journal_and_not_of_the_worktree(tmp_path, monkeypatch, clock):
     from .support import bare_repo, frames
     from .test_watch_live import Run, ticket_a_is_built, watch
 

@@ -7,7 +7,7 @@ and `last event` last. The progress line of each ticket folds into its row. Stat
 tail: after `last event`, a row has only its reason. `status --json` does not change.
 
 A case writes the journal of a run in the state directory of a real temporary git repository and calls
-`delegate.main(["status", ...])`. The system boundaries are faked: the clock (`time.time`), the locale (`LC_ALL`), the
+`delegate.main(["status", ...])`. The system boundaries are faked: the clock (the `clock` fixture), the locale (`LC_ALL`), the
 terminal (a standard output whose `isatty` is true), and `NO_COLOR`. The event streams are the recorded fixtures of
 the `claude-code` adapter.
 """
@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -26,9 +25,12 @@ import pytest
 from delegate.cli import delegate
 
 from .pages import outside_the_package, repository_root
-from .support import Terminal, bare_repo, without_titles
+from .support import Terminal, bare_repo, fake_clock, without_titles
 from .test_watch_frame import built, specialist_and_gates, verifier_starts
 from .test_watch_live import PYTEST, START, Run, at
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 ROOT = repository_root(Path(__file__))
 
@@ -47,7 +49,7 @@ def utf8_locale(monkeypatch):
 
 
 def frozen(monkeypatch, seconds: float) -> None:
-    monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=seconds)).timestamp())
+    fake_clock().at = (START + timedelta(seconds=seconds)).timestamp()
 
 
 def status(repo: Path, capsys, *extra: str) -> str:
@@ -165,11 +167,11 @@ def test_the_status_of_a_paused_run_gives_paused_before_this_step_at_the_end_of_
     ]
 
 
-@pytest.mark.parametrize(("state", "make", "clock"), [
+@pytest.mark.parametrize(("state", "make", "seconds"), [
     ("running", a_running_run, 1100), ("ended", an_ended_run, 9000), ("paused", a_paused_run, 9000),
 ])
 def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the_plan_and_the_chains_after_the_tickets(
-    tmp_path, capsys, monkeypatch, state, make, clock
+    tmp_path, capsys, monkeypatch, state, make, seconds
 ):
     """The golden files are the output of `status --json` of version 1.6.0 with #115 and #116, before #117.
 
@@ -178,7 +180,7 @@ def test_status_json_keeps_the_bytes_of_each_field_before_the_table_and_adds_the
     """
     repo = bare_repo(tmp_path)
     make(repo)
-    frozen(monkeypatch, clock)
+    frozen(monkeypatch, seconds)
 
     out = status(repo, capsys, "r1", "--json")
 

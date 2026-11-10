@@ -2,8 +2,8 @@
 
 A terminal names a tab by its foreground process when the program sets no title, so a tab that runs `delegate watch`
 showed `python3.13` (issue #80). Each case calls `delegate.main(argv)` against a real temporary git repository. The
-system boundaries are faked: the terminal (a standard output whose `isatty` is true), the clock (`time.time`), the
-time zone (`TZ`), and the wait between two polls of `watch` (`time.sleep`), which appends the next events of a live run.
+system boundaries are faked: the terminal (a standard output whose `isatty` is true), the clock (the `clock` fixture), the
+time zone (`TZ`), and the wait between two polls of `watch` (the wait of the `clock` fixture), which appends the next events of a live run.
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, final_screen, journal_path, live_lock, make_repo, without_titles
+from .support import TITLE, Terminal, bare_repo, fake_clock, final_screen, journal_path, live_lock, make_repo, without_titles
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
@@ -48,11 +51,20 @@ def local_zone(monkeypatch):
 
 
 class Clock:
-    """The clock of the process, in seconds after START. A case moves it as the run goes on."""
+    """The clock of the commands (the `clock` fixture, `support.FakeClock`), in seconds after START. A case moves it as the run goes on."""
 
-    def __init__(self, monkeypatch, seconds: float) -> None:
+    def __init__(self, seconds: float) -> None:
+        self._fake = fake_clock()
         self.seconds = seconds
-        monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=self.seconds)).timestamp())
+
+    @property
+    def seconds(self) -> float:
+        return self._seconds
+
+    @seconds.setter
+    def seconds(self, value: float) -> None:
+        self._seconds = value
+        self._fake.at = (START + timedelta(seconds=value)).timestamp()
 
 
 class Run:
@@ -88,7 +100,7 @@ def watch(repo: Path, monkeypatch, *extra: str, out: io.StringIO, waits: list) -
         assert waits, "watch waited, but the run has no more events"
         waits.pop(0)()
 
-    monkeypatch.setattr(time, "sleep", wait)
+    fake_clock().on_sleep = wait
     # The run is active: the process of a run that goes on holds the lock of its run branch.
     (journal,) = journal_path(repo, "x").parents[1].glob("*/journal.jsonl")
     with live_lock(journal):
@@ -105,7 +117,7 @@ def test_watch_on_a_terminal_shows_the_progress_and_the_local_eta_in_the_title_a
     # 900 + 600 * 2 - 300 = 1800 seconds after the start: 03:30 UTC, 16:30 local time.
     run.step(0, 600, "a")
     run.step(600, None, "b")
-    clock = Clock(monkeypatch, 900)
+    clock = Clock(900)
 
     def nothing_changes() -> None:
         clock.seconds = 950
@@ -150,7 +162,7 @@ def test_the_last_title_of_watch_names_why_the_watch_ended(tmp_path, monkeypatch
         run.add(10, "verdict", ticket="a", round=0, mode="full", verdict="ACCEPT", findings=[], unverified=[], report="/r/verdict.json")
     else:
         run.add(10, "run-end", result="failed", built=[], failed=["a"], skipped=[])
-    Clock(monkeypatch, 20)
+    Clock(20)
 
     out = Terminal()
     watch(repo, monkeypatch, *extra, out=out, waits=[])
@@ -162,7 +174,7 @@ def test_a_watch_before_the_first_ticket_ends_has_no_eta_yet(tmp_path, monkeypat
     repo = bare_repo(tmp_path)
     run = Run(repo)
     run.step(0, None, "a")
-    Clock(monkeypatch, 60)
+    Clock(60)
 
     def the_run_ends() -> None:
         run.add(100, "run-end", result="built", built=["a"], failed=[], skipped=[])
@@ -212,7 +224,7 @@ def test_a_title_holds_no_control_character_of_the_run_id(tmp_path, monkeypatch,
     repo = bare_repo(tmp_path)
     run = Run(repo, run_id="r1\x07")
     run.add(10, "run-end", result="built", built=[], failed=[], skipped=[])
-    Clock(monkeypatch, 20)
+    Clock(20)
 
     out = Terminal()
     watch(repo, monkeypatch, "r1\x07", out=out, waits=[])
@@ -223,7 +235,7 @@ def test_a_title_holds_no_control_character_of_the_run_id(tmp_path, monkeypatch,
 def a_watch(repo: Path, monkeypatch, out: io.StringIO) -> None:
     run = Run(repo)
     run.add(10, "run-end", result="built", built=[], failed=[], skipped=[])
-    Clock(monkeypatch, 20)
+    Clock(20)
     watch(repo, monkeypatch, out=out, waits=[])
 
 

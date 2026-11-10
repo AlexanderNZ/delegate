@@ -9,6 +9,8 @@ adapter installed when `watch` runs.
 """
 
 import json
+import os
+import shutil
 import threading
 import time
 from datetime import datetime, timedelta
@@ -17,7 +19,10 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, live_lock, run_end, run_start, step_end, step_start, write_journal
+from .support import append_events, bare_repo, fake_clock, live_lock, run_end, run_start, step_end, step_start, write_journal
+
+# The commands of each case use the fake clock of the case (#297): a case sets its wait.
+pytestmark = pytest.mark.usefixtures("clock")
 
 POLL = ["--poll-seconds", "0.02"]
 
@@ -80,7 +85,7 @@ def test_watch_without_a_run_id_follows_the_newest_run_while_it_goes_on(tmp_path
     write_journal(repo, "old", run_start("old", "a"), run_end("failed", [], ["a"]))
     path = write_journal(repo, "new", run_start("new", "b"))
     # The run ends while watch waits after its first read of the journal.
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, run_end("built", ["b"])))
+    fake_clock().on_sleep = lambda seconds: append_events(path, run_end("built", ["b"]))
 
     # The run is active: the process of a run that goes on holds the lock of its run branch.
     with live_lock(path):
@@ -89,6 +94,35 @@ def test_watch_without_a_run_id_follows_the_newest_run_while_it_goes_on(tmp_path
     assert code == 0
     assert "run_id=new" in out and "run_id=old" not in out
     assert lines_of(out, "run-end")
+
+
+def test_the_wait_of_a_git_command_with_a_time_limit_is_not_a_wait_of_the_watch(tmp_path, capsys, monkeypatch, clock):
+    """#297: `subprocess` waits for a git command with a time limit with `time.sleep`. Each git command of this case ends
+    0.2 seconds after it closes its output, so `subprocess` waits for it with `time.sleep` on Linux and on macOS. The
+    watch waits only through its clock: the clock gets the one wait of the watch, and no wait of git."""
+    real_git = shutil.which("git")
+    assert real_git is not None
+    marks = tmp_path / "git-calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    slow_git = bin_dir / "git"
+    slow_git.write_text(
+        f'#!/bin/sh\necho git >> "{marks}"\n"{real_git}" "$@"\nstatus=$?\nexec >&- 2>&-\nsleep 0.2\nexit $status\n'
+    )
+    slow_git.chmod(0o755)
+    repo = bare_repo(tmp_path)
+    path = write_journal(repo, "new", run_start("new", "b"))
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    clock.on_sleep = lambda seconds: append_events(path, run_end("built", ["b"]))
+
+    # With no run id, the watch looks up the repository and the active runs with git commands that have a time limit.
+    with live_lock(path):
+        code, out, err = watch(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert lines_of(out, "run-end")
+    assert marks.read_text().count("git\n") >= 1  # the watch ran git through the slow command
+    assert clock.waits == [0.02]  # the one wait of the watch, of `--poll-seconds 0.02`
 
 
 @pytest.fixture
@@ -206,9 +240,7 @@ def test_watch_without_a_run_id_follows_a_run_that_a_retry_continues_after_its_r
         repo, "new", run_start("new", "a"), run_end("failed", [], ["a"]), ("resume", {"run_id": "new"}), retry("a", "skipped"),
     )
     # The retry builds the ticket while watch waits after its first read of the journal.
-    monkeypatch.setattr(
-        time, "sleep", lambda seconds: append_events(path, step_start("a"), step_end("a"), run_end("built", ["a"]))
-    )
+    fake_clock().on_sleep = lambda seconds: append_events(path, step_start("a"), step_end("a"), run_end("built", ["a"]))
 
     # The run is active: the process of the retry holds the lock of its run branch.
     with live_lock(path):

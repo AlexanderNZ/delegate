@@ -15,7 +15,6 @@ the sink in `delegate.run.live`. The JSON sink (`JsonSink`) prints each event as
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from . import output
+from .clock import Clock
 from .journal import (
     ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, crash_of, halt_of, is_paused, last_change, read_new_events,
 )
@@ -435,8 +435,8 @@ class RawSink:
     """The raw lines of `watch`: one line for each reported event (`format_event`), and a line `watch: <reason>: ...`
     for each reason to end other than the end of the run."""
 
-    def __init__(self, emit: Callable[[str], None]) -> None:
-        self._emit = emit
+    def __init__(self, emit: Callable[[str], None], clock: Clock) -> None:
+        self._emit, self._clock = emit, clock
 
     def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
         if not reported:
@@ -467,7 +467,7 @@ class RawSink:
         return None
 
     def wait(self, seconds: float) -> None:
-        time.sleep(seconds)
+        self._clock.sleep(seconds)
 
     def interrupted(self) -> None:
         return None  # the command prints the line of an interrupted watch on stderr
@@ -494,8 +494,8 @@ class JsonSink:
     is read and not printed.
     """
 
-    def __init__(self, emit: Callable[[str], None]) -> None:
-        self._emit = emit
+    def __init__(self, emit: Callable[[str], None], clock: Clock) -> None:
+        self._emit, self._clock = emit, clock
         self.reason: str | None = None
 
     def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
@@ -520,7 +520,7 @@ class JsonSink:
         return None
 
     def wait(self, seconds: float) -> None:
-        time.sleep(seconds)
+        self._clock.sleep(seconds)
 
     def interrupted(self) -> None:
         return None  # the command prints the line of an interrupted watch on stderr
@@ -535,8 +535,9 @@ class JsonSink:
         return json.dumps({"event": WATCH_END, "reason": self.reason, "exit_code": exit_code})
 
 
-def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
-    """Follow a journal: tell each event, and the reason to end, to `sink` as it happens.
+def follow(journal: Path, options: WatchOptions, sink: Sink, clock: Clock) -> WatchResult:
+    """Follow a journal: tell each event, and the reason to end, to `sink` as it happens. `clock` gives the time of the
+    stall and of the time limit (`delegate.run.clock`).
 
     `delegate.run.runs.journal_of` finds the journal of a run. Raise JournalError when the journal is not valid or
     `from_position` is beyond its end. Return the exit code and the `seq` of the last event that was reported.
@@ -544,7 +545,7 @@ def follow(journal: Path, options: WatchOptions, sink: Sink) -> WatchResult:
     Ctrl-C (`KeyboardInterrupt`) while the watch follows the journal ends the watch with `EXIT_INTERRUPTED`. The sink
     gets `interrupted`, and then `end`, so it can draw its last frame.
     """
-    result = _follow(options, journal, sink)
+    result = _follow(options, journal, sink, clock)
     sink.end()
     return result
 
@@ -565,9 +566,9 @@ def _resumed_at(events: list[dict[str, object]]) -> int:
     return at
 
 
-def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
+def _follow(options: WatchOptions, journal: Path, sink: Sink, clock: Clock) -> WatchResult:
     """Follow the journal. Return the exit code and the `seq` of the last event that was reported."""
-    started = time.monotonic()
+    started = clock.monotonic()
     offset, next_seq, position = 0, 1, options.from_position
     tracker = _Tracker()
     files: set[Path] = set()  # the event streams, the gate logs and the prepare logs that the journal names
@@ -617,10 +618,10 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink) -> WatchResult:
                     return WatchResult(EXIT_VERDICT, position)
                 if ends:
                     return WatchResult(_stop_code(event), position)
-            if options.stall_minutes is not None and time.time() - last_change(journal, files) >= options.stall_minutes * 60:
+            if options.stall_minutes is not None and clock.now() - last_change(journal, files) >= options.stall_minutes * 60:
                 sink.stall(options.stall_minutes, last_event)
                 return WatchResult(EXIT_STALL, position)
-            if options.max_minutes is not None and time.monotonic() - started >= options.max_minutes * 60:
+            if options.max_minutes is not None and clock.monotonic() - started >= options.max_minutes * 60:
                 sink.time_limit(options.max_minutes)
                 return WatchResult(EXIT_TIME_LIMIT, position)
             sink.poll()

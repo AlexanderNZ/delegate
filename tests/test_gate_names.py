@@ -22,7 +22,8 @@ from .support import WORKFLOW, ScriptedAdapter, bare_repo, frames, make_repo, re
 from .test_run_gate_port import SpyGates
 from .test_watch_live import PYTEST, Run, local_zone, watch  # noqa: F401 - local_zone is a fixture, used by name
 
-pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")
+# The commands of each case use the fake clock of the case (#297): the helpers of `test_watch_live` set it.
+pytestmark = pytest.mark.usefixtures("home", "claude_stand_in", "clock")
 
 VITEST = "cd frontend && npx vitest run --project unit"
 PLAYWRIGHT = "cd e2e; npx playwright test"  # a `;` chain, as `&&` is in VITEST

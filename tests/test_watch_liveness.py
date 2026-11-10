@@ -13,7 +13,7 @@ reads is the same. With `NO_COLOR`, there is no animation, and the line shows th
 
 A case writes the journal of a run in the state directory of a real temporary git repository and calls
 `delegate.main([...])`. The system boundaries are faked, as in `test_watch_frame`: the terminal, the clock
-(`time.time`), the time zone, the locale, `NO_COLOR`, and the wait between two polls (`time.sleep`).
+(the `clock` fixture), the time zone, the locale, `NO_COLOR`, and the wait between two polls (the wait of the `clock` fixture).
 """
 
 from __future__ import annotations
@@ -26,11 +26,14 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import bare_repo, frames, live_lock
+from .support import bare_repo, fake_clock, frames, live_lock
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
 from .test_run_picker import Keyboard, ends_at_the_first_wait, on_a_terminal
 from .test_watch_active import two_active_runs
 from .test_watch_frame import SEVEN, Clock, in_the_verifier, watch
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 # The frames of the spinner (tokens.md), and its ASCII frames for a locale that is not UTF-8.
 SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -64,7 +67,7 @@ def watch_waits(tmp_path, monkeypatch, idle: float, waits: int = 1, *extra: str)
     """
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, VERIFIER_START + idle)
+    Clock(VERIFIER_START + idle)
     seconds: list[float] = []
 
     def sleep(wait: float) -> None:
@@ -160,7 +163,7 @@ def two_runs_active_2_seconds_ago(repo, monkeypatch):
     """Two active runs whose journals changed 2 seconds before the clock of the case."""
     first, second = two_active_runs(repo)
     now = time.time()
-    monkeypatch.setattr(time, "time", lambda: now)
+    fake_clock().at = now
     for journal in (first, second):
         os.utime(journal, (now - 2, now - 2))
     return first, second

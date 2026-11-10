@@ -4,7 +4,7 @@ The spec is `design/design_handoff_delegate_terminal_output/`: the frames 3a and
 3), and `docs/components.md`, `docs/tokens.md` and `docs/copy-deck.md`. A case writes the journal of a run in the state
 directory of a real temporary git repository and calls `delegate.main(["watch", ...])`. The system boundaries are
 faked as in `test_watch_live`: the terminal (a standard output whose `isatty` is true, `COLUMNS` and `LINES`), the
-clock (`time.time`), the time zone (`TZ`), the locale (`LC_ALL`), and the wait between two polls (`time.sleep`).
+clock (the `clock` fixture), the time zone (`TZ`), the locale (`LC_ALL`), and the wait between two polls (the wait of the `clock` fixture).
 
 The expected lines are the cells of components.md: the columns are 2 cells apart, each column is as wide as its design
 track or as its widest value when that is wider, and the numbers align right. The rows are flat and in plan order: a
@@ -27,8 +27,11 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, frames, screens
+from .support import TITLE, Terminal, bare_repo, fake_clock, frames, screens
 from .test_watch_live import PYTEST, START, Run
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 # The ticket ids and the blockers of the frames of the design (screen-map.md): 72 after 66, 67 after 72, 70 after 69,
 # and 71 after 70.
@@ -53,11 +56,20 @@ def terminal_of_a_person(monkeypatch):
 
 
 class Clock:
-    """The clock of the case, in seconds after the start of the run. A case moves it."""
+    """The clock of the commands (the `clock` fixture, `support.FakeClock`), in seconds after START. A case moves it."""
 
-    def __init__(self, monkeypatch, seconds: float) -> None:
+    def __init__(self, seconds: float) -> None:
+        self._fake = fake_clock()
         self.seconds = seconds
-        monkeypatch.setattr(time, "time", lambda: (START + timedelta(seconds=self.seconds)).timestamp())
+
+    @property
+    def seconds(self) -> float:
+        return self._seconds
+
+    @seconds.setter
+    def seconds(self, value: float) -> None:
+        self._seconds = value
+        self._fake.at = (START + timedelta(seconds=value)).timestamp()
 
 
 def built(run: Run, ticket: str, start: float) -> None:
@@ -126,7 +138,7 @@ def watch(repo: Path, monkeypatch, run_id: str, *extra: str, out: io.StringIO | 
     def no_wait(seconds: float) -> None:
         raise AssertionError("watch waited, but the run has no more events")
 
-    monkeypatch.setattr(time, "sleep", sleep or no_wait)
+    fake_clock().on_sleep = sleep or no_wait
     code = delegate.main(["watch", run_id, "--repo", str(repo), *extra])
     return code, out.getvalue()
 
@@ -161,7 +173,7 @@ def test_at_120_columns_the_frame_has_the_run_line_the_flat_table_in_plan_order_
 ):
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, 3500)
+    Clock(3500)
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
@@ -189,7 +201,7 @@ def test_at_80_columns_the_frame_drops_the_bar_then_new_and_cache_and_keeps_the_
 ):
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, 3500)
+    Clock(3500)
 
     frame = first_frame(repo, monkeypatch, run, columns=80)
 
@@ -229,7 +241,7 @@ def test_frame_1h_at_80_columns_and_24_rows_folds_the_built_rows_in_the_middle_a
 ):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
 
     frame = first_frame(repo, monkeypatch, run, columns=80)
 
@@ -262,7 +274,7 @@ def test_frame_1h_at_80_columns_and_24_rows_folds_the_built_rows_in_the_middle_a
 def test_at_120_columns_and_24_rows_the_built_rows_fold_and_every_column_stays(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
@@ -286,7 +298,7 @@ def test_at_120_columns_and_24_rows_the_built_rows_fold_and_every_column_stays(t
 def test_a_frame_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
 
     frame = first_frame(repo, monkeypatch, run, columns=120, rows=40)
 
@@ -305,7 +317,7 @@ def test_a_frame_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
 def test_an_agent_idle_past_the_stall_time_shows_a_warning_in_the_live_tail_and_in_the_waiting_line(tmp_path, monkeypatch, extra, tail, waiting):
     repo = bare_repo(tmp_path)
     run = in_the_verifier(repo, SEVEN[:5])
-    Clock(monkeypatch, 3360 + 400)
+    Clock(3360 + 400)
 
     code, out = watch(repo, monkeypatch, run.dir.name, *extra, sleep=ends_at_first_poll(run))
 
@@ -327,7 +339,7 @@ def test_a_running_gate_shows_its_short_name_and_the_age_of_its_log_in_the_live_
     changed = (START + timedelta(seconds=330)).timestamp()
     os.utime(log, (changed, changed))
     run.add(310, "gate-start", ticket="a", round=0, phase="build", command=PYTEST, gate_log=str(log))
-    Clock(monkeypatch, 360)
+    Clock(360)
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
@@ -349,7 +361,7 @@ def test_in_economy_mode_the_feed_of_the_chain_verification_is_one_group_named_b
     run.add(1000, "verify-start", ticket="b", round=0, agent="python-verifier", tier="verifier", model="m", commit="1" * 40,
             copy=str(run.dir / "copy"), stack="python", tickets=["a", "b"])
     run.add(1000, "agent-start", ticket="b", role="verifier", round=0, event_stream=str(run.dir / "reports" / "chain.stream.jsonl"))
-    Clock(monkeypatch, 1100)
+    Clock(1100)
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 
@@ -423,7 +435,7 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     repo = bare_repo(tmp_path)
     run = Run(repo, "a", "b", "c", "d", blocked_by=SEQUENCE)
     rejected_and_in_a_fixup(run)
-    clock = Clock(monkeypatch, 500)
+    clock = Clock(500)
 
     def next_events(seconds: float) -> None:
         if clock.seconds != 1270:  # the fix-up is active, so the wait has steps that draw its spinner (#147)
@@ -553,7 +565,7 @@ def painted_frames(out: str) -> list[list[str]]:
 def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
 
     _, out = watch(repo, monkeypatch, run.dir.name, rows=60, sleep=ends_at_first_poll(run))
 
@@ -588,7 +600,7 @@ def test_a_problem_line_is_warn_and_an_accept_has_a_check_in_ok_and_a_bold_word(
     built(run, "a", 0)
     run.step_start(600, "b")
     run.add(600, "step-end", ticket="b", state="failed", reason="crashed: OSError: disk full")
-    Clock(monkeypatch, 700)
+    Clock(700)
 
     code, out = watch(repo, monkeypatch, "r1", sleep=ends_at_first_poll(run))
 
@@ -600,7 +612,7 @@ def test_a_problem_line_is_warn_and_an_accept_has_a_check_in_ok_and_a_bold_word(
 def test_with_no_color_set_the_live_view_writes_no_sgr_code(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_a_fixup(repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
     monkeypatch.setenv("NO_COLOR", "1")
 
     _, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
@@ -624,7 +636,7 @@ def test_to_a_standard_output_that_is_not_a_terminal_watch_writes_no_escape_code
 def test_with_a_locale_that_is_not_utf8_the_frame_has_the_ascii_glyphs_in_the_same_columns(tmp_path, monkeypatch):
     unicode_repo, ascii_repo = (bare_repo(tmp_path / name) for name in ("unicode", "ascii"))
     unicode_run, ascii_run = in_a_fixup(unicode_repo), in_a_fixup(ascii_repo)
-    Clock(monkeypatch, 6600 + 560)
+    Clock(6600 + 560)
     unicode = first_frame(unicode_repo, monkeypatch, unicode_run, columns=120)
     monkeypatch.setenv("LC_ALL", "C")
 
@@ -659,7 +671,7 @@ def test_the_feed_puts_the_id_on_its_own_track_and_the_waiting_line_gives_the_to
     run.step_start(0, "127")
     run.add(0, "agent-start", ticket="127", role="specialist", round=0,
             event_stream=run.stream("127.specialist.stream.jsonl", "capped.jsonl", cut=True))
-    Clock(monkeypatch, 130)
+    Clock(130)
 
     code, out = watch(repo, monkeypatch, run.dir.name, "--stall-minutes", "1000000", sleep=ends_at_first_poll(run))
 
@@ -676,7 +688,7 @@ def test_the_id_track_of_the_feed_is_at_least_3_cells_wide(tmp_path, monkeypatch
     run = Run(repo, "a", run_id="r1")
     run.step_start(0, "a")
     run.add(0, "agent-start", ticket="a", role="specialist", round=0, event_stream=str(run.dir / "reports" / "a.stream.jsonl"))
-    Clock(monkeypatch, 20)
+    Clock(20)
 
     frame = first_frame(repo, monkeypatch, run, columns=120)
 

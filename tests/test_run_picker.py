@@ -13,18 +13,20 @@ true), the time zone, the locale, `NO_COLOR`, and the wait of the poll loop.
 
 import io
 import sys
-import time
 
 import pytest
 
 from delegate.cli import delegate
 
 from .support import (
-    Terminal, append_events, bare_repo, final_screen, frames, live_lock, run_end, run_start, step_end, step_start, without_titles,
-    write_journal,
+    Terminal, append_events, bare_repo, fake_clock, final_screen, frames, live_lock, run_end, run_start, step_end,
+    step_start, without_titles, write_journal,
 )
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
 from .test_watch_active import POLL, local_start, two_active_runs
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 # The prompt of the picker. The reader types the answer after it, on the same line.
 PROMPT = "watch which? [1] "
@@ -66,7 +68,7 @@ def ends_at_the_first_wait(monkeypatch, *journals):
             for journal, ticket in journals:
                 append_events(journal, step_end(ticket), run_end("built", [ticket]))
 
-    monkeypatch.setattr(time, "sleep", wait)
+    fake_clock().on_sleep = wait
 
 
 def on_a_terminal(repo, monkeypatch, stdin, *extra, stdout=None):

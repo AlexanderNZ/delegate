@@ -24,6 +24,9 @@ from .support import bare_repo, frames
 from .test_watch_frame import Clock, built, ends_at_first_poll, painted_frames, terminal_of_a_person, watch  # noqa: F401
 from .test_watch_live import PYTEST, START, Run
 
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
+
 # The cell where each track starts: `#` 3, rail 2, `plan` 6, `state` 10, `phase` 13, `after` 8, `used` 7, `new` 5,
 # `cache` 6, and the live tail, with 2 cells between two tracks.
 START_CELL: dict[str, int] = {
@@ -82,7 +85,7 @@ def first_frame(repo, monkeypatch, run: Run, columns: int = 120, rows: int = 24)
 def test_frame_3a_at_120_columns_puts_the_header_the_running_row_and_its_phase_sub_rows_on_the_tracks(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_the_specialist(repo, CHAIN_3A, 2, chain(CHAIN_3A))
-    Clock(monkeypatch, 1200 + 240)
+    Clock(1200 + 240)
 
     frame = first_frame(repo, monkeypatch, run)
 
@@ -112,7 +115,7 @@ def test_frame_3a_at_120_columns_puts_the_header_the_running_row_and_its_phase_s
 def test_frame_3a_paints_the_rail_in_plan_and_the_active_phase_in_now(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = in_the_specialist(repo, CHAIN_3A, 2, chain(CHAIN_3A))
-    Clock(monkeypatch, 1200 + 240)
+    Clock(1200 + 240)
 
     _, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
 
@@ -129,7 +132,7 @@ def test_a_linear_chain_of_40_tickets_has_the_column_positions_of_a_chain_of_3(t
     for name, tickets in (("short", short), ("long", long)):
         repo = bare_repo(tmp_path / name)
         run = in_the_specialist(repo, tickets, 1, chain(tickets))
-        Clock(monkeypatch, 600 + 30)
+        Clock(600 + 30)
         frames_of.append(first_frame(repo, monkeypatch, run, columns=columns, rows=100))
     three, forty = frames_of
 
@@ -152,7 +155,7 @@ def test_a_ticket_after_a_row_that_is_not_the_row_above_has_no_rail_and_names_it
     repo = bare_repo(tmp_path)
     run = Run(repo, "a", "b", "c", "d", "e", blocked_by=FORK_AND_JOIN)
     built(run, "a", 0)
-    Clock(monkeypatch, 700)
+    Clock(700)
 
     code, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
 
@@ -176,7 +179,7 @@ def test_the_reason_of_a_failed_and_of_a_skipped_row_is_in_the_live_tail_not_in_
     run.add(700, "step-end", ticket="b", state="failed", reason=f"gates red: {PYTEST}")
     run.add(700, "skip", ticket="c", blockers=["b"], reason="blocked by b, which failed")
     run.add(700, "run-end", result="failed", built=["a"], failed=["b"], skipped=["c"])
-    Clock(monkeypatch, 800)
+    Clock(800)
 
     code, out = watch(repo, monkeypatch, run.dir.name)
 
@@ -215,7 +218,7 @@ def test_a_running_gate_gives_the_gate_count_and_its_log_in_the_sub_row_of_the_g
     changed = (START + timedelta(seconds=930)).timestamp()
     os.utime(log, (changed, changed))
     run.add(910, "gate-start", ticket="b", round=0, phase="build", command="types", gate_log=str(log))
-    Clock(monkeypatch, 960)
+    Clock(960)
 
     frame = first_frame(repo, monkeypatch, run)
 
@@ -236,7 +239,7 @@ def test_a_fixup_round_is_a_sub_row_in_warn_with_its_round_count(tmp_path, monke
     run.add(480, "fixup-start", ticket="a", round=1, rejected_commit="1" * 40, findings_file=str(run.dir / "f.md"),
             agent="python-specialist", tier="strong", model="m")
     run.add(480, "agent-start", ticket="a", role="fix-up", round=1, event_stream=str(run.dir / "reports" / "a.fixup.stream.jsonl"))
-    Clock(monkeypatch, 500)
+    Clock(500)
 
     _, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
 
@@ -251,7 +254,7 @@ def test_with_a_c_locale_the_table_has_the_ascii_rail_and_the_same_column_positi
     unicode_repo, ascii_repo = (bare_repo(tmp_path / name) for name in ("unicode", "ascii"))
     unicode_run = in_the_specialist(unicode_repo, CHAIN_3A, 2, chain(CHAIN_3A))
     ascii_run = in_the_specialist(ascii_repo, CHAIN_3A, 2, chain(CHAIN_3A))
-    Clock(monkeypatch, 1200 + 240)
+    Clock(1200 + 240)
     unicode = first_frame(unicode_repo, monkeypatch, unicode_run)
     monkeypatch.delenv("LC_ALL")
     monkeypatch.delenv("LC_CTYPE", raising=False)
@@ -293,7 +296,7 @@ def test_the_gate_count_starts_again_with_each_run_of_the_gates(tmp_path, monkey
     run.add(920, "continuation", ticket="b", count=1, limit=2, trigger="gates-red", mode="resume", resume_session="s", commits=[], reason="red")
     run.agent(920, 1000, "b", "specialist", run.stream("b.specialist.stream.jsonl"))
     run.report(1000, "b")
-    Clock(monkeypatch, 1005)
+    Clock(1005)
 
     frame = first_frame(repo, monkeypatch, run)
 

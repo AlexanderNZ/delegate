@@ -387,8 +387,9 @@ def test_a_harness_command_that_does_not_exist_stops_the_start_with_one_line_tha
     bin_dir = tmp_path / "git-only-bin"
     bin_dir.mkdir()
     (bin_dir / "git").symlink_to(shutil.which("git"))
-    # The gate check at the start of a run (#296) runs the hook of the sealed verifier, so the directory holds `sh` and `python3` too.
-    for tool in ("sh", "python3"):
+    # The gate check at the start of a run (#296) runs the Bash hook of the sealed verifier, so the directory holds `bash`,
+    # `sh` and `python3` too. With no `bash`, the check runs the hook with `sh`, which is dash on Linux and fails (#297).
+    for tool in ("bash", "sh", "python3"):
         (bin_dir / tool).symlink_to(shutil.which(tool))
     monkeypatch.setenv("PATH", str(bin_dir))
 

@@ -2,7 +2,7 @@
 
 Each case calls `delegate.main(argv)` and raises `KeyboardInterrupt` at a system
 boundary, as Ctrl-C on a terminal does: the wait between two polls of `watch`
-(`time.sleep`), the write of a frame to the terminal, the harness adapter of
+(the wait of the `clock` fixture), the write of a frame to the terminal, the harness adapter of
 `run` (the scripted adapter), or the git process of a command
 (`subprocess.run`). The journals and the repositories are real temporary ones.
 """
@@ -13,18 +13,20 @@ import io
 import signal
 import subprocess
 import sys
-import time
 
 import pytest
 
 from delegate.cli import delegate
 
-from .support import state_dir
+from .support import fake_clock, state_dir
 from .support import (
     TITLE, Terminal, bare_repo, event_names, frames, journal_path, live_lock, make_repo, read_journal, read_journal_file,
     resume_main, run_start, step_start, ticket_of, without_titles, write_journal,
 )
 from .test_run_multi import HEAD, ticket
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 # The exit status of a process that SIGINT ended, as a shell gives it.
 INTERRUPTED = 130
@@ -65,7 +67,7 @@ def watch(monkeypatch, capsys, out: io.StringIO, *argv: str) -> tuple[int, str, 
 def test_ctrl_c_in_watch_to_a_pipe_exits_130_with_the_position_to_go_on_from(tmp_path, monkeypatch, capsys, extra):
     repo = bare_repo(tmp_path)
     a_run_that_goes_on(repo)
-    monkeypatch.setattr(time, "sleep", ctrl_c)
+    fake_clock().on_sleep = ctrl_c
 
     code, out, err = watch(monkeypatch, capsys, io.StringIO(), "r1", "--repo", str(repo), *extra)
 
@@ -79,7 +81,7 @@ def test_ctrl_c_in_watch_to_a_pipe_exits_130_with_the_position_to_go_on_from(tmp
 def test_ctrl_c_in_watch_with_no_run_id_names_the_newest_run_in_the_line(tmp_path, monkeypatch, capsys):
     repo = bare_repo(tmp_path)
     a_run_that_goes_on(repo)
-    monkeypatch.setattr(time, "sleep", ctrl_c)
+    fake_clock().on_sleep = ctrl_c
 
     # The run is active: the process of a run that goes on holds the lock of its run branch.
     with live_lock(journal_path(repo, "r1")):
@@ -92,7 +94,7 @@ def test_ctrl_c_in_watch_with_no_run_id_names_the_newest_run_in_the_line(tmp_pat
 def test_ctrl_c_in_the_live_view_restores_the_cursor_the_end_of_the_frame_and_the_title(tmp_path, monkeypatch, capsys):
     repo = bare_repo(tmp_path)
     a_run_that_goes_on(repo)
-    monkeypatch.setattr(time, "sleep", ctrl_c)
+    fake_clock().on_sleep = ctrl_c
 
     code, out, err = watch(monkeypatch, capsys, Terminal(), "r1", "--repo", str(repo))
 
@@ -124,7 +126,7 @@ class _InterruptedTerminal(Terminal):
 def test_ctrl_c_while_a_frame_is_written_draws_a_whole_frame_before_the_line(tmp_path, monkeypatch, capsys):
     repo = bare_repo(tmp_path)
     a_run_that_goes_on(repo)
-    monkeypatch.setattr(time, "sleep", lambda seconds: pytest.fail("watch waited after Ctrl-C"))
+    fake_clock().on_sleep = lambda seconds: pytest.fail("watch waited after Ctrl-C")
 
     code, out, err = watch(monkeypatch, capsys, _InterruptedTerminal(), "r1", "--repo", str(repo))
 
@@ -147,7 +149,7 @@ def test_a_stop_signal_in_the_live_view_ends_the_watch_as_ctrl_c_does_and_shows_
 
     previous = signal.signal(stop_signal, unhandled)  # a watch that handles no signal fails here, and the test process stays alive
     try:
-        monkeypatch.setattr(time, "sleep", send_the_signal)
+        fake_clock().on_sleep = send_the_signal
         code, out, err = watch(monkeypatch, capsys, Terminal(), "r1", "--repo", str(repo))
         restored = signal.getsignal(stop_signal)
     finally:
@@ -168,7 +170,7 @@ def test_an_error_of_the_journal_in_the_live_view_shows_the_cursor_again_before_
         with path.open("a") as handle:
             handle.write("this is not JSON\n")
 
-    monkeypatch.setattr(time, "sleep", corrupt_the_journal)
+    fake_clock().on_sleep = corrupt_the_journal
 
     code, out, err = watch(monkeypatch, capsys, Terminal(), "r1", "--repo", str(repo))
 

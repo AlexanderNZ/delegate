@@ -33,13 +33,13 @@ of the run), so this module never imports an adapter.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from . import domain, output, status
+from .clock import Clock, utc_now
 from .events import JOURNAL_CHANGED
 from .journal import JournalError, crash_where
 
@@ -141,18 +141,17 @@ class LiveView:
     """The sink of `follow` for a terminal. `frame` gives the lines to draw; `draw` gets them at each poll and at the end,
     and also after each `SPIN_SECONDS` of the wait between two polls while the frame has a spinner (`wait`).
 
-    `reader_of` gives the reader of the event streams for the adapter of the run, as for `delegate status`. `now` is the
-    clock, in UTC. `size` gives the columns and the lines of the terminal, with 0 lines when the terminal does not give
-    its size. `stall_minutes` is the `--stall-minutes` of
-    the watch: an agent with no activity for that time shows a warning in the table. With None, the time is
-    `IDLE_WARNING_MINUTES`.
+    `reader_of` gives the reader of the event streams for the adapter of the run, as for `delegate status`. `clock` gives
+    the time of now and the wait (`delegate.run.clock`). `size` gives the columns and the lines of the terminal, with 0
+    lines when the terminal does not give its size. `stall_minutes` is the `--stall-minutes` of the watch: an agent with
+    no activity for that time shows a warning in the table. With None, the time is `IDLE_WARNING_MINUTES`.
     """
 
     def __init__(
-        self, journal: Path, reader_of: status.ReaderOf, now: Callable[[], datetime],
+        self, journal: Path, reader_of: status.ReaderOf, clock: Clock,
         size: Callable[[], tuple[int, int]], draw: Callable[[list[str]], None], stall_minutes: float | None = None,
     ) -> None:
-        self._journal, self._now, self._size, self._draw = journal, now, size, draw
+        self._journal, self._clock, self._size, self._draw = journal, clock, size, draw
         self._reader_of = status.caching(reader_of)  # a stream that did not change is not parsed again (#183)
         self._idle_limit = int((IDLE_WARNING_MINUTES if stall_minutes is None else stall_minutes) * 60)
         self._events: list[dict[str, object]] = []
@@ -174,6 +173,10 @@ class LiveView:
         self._at: datetime | None = None
         self._spin = 0  # the frame of the spinner of the next draw
         self._spinning = False  # the newest frame has a spinner
+
+    def _now(self) -> datetime:
+        """The time of the clock, in UTC."""
+        return utc_now(self._clock)
 
     # The sink of `follow`.
 
@@ -209,12 +212,12 @@ class LiveView:
         the next poll draws."""
         left = seconds
         while self._spinning and left > SPIN_SECONDS:
-            time.sleep(SPIN_SECONDS)
+            self._clock.sleep(SPIN_SECONDS)
             left -= SPIN_SECONDS
             columns, rows = self._size()
             self._draw(self._compose(columns, rows, final=False))
             self._spin += 1
-        time.sleep(left)
+        self._clock.sleep(left)
 
     def interrupted(self) -> None:
         return None  # `end` draws the last frame; the command restores the terminal and prints the line

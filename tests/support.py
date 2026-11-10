@@ -17,12 +17,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Mapping
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from delegate.ports.harness import Activity, AdapterError, AdapterRequest, AdapterResult, McpTool, SealedAgent, SealedFile
+from delegate.run import clock as run_clock
 
 # The cases read the worktrees and the ticket branches after a run, so the workflow keeps them: a run that ends built
 # removes them by default (#167). `CLEANED_WORKFLOW` is the same workflow without the field.
@@ -839,3 +841,38 @@ def write_project_agents(repo: Path) -> None:
     for name, content in render(agents, tiers)[adapter].items():
         (target / name).write_text(content)
 
+
+
+class FakeClock:
+    """The clock of a case (#297): the `clock` fixture of `conftest` makes it the clock of the commands
+    (`delegate.run.clock.use`), so no case replaces a function of the module `time`.
+
+    `at` is the wall time in seconds since the epoch. With None, the wall time is the time of the system. Each wait
+    returns at once, adds its seconds to `waits`, moves the monotonic time on by its seconds, and then calls `on_sleep`
+    with the seconds, when the case set it. `on_sleep` can append the next events of a run, move `at`, or raise.
+    """
+
+    def __init__(self) -> None:
+        self.at: float | None = None
+        self.on_sleep: Callable[[float], None] | None = None
+        self.waits: list[float] = []
+        self._monotonic = 0.0
+
+    def now(self) -> float:
+        return time.time() if self.at is None else self.at
+
+    def monotonic(self) -> float:
+        return self._monotonic
+
+    def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        self._monotonic += seconds
+        if self.on_sleep is not None:
+            self.on_sleep(seconds)
+
+
+def fake_clock() -> FakeClock:
+    """The fake clock that the `clock` fixture made the clock of the commands. A helper of a case calls this to set it."""
+    found = run_clock.current()
+    assert isinstance(found, FakeClock), "the case needs the `clock` fixture: the commands use the clock of the system"
+    return found

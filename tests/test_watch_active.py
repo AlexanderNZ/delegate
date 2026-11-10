@@ -14,12 +14,18 @@ import re
 import time
 from datetime import datetime, timedelta
 
+import pytest
+
 from delegate.cli import delegate
 
 from .support import (
-    append_events, bare_repo, journal_path, live_lock, run_end, run_start, stale_lock, step_end, step_start, write_journal,
+    append_events, bare_repo, fake_clock, journal_path, live_lock, run_end, run_start, stale_lock, step_end, step_start,
+    write_journal,
 )
 from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 # The time limit ends a watch that follows a run with no end, so a case fails and does not wait.
 POLL = ["--poll-seconds", "0.02", "--max-minutes", "0.1"]
@@ -63,7 +69,7 @@ def test_watch_without_a_run_id_follows_the_one_active_run_when_a_newer_run_ende
     active = write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), step_start("a"))
     write_journal(repo, "newer", run_start("newer", "b", run_branch="run/newer"), run_end("failed", [], ["b"]))
     # The active run ends while watch waits after its first read of the journal.
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+    fake_clock().on_sleep = lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"]))
 
     with live_lock(active, "run/older"):
         code, out, err = watch(repo, capsys)
@@ -112,7 +118,7 @@ def test_watch_without_a_run_id_does_not_count_a_run_with_no_run_end_and_no_live
     # The newest run stopped with no `run-end`: its process was killed, and its lock names a process that no longer exists.
     stopped = write_journal(repo, "newer", run_start("newer", "b", run_branch="run/newer"), step_start("b"))
     stale_lock(stopped, "run/newer")
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+    fake_clock().on_sleep = lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"]))
 
     with live_lock(active, "run/older"):
         code, out, err = watch(repo, capsys)
@@ -268,7 +274,7 @@ def test_watch_without_a_run_id_follows_the_one_active_run_when_a_newer_run_fail
     repo = bare_repo(tmp_path)
     active = write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), step_start("a"))
     failed_start(repo, "newer")
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+    fake_clock().on_sleep = lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"]))
 
     with live_lock(active, "run/older"):
         code, out, err = watch(repo, capsys)
@@ -282,7 +288,7 @@ def test_watch_from_a_position_without_a_run_id_follows_the_one_active_run_when_
     repo = bare_repo(tmp_path)
     active = write_journal(repo, "older", run_start("older", "a", run_branch="run/older"), step_start("a"))
     write_journal(repo, "newer", run_start("newer", "b", run_branch="run/newer"), run_end("failed", [], ["b"]))
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"])))
+    fake_clock().on_sleep = lambda seconds: append_events(active, step_end("a"), run_end("built", ["a"]))
 
     with live_lock(active, "run/older"):
         code, out, err = watch(repo, capsys, "--from", "1")

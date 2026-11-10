@@ -1,7 +1,7 @@
 """The chain row of an `economy` run in `delegate status` and in the live view of `delegate watch` (#196).
 
 A case writes the journal of an `economy` run in the state directory of a real temporary git repository: five tickets
-that are built, and the verification of the chain that follows. The clock (`time.time`) is the system boundary, so a
+that are built, and the verification of the chain that follows. The clock (the `clock` fixture) is the system boundary, so a
 case fixes it.
 """
 
@@ -10,14 +10,18 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
 from delegate.cli import delegate
 
-from .support import Terminal, bare_repo, frames
+from .support import Terminal, bare_repo, fake_clock, frames
 from .test_status_snapshot import START, Run, claude, frozen, snapshot, utf8_locale  # noqa: F401 - the fixture is autouse
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 TICKETS = ("a", "b", "c", "d", "e")
 CHAIN_GATE = "nix develop -c python3 -m pytest -q"
@@ -59,7 +63,7 @@ def watch_block(repo: Path, monkeypatch, run: Run) -> list[str]:
     out = Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.setattr(time, "sleep", lambda seconds: run.add(99999, "run-end", result="built", built=list(TICKETS), failed=[], skipped=[]))
+    fake_clock().on_sleep = lambda seconds: run.add(99999, "run-end", result="built", built=list(TICKETS), failed=[], skipped=[])
     assert delegate.main(["watch", run.path.parent.name, "--repo", str(repo)]) == 0
     frame = frames(out.getvalue())[0]
     above = next((frame[:index] for index, line in enumerate(frame) if line and set(line) == {"─"}), frame)
@@ -244,7 +248,7 @@ def test_the_chain_row_stays_under_the_last_ticket_when_the_rows_in_the_middle_f
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.setenv("LINES", "20")
-    monkeypatch.setattr(time, "sleep", lambda seconds: run.add(99999, "run-end", result="built", built=ids, failed=[], skipped=[]))
+    fake_clock().on_sleep = lambda seconds: run.add(99999, "run-end", result="built", built=ids, failed=[], skipped=[])
 
     assert delegate.main(["watch", run.path.parent.name, "--repo", str(repo)]) == 0
 

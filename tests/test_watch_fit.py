@@ -30,6 +30,9 @@ from .test_watch_frame import Clock, ends_at_first_poll, painted_frames, termina
 from .test_watch_live import PYTEST, START, Run
 from .test_watch_plan_table import START_CELL, line_of
 
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
+
 # The 40 tickets of frame 3b in plan order: 101 to 125, then the branch 131 and 132 after 124, then 126 after 125, the
 # join 133 after 126 and 132, and 11 more tickets in a chain.
 PLAN_3B: list[str] = [str(n) for n in range(101, 126)] + ["131", "132", "126", "133"] + [str(n) for n in range(134, 145)]
@@ -106,7 +109,7 @@ def first_frame(repo, monkeypatch, run: Run, columns: int = 120, rows: int = 24)
 def test_frame_3b_at_120_by_24_folds_the_pending_tail_and_the_built_rows_in_the_middle(tmp_path, monkeypatch, capsys):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
     tickets = snapshot_tickets(repo, run, capsys)
     middle = PLAN_3B[3:20]  # rows 4 to 20: 104 to 120
     used = format_duration(sum(int(tickets[t]["elapsed_seconds"]) for t in middle))  # type: ignore[call-overload]
@@ -152,7 +155,7 @@ def test_frame_3b_at_120_by_24_folds_the_pending_tail_and_the_built_rows_in_the_
 def test_the_fold_rows_are_faint_and_the_rail_runs_through_the_middle_fold(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
 
     _, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))
 
@@ -167,7 +170,7 @@ def test_the_fold_rows_are_faint_and_the_rail_runs_through_the_middle_fold(tmp_p
 def test_with_a_c_locale_a_fold_row_has_the_ascii_glyphs_and_an_ascii_range(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
     monkeypatch.setenv("LC_ALL", "C")
 
     frame = first_frame(repo, monkeypatch, run)
@@ -180,7 +183,7 @@ def test_with_a_c_locale_a_fold_row_has_the_ascii_glyphs_and_an_ascii_range(tmp_
 def test_a_terminal_with_more_rows_folds_only_the_tail_and_keeps_every_row_from_the_top(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
 
     frame = first_frame(repo, monkeypatch, run, rows=41)
 
@@ -201,7 +204,7 @@ def test_a_terminal_with_more_rows_folds_only_the_tail_and_keeps_every_row_from_
 def test_a_terminal_with_room_for_every_row_does_not_fold(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
 
     frame = first_frame(repo, monkeypatch, run, rows=60)
 
@@ -223,7 +226,7 @@ def test_at_80_by_24_the_bar_drops_first_then_new_and_cache_then_used_and_the_ph
 ):
     repo = bare_repo(tmp_path)
     run = in_a_continuation(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
 
     frame = first_frame(repo, monkeypatch, run, columns=columns)
 
@@ -257,7 +260,7 @@ def test_while_the_run_is_pausing_the_next_row_gives_pauses_before_this_step_and
     run = a_chain_where_b_runs(repo)
     request = run.dir / "pause-request"
     request.write_text(json.dumps({"time": "2026-10-16T03:10:00+00:00", "pid": os.getpid()}) + "\n")
-    Clock(monkeypatch, 700)
+    Clock(700)
 
     code, out = watch(repo, monkeypatch, run.dir.name, sleep=ends_at_first_poll(run))  # the Run holds the lock of a run that works
 
@@ -288,7 +291,7 @@ def test_while_the_run_is_pausing_the_next_row_gives_pauses_before_this_step_and
 def test_when_the_terminal_gives_no_size_no_row_folds(tmp_path, monkeypatch):
     repo = bare_repo(tmp_path)
     run = frame_3b(repo)
-    Clock(monkeypatch, STEP + 360)
+    Clock(STEP + 360)
 
     def no_size(*args: object) -> os.terminal_size:
         raise OSError("not a terminal")

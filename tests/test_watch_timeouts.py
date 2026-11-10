@@ -7,7 +7,6 @@ the run through `delegate.main`. The raw lines and the problem lines are the int
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 
@@ -15,8 +14,11 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, ScriptedAdapter, append_events, bare_repo, frames, make_repo, read_journal, write_journal
-from .support import run_end, run_start, step_end, step_start
+from .support import fake_clock, run_end, run_start, step_end, step_start
 from .test_watch_live import PYTEST, Run, at, local_zone, watch  # noqa: F401 - a fixture, used by name
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 POLL = ["--poll-seconds", "0.02"]
 PROBLEM = 3
@@ -39,7 +41,7 @@ def test_a_specialist_session_that_ran_past_the_agent_timeout_is_a_problem_that_
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "a"), step_start("a"), agent_events()[0])
     # The timeout and the failed result arrive after the watch starts (#222: a replay takes a problem that a later event follows as history).
-    monkeypatch.setattr(time, "sleep", lambda seconds: append_events(path, *agent_events()[1:]))
+    fake_clock().on_sleep = lambda seconds: append_events(path, *agent_events()[1:])
 
     code = delegate.main(["watch", "r1", "--repo", str(repo), *POLL])
     out = capsys.readouterr().out

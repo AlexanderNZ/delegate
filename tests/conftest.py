@@ -7,9 +7,11 @@ import pytest
 from delegate.adapters.git import GitVersionControl
 from delegate.definitions.declaration import load_declaration
 from delegate.definitions.render import render
+from delegate.run import clock as run_clock
 from delegate.shared.tiers import load_tiers
 
 from . import git_processes
+from .support import FakeClock
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -143,6 +145,18 @@ def no_run_against_the_kit(monkeypatch, request):
         return top, common
 
     monkeypatch.setattr(GitVersionControl, "repository_paths", guarded)
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    """The clock of `delegate watch` and `delegate status` in the case: a `support.FakeClock` (#297).
+
+    A case sets the wall time and the waits of the commands through this clock. It does not replace `time.sleep`,
+    `time.time` or `time.monotonic`: that also changes them for each library that the command calls, as the wait of
+    `subprocess` for a git command with a time limit (`test_no_time_patch`).
+    """
+    with run_clock.use(FakeClock()) as fake:
+        yield fake
 
 
 @pytest.fixture

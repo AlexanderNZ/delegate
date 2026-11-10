@@ -170,7 +170,7 @@ def test_delegate_status_shows_one_line_that_names_the_stack_and_the_fields(tmp_
     assert lines == ["stack python changed: gates, agent_timeout"]
 
 
-def test_delegate_watch_shows_one_feed_line_that_names_the_stack_and_the_fields(tmp_path, monkeypatch):
+def test_delegate_watch_shows_one_feed_line_that_names_the_stack_and_the_fields(tmp_path, monkeypatch, clock):
     from .support import bare_repo, frames
     from .test_watch_live import Run, ticket_a_is_built, watch
 

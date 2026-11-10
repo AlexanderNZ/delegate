@@ -7,7 +7,7 @@ but the replay takes a problem as history when any later event follows it. `--fo
 
 A case writes the journal with the journal class of the engine in a real temporary git repository, holds the lock of the
 run branch as the process of a run that goes on does, and calls `delegate.main(["watch", ...])`. The terminal (a standard
-output whose `isatty` is true) and the wait between two polls (`time.sleep`), which appends the next events of the live
+output whose `isatty` is true) and the wait between two polls (the wait of the `clock` fixture), which appends the next events of the live
 run, are the system boundaries.
 """
 
@@ -15,15 +15,18 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 
 import pytest
 
 from delegate.cli import delegate
 
 from .support import (
-    CONTROL, Terminal, append_events, bare_repo, frames, live_lock, run_end, run_start, step_end, step_start, write_journal,
+    CONTROL, Terminal, append_events, bare_repo, fake_clock, frames, live_lock, run_end, run_start, step_end,
+    step_start, write_journal,
 )
+
+# The commands of each case use the fake clock of the case (#297): its helpers set it.
+pytestmark = pytest.mark.usefixtures("clock")
 
 POLL = ["--poll-seconds", "0.02"]
 PROBLEM = 3
@@ -98,10 +101,10 @@ def ends_with(monkeypatch, path, *events):
     """A wait between two polls that appends `events` once, and then fails a case that waits again."""
 
     def sleep(seconds: float) -> None:
-        monkeypatch.setattr(time, "sleep", no_more_polls)
+        fake_clock().on_sleep = no_more_polls
         append_events(path, *events)
 
-    monkeypatch.setattr(time, "sleep", sleep)
+    fake_clock().on_sleep = sleep
 
 
 # The live view.
@@ -205,7 +208,7 @@ def test_the_live_view_goes_on_at_a_problem_that_is_the_newest_event_of_the_repl
 def test_a_limit_that_a_person_sets_still_ends_the_live_view_after_a_problem(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", *run_past_a_second_continuation())
-    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    fake_clock().on_sleep = lambda seconds: None
 
     with live_lock(path):
         code, _, _ = watch(repo, capsys, monkeypatch, "--max-minutes", "0.0001", terminal=True)
@@ -233,7 +236,7 @@ def test_a_raw_watch_with_no_from_follows_a_replay_past_a_problem_that_later_eve
 def test_a_raw_watch_exits_3_at_a_problem_that_is_the_newest_event_of_the_replay(tmp_path, capsys, monkeypatch, extra):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "R5"), step_start("R5"), continuation("R5", 2))
-    monkeypatch.setattr(time, "sleep", no_more_polls)
+    fake_clock().on_sleep = no_more_polls
 
     with live_lock(path):
         code, out, _ = watch(repo, capsys, monkeypatch, *extra)
@@ -272,7 +275,7 @@ def test_follow_makes_the_raw_and_json_forms_go_on_at_a_problem(tmp_path, capsys
 def test_follow_with_json_still_ends_at_a_limit_with_its_last_object(tmp_path, capsys, monkeypatch):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "R5"), step_start("R5"), continuation("R5", 2))
-    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    fake_clock().on_sleep = lambda seconds: None
 
     with live_lock(path):
         code, out, _ = watch(repo, capsys, monkeypatch, "--follow", "--json", "--max-minutes", "0.0001")
