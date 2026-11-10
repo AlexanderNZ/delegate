@@ -86,7 +86,7 @@ def test_a_chain_gate_that_runs_for_30_minutes_shows_as_a_chain_row_with_its_pha
 
     assert snap["chains"] == [{
         "stack": "python", "phase": "gates", "state": "running", "elapsed_seconds": 1800, "gate_command": CHAIN_GATE,
-        "gate_idle_seconds": 60, "tokens_new": 0, "tokens_cache": 0, "verdict": None,
+        "gate_idle_seconds": 60, "tokens_new": 0, "tokens_cache": 0, "verdict": None, "fixup_round": 0,
     }]
     # The row goes after the last ticket row of its stack. It shows the stack, the phase and the time used.
     row = chain_row(status)
@@ -266,4 +266,83 @@ def test_the_json_of_a_chain_holds_exactly_the_fields_of_the_row(tmp_path, capsy
 
     assert sorted(chain) == sorted([
         "stack", "phase", "state", "elapsed_seconds", "gate_command", "gate_idle_seconds", "tokens_new", "tokens_cache", "verdict",
+        "fixup_round",
     ])
+
+
+def a_chain_that_a_fix_up_round_stopped(run: Run) -> None:
+    """The chain gates, the verifier, a REJECT and the fix-up of round 1, which the agent check stopped (#209).
+
+    The stop fails the ticket that ends the stack. The coordinator then retries it at the phase `chain-fixup`.
+    """
+    chain_gate_starts(run, 3000)
+    chain_verifier_starts(run, 3100)
+    run.add(3400, "verdict", ticket="e", round=0, mode="full", verdict="REJECT", findings=["a: x"], unverified=[], report="/r",
+            stack="python", tickets=list(TICKETS), mapped={"a": ["a: x"]}, unmapped=[])
+    run.add(3401, "fixup-start", ticket="e", round=1, stack="python", rejected_commit="3", findings_file="/f", agent="s", tier="standard", model="m")
+    run.add(3402, "step-end", ticket="e", state="failed", reason="the agents changed")
+
+
+def the_retry(run: Run, seconds: float, phase: str) -> None:
+    run.add(seconds, "retry", ticket="e", phase=phase, round=1, reason="the agents changed", revived=[])
+
+
+def test_after_a_retry_at_the_chain_fix_up_the_chain_keeps_its_round_its_phase_and_its_time(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = an_economy_run_of_five_built_tickets(repo)
+    a_chain_that_a_fix_up_round_stopped(run)
+    the_retry(run, 3500, "chain-fixup")
+    chain_gate_starts(run, 3600, round_number=1)
+    frozen(monkeypatch, 3700)
+
+    (chain,) = snapshot(repo, capsys)["chains"]
+    row = chain_row(status_lines(repo, capsys))
+    live = chain_row(watch_block(repo, monkeypatch, run))
+
+    # The engine counts the fix-up of round 1 since the last retry that is no `chain-fixup`: the retry does not end the chain.
+    assert (chain["state"], chain["phase"], chain["fixup_round"], chain["elapsed_seconds"]) == ("running", "gates", 1, 700)
+    assert "gates ●" in row and "1/2" in row and "11m40s" in row
+    assert "gates ●" in live and "1/2" in live and "11m40s" in live
+
+
+def test_right_after_a_retry_at_the_chain_fix_up_the_chain_runs_in_the_phase_fix_up_and_not_as_rejected(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = an_economy_run_of_five_built_tickets(repo)
+    a_chain_that_a_fix_up_round_stopped(run)
+    the_retry(run, 3500, "chain-fixup")
+    frozen(monkeypatch, 3700)
+
+    (chain,) = snapshot(repo, capsys)["chains"]
+
+    assert (chain["state"], chain["phase"], chain["fixup_round"], chain["verdict"], chain["elapsed_seconds"]) == ("running", "fix-up", 1, None, 700)
+
+
+def test_after_a_retry_at_the_chain_the_chain_starts_again_with_round_0(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = an_economy_run_of_five_built_tickets(repo)
+    a_chain_that_a_fix_up_round_stopped(run)
+    the_retry(run, 3500, "chain")
+    chain_gate_starts(run, 3600)
+    frozen(monkeypatch, 3700)
+
+    (chain,) = snapshot(repo, capsys)["chains"]
+
+    assert (chain["state"], chain["phase"], chain["fixup_round"], chain["elapsed_seconds"]) == ("running", "gates", 0, 100)
+
+
+def test_the_table_of_a_chain_with_a_fix_up_round_and_no_retry_shows_the_round(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = an_economy_run_of_five_built_tickets(repo)
+    chain_gate_starts(run, 3000)
+    chain_verifier_starts(run, 3100)
+    run.add(3400, "verdict", ticket="e", round=0, mode="full", verdict="REJECT", findings=["a: x"], unverified=[], report="/r",
+            stack="python", tickets=list(TICKETS), mapped={"a": ["a: x"]}, unmapped=[])
+    run.add(3401, "fixup-start", ticket="e", round=1, stack="python", rejected_commit="3", findings_file="/f", agent="s", tier="standard", model="m")
+    chain_gate_starts(run, 3500, round_number=1)
+    frozen(monkeypatch, 3700)
+
+    (chain,) = snapshot(repo, capsys)["chains"]
+    row = chain_row(status_lines(repo, capsys))
+
+    assert (chain["state"], chain["phase"], chain["fixup_round"], chain["elapsed_seconds"]) == ("running", "gates", 1, 700)
+    assert "gates ●" in row and "1/2" in row and "11m40s" in row

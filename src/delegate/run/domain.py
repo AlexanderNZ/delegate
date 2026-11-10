@@ -46,6 +46,10 @@ FIXUP_ROUND_LIMIT: dict[str, int] = {ASSURE: 2, ECONOMY: 2}
 # The `phase` of a gate run on the tip of an `economy` chain, in the journal.
 GATES_OF_CHAIN: str = "chain"
 
+# The `phase` of a `retry` after the agent check stopped a fix-up session of an `economy` chain (#209). The verification
+# of the chain goes on after it: its rounds, its verdicts and its time still count.
+RETRY_CHAIN_FIXUP: str = "chain-fixup"
+
 # The specialist of a ticket continues in the same worktree at most this many
 # times after it ends capped or failed, or after the gates are red. One count
 # covers all three causes. The limit depends on the mode: `assure` pays for
@@ -205,6 +209,18 @@ def work_starts_at(base_commit: str, rebased_onto: str | None = None) -> str:
     commits of earlier tickets, and the commits of the base branch, are not counted.
     """
     return rebased_onto if rebased_onto is not None else base_commit
+
+
+def starts_chain_verification(event: Mapping[str, object]) -> bool:
+    """Tell whether a journal event starts a new verification of an `economy` chain (#297).
+
+    A `plan-change` and a `retry` start one, except a `retry` with the phase `chain-fixup`: that retry goes on with the
+    verification that the stop cut off, so the fix-up rounds and the time before it still count. The engine reads the
+    events after the newest such event, and `delegate status` and `delegate watch` use this function for the same
+    rule, so the round and the time of a chain are the same in the three.
+    """
+    kind = event["event"]
+    return kind == "plan-change" or (kind == "retry" and event.get("phase") != RETRY_CHAIN_FIXUP)
 
 
 def is_accepted(verdict: str) -> bool:

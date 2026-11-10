@@ -317,7 +317,7 @@ class Snapshot:
                 {
                     "stack": c.stack, "phase": c.phase, "state": c.state, "elapsed_seconds": c.elapsed_seconds,
                     "gate_command": c.gate_command, "gate_idle_seconds": c.gate_idle_seconds, "tokens_new": c.tokens_new,
-                    "tokens_cache": c.tokens_cache, "verdict": c.verdict,
+                    "tokens_cache": c.tokens_cache, "verdict": c.verdict, "fixup_round": c.fixup_round,
                 }
                 for c in self.chains
             ],
@@ -489,11 +489,14 @@ def _chain_phase_of(event: dict[str, object]) -> str | None:
 
     The gates of one ticket are not the gates of the chain, so a `gate-start` or a `gate-skip` counts only in its phase
     `chain`. The agent of the verifier or of a fix-up specialist starts its phase too: in `economy` mode only the chain
-    runs them.
+    runs them. A `retry` at the chain fix-up starts the phase `fix-up`: the stopped fix-up runs again.
     """
     kind = str(event["event"])
     if kind in ("gate-start", "gate-skip") and event.get("phase") != domain.GATES_OF_CHAIN:
         return None
+    if kind == "retry":
+        # A retry at the chain fix-up goes on with the verification: the engine runs the stopped fix-up again (#297).
+        return domain.PHASE_FIXUP if event.get("phase") == domain.RETRY_CHAIN_FIXUP else None
     if kind == "agent-start":
         role = str(event["role"])
         return PHASE_OF_ROLE[role] if role != "specialist" else None
@@ -527,7 +530,9 @@ def _chains(
 
     The engine names the chain of a stack by the last ticket of the stack: the gates, the verifier and the fix-up rounds
     of the chain carry that ticket. A group is the events of one such ticket from its first event of the chain. A new
-    `step-start` or a `retry` of the ticket ends its group: the chain after it is a new one.
+    `step-start` ends its group, and so does a `retry` that starts a new verification (`domain.starts_chain_verification`,
+    the rule of the engine): the chain after it is a new one. A `retry` at the chain fix-up does not, so its group keeps the
+    fix-up rounds and the time before it (#297).
 
     The chain is `accepted` when its newest verdict is ACCEPT. It is `rejected` when its last ticket failed after the
     chain started (red gates, a crash), when its newest verdict is not ACCEPT and no fix-up follows it and a ticket
@@ -543,7 +548,7 @@ def _chains(
             failures.append(index)
         if not isinstance(ticket, str):
             continue
-        if kind in ("step-start", "retry"):
+        if kind == "step-start" or domain.starts_chain_verification(event):
             groups.pop(ticket, None)
         elif _chain_phase_of(event) is not None or (ticket in groups and kind in CHAIN_RESULT_EVENTS and event.get("phase", chain) == chain):
             groups.setdefault(ticket, []).append((index, event))
@@ -586,6 +591,8 @@ def _chain_of(
             gate = None
         elif kind == "fixup-start":
             fixup_round = int(event["round"])  # type: ignore[call-overload]
+        elif kind == "retry":
+            failed = None  # the retry at the chain fix-up revives the tickets that the stop failed
         elif kind == "verdict":
             verdict = (index, event)
         elif kind == "step-end" and event.get("state") == FAILED:

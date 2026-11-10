@@ -239,7 +239,7 @@ For example, two tickets of 600 and 300 seconds ended, and the gates of the chai
 
 #### The chain row
 
-The verification of a chain is also a row of the ticket table, in `delegate status` and in the live view of `delegate watch`. A gate of the chain can run for hours, and a table with only `built` rows would not show it. In `economy` mode, the table has one chain row for each [**stack**](../glossary.md#stack) that started its verification. The row starts at the first gate, verifier or fix-up of the chain of the stack. It goes after the last ticket row of the stack, under the sub-rows of that ticket, and it folds with that ticket when the rows fold to fit the height of the terminal. A run in `assure` mode has no chain row, and `--raw` does not change.
+The verification of a chain is also a row of the ticket table, in `delegate status` and in the live view of `delegate watch`. A gate of the chain can run for hours, and a table with only `built` rows would not show it. In `economy` mode, the table has one chain row for each [**stack**](../glossary.md#stack) that started its verification. The row starts at the first gate, verifier or fix-up of the chain of the stack. A retry at the phase `chain-fixup` does not end the row: the chain goes on in the phase `fix-up`, with its round and its time from before the retry. It goes after the last ticket row of the stack, under the sub-rows of that ticket, and it folds with that ticket when the rows fold to fit the height of the terminal. A run in `assure` mode has no chain row, and `--raw` does not change.
 
 | Cell | The chain row |
 |---|---|
@@ -264,6 +264,7 @@ The `chains` list of `status --json` has one object for each chain row:
 | `tokens_new` | integer or `null` | The new tokens of the agents of the chain. `null` for [a run with no stream reader](#a-run-with-no-stream-reader), and for a chain with [a stream that cannot be read](#a-stream-that-cannot-be-read). |
 | `tokens_cache` | integer or `null` | The cache reads of the same agents. It is `null` when `tokens_new` is `null`. |
 | `verdict` | string or `null` | The verdict that ended the chain. `null` while it runs, and when red gates ended it. |
+| `fixup_round` | integer | The round of the newest fix-up of the chain, or 0 before the first fix-up. A [retry](run.md) at the phase `chain-fixup` does not start the count again: the engine counts the fix-up rounds since the last retry that is not at that phase, and `status` and `watch` use the same rule. A retry at another phase starts the chain again. |
 
 ## `delegate watch`
 

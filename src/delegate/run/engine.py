@@ -294,7 +294,7 @@ RETRY_VERIFIER: str = "verifier"
 RETRY_SCOPED_VERIFIER: str = "scoped-verifier"
 # The agent check stopped a fix-up session (#209): `assure` mode runs the fix-up of the round again, `economy` mode the chain fix-up.
 RETRY_FIXUP: str = "fixup"
-RETRY_CHAIN_FIXUP: str = "chain-fixup"
+RETRY_CHAIN_FIXUP: str = domain.RETRY_CHAIN_FIXUP
 # A retry with a commit of the coordinator goes on with a chain whose verification failed (#225): `economy` mode only.
 RETRY_CHAIN: str = "chain"
 
@@ -1349,10 +1349,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     verification of the chain is its events after the newest `retry` that is not a retry at the chain fix-up, or the
     newest `plan-change`, as in `_ChainRun`.
     """
-    starts = [
-        index for index, e in enumerate(events)
-        if e["event"] == "plan-change" or (e["event"] == "retry" and e.get("phase") != RETRY_CHAIN_FIXUP)
-    ]
+    starts = [index for index, e in enumerate(events) if domain.starts_chain_verification(e)]
     report = _unfinished_report([e for e in events[starts[-1] + 1 if starts else 0 :] if e["event"] == "fixup-report"])
     return report is not None and _report_names_hotspot(workflow, report, config_paths)
 
@@ -4145,10 +4142,7 @@ class _ChainRun:
         _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
         every_event = self.journal.events
         # A retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
-        retries = [
-            index for index, e in enumerate(every_event)
-            if e["event"] == "plan-change" or (e["event"] == "retry" and e.get("phase") != RETRY_CHAIN_FIXUP)
-        ]
+        retries = [index for index, e in enumerate(every_event) if domain.starts_chain_verification(e)]
         # The verification of the chain since the last retry or plan change.
         events = every_event[retries[-1] + 1 :] if retries else every_event
         if any(e["event"] == "run-branch-advance" for e in events):
