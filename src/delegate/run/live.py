@@ -40,6 +40,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import domain, output, status
+from .events import JOURNAL_CHANGED
 from .journal import JournalError, crash_where
 
 # The text between two parts of a line of the feed.
@@ -571,6 +572,8 @@ class LiveView:
                 return f"verifier started ({tickets})"
             return "verifier started" if not event["round"] else f"scoped verifier started{SEPARATOR}round {event['round']}"
         if kind == "invariant-violation":
+            if event.get("kind") == JOURNAL_CHANGED:
+                return "invariant violation: another writer changed the journal"
             return "invariant violation: the verifier changed the worktree"
         if kind == "fixup-refused":
             return f"fix-up round {event['round']} refused"

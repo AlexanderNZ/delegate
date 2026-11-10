@@ -82,9 +82,10 @@ def test_the_adr_index_lists_adr_0007_with_its_measurement():
 
 
 @outside_the_package
-def test_the_limits_page_lists_the_sealed_agent_and_the_guard_probe_among_the_checks_of_the_engine():
+def test_the_limits_page_lists_the_sealed_agent_the_guard_probe_and_the_journal_check_among_the_checks_of_the_engine():
     text = plain(section(LIMITS_PAGE.read_text(), "What the engine enforces"))
-    assert "It has seven checks." in text
+    assert "It has eight checks." in text
+    assert re.search(r"\*\*A journal that only the engine writes\.\*\*", text)
     assert re.search(r"\*\*One seal for each run\.\*\*", text)
     assert re.search(r"\*\*A probe before the first session\.\*\*", text)
     assert "ADR 0007" in text

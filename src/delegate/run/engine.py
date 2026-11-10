@@ -200,12 +200,12 @@ from .brief import (
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
-from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, RESUME, RUN_START, SCHEMA_VERSION, STACK_CHANGE
+from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, STACK_CHANGE
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
 )
-from .journal import Journal, JournalError, abandoned_end, crash_where, plan_ids, read_events
+from .journal import Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, probe_guard, refusal, stream_path
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
@@ -459,13 +459,14 @@ def _holds(vcs: VersionControl, repo: Path, ancestor: str, descendant: str) -> b
 
 
 def _ends_the_run(error: Exception) -> bool:
-    """True for an error that ends the run for good: an invariant violation and a moved run branch. Any other error is a crash."""
-    return isinstance(error, (InvariantViolation, _RunBranchMoved))
+    """True for an error that ends the run for good: an invariant violation, a change of the journal by another writer
+    (#291), and a moved run branch. Any other error is a crash."""
+    return isinstance(error, (InvariantViolation, JournalChanged, _RunBranchMoved))
 
 
 def _halt_reason(error: Exception) -> str:
     """The reason a step fails when an error that ends the run (`_ends_the_run`) ends it."""
-    if isinstance(error, InvariantViolation):
+    if isinstance(error, (InvariantViolation, JournalChanged)):
         return f"invariant violation: {error}"
     return f"run branch moved: {error}"
 
@@ -522,10 +523,7 @@ def _record_crash(journal: Journal, ticket_id: str, error: Exception, phase: str
     `retry: true`, and the resume command that the lines of the run give names `--retry`.
     """
     if phase is None:
-        try:
-            phase = _crash_phase(read_events(journal.path), ticket_id)
-        except JournalError:
-            phase = CRASH_PHASE_SETUP
+        phase = _crash_phase(journal.events, ticket_id)
     path = journal.path.parent / f"{CRASH_FILE_PREFIX}{journal.next_seq}.txt"
     trace: str | None = str(path)
     try:
@@ -566,7 +564,7 @@ def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_bra
     `_RunBranchMoved`, which halts the run as an invariant violation does. When the tips agree, return the tip that the
     check read, so the caller does not read it again (#239). A journal with no expected tip has no check.
     """
-    expected = _expected_tip(read_events(journal.path))
+    expected = _expected_tip(journal.events)
     found = _tip(vcs, repo, run_branch)
     if expected is None or found == expected:
         return found
@@ -1127,7 +1125,15 @@ class PlanReview:
 
 
 def _violation_text(violation: dict[str, object]) -> str:
-    """The text that refuses a resume of a run that an invariant violation halted: the ticket, the worktree and each change."""
+    """The text that refuses a resume of a run that an invariant violation halted: the ticket, the worktree and each change.
+
+    For a change of the journal by another writer (#291), the text names the journal and the byte offset of the change.
+    """
+    if violation.get("kind") == JOURNAL_CHANGED:
+        return (
+            f"an invariant violation halted the run: another writer changed the journal {violation['journal']} "
+            f"at byte {violation['offset']}; a halted run cannot be resumed: start a new run"
+        )
     changes = "; ".join(str(change) for change in violation["changes"])  # type: ignore[union-attr]
     return (
         f"an invariant violation halted the run at ticket {violation['ticket']!r}: "
@@ -2001,6 +2007,10 @@ def run_workflow(
     start (`run-start`, or `resume` and a plan change), before the first step. A resume that the engine refuses does not
     call it. `delegate run` then puts the id in the title of the terminal and prints its start lines.
 
+    The run decides from the events that its journal holds in memory (#291). A change of the journal file by another
+    writer ends the run as an invariant violation does: in a step, the step fails; outside a step, the run writes
+    `run-end` with the result `failed`, and raises EngineError, which names the journal and the byte offset.
+
     Ctrl-C (`KeyboardInterrupt`) stops the run at once. The run releases its lock, appends `interrupted` to its
     journal, and raises RunInterrupted. A resume then goes on as after a crash.
 
@@ -2045,12 +2055,28 @@ def run_workflow(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
                     reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed,
                 )
+            except JournalChanged as changed:
+                raise EngineError(_end_changed_journal(changed, run_id)) from None
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
                 raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id)) from None
             return replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
+
+
+def _end_changed_journal(changed: JournalChanged, run_id: str) -> str:
+    """End a run whose journal another writer changed outside a step (#291). Return the text of the error.
+
+    A change that the journal finds in a step fails the step as an invariant violation does (`_ends_the_run`). A change
+    that it finds outside a step, for example after the guard probe or at the clean-up, ends here: the journal
+    holds `invariant-violation` already, and the engine writes `run-end` with the result `failed`.
+    """
+    progress = restore_progress(changed.journal.events, run_id, retrying=True)
+    changed.journal.append(
+        "run-end", result=FAILED, built=list(progress.built), failed=list(progress.failed), skipped=list(progress.skipped),
+    )
+    return f"invariant violation: {changed}"
 
 
 def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
@@ -2380,7 +2406,7 @@ def _plan_change_note(journal: Journal, workflow: Workflow, ticket_ids: list[str
     ticket. The section names each ticket that such a change added or changed,
     and that comes before the ticket in the plan, with its text.
     """
-    events = [event for event in read_events(journal.path) if event["event"] == "plan-change"]
+    events = [event for event in journal.events if event["event"] == "plan-change"]
     if not events:
         return None
     order = [t.id for t in plan_order(workflow)]
@@ -2506,7 +2532,7 @@ def _probe_guards(
     """
     if not getattr(adapter, "probes_guard", False):
         return
-    events = read_events(journal.path)
+    events = journal.events
     recorded = recorded_agents(events) or []
     done = denied_agents(events)
     verifiers = list(dict.fromkeys(stack.verifier for stack in workflow.stacks.values()))
@@ -2552,7 +2578,7 @@ def _check_agent_file(
     both hashes. The agent file in the tree of the agent is not read. Give the sealed agent for the request, or None when
     the run recorded no seal for the agent. `retry` is the ticket that the message names for the retry, when it is not `ticket`.
     """
-    recorded = recorded_agents(read_events(journal.path))
+    recorded = recorded_agents(journal.events)
     if recorded is None:
         return None
     sealed, change = check_agent(recorded, agent)
@@ -2847,7 +2873,7 @@ def _prepare_ticket_worktree(
         return
     if not made:
         last = None
-        for event in read_events(journal.path):
+        for event in journal.events:
             if event["event"] in ("prepare-start", "prepare-result") and event.get("ticket") == ticket and event.get("tree") == TREE_WORKTREE:
                 last = event
         if last is not None and last["event"] == "prepare-result" and last["exit_status"] == 0 and last["command"] == stack.prepare[-1]:
@@ -2920,7 +2946,7 @@ def _build_ticket(
             continuations = sum(1 for e in prior if e["event"] == "continuation")
         else:
             specialist_done, continuations = _specialist_committed(tuple(prior)), 0
-        completed = _coordinator_completes(_ticket_events(read_events(journal.path), ticket.id))
+        completed = _coordinator_completes(_ticket_events(journal.events, ticket.id))
         # A verifier run that ended with no verdict does not count against the fix-up limit; a red-gate fix-up round does.
         verify_rounds = _rounds_used(prior)
         rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
@@ -3223,7 +3249,7 @@ def _hotspot_stop(
     The change of a commit of the coordinator that a retry of the step recorded (see `_coordinator_commits`) does not
     count (#225). Each other commit of the step counts.
     """
-    excluded = {commit for commit, _ in _coordinator_commits(vcs, worktree, _ticket_events(read_events(journal.path), ticket))}
+    excluded = {commit for commit, _ in _coordinator_commits(vcs, worktree, _ticket_events(journal.events, ticket))}
     if excluded:
         with _vcs_errors():
             paths = _paths_without(vcs, worktree, since, None, merge_base, excluded)
@@ -3740,7 +3766,7 @@ def _coordinator_of_step(step: _Step) -> list[tuple[str, tuple[str, ...]]]:
     owner = step.anchor or step.ticket
     if step.segments is not None and owner.id not in {segment.ticket for segment in step.segments}:
         return []
-    own = _ticket_events(read_events(step.journal.path), owner.id)
+    own = _ticket_events(step.journal.events, owner.id)
     branch, run_branch = f"refs/heads/{step.branch}", f"refs/heads/{step.workflow.run_branch}"
     return [
         (commit, paths) for commit, paths in _coordinator_commits(step.vcs, step.repo, own)
@@ -4066,7 +4092,7 @@ class _ChainRun:
 
     def _verify_stacks(self) -> list[str]:
         _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
-        every_event = read_events(self.journal.path)
+        every_event = self.journal.events
         # A retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
         retries = [
             index for index, e in enumerate(every_event)
@@ -4402,7 +4428,7 @@ def _green_result(journal: Journal, command: str, commit: str) -> dict[str, obje
     not committed when the gate ran (#176), and the gate changed no tracked file
     (#276). A result of an older journal has no such field, so it skips no gate.
     """
-    for event in read_events(journal.path):
+    for event in journal.events:
         if (
             event["event"] == "gate-result" and event["green"] and event.get("clean") is True
             and event["command"] == command and event.get("commit") == commit

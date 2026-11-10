@@ -460,13 +460,27 @@ class VerifyResult(TypedDict):
     refused: NotRequired[list[Refusal]]
 
 
+# The `kind` of an `invariant-violation` that another writer of the journal caused (#291). A violation of the worktree
+# by a verifier has no `kind`.
+JOURNAL_CHANGED: str = "journal-changed"
+
+
 class InvariantViolation(TypedDict):
-    ticket: str
-    round: int
-    worktree: str
-    head_before: str
-    head_after: str
-    changes: list[str]
+    # A violation of the worktree by a verifier has these fields.
+    ticket: NotRequired[str]
+    round: NotRequired[int]
+    worktree: NotRequired[str]
+    head_before: NotRequired[str]
+    head_after: NotRequired[str]
+    changes: NotRequired[list[str]]
+    # A change of the journal by another writer has these fields (#291). Only a change that left bytes of the other
+    # writer has `changed_bytes`.
+    kind: NotRequired[str]
+    journal: NotRequired[str]
+    offset: NotRequired[int]
+    size_written: NotRequired[int]
+    size_found: NotRequired[int]
+    changed_bytes: NotRequired[str]
 
 
 class VerifyReport(TypedDict):

@@ -10,6 +10,13 @@ from the last line.
 An append writes one line with one write call. `seq` grows only after the write succeeded, so a failed append leaves
 the journal as it was (#191). A power loss can cut the last line in half. `Journal.reopen` removes a last line that has
 no newline at its end, and records the removal in `journal-repaired`.
+
+A `Journal` keeps in memory each event that it read when it opened the file, and each event that it appended, with the
+bytes of the file (#291). The engine decides from these events, and does not read the file again. Before each append
+the journal checks that the file has the size that it wrote last. A file that is longer or shorter was changed by
+another writer: the journal puts back its own bytes, keeps the bytes of the other writer in a file beside the journal,
+writes `invariant-violation` with the kind `journal-changed`, and raises `JournalChanged`. The readers of other
+processes (`status`, `watch`, `clean`, the dry run) read the file with `read_events` and `read_new_events`.
 """
 
 from __future__ import annotations
@@ -20,7 +27,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT
+from .events import (
+    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, INVARIANT_VIOLATION, JOURNAL_CHANGED, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT,
+)
 
 # The events whose line must be on the disk before the engine goes on: a run that ended, a move of the run branch, and a
 # verdict. A power loss then cannot take a fact that the repository already shows.
@@ -29,6 +38,18 @@ SYNCED: frozenset[str] = frozenset({RUN_END, RUN_BRANCH_ADVANCE, VERDICT})
 
 class JournalError(Exception):
     """A journal cannot be read. The message names the file."""
+
+
+class JournalChanged(JournalError):
+    """Another writer changed the journal that a run writes (#291). The message names the journal and the byte offset.
+
+    The journal put back its own bytes and wrote `invariant-violation` before it raised this error, so `journal` takes
+    the next append.
+    """
+
+    def __init__(self, message: str, journal: Journal) -> None:
+        super().__init__(message)
+        self.journal = journal
 
 
 def read_events(path: Path, *, torn_tail: bool = False) -> list[dict[str, object]]:
@@ -43,6 +64,11 @@ def read_events(path: Path, *, torn_tail: bool = False) -> list[dict[str, object
         raise JournalError(f"journal {path} not found") from None
     if torn_tail and text and not text.endswith("\n"):
         text = text[: text.rfind("\n") + 1]
+    return _parse(path, text)
+
+
+def _parse(path: Path, text: str) -> list[dict[str, object]]:
+    """The events of the text of a journal file. Raise JournalError when a line is not an event."""
     events: list[dict[str, object]] = []
     for number, line in enumerate(text.splitlines(), start=1):
         try:
@@ -222,12 +248,19 @@ def last_change(journal: Path, files: set[Path]) -> float:
     return max(times)
 
 
+# The prefix of the file that keeps the bytes of another writer of a journal: `journal-changed-<seq>.txt` beside the
+# journal, where `<seq>` is the `seq` of the `invariant-violation` event that names it (#291).
+CHANGED_BYTES_PREFIX: str = "journal-changed-"
+
+
 class Journal:
-    """Appends events to one file."""
+    """Appends events to one file, and keeps in memory each event of the file (#291)."""
 
     def __init__(self, path: Path, seq: int = 0, *, create: bool = True) -> None:
         self.path = path
         self._seq = seq
+        self._events: list[dict[str, object]] = []
+        self._data = bytearray()
         if create:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch(exist_ok=False)
@@ -236,8 +269,8 @@ class Journal:
     def reopen(cls, path: Path) -> tuple[Journal, list[dict[str, object]]]:
         """Open the journal of an earlier run for appending. Return it with the events it holds.
 
-        A last line with no newline at its end is a write that a power loss cut. It is removed, and `journal-repaired`
-        records the number of bytes removed; the events that come back hold that event.
+        The file is read one time. A last line with no newline at its end is a write that a power loss cut. It is removed,
+        and `journal-repaired` records the number of bytes removed; the events that come back hold that event.
 
         Raise JournalError when the file is missing or a line is not an event.
         """
@@ -247,25 +280,44 @@ class Journal:
             raise JournalError(f"journal {path} not found") from None
         removed = len(data) - (data.rfind(b"\n") + 1) if data and not data.endswith(b"\n") else 0
         if removed:
-            os.truncate(path, len(data) - removed)
-        events = read_events(path)
+            data = data[: len(data) - removed]
+            os.truncate(path, len(data))
+        events = _parse(path, data.decode())
         journal = cls(path, seq=len(events), create=False)
+        journal._events, journal._data = events, bytearray(data)
         if removed:
             journal.append(JOURNAL_REPAIRED, bytes_removed=removed)
-            events = read_events(path)
-        return journal, events
+        return journal, journal.events
 
     @property
     def next_seq(self) -> int:
         """The `seq` that the next event gets. A file that a crash record names holds this number."""
         return self._seq + 1
 
+    @property
+    def events(self) -> list[dict[str, object]]:
+        """Each event of the journal, in order: the events that it read when it opened the file, and the events that it appended."""
+        return list(self._events)
+
     def append(self, event: str, **fields: object) -> None:
-        """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line."""
+        """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line.
+
+        Raise JournalChanged when the file does not have the size that the journal wrote last: another writer changed it.
+        The event is then not written (see `_put_back`).
+        """
+        try:
+            size = self.path.stat().st_size
+        except FileNotFoundError:
+            size = -1
+        if size != len(self._data):
+            raise self._put_back(max(size, 0))
+        self._write(event, fields)
+
+    def _write(self, event: str, fields: dict[str, object]) -> None:
         seq = self._seq + 1
         line = {"seq": seq, "time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
         data = (json.dumps(line, sort_keys=False) + "\n").encode()
-        size = self.path.stat().st_size
+        size = len(self._data)
         try:
             with self.path.open("ab") as handle:
                 handle.write(data)
@@ -277,3 +329,42 @@ class Journal:
                 os.truncate(self.path, size)  # a part of the line must not stay: the next line would join it
             raise
         self._seq = seq
+        self._events.append(line)
+        self._data += data
+
+    def _put_back(self, found: int) -> JournalChanged:
+        """Put back the bytes that the journal wrote, after another writer changed the file to `found` bytes. Return the error.
+
+        The bytes of the other writer from the first byte that differs go to `journal-changed-<seq>.txt` beside the
+        journal. The journal writes `invariant-violation` with the kind `journal-changed`, the byte offset of the first
+        byte that differs, the size that it wrote, the size that it found, and the file of the other bytes, if any.
+        """
+        try:
+            now = self.path.read_bytes()
+        except FileNotFoundError:
+            now = b""
+        ours = bytes(self._data)
+        offset = next((index for index, (a, b) in enumerate(zip(now, ours)) if a != b), min(len(now), len(ours)))
+        other = now[offset:]
+        saved: Path | None = self.path.with_name(f"{CHANGED_BYTES_PREFIX}{self.next_seq}.txt") if other else None
+        if saved is not None:
+            saved.write_bytes(other)
+        restore = self.path.with_name(f"{self.path.name}.restore")
+        with restore.open("wb") as handle:
+            handle.write(ours)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(restore, self.path)
+        message = (
+            f"another writer changed the journal {self.path} at byte {offset}: the run wrote {len(ours)} bytes, "
+            f"and the file had {found} bytes; the run put back its own bytes"
+            + (f", and the bytes of the other writer are in {saved}" if saved is not None else "")
+        )
+        self._write(
+            INVARIANT_VIOLATION,
+            {
+                "kind": JOURNAL_CHANGED, "journal": str(self.path), "offset": offset, "size_written": len(ours), "size_found": found,
+                **({"changed_bytes": str(saved)} if saved is not None else {}),
+            },
+        )
+        return JournalChanged(message, self)
