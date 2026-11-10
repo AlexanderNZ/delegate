@@ -338,6 +338,8 @@ class GuardProbe(TypedDict):
     handle: str
     result: str
     event_stream: str
+    # Each session of the probe, in order (#299): a session that made no call of the probe command is followed by one more session.
+    tries: NotRequired[list[dict[str, str]]]
 
 
 class SetupProblem(TypedDict):

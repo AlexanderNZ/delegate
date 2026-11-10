@@ -40,7 +40,11 @@ if probe and "touch delegate-guard-probe" in stdin:
         log.write(json.dumps({{"argv": sys.argv[1:], "stdin": stdin, "cwd": os.getcwd()}}) + "\\n")
     if os.environ.get("FAKE_HARNESS_PROBE_TOUCH"):
         open("delegate-guard-probe", "w").close()
-    with open(probe) as stream:
+    # A list of streams, joined with the path separator, gives one stream for each probe session; the last one repeats.
+    streams = probe.split(os.pathsep)
+    with open(os.environ["FAKE_HARNESS_PROBE_LOG"]) as log:
+        number = len(log.readlines())
+    with open(streams[min(number, len(streams)) - 1]) as stream:
         sys.stdout.write(stream.read())
     sys.exit(0)
 time.sleep(float(os.environ.get("FAKE_HARNESS_START", "0")))

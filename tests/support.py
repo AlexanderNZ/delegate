@@ -259,9 +259,9 @@ class ScriptedAdapter:
     A request whose prompt asks for the command `touch delegate-guard-probe` is a guard probe (#219). It goes to
     `probe_calls`, not to `calls` or `verifier_calls`, and it writes no report. The adapter takes part only when
     `probes_guard` is true. `project_config_paths` is the attribute of the same name of the adapter port (#273). The result of the probe comes from `probe_outcomes` (a dictionary by agent name, `denied`
-    when the agent has no entry): `denied` ends the session with an error result of the probe command in
+    when the agent has no entry; a list gives one outcome for each session of the agent, and its last outcome repeats): `denied` ends the session with an error result of the probe command in
     `command_errors` that holds the text of a guard that denied the command, `ran` writes the file `delegate-guard-probe`
-    into the working directory, and `inconclusive` ends the session with a text that tells of no command. `probe_commits` holds the number of commits of the working directory of each probe, and
+    into the working directory, `refused` ends the session with an error result that a permission mode of the host gave, and `inconclusive` ends the session with a text that tells of no command. `probe_commits` holds the number of commits of the working directory of each probe, and
     `probe_gone` is true when the engine removed the directory of the last probe.
 
     `report_checks` holds, for each request, the role (`specialist`, `fix-up`
@@ -324,7 +324,7 @@ class ScriptedAdapter:
     denials: dict[str, str] = field(default_factory=dict)
     probes_guard: bool = False
     project_config_paths: tuple[str, ...] = ()
-    probe_outcomes: dict[str, str] = field(default_factory=dict)
+    probe_outcomes: dict[str, str | list[str]] = field(default_factory=dict)
     probe_calls: list[AdapterRequest] = field(default_factory=list)
     probe_commits: list[int] = field(default_factory=list)
     sealed_tools: dict[str, tuple[McpTool, ...]] = field(default_factory=dict)
@@ -337,8 +337,15 @@ class ScriptedAdapter:
         self.probe_calls.append(request)
         self.probe_commits.append(int(git(request.cwd, "rev-list", "--count", "HEAD")))
         outcome = self.probe_outcomes.get(request.agent, "denied")
+        if isinstance(outcome, list):  # one outcome for each session of the agent; the last one repeats
+            outcome = outcome[min(len([c for c in self.probe_calls if c.agent == request.agent]) - 1, len(outcome) - 1)]
         errors: tuple[tuple[str, str], ...] = ()
-        if outcome == "ran":
+        refused: tuple[str, ...] = ()
+        if outcome == "refused":
+            text = "Permission to use Bash has been denied because Claude Code is running in dontAsk mode [touch delegate-guard-probe]"
+            errors = (("touch delegate-guard-probe", text),)
+            refused = ("touch delegate-guard-probe",)
+        elif outcome == "ran":
             (request.cwd / "delegate-guard-probe").write_text("")
             text = "The command ran with no output."
         elif outcome == "denied":
@@ -347,7 +354,9 @@ class ScriptedAdapter:
         else:
             text = "I did not try the command."
         request.event_stream.write_text(json.dumps({"type": "result", "result": text}) + "\n")
-        return AdapterResult(0, "finished", "probe-session", request.event_stream, final_text=text, command_errors=errors)
+        return AdapterResult(
+            0, "finished", "probe-session", request.event_stream, final_text=text, command_errors=errors, refused_commands=refused
+        )
 
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
         """The paths where the harness would look for `agent`: under `.claude/agents` of `source`, then in `user_agents`."""

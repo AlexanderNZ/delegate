@@ -12,6 +12,7 @@ adapter, so it covers what the adapter gives the harness.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -400,3 +401,115 @@ def test_a_harness_command_that_does_not_exist_stops_the_start_with_one_line_tha
     assert "claude" in err and "guard probe" in err
     assert "Traceback" not in err
     assert "guard-probe" not in event_names(read_journal(out))
+
+
+def tries_of(probe: dict[str, object]) -> list[str]:
+    return [str(t["result"]) for t in probe["tries"]]  # type: ignore[union-attr]
+
+
+def test_the_probe_brief_tells_the_facts_of_the_session_and_holds_the_command_once(tmp_path, scripted, capsys):
+    repo = repo_with_agents(tmp_path)
+
+    start(repo, capsys)
+
+    (request,) = scripted.probe_calls
+    brief = request.prompt
+    assert brief.count("touch delegate-guard-probe") == 1
+    text = " ".join(brief.split()).lower()
+    assert "new temporary directory" in text
+    assert "made for this check" in text
+    assert "no work under review" in text
+    assert "test of the guard" in text
+    assert "expects the guard to deny" in text
+    assert "bash tool" in text
+
+
+def test_a_probe_session_with_no_call_of_the_command_runs_once_more_and_the_denial_of_the_second_session_counts(tmp_path, scripted, capsys):
+    repo = repo_with_agents(tmp_path)
+    scripted.probe_outcomes = {"python-verifier": ["inconclusive", "denied"]}
+
+    code, out, err, events = start(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert len(scripted.probe_calls) == 2
+    (probe,) = probes(events)
+    assert probe["result"] == "denied"
+    assert tries_of(probe) == ["inconclusive", "denied"]
+    first, second = (Path(t["event_stream"]) for t in probe["tries"])
+    assert first != second and first.is_file() and second.is_file()
+    assert probe["event_stream"] == str(second)
+    assert len(scripted.calls) == 1
+
+
+def test_a_probe_with_no_call_of_the_command_in_two_sessions_is_inconclusive_and_names_both_tries(tmp_path, scripted, capsys):
+    repo = repo_with_agents(tmp_path)
+    scripted.probe_outcomes = {"python-verifier": "inconclusive"}
+
+    code, out, err, events = start(repo, capsys)
+
+    assert code == 1
+    assert len(scripted.probe_calls) == 2
+    (probe,) = probes(events)
+    assert probe["result"] == "inconclusive" and tries_of(probe) == ["inconclusive", "inconclusive"]
+    assert "inconclusive" in err and scripted.calls == []
+
+
+@pytest.mark.parametrize("outcome", ["ran", "refused"])
+def test_a_probe_session_that_ran_the_file_or_met_a_permission_mode_does_not_run_a_second_session(tmp_path, scripted, capsys, outcome):
+    repo = repo_with_agents(tmp_path)
+    scripted.probe_outcomes = {"python-verifier": [outcome, "denied"]}
+
+    code, out, err, events = start(repo, capsys)
+
+    assert code == 1
+    assert len(scripted.probe_calls) == 1
+    (probe,) = probes(events)
+    assert probe["result"] == {"ran": "ran", "refused": "inconclusive"}[outcome]
+    assert tries_of(probe) == [probe["result"]]
+
+
+def test_a_probe_session_with_a_denial_the_first_time_does_not_run_a_second_session(tmp_path, scripted, capsys):
+    repo = repo_with_agents(tmp_path)
+
+    code, out, err, events = start(repo, capsys)
+
+    assert len(scripted.probe_calls) == 1
+    (probe,) = probes(events)
+    assert tries_of(probe) == ["denied"]
+
+
+def test_the_dry_run_names_each_try_of_a_probe_that_ran_two_sessions(tmp_path, checked, capsys):
+    repo = repo_with_agents(tmp_path)
+    checked.probe_outcomes = {"python-verifier": ["inconclusive", "denied"]}
+
+    code, out, err = dry_run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    assert "stack python: guard probe denied (2 tries: inconclusive, denied)" in out.splitlines()
+    assert len(checked.probe_calls) == 2
+
+
+def test_the_dry_run_names_both_tries_of_a_probe_that_stays_inconclusive(tmp_path, checked, capsys):
+    repo = repo_with_agents(tmp_path)
+    checked.probe_outcomes = {"python-verifier": "inconclusive"}
+
+    code, out, err = dry_run(repo, capsys)
+
+    assert code == 1
+    assert "guard probe inconclusive" in err and "2 tries: inconclusive, inconclusive" in err
+
+
+def test_a_claude_code_session_with_no_tool_call_the_first_time_and_a_denial_the_second_time_gives_denied(tmp_path, monkeypatch, capsys):
+    claude_fake.install(tmp_path, monkeypatch, "finished.jsonl")
+    stream = tmp_path / "probe-stream.jsonl"
+    stream.write_text(result_line("I did not run it: my rules make me read-only.") + "\n")
+    second = tmp_path / "probe-stream-2.jsonl"
+    second.write_text("\n".join([call_line(PROBE), tool_line(f"hook error: the command [{PROBE}] is not permitted"), result_line("Done.")]) + "\n")
+    monkeypatch.setenv("FAKE_HARNESS_PROBE", f"{stream}{os.pathsep}{second}")
+    repo = make_repo(tmp_path, WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"'))
+    write_project_agents(repo)
+
+    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--dry-run")
+
+    assert (code, err) == (0, "")
+    assert "stack python: guard probe denied (2 tries: inconclusive, denied)" in out

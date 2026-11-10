@@ -211,7 +211,7 @@ from .guards import (
 )
 from .journal import Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .probe import PROBE_TIER, DENIED, probe_guard, refusal, stream_path
+from .probe import PROBE_TIER, DENIED, describe_tries, probe_guard, refusal, stream_path
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, strongest_tier
 
@@ -2605,7 +2605,7 @@ def _probe_guards(
 
     It runs before the first agent session of the run or of the resume. An adapter whose `probes_guard` is not true gets
     no probe. A verifier that the run did not seal gets none either: a session of an agent with no seal does not run from
-    a guard of the run. The journal gets `guard-probe` with the agent, the handle, the result and the event stream. A
+    a guard of the run. The journal gets `guard-probe` with the agent, the handle, the result, the event stream and each try (#299). A
     result other than `denied` raises an `EngineError` that names the agent, the result, the limits page and the command
     that goes on. A resume probes again, because no denied probe follows the newest seal. A failure of the harness or of
     the repository of the probe is an `EngineError` too, and the journal gets no event for it.
@@ -2641,9 +2641,10 @@ def _probe_guards(
             probe = probe_guard(adapter, vcs, sealed, model, stream)
         except (AdapterError, VcsError) as error:
             raise EngineError(f"the guard probe of the verifier {agent!r} could not run: {error}") from None
-        journal.append("guard-probe", agent=probe.agent, handle=probe.handle, result=probe.result, event_stream=str(probe.event_stream))
+        tries = [{"result": t.result, "event_stream": str(t.event_stream)} for t in probe.tries]
+        journal.append("guard-probe", agent=probe.agent, handle=probe.handle, result=probe.result, event_stream=str(probe.event_stream), tries=tries)
         if probe.result != DENIED:
-            raise EngineError(f"{refusal(agent, probe.result)}; the run started no agent session; a resume with delegate run --resume {run_id} probes again")
+            raise EngineError(f"{refusal(agent, probe.result, describe_tries(probe))}; the run started no agent session; a resume with delegate run --resume {run_id} probes again")
 
 
 def _check_agent_file(
