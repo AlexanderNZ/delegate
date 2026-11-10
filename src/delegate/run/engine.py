@@ -1452,12 +1452,15 @@ def _record_outlook(
     `was_skipped` holds the reason of each ticket that the journal gives as skipped, before the plan change and the retry.
     A ticket whose step runs gets `unskip`, with the text of the dry run: the old `skip` no longer applies. A ticket that
     stays skipped with a new reason gets its new `skip` now. `before` gets the reason of each ticket that stays skipped,
-    so the loop of the resume writes a `skip` for it only when the reason is different then. Thus `delegate status` shows what the resume does, also before it gets
-    to the ticket. The record is the same as the section `skipped tickets:` of the dry run of the resume.
+    so the loop of the resume writes a `skip` for it only when the reason is different then. `before` loses each ticket
+    that gets `unskip`: if a blocker fails later in the resume, the loop writes a new `skip` for it, also with the old
+    reason. Thus `delegate status` shows what the resume does, also before it gets to the ticket. The record is the same
+    as the section `skipped tickets:` of the dry run of the resume.
     """
     for item in _outlook_of_skipped(order, progress, set(was_skipped)):
         if item.runs:
             journal.append(UNSKIP, ticket=item.ticket, outlook=item.text)
+            before.pop(item.ticket, None)
         elif item.reason is not None:
             if item.reason != was_skipped[item.ticket]:
                 journal.append("skip", ticket=item.ticket, blockers=item.blockers, reason=item.reason)

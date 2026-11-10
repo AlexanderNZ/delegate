@@ -328,6 +328,55 @@ def test_a_resume_leaves_skipped_a_ticket_whose_blocker_still_failed_and_gives_t
     assert sorted(end["built"]) == ["a", "b", "e"]
 
 
+def test_a_ticket_that_a_resume_runs_again_and_then_skips_again_with_its_old_reason_shows_as_skipped_after_the_resume(
+    tmp_path, capsys, scripted
+):
+    # Ticket b waits on a, c on b, and d on c. A and x fail, so the first run skips b, c and d. A retry of a builds a and
+    # pauses in the specialist of b. The retry of x takes c and d out of the skipped tickets, but the step of b fails.
+    # The engine skips c and d again. The new reason of d is the same as its old reason: the resume must still write a
+    # `skip` of d after its `unskip`, or the status shows d as pending after the run ended (#298).
+    scripted.files_by_ticket["x"] = {"x.txt": "x\n"}
+    end_with_no_verdict(scripted, scoped_only=False)
+    tickets = ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",)) + ticket("d", ("c",)) + ticket("x")
+    repo = make_repo(tmp_path, HEAD + tickets)
+    code, run_id = first_run(repo, capsys)
+    assert code == 1
+    (first,) = [e for e in read_journal_file(repo, run_id) if e["event"] == "skip" and e["ticket"] == "d"]
+    assert first["reason"] == "blocked by c, which was skipped"
+    pause_at_the_specialist_of_b_after_a_retry_of_a(repo, capsys, scripted, run_id)
+    healthy(scripted, "ACCEPT")
+    end_with_no_verdict_of(scripted, "b")
+
+    code, out, err = resume_main(repo, capsys, run_id, "--retry", "x")
+
+    assert code == 1
+    assert "ticket d: skipped: blocked by c, which was skipped\n" in err
+    events = read_journal_file(repo, run_id)
+    resumed = events[[index for index, event in enumerate(events) if event["event"] == "resume"][-1] :]
+    assert [(e["event"], e["ticket"]) for e in resumed if e["event"] in ("unskip", "skip")] == [
+        ("unskip", "c"), ("unskip", "d"), ("skip", "c"), ("skip", "d")
+    ]
+    end = events[-1]
+    assert (end["event"], end["result"], end["failed"], end["skipped"]) == ("run-end", "failed", ["b"], ["c", "d"])
+    snapshot = status_json(repo, capsys, run_id)
+    assert {t["id"]: t["state"] for t in snapshot["tickets"]} == {
+        "a": "built", "b": "failed", "c": "skipped", "d": "skipped", "x": "built"
+    }
+    row = status_row("\n".join(status_lines(repo, capsys, run_id)), "d")
+    assert row[2].split()[-1] == "skipped" and row[-1] == "blocked by c, which was skipped"
+
+
+def end_with_no_verdict_of(scripted, ticket_id):
+    """The harness ends the verifier of `ticket_id` at its time limit, with no report. Each other verifier gives its verdict."""
+
+    def time_limit(request):
+        killed = ticket_of(request) == ticket_id
+        scripted.write_verifier_report = not killed
+        scripted.verifier_end_state, scripted.verifier_exit_status = ("failed", -9) if killed else ("finished", 0)
+
+    scripted.during_verifier = time_limit
+
+
 def look_during_the_verifier_of(repo, capsys, scripted, run_id, ticket_id):
     """While the verifier of `ticket_id` works, read `delegate status --json` and the text of `delegate status`. Return the list
     that gets the two, once for each verifier of `ticket_id`."""
