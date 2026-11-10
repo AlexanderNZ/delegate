@@ -1327,7 +1327,8 @@ def git_shim(tmp_path: Path, monkeypatch, before: str) -> Path:
     shim = tmp_path / "shim"
     shim.mkdir()
     real = shutil.which("git")
-    (shim / "git").write_text(f'#!/bin/bash\n{before}\nexec "{real}" "$@"\n')
+    shell = shutil.which("sh")  # no fixed `/bin/...` path: the Nix build sandbox has no `/bin/bash`
+    (shim / "git").write_text(f'#!{shell}\n{before}\nexec "{real}" "$@"\n')
     (shim / "git").chmod(0o755)
     monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ['PATH']}")
     return shim

@@ -64,7 +64,7 @@ def test_a_dry_run_with_a_test_repository_works_from_the_repository_of_the_kit(s
 
 
 def test_a_test_reads_a_file_of_the_kit_by_path_with_no_look_up_of_the_repository():
-    assert (KIT / "CONTRIBUTING.md").is_file()
+    assert (KIT / "pyproject.toml").is_file()
     assert (KIT / "src" / "delegate").is_dir()
 
 
