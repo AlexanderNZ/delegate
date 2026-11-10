@@ -53,6 +53,7 @@ HALTED: str = "halted"
 CRASHED: str = "crashed"
 INTERRUPTED: str = "interrupted"
 SKIP: str = "skip"
+UNSKIP: str = "unskip"
 REBASE: str = "rebase"
 VERIFY_START: str = "verify-start"
 VERIFY_RESULT: str = "verify-result"
@@ -432,6 +433,16 @@ class Skip(TypedDict):
     reason: str
 
 
+class Unskip(TypedDict):
+    """A resume takes the ticket out of the skipped tickets (#298): the step of the ticket runs, if each step before it is built.
+
+    `outlook` is the text of the line of the ticket in the section `skipped tickets:` of the dry run of the resume.
+    """
+
+    ticket: str
+    outlook: str
+
+
 class Rebase(TypedDict):
     ticket: str
     result: str
@@ -642,6 +653,7 @@ EVENTS: dict[str, type] = {
     CRASHED: Crashed,
     INTERRUPTED: Interrupted,
     SKIP: Skip,
+    UNSKIP: Unskip,
     REBASE: Rebase,
     VERIFY_START: VerifyStart,
     VERIFY_RESULT: VerifyResult,

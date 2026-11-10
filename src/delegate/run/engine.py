@@ -202,7 +202,9 @@ from .brief import (
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
-from .events import CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE
+from .events import (
+    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE, UNSKIP,
+)
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
@@ -1375,8 +1377,8 @@ def _skipped_outlook(
 
     The function restores the progress of the run, applies the plan change and the retry, and applies the skip rule
     again, with the same functions as the resume (`restore_progress`, `_retry_plan`, `_apply_plan_change`,
-    `_prepare_resume` and `domain.skip_reason`). It takes each step that runs before a ticket as built: the skip rule
-    skips the dependants of a step that fails. Empty also when the resume is refused, so that no step runs.
+    `_prepare_resume` and `_outlook_of_skipped`). The resume records the same result in its journal (#298). Empty also
+    when the resume is refused, so that no step runs.
     """
     order = plan_order(workflow)
     try:
@@ -1389,14 +1391,39 @@ def _skipped_outlook(
     if review.check is not None:
         _apply_plan_change(review.check, progress)
     _prepare_resume(workflow, order, progress, plan)
+    return tuple(SkippedTicket(item.ticket, item.text) for item in _outlook_of_skipped(order, progress, was_skipped))
+
+
+class _Outlook(NamedTuple):
+    """What a resume does with one ticket that the run skipped, as `_outlook_of_skipped` finds it (#260, #298).
+
+    `text` is the text of the dry run. `runs` is True when the step of the ticket runs in the resume, if each step before
+    it is built. Else `reason` is the reason of the skip rule, with `blockers` (the blockers that stay not built), or None
+    for a ticket that a crash left unreached: the resume does not check it again.
+    """
+
+    ticket: str
+    text: str
+    runs: bool
+    reason: str | None
+    blockers: list[str]
+
+
+def _outlook_of_skipped(order: list[Ticket], progress: _Progress, was_skipped: set[str]) -> list[_Outlook]:
+    """What the resume does with each ticket of `was_skipped`, in plan order, from `progress` after `_prepare_resume`.
+
+    It takes each step that runs before a ticket as built: the skip rule skips the dependants of a step that fails. The dry
+    run prints the result (`_skipped_outlook`), and the resume records it before its first step (`_record_outlook`).
+    """
     built, failed, skipped = progress.built, progress.failed, progress.skipped
     complete = {*built, *failed, *skipped}
     runs: list[str] = []
-    outlook: list[SkippedTicket] = []
+    outlook: list[_Outlook] = []
     for ticket in order:
         if ticket.id in skipped:
             # The skip rule did not skip it: the run did not reach it after a crash (see `_prepare_resume`).
-            outlook.append(SkippedTicket(ticket.id, f"stays skipped until a retry of the step that crashed: {skipped[ticket.id]}"))
+            text = f"stays skipped until a retry of the step that crashed: {skipped[ticket.id]}"
+            outlook.append(_Outlook(ticket.id, text, False, None, []))
             continue
         if ticket.id in complete:
             continue
@@ -1406,14 +1433,35 @@ def _skipped_outlook(
         if ticket.id not in was_skipped:
             continue
         if reason is not None:
-            outlook.append(SkippedTicket(ticket.id, f"stays skipped: {reason}"))
+            blockers = domain.unbuilt_blockers(ticket.blocked_by, [*built, *runs])
+            outlook.append(_Outlook(ticket.id, f"stays skipped: {reason}", False, reason, blockers))
             continue
         earlier = [blocker for blocker in ticket.blocked_by if blocker in runs]
         text = "runs again" if not ticket.blocked_by else "runs again: each blocker is built"
         if earlier:
             text = f"runs again if {', '.join(earlier)} {'is' if len(earlier) == 1 else 'are'} built earlier in this resume"
-        outlook.append(SkippedTicket(ticket.id, text))
-    return tuple(outlook)
+        outlook.append(_Outlook(ticket.id, text, True, None, []))
+    return outlook
+
+
+def _record_outlook(
+    journal: Journal, order: list[Ticket], progress: _Progress, was_skipped: dict[str, str], before: dict[str, str]
+) -> None:
+    """Record in the journal what the resume does with each ticket that the run skipped, before the first step (#298).
+
+    `was_skipped` holds the reason of each ticket that the journal gives as skipped, before the plan change and the retry.
+    A ticket whose step runs gets `unskip`, with the text of the dry run: the old `skip` no longer applies. A ticket that
+    stays skipped with a new reason gets its new `skip` now. `before` gets the reason of each ticket that stays skipped,
+    so the loop of the resume writes a `skip` for it only when the reason is different then. Thus `delegate status` shows what the resume does, also before it gets
+    to the ticket. The record is the same as the section `skipped tickets:` of the dry run of the resume.
+    """
+    for item in _outlook_of_skipped(order, progress, set(was_skipped)):
+        if item.runs:
+            journal.append(UNSKIP, ticket=item.ticket, outlook=item.text)
+        elif item.reason is not None:
+            if item.reason != was_skipped[item.ticket]:
+                journal.append("skip", ticket=item.ticket, blockers=item.blockers, reason=item.reason)
+            before[item.ticket] = item.reason
 
 
 def _refuse_plan_change(review: PlanReview, workflow_path: Path, run_id: str) -> None:
@@ -2166,12 +2214,14 @@ def _execute(
             agents=sealed, configuration=_configuration_record(workflow),
         )
         progress = _Progress()
+        was_skipped: dict[str, str] = {}
     else:
         journal, events = _journal_events(state_dir, run_id)
         review, progress, run_base, plan = _resume_checks(
             workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
             project_config_paths(adapter), stack_changed,
         )
+        was_skipped = dict(progress.skipped)  # before the plan change and the retry, as in the dry run (`_skipped_outlook`)
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:
@@ -2211,6 +2261,7 @@ def _execute(
     retried_reason, before = _prepare_resume(workflow, order, progress, plan)
     for revived in plan.revive if plan is not None else ():
         journal.append("step-end", ticket=revived, state=BUILT, reason=None)
+    _record_outlook(journal, order, progress, was_skipped, before)
     complete = {*built, *failed, *skipped}
     ended_early = False
     paused: str | None = None

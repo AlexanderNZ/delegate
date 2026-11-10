@@ -557,6 +557,34 @@ def test_a_journal_with_a_reject_a_continuation_a_skip_a_pause_and_a_run_end_giv
     ]]
 
 
+def test_after_an_unskip_the_frame_shows_the_ticket_as_pending_with_no_reason_and_the_feed_says_that_it_runs_again(
+    tmp_path, monkeypatch
+):
+    # B failed, and c was skipped. A resume with `--retry b` takes c out of the skipped tickets before its first step
+    # (#298). C is pending again, not ended, and its row has no skip reason.
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "a", "b", "c", "d", blocked_by=SEQUENCE)
+    rejected_and_in_a_fixup(run)
+    fixup_accepted_and_b_continues_twice(run)
+    b_fails(run)
+    c_is_skipped_and_the_run_pauses_before_d(run)
+    position = run.seq
+    run.add(2000, "resume", run_id="r1", built=["a"], failed=["b"], skipped=["c"], open=None)
+    run.add(2000, "unskip", ticket="c", outlook="runs again if b is built earlier in this resume")
+
+    def ctrl_c(seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    code, out = watch(repo, monkeypatch, "r1", "--from", str(position), sleep=ctrl_c)
+
+    assert code == 130
+    frame = frames(out)[-1]
+    assert "2/4 ended" in frame[0], frame[0]
+    assert "  3  │   · c     pending" in frame
+    assert "blocked by" not in "\n".join(frame)
+    assert frame[-1] == "16:33  #c   not skipped · runs again if b is built earlier in this resume", "\n".join(frame)
+
+
 def painted_frames(out: str) -> list[list[str]]:
     """The frames as the terminal gets them, with the paint of each role, and with no other control sequence."""
     return screens(out)

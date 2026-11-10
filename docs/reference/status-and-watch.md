@@ -85,7 +85,7 @@ The columns of the table:
 | `#` | The position of the ticket in the plan. |
 | (no header) | The rail `│` when the one [**blocker**](../glossary.md#blocker) of the ticket is the row directly above, as in the live view. |
 | `plan` | The node glyph of the state, and the id of the ticket, as in the live view. |
-| `state` | `pending` (no event yet), `running` (`step-start`, and no `step-end`; or a `retry` after the `step-end`), `built`, `failed`, or `skipped`. |
+| `state` | `pending` (no event yet, or an `unskip` event after the [**skip**](../glossary.md#skip): a resume takes the ticket out of the skipped tickets), `running` (`step-start`, and no `step-end`; or a `retry` after the `step-end`), `built`, `failed`, or `skipped`. |
 | `phase` | For a running ticket, the first phase on its row, and each further phase on a sub-row, as in the live view: `✓` for a phase that is done, `●` for the phase that runs, and `○` for a phase that is to come. Only phases go in this column. |
 | `after` | The ids of the blockers of the ticket when the rail does not join it to its blocker, as in the live view. |
 | `verdict` | The verdict of the newest `verdict` event of the ticket. Empty when there is none. A verdict of a [**chain**](../glossary.md#chain) in [**`economy`**](../glossary.md#economy) mode covers each ticket in its `tickets` field. |

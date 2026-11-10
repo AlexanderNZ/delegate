@@ -368,6 +368,9 @@ def _ticket(
         elif kind == "skip":
             state = SKIPPED
             reason = None if event.get("reason") is None else str(event["reason"])
+        elif kind == "unskip":
+            # A resume took the ticket out of the skipped tickets: the old skip no longer applies (#298).
+            state, reason = PENDING, None
         elif kind == "fixup-start":
             fixup_round = int(event["round"])  # type: ignore[call-overload]
         elif kind == "continuation":

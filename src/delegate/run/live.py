@@ -582,4 +582,6 @@ class LiveView:
             return f"fix-up round {event['round']} refused"
         if kind == "skip":
             return f"skipped{SEPARATOR}{event['reason']}" if event.get("reason") else "skipped"
+        if kind == "unskip":
+            return f"not skipped{SEPARATOR}{event['outlook']}"
         return kind
