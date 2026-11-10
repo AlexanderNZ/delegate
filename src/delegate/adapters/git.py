@@ -2,7 +2,10 @@
 
 Each method runs git through `subprocess`, with the path of the repository or
 worktree as the working directory of the command (`git -C`). A command that
-fails raises `VcsError` with the command and the message of git.
+fails raises `VcsError` with the command and the message of git. Each command reads no stdin, asks for no
+credential on a terminal (`GIT_TERMINAL_PROMPT=0`), and has a time limit: 10 minutes, and 30 minutes for the clone of
+a verifier copy. A command that reaches its limit raises `VcsError` with "timed out after N seconds" (#295). The command
+that stops the fsmonitor daemon has its own limit.
 
 Every worktree and every copy that this backend makes runs with
 `core.fsmonitor=false`, whatever the user sets. With the setting on, git starts a
@@ -57,28 +60,55 @@ from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseRes
 # The limit, in seconds, for the command that stops the fsmonitor daemon of a directory.
 _FSMONITOR_STOP_TIMEOUT: int = 30
 
+# The limit, in seconds, for each other git command of the backend: 10 minutes (#295).
+_GIT_TIMEOUT: int = 600
 
-def _run(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
+# The limit, in seconds, for the clone of a verifier copy: 30 minutes. The clone copies the whole history, and a
+# filter, such as an LFS smudge, can need more time than a command that reads the repository.
+_CLONE_TIMEOUT: int = 1800
+
+
+def _environment() -> dict[str, str]:
+    """The environment of a git command of the backend: git asks for no credential on a terminal."""
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+
+def _run(directory: Path, *args: str, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     """Run git in `directory` and return the result, whatever the exit code is.
 
     The command runs with `core.fsmonitor=false`: a worktree gets its settings through the environment of the processes
     that the engine starts, and a command of the backend has none of them.
+
+    The command reads no stdin (a hook, a signing program or a filter cannot wait on the stdin of the engine), starts
+    no prompt for a credential, and has a time limit: `timeout` seconds, or `_GIT_TIMEOUT`. A command that reaches the
+    limit is a `VcsError`.
     """
-    return subprocess.run(["git", "-C", str(directory), "-c", "core.fsmonitor=false", *args], capture_output=True, text=True)
+    limit = _GIT_TIMEOUT if timeout is None else timeout
+    command = ["git", "-C", str(directory), "-c", "core.fsmonitor=false", *args]
+    try:
+        return subprocess.run(
+            command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=_environment(), timeout=limit
+        )
+    except subprocess.TimeoutExpired:
+        operation = f"git {' '.join(args)}"
+        cause = f"timed out after {limit} seconds"
+        raise VcsError(
+            f"{operation} in {directory} {cause}", operation=operation, directory=directory, cause=cause
+        ) from None
 
 
-def _git_raw(directory: Path, *args: str) -> str:
+def _git_raw(directory: Path, *args: str, timeout: int | None = None) -> str:
     """Run git in `directory` and return its output as it is. Raise VcsError when git fails."""
-    result = _run(directory, *args)
+    result = _run(directory, *args, timeout=timeout)
     if result.returncode != 0:
         operation, cause = f"git {' '.join(args)}", result.stderr.strip() or str(result.returncode)
         raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=directory, cause=cause)
     return result.stdout
 
 
-def _git(directory: Path, *args: str) -> str:
+def _git(directory: Path, *args: str, timeout: int | None = None) -> str:
     """Run git in `directory` and return its output without the surrounding white space. Raise VcsError when git fails."""
-    return _git_raw(directory, *args).strip()
+    return _git_raw(directory, *args, timeout=timeout).strip()
 
 
 # The file in the git directory of a worktree that holds the settings of that worktree alone.
@@ -361,7 +391,7 @@ class GitVersionControl:
         copy = copy.absolute()
         existed = copy.exists()
         try:
-            _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy))
+            _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy), timeout=_CLONE_TIMEOUT)
             _git(copy, "checkout", "-q", "-B", branch, f"origin/{branch}")
             _git(copy, "branch", "-f", base, f"origin/{base}")
             _git(copy, "remote", "remove", "origin")
@@ -396,7 +426,7 @@ class GitVersionControl:
         try:
             subprocess.run(
                 ["git", "-C", str(path), "fsmonitor--daemon", "stop"],
-                capture_output=True, text=True, timeout=_FSMONITOR_STOP_TIMEOUT,
+                capture_output=True, text=True, stdin=subprocess.DEVNULL, env=_environment(), timeout=_FSMONITOR_STOP_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             pass

@@ -1317,3 +1317,80 @@ def test_a_scratch_repository_that_cannot_be_made_is_a_vcs_error_and_leaves_noth
         vcs.make_scratch_repository(blocked / "scratch")
 
     assert not (blocked / "scratch").exists()
+
+
+# The limits and the quiet start of each git command of the backend (#295). A shim of `git` is the system boundary: it
+# stands for a hook, a signing program or a filter that waits on stdin, or hangs, and it passes each other call to git.
+
+def git_shim(tmp_path: Path, monkeypatch, before: str) -> Path:
+    """Put a `git` first on PATH that runs the shell text `before`, and then the real git. Return the shim directory."""
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    real = shutil.which("git")
+    (shim / "git").write_text(f'#!/bin/bash\n{before}\nexec "{real}" "$@"\n')
+    (shim / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ['PATH']}")
+    return shim
+
+
+@pytest.fixture
+def open_stdin():
+    """Make fd 0 the read end of a pipe that nothing writes to and nothing closes: a read on it waits."""
+    saved, (read_end, write_end) = os.dup(0), os.pipe()
+    os.dup2(read_end, 0)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, read_end, write_end):
+            os.close(fd)
+
+
+def test_a_git_command_of_the_backend_reads_no_stdin_of_the_engine(tmp_path, vcs, monkeypatch, open_stdin):
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "stdin"
+    # With the stdin of the engine, a program that reads it waits for ever. With the null device, it reads the end of the input.
+    git_shim(tmp_path, monkeypatch, f'if [ /dev/stdin -ef /dev/null ]; then echo null; else echo inherited; fi > "{marker}"')
+
+    assert vcs.branch_exists(repo, "main")
+
+    assert marker.read_text().strip() == "null"
+
+
+def test_a_git_command_of_the_backend_asks_for_no_credential_on_a_terminal(tmp_path, vcs, monkeypatch):
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "prompt"
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    git_shim(tmp_path, monkeypatch, f'echo "${{GIT_TERMINAL_PROMPT-unset}}" > "{marker}"')
+
+    vcs.branch_exists(repo, "main")
+
+    assert marker.read_text().strip() == "0"
+
+
+def test_a_git_command_that_runs_past_its_limit_is_a_vcs_error_that_says_it_timed_out(tmp_path, vcs, monkeypatch):
+    repo = make_repo(tmp_path)
+    git_shim(tmp_path, monkeypatch, 'case "$*" in *show-ref*) exec sleep 60;; esac')
+    monkeypatch.setattr("delegate.adapters.git._GIT_TIMEOUT", 1)
+
+    with pytest.raises(VcsError, match="timed out after 1 seconds") as error:
+        vcs.branch_exists(repo, "main")
+
+    assert error.value.directory == repo
+    assert "show-ref" in str(error.value)
+
+
+def test_the_clone_of_a_verifier_copy_has_its_own_longer_limit(tmp_path, vcs, monkeypatch):
+    repo = make_repo(tmp_path)
+    vcs.create_branch(repo, "run/demo", "main")
+    vcs.create_branch(repo, "run/demo-a", "main")
+    copy = tmp_path / "copy"
+    git_shim(tmp_path, monkeypatch, 'case "$*" in *" clone "*) exec sleep 60;; esac')
+    # The general limit is shorter than the clone limit: only the clone gets the time that it needs.
+    monkeypatch.setattr("delegate.adapters.git._GIT_TIMEOUT", 1)
+    monkeypatch.setattr("delegate.adapters.git._CLONE_TIMEOUT", 2)
+
+    with pytest.raises(VcsError, match="timed out after 2 seconds"):
+        vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+
+    assert not copy.exists()
