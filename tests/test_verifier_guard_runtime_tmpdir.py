@@ -29,12 +29,13 @@ from pathlib import Path
 
 import pytest
 
+from delegate.cli import delegate
 from delegate.definitions.declaration import load_declaration
 from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 
-from .support import committed_repo
+from .support import committed_repo, make_repo
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "java-spring.toml"
 
@@ -263,3 +264,44 @@ def test_the_bash_guard_and_the_write_guard_agree_on_each_runtime_tmpdir(host, s
     assert verdicts[("trailing-slashes", f"{host.tmp}/x/f")] == (0, 0)
     assert verdicts[("safe", f"{host.tmp}/repo/f")] == (2, 2)
     assert verdicts[("home", f"{host.home}/f")] == (2, 2)
+
+
+# --- The scratch directory of a verifier session (#294) -----------------------
+
+
+def test_the_guard_of_a_verifier_session_permits_a_write_in_its_scratch_directory_outside_the_directory_of_the_run(
+    host, scripted, monkeypatch, capsys
+):
+    # The engine makes the scratch directory of a verifier in the temp directory of the host, outside the fixed
+    # prefixes here, and sets `TMPDIR` of the session to it. The guards run while the session runs, with its environment
+    # and its working directory, as the harness runs them.
+    engine_temp = host.base / "engine-tmp"
+    engine_temp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(engine_temp))
+    monkeypatch.setattr(tempfile, "tempdir", None)  # the module keeps the first value that it read
+    verdicts: list[tuple[str, int]] = []
+
+    def guard(request) -> None:
+        scratch = request.environment["TMPDIR"]
+        env = {**os.environ, **request.environment, "HOME": str(host.home)}
+        for command in (f"touch {scratch}/notes.md", f"echo probe > {scratch}/probe.log", f"touch {request.cwd}/f"):
+            verdicts.append((command, _bash(command, "bash", env, request.cwd).returncode))
+        verdicts.append((f"Write {scratch}/verdict-draft.json", _write(f"{scratch}/verdict-draft.json", env, request.cwd).returncode))
+
+    scripted.during_verifier = guard
+    scripted.files_by_ticket = {}  # ticket a writes `feature.txt`, which the gate needs
+    repo = make_repo(host.base)
+
+    code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo)])
+    out = capsys.readouterr().out
+
+    assert code == 0, out
+    (request,) = scripted.verifier_calls
+    scratch = request.environment["TMPDIR"]
+    assert Path(scratch).parent == engine_temp
+    assert verdicts == [
+        (f"touch {scratch}/notes.md", 0),
+        (f"echo probe > {scratch}/probe.log", 0),
+        (f"touch {request.cwd}/f", 2),  # the copy is a git tree, so the guard still denies a write there
+        (f"Write {scratch}/verdict-draft.json", 0),
+    ]

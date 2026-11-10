@@ -1,9 +1,11 @@
-"""Each agent session gets a scratch directory in the directory of the run, and the brief names it (#227).
+"""Each agent session gets a scratch directory, and the brief names it (#227).
 
 A host in `dontAsk` mode refuses a write to `/tmp`, and a scratch file in the worktree stops the step at the check for
-uncommitted changes. So the engine makes `runs/<run id>/scratch/<ticket>/<role>/` before each session, adds it to the
-session, sets `TMPDIR` to it, and names it in the brief. `delegate clean` removes the scratch directories of a run that
-it cleans.
+uncommitted changes. So the engine makes a scratch directory before each session, adds it to the session, sets `TMPDIR`
+to it, and names it in the brief. A specialist and a fix-up get `runs/<run id>/scratch/<ticket>/<role>/`, and
+`delegate clean` removes the scratch directories of a run that it cleans. A verifier gets a new private directory in the
+temp directory of the host, because the directory of the run holds the report of the specialist (#294). The engine
+removes it after the session, and `delegate clean` removes one that a kill left.
 
 Each case runs `delegate.main` against a real temporary git repository. The Claude Code cases start the real adapter on
 a stand-in `claude` command, which records its arguments and its environment. A scripted adapter does the work of each
@@ -29,6 +31,8 @@ from . import claude_fake
 from .support import WORKFLOW, ScriptedAdapter, make_repo, read_journal, read_journal_file, state_dir, valid_report, write_project_agents
 
 FINDING = "FINDING-2271 feature.txt has no header row"
+
+TWO_TICKETS = WORKFLOW + '\n[[tickets]]\nid = "b"\ntext = "The import command reads a CSV file."\nstack = "python"\nblocked-by = []\n'
 
 #: The fixed temp prefixes of the verifier guards, as text.
 FIXED = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
@@ -117,15 +121,23 @@ def test_the_harness_gets_the_scratch_directory_of_each_session_in_add_dir_and_t
     code, out, err = run(repo, capsys)
 
     assert (code, err) == (0, "")
-    scratch = scratch_of(repo, run_id_of(out)) / "a"
+    run_id = run_id_of(out)
+    scratch = scratch_of(repo, run_id) / "a"
     calls = fake.calls()
     assert [role_of(str(call["stdin"])) for call in calls] == ["specialist", "verifier", "fix-up", "verifier"]
+    verifier_directories = []
     for call in calls:
         role = role_of(str(call["stdin"]))
-        directory = str(scratch / role)
+        directory = call["env"]["TMPDIR"]
+        if role == "verifier":
+            # A verifier gets a new directory outside the directory of the run for each session (#294).
+            assert Path(directory).name.startswith(f"delegate-verifier-{run_id}-a-"), directory
+            verifier_directories.append(directory)
+        else:
+            assert directory == str(scratch / role), role
         assert directory in added_directories(call["argv"]), (role, call["argv"])
-        assert call["env"]["TMPDIR"] == directory, role
         assert f"`{directory}`" in call["stdin"], role
+    assert len(set(verifier_directories)) == 2
     assert adapter.scratch_existed == [True] * 4
 
 
@@ -209,7 +221,7 @@ def test_clean_removes_the_scratch_directories_of_a_run_that_it_cleans(tmp_path,
     code, out, _ = run(repo, capsys)
     run_id = run_id_of(out)
     scratch = scratch_of(repo, run_id)
-    assert sorted(path.name for path in (scratch / "a").iterdir()) == ["specialist", "verifier"]
+    assert sorted(path.name for path in (scratch / "a").iterdir()) == ["specialist"]
     (scratch / "a" / "specialist" / "vitest.log").write_text("output\n")
 
     code, out, err = clean(repo, capsys, run_id)
@@ -244,6 +256,109 @@ def test_an_abandon_removes_the_scratch_directories_of_the_run(tmp_path, capsys,
     assert (code, err) == (0, "")
     assert not scratch_of(repo, run_id).exists()
     assert read_journal_file(repo, run_id)[-1]["scratch_removed"] == [str(scratch_of(repo, run_id))]
+
+
+@pytest.mark.parametrize("mode", ["assure", "economy"])
+def test_no_verifier_brief_and_no_verifier_environment_names_a_path_in_the_directory_of_the_run(tmp_path, capsys, scripted, mode):
+    # The report of the specialist is in the directory of the run, so a blind verifier must not learn where that is (#294).
+    scripted.verdict_sequence = ["REJECT", "ACCEPT"]
+    scripted.verdict_findings = [FINDING]
+    repo = make_repo(tmp_path, WORKFLOW.replace('mode = "assure"', f'mode = "{mode}"'))
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    run_dir = state_dir(repo) / "runs" / run_id_of(out)
+    names = {str(run_dir), os.path.realpath(run_dir)}
+    assert [role_of(request.prompt) for request in scripted.verifier_calls] == ["verifier", "verifier"]
+    for request in scripted.verifier_calls:
+        texts = [request.prompt, *request.environment.values(), *(str(path) for path in request.added_directories)]
+        assert [text for text in texts if any(name in text for name in names)] == []
+
+
+def test_the_scratch_directory_of_a_verifier_is_private_names_the_run_and_the_ticket_and_goes_after_the_session(
+    tmp_path, capsys, scripted
+):
+    seen: list[tuple[str, int]] = []
+    scripted.during_verifier = lambda request: seen.append(
+        (request.environment["TMPDIR"], Path(request.environment["TMPDIR"]).stat().st_mode & 0o777)
+    )
+    repo = make_repo(tmp_path)
+
+    code, out, err = run(repo, capsys)
+
+    assert (code, err) == (0, "")
+    ((directory, permissions),) = seen
+    assert Path(directory).name.startswith(f"delegate-verifier-{run_id_of(out)}-a-")
+    assert permissions == 0o700
+    assert f"`{directory}`" in scratch_section(scripted.verifier_calls[0].prompt)
+    assert not Path(directory).exists()
+    assert sorted(path.name for path in (scratch_of(repo, run_id_of(out)) / "a").iterdir()) == ["specialist"]
+
+
+def verifier_scratch_of(repo: Path, run_id: str) -> Path:
+    """The scratch directory of the verifier that the `verify-start` of the run records."""
+    return Path(str(next(e["scratch"] for e in read_journal_file(repo, run_id) if e["event"] == "verify-start")))
+
+
+def test_clean_removes_the_scratch_directory_of_a_verifier_that_a_kill_left(tmp_path, capsys, scripted):
+    repo = make_repo(tmp_path)
+    code, out, _ = run(repo, capsys)
+    run_id = run_id_of(out)
+    left = verifier_scratch_of(repo, run_id)
+    assert not left.exists()
+    # A run process that a kill ends during a verifier session leaves the scratch directory of the verifier.
+    left.mkdir()
+    (left / "notes.md").write_text("probe\n")
+
+    code, out, err = clean(repo, capsys, "--dry-run", run_id)
+
+    assert (code, err) == (0, "")
+    assert (left / "notes.md").is_file()
+    assert str(left) in out
+
+    code, out, err = clean(repo, capsys, run_id)
+
+    assert (code, err) == (0, "")
+    assert not left.exists()
+    assert f"removed the scratch directories ({scratch_of(repo, run_id)}, {left})" in out
+    assert read_journal_file(repo, run_id)[-1]["scratch_removed"] == [str(scratch_of(repo, run_id)), str(left)]
+
+
+def test_clean_removes_a_verifier_scratch_directory_of_the_run_that_a_kill_left_before_the_journal_named_it(
+    tmp_path, capsys, scripted
+):
+    repo = make_repo(tmp_path)
+    code, out, _ = run(repo, capsys)
+    run_id = run_id_of(out)
+    # A kill during the copy or the prepare commands of a verifier leaves a directory that no `verify-start` names.
+    left = Path(tempfile.mkdtemp(prefix=f"delegate-verifier-{run_id}-a-"))
+    other = Path(tempfile.mkdtemp(prefix="delegate-verifier-20200101T000000Z-0000-a-"))
+    try:
+        code, out, err = clean(repo, capsys, run_id)
+
+        assert (code, err) == (0, "")
+        assert not left.exists()
+        assert other.is_dir()
+        assert str(left) in read_journal_file(repo, run_id)[-1]["scratch_removed"]
+    finally:
+        shutil.rmtree(other, ignore_errors=True)
+        shutil.rmtree(left, ignore_errors=True)
+
+
+def test_an_abandon_removes_the_scratch_directory_of_a_verifier_that_a_kill_left(tmp_path, capsys, scripted):
+    scripted.failing_tickets = {"b"}
+    repo = make_repo(tmp_path, TWO_TICKETS)
+    code, out, _ = run(repo, capsys)
+    run_id = run_id_of(out)
+    left = verifier_scratch_of(repo, run_id)
+    left.mkdir()
+
+    code, out, err = clean(repo, capsys, "--abandon", run_id, "--reason", "the ticket is gone")
+
+    assert (code, err) == (0, "")
+    assert not left.exists()
+    assert str(left) in read_journal_file(repo, run_id)[-1]["scratch_removed"]
 
 
 @pytest.fixture
@@ -284,7 +399,8 @@ def test_on_a_host_whose_temp_directory_is_outside_the_fixed_prefixes_the_verifi
     assert (code, err) == (0, "")
     (verifier,) = scripted.verifier_calls
     session_temp = Path(verifier.environment["TMPDIR"])
-    assert session_temp == scratch_of(repo, run_id_of(out)) / "a" / "verifier"
+    assert session_temp.parent == host_temp
+    assert session_temp.name.startswith(f"delegate-verifier-{run_id_of(out)}-a-")
     assert verifier.cwd.is_relative_to(session_temp)
     assert verifier.report_path.is_relative_to(session_temp)
     assert [str(path) for path in verifier.added_directories] == [str(verifier.cwd.parent / "proof"), str(session_temp)]
@@ -304,4 +420,4 @@ def test_on_a_host_whose_temp_directory_is_in_a_fixed_prefix_the_verifier_copy_s
     assert (code, err) == (0, "")
     (verifier,) = scripted.verifier_calls
     assert str(verifier.cwd).startswith("/tmp/delegate-verify-")
-    assert verifier.environment["TMPDIR"] == str(scratch_of(repo, run_id_of(out)) / "a" / "verifier")
+    assert verifier.environment["TMPDIR"].startswith(f"/tmp/delegate-verifier-{run_id_of(out)}-a-")

@@ -7,8 +7,9 @@ a verifier also leaves the temporary copy of the verifier and its proof copy.
 `clean` removes them for each run that ended `built`, with the rules of
 `cleanup.clean_tickets`: it stops the file watchers, removes the ticket
 worktrees and their hooks, deletes each ticket branch that the run branch
-holds, and removes the leftover verifier copies and proof copies, and the
-scratch directories of the agent sessions of the run (#227). With
+holds, and removes the leftover verifier copies and proof copies, the
+scratch directories of the agent sessions of the run (#227), and each scratch
+directory of a verifier session that a kill left in the temp directory (#294). With
 `merged`, it then deletes the run branch when the base branch holds it or the default
 branch of the repository holds it (#267): a stacked run has the run branch of an earlier run as its base branch,
 and a fixed base branch never moves. When the run branch is gone already, the base branch and the default branch are the holders of the ticket
@@ -33,7 +34,7 @@ The lines then say what the command would remove and keep.
 
 `abandon` is the other use of the module (#201): it ends a run that is not built for good. It writes `run-end` with the
 result `abandoned` and the reason, and then removes the ticket worktrees, the ticket branches and the hooks directory
-whatever they hold, and the scratch directories of the run. It keeps the run branch, unless the caller asks to delete it. A stale lock that it removes is
+whatever they hold, and the scratch directories of the run and of its verifiers. It keeps the run branch, unless the caller asks to delete it. A stale lock that it removes is
 recorded with `lock-broken` before the `run-end` (#207).
 
 The module starts no process and imports no adapter: the port does the work.
@@ -43,13 +44,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
-from .engine import CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, EngineError, locate_state, restore_progress
+from .engine import (
+    CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, EngineError, locate_state, restore_progress,
+)
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
@@ -105,7 +109,8 @@ class RunClean:
         if kept:
             parts.append(f"{verbs[2]} " + "; ".join(kept))
         if self.scratch_removed:
-            parts.append(f"{verbs[0]} the scratch directory ({', '.join(self.scratch_removed)})")
+            noun = "scratch directory" if len(self.scratch_removed) == 1 else "scratch directories"
+            parts.append(f"{verbs[0]} the {noun} ({', '.join(self.scratch_removed)})")
         if not parts:
             return f"run {self.run_id}: nothing to remove"
         return f"run {self.run_id}: " + "; ".join(parts) + f"; {verbs[3]} {format_size(self.bytes_freed)}"
@@ -248,7 +253,7 @@ def _clean_run(
                 continue
         outcome.tracebacks_removed.append(str(trace))
         outcome.bytes_freed += size
-    _remove_scratch(outcome, journal.parent, dry_run)
+    _remove_scratch(outcome, journal.parent, events, dry_run)
     if dry_run:
         return outcome
     remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
@@ -277,23 +282,41 @@ def _remove_copies(outcome: RunClean, events: list[dict[str, object]], dry_run: 
         outcome.bytes_freed += size
 
 
-def _remove_scratch(outcome: RunClean, run_directory: Path, dry_run: bool) -> None:
-    """Remove the scratch directory of the run, `<run dir>/scratch`, which holds the scratch directory of each agent session (#227).
+def _remove_scratch(outcome: RunClean, run_directory: Path, events: list[dict[str, object]], dry_run: bool) -> None:
+    """Remove the scratch directory of the run, `<run dir>/scratch`, which holds the scratch directory of each specialist
+    and fix-up session (#227), then each scratch directory of a verifier of the run that a kill left (`_leftover_verifier_scratch`).
 
-    Add it to `outcome` with its size. The leftover copies go first (`_remove_copies`), so the file watcher of a copy in
-    it is stopped. With `dry_run`, remove nothing. A run with no scratch directory adds nothing.
+    Add each to `outcome` with its size. The leftover copies go first (`_remove_copies`), so the file watcher of a copy in
+    one is stopped. With `dry_run`, remove nothing. A directory that is not there adds nothing.
     """
-    scratch = run_directory / SCRATCH_DIRECTORY
-    if not scratch.is_dir():
-        return
-    size = _size(scratch)
-    if not dry_run:
-        shutil.rmtree(scratch, ignore_errors=True)
-        if scratch.exists():
-            outcome.errors.append(f"scratch directory {scratch}: it could not be removed")
-            return
-    outcome.scratch_removed.append(str(scratch))
-    outcome.bytes_freed += size
+    for scratch in [run_directory / SCRATCH_DIRECTORY, *_leftover_verifier_scratch(events, run_directory.name)]:
+        if not scratch.is_dir():
+            continue
+        size = _size(scratch)
+        if not dry_run:
+            shutil.rmtree(scratch, ignore_errors=True)
+            if scratch.exists():
+                outcome.errors.append(f"scratch directory {scratch}: it could not be removed")
+                continue
+        outcome.scratch_removed.append(str(scratch))
+        outcome.bytes_freed += size
+
+
+def _leftover_verifier_scratch(events: list[dict[str, object]], run_id: str) -> list[Path]:
+    """The scratch directories of the verifiers of the run that are still on the disk (#294).
+
+    The engine removes the scratch directory of a verifier when the session ends, so only a kill leaves one. They are
+    the directories that the `verify-start` events name, and the directories in the temp directory whose names start
+    with the prefix of the run: a kill before `verify-start` leaves a directory that no event names. Only a path of the
+    shape that the engine makes counts: a name that starts with `delegate-verifier-<run id>-`.
+    """
+    prefix = f"{VERIFIER_SCRATCH_PREFIX}{run_id}-"
+    named = [Path(str(e["scratch"])) for e in events if e["event"] == "verify-start" and "scratch" in e]
+    found: list[Path] = []
+    for path in [*named, *sorted(Path(tempfile.gettempdir()).glob(f"{prefix}*"))]:
+        if path.name.startswith(prefix) and path.is_dir() and path not in found:
+            found.append(path)
+    return found
 
 
 def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
@@ -507,7 +530,7 @@ def _abandon_run(
     errors += cleanup.errors
     outcome.bytes_freed = sum(sizes.get(path, 0) for path in cleanup.worktrees_removed)
     _remove_copies(outcome, events, False, vcs)
-    _remove_scratch(outcome, journal.parent, False)
+    _remove_scratch(outcome, journal.parent, events, False)
     result = Abandoned(outcome, run_branch, reason, already)
     if delete_run_branch:
         try:

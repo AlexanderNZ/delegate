@@ -41,10 +41,12 @@ each verifier run, the engine also makes the proof copy beside the temporary
 copy: the tree of the copy with no `.git` entry, where the verifier breaks a
 check for a red proof. The engine removes both copies after every verifier run.
 
-Each agent session gets a scratch directory in the directory of the run, `scratch/<ticket>/<role>/` (#227). The engine
-makes it before the session, adds it to the session, sets `TMPDIR` to it, and the brief names it. A host can refuse a
-write to `/tmp`, and a scratch file in the tree changes the work, so the agent writes its scratch files there. The
-directories stay after the run, and `delegate clean` removes them.
+Each agent session gets a scratch directory (#227). The engine makes it before the session, adds it to the session,
+sets `TMPDIR` to it, and the brief names it. A host can refuse a write to `/tmp`, and a scratch file in the tree changes
+the work, so the agent writes its scratch files there. A specialist and a fix-up get `scratch/<ticket>/<role>/` in the
+directory of the run; these directories stay after the run, and `delegate clean` removes them. A verifier gets a new
+private directory in the temp directory of the host, outside the directory of the run, which holds the report of the
+specialist (#294). The engine removes it when the session ends, and `delegate clean` removes one that a kill left.
 
 In `economy` mode each ticket branch starts from the tip of the previous built
 ticket, and the engine runs no gate and no verifier for a ticket by itself: a
@@ -241,8 +243,13 @@ ROLE_SPECIALIST: str = "specialist"
 ROLE_FIXUP: str = "fix-up"
 ROLE_VERIFIER: str = "verifier"
 
-# The directory of the run that holds the scratch directory of each agent session: `<run dir>/scratch/<ticket>/<role>/` (#227).
+# The directory of the run that holds the scratch directory of each specialist and fix-up session:
+# `<run dir>/scratch/<ticket>/<role>/` (#227).
 SCRATCH_DIRECTORY: str = "scratch"
+
+# The prefix of the name of the scratch directory of a verifier session, in the temp directory of the host:
+# `delegate-verifier-<run id>-<ticket>-<random>` (#294). See `_verifier_scratch_directory`.
+VERIFIER_SCRATCH_PREFIX: str = "delegate-verifier-"
 
 # The temp prefixes that each verifier guard permits, whatever the value of `TMPDIR` (`VERIFIER_TEMP_PATH_PREFIXES` of
 # the definitions context; a `/private` before them counts as no prefix). The run context does not import that context,
@@ -2681,6 +2688,17 @@ def _scratch_directory(run_dir: Path, ticket: str, role: str) -> Path:
     return path
 
 
+def _verifier_scratch_directory(run_id: str, ticket: str) -> Path:
+    """Make the scratch directory of one verifier session, and give it (#294).
+
+    The directory is new and private (`tempfile.mkdtemp`), in the temp directory of the host, with a name that starts
+    with `delegate-verifier-<run id>-<ticket>-`. It is outside the directory of the run, which holds the report of the
+    specialist, so the brief and the environment of a blind verifier name no path there. The caller removes it when the
+    session ends, and `delegate clean` removes one that a kill left.
+    """
+    return Path(tempfile.mkdtemp(prefix=f"{VERIFIER_SCRATCH_PREFIX}{run_id}-{ticket}-"))
+
+
 def _verifier_temp_parent(scratch: Path) -> Path | None:
     """The directory where the engine makes the temporary copy of a verifier: None for the temp directory of the host.
 
@@ -3635,8 +3653,12 @@ def _verify_round(
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
-    own_scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_VERIFIER)
-    scratch = Path(tempfile.mkdtemp(prefix="delegate-verify-", dir=_verifier_temp_parent(own_scratch)))
+    own_scratch = _verifier_scratch_directory(step.run_dir.name, ticket.id)
+    try:
+        scratch = Path(tempfile.mkdtemp(prefix="delegate-verify-", dir=_verifier_temp_parent(own_scratch)))
+    except OSError:
+        shutil.rmtree(own_scratch, ignore_errors=True)
+        raise
     try:
         copy = scratch / "copy"
         report_path = scratch / "verdict.json"
@@ -3686,7 +3708,7 @@ def _verify_round(
         before = snapshot_worktree(step.vcs, step.worktree)
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
-            commit=verified, copy=str(copy), snapshot=before.to_record(), **step.chain_fields,
+            commit=verified, copy=str(copy), scratch=str(own_scratch), snapshot=before.to_record(), **step.chain_fields,
         )
         # The stream goes in the evidence directory from the start, outside the copy, so it stays when the copy goes.
         stream = _start_agent(step.journal, ticket.id, ROLE_VERIFIER, round_number, evidence / report_path.name)
@@ -3715,6 +3737,7 @@ def _verify_round(
     finally:
         step.vcs.stop_file_watcher(scratch / "copy")
         shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(own_scratch, ignore_errors=True)
     report_path = evidence / report_path.name
     stream = result.event_stream
     if stream.is_relative_to(scratch):

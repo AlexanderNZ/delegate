@@ -30,7 +30,7 @@ The environment of the command is the environment of the [**engine**](../glossar
 | `--strict-mcp-config` | Ignore every MCP configuration other than `--mcp-config`: the servers of the user, of the project, and of the plugins. See [what the agent gets](#what-the-agent-gets). |
 | `--mcp-config <servers>` | Only when the stack names MCP servers in its `mcp-servers` table. One JSON object, `{"mcpServers": {...}}`: a local server as `command` and `args` (and `env`, when the server has an `env` table), a remote server as `type` `http` and `url`. |
 | `--add-dir <proof copy>` | Only for a verifier: the proof copy that the engine made for a [**red proof**](../glossary.md#red-proof). See [the proof copy of a verifier](#the-proof-copy-of-a-verifier). |
-| `--add-dir <scratch directory>` | For each agent session of a [**ticket**](../glossary.md#ticket): the scratch directory of the session, in the directory of the [**run**](../glossary.md#run). See [the scratch directory](#the-scratch-directory). |
+| `--add-dir <scratch directory>` | For each agent session of a [**ticket**](../glossary.md#ticket): the scratch directory of the session. For a specialist and a [**fix-up**](../glossary.md#fix-up) specialist it is in the directory of the [**run**](../glossary.md#run), and for a verifier it is in the temp directory of the host. See [the scratch directory](#the-scratch-directory). |
 | `--disallowedTools Monitor,TaskStop` | Remove the monitor tool and the tool that stops a background task, for every agent. See [the foreground rule](#the-foreground-rule). |
 | `--settings <path>` | Only when the host sets `DELEGATE_AGENT_SETTINGS`. See [the settings of a host](#the-settings-of-a-host). |
 | `--permission-mode <mode>` | Only when the host sets `DELEGATE_PERMISSION_MODE`. See [the settings of a host](#the-settings-of-a-host). |
@@ -66,7 +66,7 @@ A verifier that a person spawns outside a `delegate run` keeps the recipe of the
 
 ## The scratch directory
 
-In a `delegate run`, each agent session of a ticket gets a scratch directory, `runs/<run id>/scratch/<ticket id>/<role>/`, and the [**brief**](../glossary.md#brief) tells the agent to write each scratch file there and never to `/tmp` or to its tree (#227). See [the scratch directory of a session](run.md#the-scratch-directory-of-a-session). The adapter adds the directory to the session with `--add-dir`, as it adds the proof copy, and the session gets `TMPDIR` set to it.
+In a `delegate run`, each agent session of a ticket gets a scratch directory: `runs/<run id>/scratch/<ticket id>/<role>/` for a specialist and a fix-up specialist, and a new private directory in the temp directory of the host for a verifier (#294). The [**brief**](../glossary.md#brief) tells the agent to write each scratch file there and never to `/tmp` or to its tree (#227). See [the scratch directory of a session](run.md#the-scratch-directory-of-a-session). The adapter adds the directory to the session with `--add-dir`, as it adds the proof copy, and the session gets `TMPDIR` set to it.
 
 Measured on Claude Code 2.1.287 on 2026-11-02, with `claude -p --permission-mode <mode> --setting-sources project --settings <rules> --add-dir <scratch>`, in a working directory with no project settings, and with a scratch directory outside the working directory:
 

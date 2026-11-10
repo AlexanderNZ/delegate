@@ -193,7 +193,7 @@ def test_a_change_before_the_first_step_ends_the_run_failed_and_names_the_journa
 
 
 # The events of the step of one ticket of a run with no other writer, with the fields of each, as the engine wrote them
-# before #291. The first gate result is green on the tip, so the gate after the rebase onto the same tip is skipped.
+# before #291, and the field `scratch` of `verify-start` (#294). The first gate result is green on the tip, so the gate after the rebase onto the same tip is skipped.
 STEP: list[tuple[str, list[str]]] = [
     ("step-start", ["agent", "base_commit", "branch", "model", "stack", "ticket", "tier", "worktree"]),
     ("agent-start", ["event_stream", "role", "round", "ticket"]),
@@ -203,7 +203,7 @@ STEP: list[tuple[str, list[str]]] = [
     ("gate-result", ["clean", "command", "commit", "exit_status", "green", "output_tail", "phase", "round", "ticket", "timed_out"]),
     ("rebase", ["files", "from_commit", "onto_commit", "result", "ticket", "to_commit"]),
     ("gate-skip", ["command", "commit", "green_seq", "phase", "reason", "round", "ticket"]),
-    ("verify-start", ["agent", "commit", "copy", "model", "round", "snapshot", "ticket", "tier"]),
+    ("verify-start", ["agent", "commit", "copy", "model", "round", "scratch", "snapshot", "ticket", "tier"]),
     ("agent-start", ["event_stream", "role", "round", "ticket"]),
     ("verify-result", ["end_state", "event_stream", "exit_status", "last_event", "round", "session_id", "ticket", "tokens_cache", "tokens_new"]),
     ("verify-report", ["path", "reason", "round", "ticket", "valid"]),

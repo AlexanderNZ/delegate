@@ -442,6 +442,9 @@ class VerifyStart(TypedDict):
     model: str
     commit: str
     copy: str
+    # The scratch directory of the verifier session, outside the directory of the run (#294). A journal of an earlier
+    # version has none.
+    scratch: NotRequired[str]
     snapshot: NotRequired[dict[str, object]]
     stack: NotRequired[str]
     tickets: NotRequired[list[str]]
@@ -582,7 +585,8 @@ class Cleanup(TypedDict):
     # Only the event that `delegate clean` writes after `run-end` has these.
     copies_removed: NotRequired[int]
     tracebacks_removed: NotRequired[list[str]]
-    # The scratch directory of the run that `delegate clean` removed, as a list of one path or none (#227).
+    # The scratch directory of the run that `delegate clean` removed, and each scratch directory of a verifier that a
+    # kill left (#227, #294); an empty list when it removed none.
     scratch_removed: NotRequired[list[str]]
     bytes_freed: NotRequired[int]
 
