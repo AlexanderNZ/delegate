@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.21.1] - 2026-11-11
+
 ### Consumer impact
 
 - Render each committed agent pair again with `agent-definitions render` (#300). The Bash guard and the Write guard of the rendered Claude Code verifier, and the `external_directory` map of the rendered OpenCode verifier, have the new temp prefix `/private/var/folders/`. A pair that an older release rendered still denies that prefix.
