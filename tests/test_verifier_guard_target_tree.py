@@ -144,8 +144,8 @@ def _bash_writes(path: str) -> list[str]:
 
 
 def _is_temp_text(path: str) -> bool:
-    """True when the Bash guard reads `path` as a temp path. `/private/var/folders` is not a temp prefix."""
-    return path.startswith(("/tmp/", "/private/tmp/", "/var/folders/", "$TMPDIR"))
+    """True when the Bash guard reads `path` as a temp path."""
+    return path.startswith(("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/", "$TMPDIR"))
 
 
 def _assert_denied_for(result: subprocess.CompletedProcess, shown: str, tree: Path, shell: str, named: bool = True) -> None:
@@ -191,6 +191,52 @@ def test_the_write_guard_denies_a_file_of_a_worktree_when_the_working_directory_
         assert result.returncode == 2, (file_path, result.stderr)
         assert file_path in result.stderr
         assert f"git toplevel [{_without_private(trees.worktree)}]" in result.stderr
+
+
+def _user_temp_directory() -> str | None:
+    """The temp directory of the user on macOS, under /var/folders. None on another host."""
+    if sys.platform != "darwin":
+        return None
+    result = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], capture_output=True, text=True)
+    directory = result.stdout.strip()
+    return directory if result.returncode == 0 and directory.startswith("/var/folders/") else None
+
+
+class VarFoldersTrees(Trees):
+    """Trees in the temp directory of the user on macOS. Their real path starts with `/private/var/folders/`.
+
+    `TMPDIR` of the hook is `/tmp/`, so no runtime value of $TMPDIR makes a path under `base` a temp path: only the
+    fixed prefixes count.
+    """
+
+    def env(self) -> dict[str, str]:
+        return {**os.environ, "TMPDIR": "/tmp/"}
+
+
+@pytest.fixture
+def var_folders_trees(git_identity):
+    directory = _user_temp_directory()
+    if directory is None or not os.access(directory, os.W_OK):
+        pytest.skip("no writable temp directory of the user under /var/folders: the host is not macOS")
+    base = Path(os.path.realpath(tempfile.mkdtemp(dir=directory)))
+    assert str(base).startswith("/private/var/folders/"), base
+    yield VarFoldersTrees(base)
+    shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_guards_deny_a_write_target_in_a_git_tree_in_the_private_form_of_var_folders(var_folders_trees, shell):
+    # The temp prefixes hold /private/var/folders/ (#300), and the rule of #125 still denies a target in a git tree.
+    trees = var_folders_trees
+    private = "/private" + _without_private(trees.worktree / "src" / "app.py")
+    hold = "/private" + _without_private(trees.hold)
+    for command in [*_bash_writes(private), f"rm -rf {hold}"]:
+        _assert_denied_for(_bash(trees, command, shell, trees.copy), command, trees.worktree, shell)
+    for file_path in (private, hold):
+        result = _write(trees, file_path, shell, trees.copy)
+
+        assert result.returncode == 2, (file_path, result.stderr)
+        assert f"git toplevel [{_without_private(trees.worktree)}]" in result.stderr, (file_path, result.stderr)
 
 
 # --- A write into the copy ------------------------------------------------------

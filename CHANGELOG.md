@@ -6,9 +6,17 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Consumer impact
+
+- Render each committed agent pair again with `agent-definitions render` (#300). The Bash guard and the Write guard of the rendered Claude Code verifier, and the `external_directory` map of the rendered OpenCode verifier, have the new temp prefix `/private/var/folders/`. A pair that an older release rendered still denies that prefix.
+
 ### Changed
 
 - `stop_file_watcher` runs `git fsmonitor--daemon stop` through `_run`, the one runner of the git backend (#303). Before, it called `subprocess.run` itself, with its own environment and its own handler for a timeout. Now it has the same quiet start as each other command: no stdin, no prompt for a credential and `core.fsmonitor=false`. As before, it raises no error when git exits with an error or reaches the limit `_FSMONITOR_STOP_TIMEOUT`. `_run` is now the only call of `subprocess` in the git backend, and a test checks it.
+
+### Fixed
+
+- The verifier guards permit a temp path under `/private/var/folders/`, as they permit the same path under `/var/folders/` (#300). On macOS `/var` is a symbolic link to `/private/var`, and a program that resolves a temp path (`pwd -P`, `realpath`, Python `os.path.realpath`) gives the `/private` form. In a run of 1.21.0 on macOS, the Bash guard denied `cd /private/var/folders/<id>/T/delegate-verify-<id>/copy` from the proof copy, and it denied `touch` and `mkdir` on such a path. The temp prefixes of the guards (`VERIFIER_TEMP_PATH_PREFIXES`) had `/private/tmp/`, but not `/private/var/folders/`. Now they have it, so the Bash guard, the Write guard and the OpenCode `external_directory` map permit the same paths in the `/private` form and in the short form. The check for a git tree does not change: a `/private/var/folders/` path in a git tree, or that holds one, stays denied. See `docs/reference/commands.md` and `docs/explanation/the-enforcement-model-and-its-limits.md`.
 
 ## [1.21.0] - 2026-11-10
 

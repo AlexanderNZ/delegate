@@ -47,7 +47,7 @@ SHELLS = (
 )
 
 #: The fixed temp prefixes of the guards, as text.
-FIXED = ("/tmp/", "/private/tmp/", "/var/folders/")
+FIXED = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
 
 def _hooks() -> dict[str, str]:
@@ -93,9 +93,9 @@ class Host:
 def host(tmp_path, git_identity):
     """A Host in the pytest temp directory, when its real path is outside the fixed prefixes as text.
 
-    On macOS the real path starts with /private/var/folders, and a Nix build
-    sandbox gives /build. On a Linux host the pytest temp directory is in /tmp,
-    so the host then goes in /var/tmp.
+    A Nix build sandbox gives /build. On macOS the real path starts with
+    /private/var/folders, a fixed prefix since #300, and on a Linux host the
+    pytest temp directory is in /tmp. The host then goes in /var/tmp.
     """
     base = Path(os.path.realpath(tmp_path))
     made = None

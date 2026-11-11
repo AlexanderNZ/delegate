@@ -87,7 +87,12 @@ VERIFIER_TEMP_WRITE_COMMANDS: tuple[str, ...] = ("mkdir", "mv", "rm", "tee", "to
 #: removes its source.
 VERIFIER_TEMP_DEST_COMMANDS: tuple[str, ...] = ("cp", "cd")
 
-VERIFIER_TEMP_PATH_PREFIXES: tuple[str, ...] = ("/tmp/", "/private/tmp/", "$TMPDIR", "/var/folders/")
+#: The temp prefixes of the verifier guards. On macOS `/tmp` and `/var` are
+#: symbolic links to `/private/tmp` and `/private/var`, and a program that
+#: resolves a temp path (`pwd -P`, `realpath`, `os.path.realpath`) gives the
+#: `/private` form. So each fixed prefix is here in its short form and in its
+#: `/private` form (#300).
+VERIFIER_TEMP_PATH_PREFIXES: tuple[str, ...] = ("/tmp/", "/private/tmp/", "$TMPDIR", "/var/folders/", "/private/var/folders/")
 
 #: The options of `env` that the guard removes with `env` (#158). Each one
 #: changes only the environment of the command, or the output of a bare `env`.

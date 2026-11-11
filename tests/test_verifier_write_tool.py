@@ -79,7 +79,13 @@ def test_the_rendered_claude_code_verifier_has_the_write_tool_and_a_hook_on_writ
 
 @pytest.mark.parametrize(
     "file_path",
-    ["/tmp/delegate-verify-x/verdict.json", "/private/tmp/v/verdict.json", "/var/folders/ab/T/delegate-verify-x/verdict.json"],
+    [
+        "/tmp/delegate-verify-x/verdict.json",
+        "/private/tmp/v/verdict.json",
+        "/var/folders/ab/T/delegate-verify-x/verdict.json",
+        # The real path of a macOS temp directory, as `os.path.realpath` gives it (#300).
+        "/private/var/folders/ab/T/delegate-verify-x/verdict.json",
+    ],
 )
 def test_the_write_guard_permits_a_file_in_a_temp_directory(rendered, tmp_path, file_path):
     result = _write(_write_hook(rendered), {"file_path": file_path, "content": "{}"}, f"{tmp_path}/")
@@ -170,6 +176,15 @@ def test_the_rendered_opencode_verifier_can_write_only_outside_the_project_and_i
     assert opencode_permission_action(permission, "external_directory", "/Users/dev/project/src/*") == "deny"
     assert opencode_permission_action(permission, "external_directory", "/etc/*") == "deny"
     assert opencode_permission_action(permission, "write", "src/main/App.java") == "deny"
+
+
+def test_the_rendered_opencode_verifier_has_a_write_rule_for_the_private_form_of_var_folders(rendered):
+    # On macOS /var is a symbolic link to /private/var, and a resolved temp path has the /private form (#300).
+    permission = _frontmatter(rendered / "opencode" / "java-spring-verifier.md")["permission"]
+
+    assert permission["external_directory"].get("/private/var/folders/*") == "allow"
+    assert opencode_permission_action(permission, "external_directory", "/private/var/folders/ab/T/delegate-verify-x/*") == "allow"
+    assert opencode_permission_action(permission, "external_directory", "/private/var/db/*") == "deny"
 
 
 def test_the_validator_accepts_the_rendered_pair(rendered, tiers):

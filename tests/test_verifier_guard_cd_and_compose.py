@@ -335,6 +335,43 @@ def test_a_cd_to_a_temp_path_is_still_permitted(repo, shell):
         _assert_permitted(_guard(command, shell, repo), command, shell)
 
 
+#: A temp directory of macOS in the /private form, as `pwd -P`, `realpath` and Python `os.path.realpath` give it (#300).
+#: `/var` is a symbolic link to `/private/var`. The guard reads the path as text, so the path need not exist, and the id
+#: `ab` is not the id of the temp directory of the host.
+PRIVATE_VAR_FOLDERS = "/private/var/folders/ab/T/delegate-verify-x"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"cd {PRIVATE_VAR_FOLDERS}/copy",
+        f"cd {PRIVATE_VAR_FOLDERS}/copy && ./gradlew test",
+        f"touch {PRIVATE_VAR_FOLDERS}/x",
+        f"mkdir {PRIVATE_VAR_FOLDERS}/y",
+    ],
+)
+def test_a_cd_or_a_temp_write_to_the_private_form_of_var_folders_is_permitted_from_a_copy_with_no_git_entry(
+    copy, shell, command
+):
+    # The engine run of #300: from the proof copy, with no git tree, the verifier went to the copy by its real path.
+    _assert_permitted(_guard(command, shell, copy), command, shell)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd /private/var/db/x",
+        "touch /private/var/db/x",
+        "touch /private/var/foldersx/x",
+        f"touch {PRIVATE_VAR_FOLDERS}/../../../../db/x",
+    ],
+)
+def test_a_path_under_private_var_outside_var_folders_stays_denied_from_a_copy_with_no_git_entry(copy, shell, command):
+    _assert_denied(_guard(command, shell, copy), command, shell)
+
+
 # --- docker compose -f <file> -----------------------------------------------------
 
 
