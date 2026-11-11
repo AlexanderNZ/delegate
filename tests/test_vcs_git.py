@@ -5,11 +5,13 @@ that git reports afterwards. No case imports a private function of the backend.
 The port itself names no git command and no flag, and the last cases check that.
 """
 
+import ast
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -1397,3 +1399,45 @@ def test_the_clone_of_a_verifier_copy_has_its_own_longer_limit(tmp_path, vcs, mo
         vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
 
     assert not copy.exists()
+
+
+# The one runner of the git backend (#303): `stop_file_watcher` runs through it, like each other command.
+
+
+def test_stop_file_watcher_returns_with_no_error_when_the_stop_command_runs_past_its_limit(tmp_path, vcs, monkeypatch):
+    repo = make_repo(tmp_path)
+    git_shim(tmp_path, monkeypatch, 'case "$*" in *fsmonitor--daemon*) exec sleep 60;; esac')
+    monkeypatch.setattr("delegate.adapters.git._FSMONITOR_STOP_TIMEOUT", 1)
+
+    started = time.monotonic()
+    vcs.stop_file_watcher(repo)
+
+    assert time.monotonic() - started < 30  # the shim sleeps for 60 seconds
+
+
+def test_stop_file_watcher_runs_the_stop_command_with_fsmonitor_off(tmp_path, vcs, monkeypatch):
+    repo = make_repo(tmp_path)
+    marker = tmp_path / "stop-args"
+    git_shim(tmp_path, monkeypatch, f'case "$*" in *fsmonitor--daemon*) echo "$*" > "{marker}";; esac')
+
+    vcs.stop_file_watcher(repo)
+
+    # The stop command has the same quiet start as each other command: fsmonitor is off for it.
+    assert "core.fsmonitor=false" in marker.read_text()
+
+
+def test_the_git_backend_uses_subprocess_only_in_its_one_runner():
+    path = Path(__file__).parent.parent / "src" / "delegate" / "adapters" / "git.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    runner = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_run")
+    inside = {id(node) for node in ast.walk(runner)}
+    outside = [
+        node.lineno
+        for node in ast.walk(tree)
+        if id(node) not in inside
+        and (
+            (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "subprocess")
+            or (isinstance(node, ast.ImportFrom) and node.module == "subprocess")
+        )
+    ]
+    assert outside == []

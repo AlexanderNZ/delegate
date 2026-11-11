@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Changed
+
+- `stop_file_watcher` runs `git fsmonitor--daemon stop` through `_run`, the one runner of the git backend (#303). Before, it called `subprocess.run` itself, with its own environment and its own handler for a timeout. Now it has the same quiet start as each other command: no stdin, no prompt for a credential and `core.fsmonitor=false`. As before, it raises no error when git exits with an error or reaches the limit `_FSMONITOR_STOP_TIMEOUT`. `_run` is now the only call of `subprocess` in the git backend, and a test checks it.
+
 ## [1.21.0] - 2026-11-10
 
 ### Consumer impact

@@ -422,11 +422,9 @@ class GitVersionControl:
             raise
 
     def stop_file_watcher(self, path: Path) -> None:
-        # Git exits with an error when no daemon runs, or when the directory is not a repository. Both are fine.
+        # Git exits with an error when no daemon runs, or when the directory is not a repository. Both are fine, and so is a
+        # stop command that reaches its limit: the caller removes the directory.
         try:
-            subprocess.run(
-                ["git", "-C", str(path), "fsmonitor--daemon", "stop"],
-                capture_output=True, text=True, stdin=subprocess.DEVNULL, env=_environment(), timeout=_FSMONITOR_STOP_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
+            _run(path, "fsmonitor--daemon", "stop", timeout=_FSMONITOR_STOP_TIMEOUT)
+        except VcsError:
             pass
