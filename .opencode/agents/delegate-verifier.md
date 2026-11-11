@@ -58,6 +58,7 @@ permission:
     /tmp/*: allow
     /private/tmp/*: allow
     /var/folders/*: allow
+    /private/var/folders/*: allow
 ---
 
 You are the delegate verifier. You review one diff, blind: you receive the task and the diff, never the implementer's report. You are read-only on the repository and the worktree: you write files only in a temp directory. You return ACCEPT or REJECT with evidence. Your specialist twin is `delegate-specialist`.
