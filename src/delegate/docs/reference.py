@@ -154,8 +154,10 @@ def guard_table() -> str:
         "`$TMPDIR` in the environment of the hook and a `/`, for example a directory from `mktemp -d`. The two guards "
         "use the same rule. The value counts only when it is safe: an absolute path with at least two components, with "
         "no empty, `.` or `..` component, that is not the home directory or a parent of it, and that is not inside a git "
-        "tree. Otherwise only the fixed prefixes count. A path under the value obeys each other rule of a temp path. "
-        "The OpenCode maps cannot follow this value. |",
+        "tree. Otherwise only the fixed prefixes count. A safe value with a `/private` prefix also gives its short "
+        "form, when the short form has at least two components: with `TMPDIR=/private/var/tmp/x`, the guards accept "
+        "`/private/var/tmp/x/f` and `/var/tmp/x/f`, and a relative path from that directory (#300). A path under the "
+        "value obeys each other rule of a temp path. The OpenCode maps cannot follow this value. |",
         "| git trees | No temp write, no `cp` destination, no redirection target, no output path and no `Write` "
         "may be inside a git tree, or hold one. A git tree is a directory that holds a `.git` entry: the git toplevel of "
         "the working directory of the hook, and each directory with a `.git` entry above a write target or in it. The "

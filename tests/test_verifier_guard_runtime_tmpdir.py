@@ -111,9 +111,14 @@ def host(tmp_path, git_identity):
         shutil.rmtree(made, ignore_errors=True)
 
 
-def _bash(command: str, shell: str, env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess:
-    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process."""
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)})
+def _bash(
+    command: str, shell: str, env: dict[str, str], cwd: Path, hook_cwd: str | None = None
+) -> subprocess.CompletedProcess:
+    """Run the Bash guard on `command`, with `cwd` as the working directory of the hook input and of the process.
+
+    `hook_cwd` gives another working directory to the hook input only, as text.
+    """
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": hook_cwd or str(cwd)})
     argv, executable = [shutil.which(shell) or shell, "-c", HOOKS["Bash"]], None
     if shell == "/bin/sh" and sys.platform != "darwin":
         # The Linux Nix build sandbox's /bin/sh is busybox. Run bash as `sh`, the shell of a NixOS host.
@@ -195,7 +200,50 @@ def test_a_path_under_the_runtime_tmpdir_in_or_holding_a_git_tree_is_denied(host
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("command", ["touch repo/f", "rm -rf hold"])
 def test_a_relative_write_into_a_git_tree_under_the_runtime_tmpdir_is_denied(host, shell, command):
-    _denied(_bash(command, shell, host.env(), host.tmp), shell, command)
+    result = _bash(command, shell, host.env(), host.tmp)
+
+    _denied(result, shell, command)
+    # The rule of a git tree denies it, not the temp rule: the target is under the runtime TMPDIR.
+    assert "is in the git toplevel" in result.stderr, (shell, command, result.stderr)
+
+
+# --- The /private form of the runtime TMPDIR (#300) ---------------------------
+
+#: A runtime TMPDIR in the /private form, as text. On macOS `/var` is a symbolic link to `/private/var`, so a program
+#: that resolves a temp directory gives this form, and `/var/tmp/...` is the same directory. The guards read the paths
+#: as text, so the directory need not exist, and each host gives the same verdicts.
+PRIVATE = "/private/var/tmp/delegate-guard-300"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("command", ["touch x/g", "mkdir y", "echo hi > x/g", "cd x"])
+def test_a_relative_write_from_the_private_form_of_the_runtime_tmpdir_is_permitted(host, shell, command):
+    # The working directory of the guard has no /private prefix. The relative target was then outside the /private
+    # value of TMPDIR as text, and the guard denied it, while it permitted the same target as an absolute path.
+    result = _bash(command, shell, host.env(PRIVATE), host.base, hook_cwd=PRIVATE)
+
+    _permitted(result, shell, command)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_guards_permit_the_short_form_of_a_private_runtime_tmpdir_with_two_components(host, shell):
+    env = host.env(PRIVATE)
+    for path in (f"{PRIVATE}/f", "/var/tmp/delegate-guard-300/f"):
+        _permitted(_bash(f"touch {path}", shell, env, host.base), shell, path)
+        assert _write(path, env, host.base).returncode == 0, path
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_short_form_of_a_private_runtime_tmpdir_with_one_component_is_not_a_temp_path(host, shell):
+    # `/private/agent-tmp` is a safe value with two components. Its short form `/agent-tmp` has one, as an unsafe value.
+    env = host.env("/private/agent-tmp")
+
+    _permitted(_bash("touch /private/agent-tmp/f", shell, env, host.base), shell)
+    assert _write("/private/agent-tmp/f", env, host.base).returncode == 0
+    result = _bash("touch /agent-tmp/f", shell, env, host.base)
+    _denied(result, shell)
+    assert "outside a temp directory" in result.stderr, (shell, result.stderr)
+    assert _write("/agent-tmp/f", env, host.base).returncode == 2
 
 
 # --- An unsafe runtime TMPDIR adds no temp path -------------------------------

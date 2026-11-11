@@ -227,11 +227,22 @@ TOPLEVEL_FINDER = (
 #: value of `~` (`$HOME`, or else the password database). The two sides of the
 #: home test have no "/private" prefix. A value that is not safe adds no
 #: prefix, and only the fixed prefixes count.
+#:
+#: The guards also use `tu`, the safe value without a "/private" prefix, when
+#: it still has at least two components, as a temp prefix. On macOS `/var` and
+#: `/tmp` are symbolic links to `/private/var` and `/private/tmp`, so a value
+#: such as `/private/var/tmp/x` and the short form `/var/tmp/x` name the same
+#: directory. The working directory of the Bash guard has no "/private"
+#: prefix, so without `tu` a relative target under such a value was a deny,
+#: and the same target as an absolute path was not (#300). `tp` holds each
+#: of `ts` and `tu` that is not empty, with a "/" after it.
 SAFE_TEMP_DIRECTORY = (
     't=os.environ.get("TMPDIR","").rstrip("/"); '
     'hm=u(os.path.expanduser("~").rstrip("/")); '
     'ts=t if t.startswith("/") and len(t.split("/"))>2 and not {"",".",".."}&set(t.split("/")[1:]) '
-    'and not (hm+"/").startswith(u(t)+"/") and not up(pathlib.Path(t)) else ""'
+    'and not (hm+"/").startswith(u(t)+"/") and not up(pathlib.Path(t)) else ""; '
+    'tu=u(ts) if u(ts).count("/")>1 else ""; '
+    'tp=tuple(x+"/" for x in (ts,tu) if x)'
 )
 
 #: The python3 text that finds the git trees of the write targets of a
@@ -240,8 +251,8 @@ SAFE_TEMP_DIRECTORY = (
 #: removes each quote and backslash, as the shell check does, and divides the
 #: text at each space. It also divides each word at each separator and
 #: redirection sign. In each word and each part, each text from a temp prefix
-#: (`/tmp/`, `/var/folders/`, the safe value `ts` of $TMPDIR with a "/" after
-#: it, or `$TMPDIR`) to the end is a path (#166). A path gets the
+#: (`/tmp/`, `/var/folders/`, each prefix `tp` of the safe value of $TMPDIR,
+#: or `$TMPDIR`) to the end is a path (#166). A path gets the
 #: value of $TMPDIR (`t`) in place of a leading `$TMPDIR`, loses a `/private`
 #: prefix, and each `//` and `/./` in it becomes one `/`, as in
 #: IN_TOPLEVEL_CHECK. A path with a pattern or an expansion character (`*`,
@@ -255,14 +266,14 @@ SAFE_TEMP_DIRECTORY = (
 #: that does not start with `/`, `$`, `~` or `=` is also a path: the working
 #: directory, a "/" and the part, with no `/private` prefix, and each `//` and
 #: `/./` made one `/`. Only such a path that starts with `/tmp/`,
-#: `/var/folders/` or `ts` and a "/" (the prefixes `F`) counts, because the
+#: `/var/folders/` or a prefix of `tp` (the prefixes `F`) counts, because the
 #: shell check denies each other relative target by the temp rule. The test is on the full path, not on the working
 #: directory: from `/`, the part `tmp/x` is the temp path `/tmp/x`. When the
 #: working directory is in a git tree, the shell check denies each relative
 #: target by the toplevel `r`, so the finder reads no more directories there.
 TARGET_TREE_FINDER = (
     's=(c if isinstance(c,str) else "").replace(chr(34),"").replace(chr(39),"").replace(chr(92),""); '
-    'F=("/tmp/","/var/folders/")+((ts+"/",) if ts else ()); K=F+("$TMPDIR",); '
+    'F=("/tmp/","/var/folders/")+tp; K=F+("$TMPDIR",); '
     'X={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) for i in range(len(p)) if p.startswith(K,i) '
     'for x in (re.sub("/(?:[.]/|/)+","/",u(t+p[i+7:] if p.startswith("$TMPDIR",i) else p[i:])),) if x.startswith("/")}; '
     'X|={x for z in s.split() for p in (z,*re.split("[;&|<>()`]",z)) if p and p[0] not in "/$~=" '
@@ -1292,8 +1303,10 @@ def _verifier_bash_hook(
             f'istp() {{ p=$1; case "$p" in {quote}) p=${{p#?}};; esac; '
             'case "$p" in ..|../*|*/..|*/../*) return 1;; esac; '
             f'case "$p" in {_temp_path_pattern()}) return 0;; esac; '
-            # A path under the safe value of $TMPDIR ($ts) in the environment of the hook, as the Write guard (#166).
-            '[ -n "$ts" ] || return 1; case "$p" in "$ts"/*) return 0;; esac; return 1; }',
+            # A path under the safe value of $TMPDIR ($ts) in the environment of the hook, as the Write guard (#166),
+            # or under its short form $tu with no "/private" prefix (#300).
+            '[ -n "$ts" ] || return 1; case "$p" in "$ts"/*) return 0;; esac; '
+            '[ -n "$tu" ] || return 1; case "$p" in "$tu"/*) return 0;; esac; return 1; }',
             IN_TOPLEVEL_CHECK,
             IN_TOPLEVEL_CD_CHECK,
             # A write target: a temp path that is not in a git tree and holds none (#106, #125). A temp path in a
@@ -1341,6 +1354,9 @@ def _verifier_bash_hook(
             f"hi=$({HOOK_COMMAND_READER} 2>/dev/null)",
             "wt=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; td=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; "
             "wd=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; ts=${hi%%$'\\n'*}; hi=${hi#*$'\\n'}; gt=(); gb=()",
+            # The short form of the safe value of $TMPDIR: $ts with no "/private" prefix, when it still has two
+            # components or more, as `tu` of SAFE_TEMP_DIRECTORY (#300). It is empty otherwise.
+            'tu=; case "$ts" in /private/*/*) tu=${ts#/private} ;; esac',
             "while :; do case \"$hi\" in /*$'\\n'*) gt+=(\"${hi%%$'\\n'*}\") ;; "
             "+/*$'\\n'*) wr=${hi%%$'\\n'*}; gb+=(\"${wr#+}\") ;; *) break ;; esac; hi=${hi#*$'\\n'}; done; cmd=$hi",
             'case "$cmd" in :*) cmd=${cmd#:} ;; *) cmd= ;; esac',
@@ -1418,7 +1434,8 @@ def _verifier_write_hook() -> str:
     only when the path is absolute, has no ".." component, and starts with a
     fixed temp prefix or with the value of $TMPDIR in the environment of the
     hook and a "/". Only a safe $TMPDIR adds a prefix, by the rule of
-    SAFE_TEMP_DIRECTORY, which the Bash guard also uses (#166). The guard
+    SAFE_TEMP_DIRECTORY, which the Bash guard also uses (#166). A safe value
+    with a "/private" prefix also adds its short form (#300). The guard
     reads the path as text, as the Bash guard does: it does not resolve a
     symbolic link.
 
@@ -1437,7 +1454,7 @@ def _verifier_write_hook() -> str:
         "isinstance(p,str) or sys.exit(4); "
         f"{TOPLEVEL_FINDER}; "
         f"{SAFE_TEMP_DIRECTORY}; "
-        f'q=({prefixes})+((ts+"/",) if ts else ()); '
+        f'q=({prefixes})+tp; '
         'ok=p.startswith("/") and ".." not in p.split("/") and p.startswith(q); '
         'm="" if ok else "the file path ["+p+"] is not permitted. '
         'A verifier writes only to an absolute path in a temp directory, with no .. component."; '
