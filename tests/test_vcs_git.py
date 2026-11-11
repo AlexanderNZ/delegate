@@ -1336,8 +1336,9 @@ def git_shim(tmp_path: Path, monkeypatch, before: str) -> Path:
 
 @pytest.fixture
 def open_stdin():
-    """Make fd 0 the read end of a pipe that nothing writes to and nothing closes: a read on it waits."""
+    """Make fd 0 the read end of a pipe that holds one line and stays open: a read on it gets the line at once."""
     saved, (read_end, write_end) = os.dup(0), os.pipe()
+    os.write(write_end, b"from the engine\n")
     os.dup2(read_end, 0)
     try:
         yield
@@ -1350,8 +1351,9 @@ def open_stdin():
 def test_a_git_command_of_the_backend_reads_no_stdin_of_the_engine(tmp_path, vcs, monkeypatch, open_stdin):
     repo = make_repo(tmp_path)
     marker = tmp_path / "stdin"
-    # With the stdin of the engine, a program that reads it waits for ever. With the null device, it reads the end of the input.
-    git_shim(tmp_path, monkeypatch, f'if [ /dev/stdin -ef /dev/null ]; then echo null; else echo inherited; fi > "{marker}"')
+    # With the stdin of the engine, a program that reads it gets the line of the pipe. With the null device, it reads the end of
+    # the input. The shell text is POSIX: `read` and `if`, with no `test -ef`.
+    git_shim(tmp_path, monkeypatch, f'if read -r line; then echo inherited; else echo null; fi > "{marker}"')
 
     assert vcs.branch_exists(repo, "main")
 
