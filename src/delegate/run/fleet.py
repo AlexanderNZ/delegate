@@ -623,7 +623,7 @@ def record_runs(root: Path, host: str, now: datetime, index: RunIndex) -> str | 
     """Write the record of each run of the state root `root` that `delegate runs` lists and that has no record, or an older one (#323).
 
     `delegate run` and `delegate run --resume` call it before the run starts. It reads no stream. Return the reason of the first
-    failure of the index, or None. Raise RunsError when a lock file cannot be read.
+    failure of the index, or None. A lock file that cannot be read stops no record (#330).
     """
     return fleet_of(root, host, now, lambda adapter: None, index=index, read_index=False).index_problem
 
@@ -643,7 +643,8 @@ def fleet_of(
     also with `read_index` False. A write that fails is in `Fleet.index_problem`, and the call goes on.
 
     The order is the order of the table: the runs with no `run-end`, newest start first, then the runs that ended,
-    newest end first. Raise RunsError when a lock file cannot be read.
+    newest end first. A lock file that cannot be read, in the search for the runs that failed at start, is one entry of `Fleet.unreadable` for its
+    state directory (#330), as a journal that cannot be read is; the other state directories are listed.
     """
     reads = JournalReads() if reads is None else reads
     rows: list[RunRow] = []
@@ -678,7 +679,12 @@ def fleet_of(
                 trend=fleet_rules.trend_cells(built_times, now), slip_seconds=slip, built=tuple(built_times), last_event=_time(events[-1]),
                 record=record_of(events, journal, Path(repo), now, host=host, snapshot=snap), cleaned=cleaned(events),
             ))
-        for start in failed_starts([state]):
+        try:
+            starts = failed_starts([state])
+        except RunsError as error:  # a lock file that cannot be read: one line for the state directory, and the other repositories show (#330)
+            unreadable.append((state / "runs", str(error)))
+            continue
+        for start in starts:
             if _in_window(start.changed, now):
                 rows.append(RunRow(start.run_id, repo, host, FAILED, start.changed, start.changed, 0, 0, None, None, None, failed_start=True))
     reads.keep_only(listed)

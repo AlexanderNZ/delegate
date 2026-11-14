@@ -495,3 +495,34 @@ def test_a_document_whose_run_has_no_alert_fields_is_a_document_that_this_versio
     lines = out.splitlines()
     assert (code, err) == (0, "")
     assert reason_of(lines, "build-host") == "build-host gave a document that this version of delegate cannot read"
+
+
+@pytest.mark.parametrize(("text", "reason"), [
+    ("", "build-host gave no JSON document"),
+    ("not json", "build-host gave no JSON document"),
+    ("[]", "build-host gave a document that is not an object"),
+    ('{"format": 1}', "build-host gave a document that this version of delegate cannot read"),
+    ('{"format": 1, "runs": [{"run_id": "x"}]}', "build-host gave a document that this version of delegate cannot read"),
+    ('{"format": true, "runs": []}', "delegate on build-host is older than 1.22.0"),
+])
+def test_a_document_that_this_version_cannot_read_gives_the_exact_reason_of_its_kind_under_the_row_of_the_host(machine, index, ssh, capsys, text, reason):
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    ssh.prints("build-host", text)
+
+    _, out, _ = runs(capsys)
+
+    assert reason_of(out.splitlines(), "build-host") == reason
+
+
+def test_an_ssh_that_cannot_start_gives_the_reason_ssh_cannot_start_with_the_error_of_the_system(machine, index, ssh, capsys, tmp_path, monkeypatch):
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    nowhere = tmp_path / "no-command-here"
+    nowhere.mkdir()
+    monkeypatch.setenv("PATH", str(nowhere))
+
+    code, out, err = runs(capsys)
+
+    assert (code, err) == (0, "")
+    assert reason_of(out.splitlines(), "build-host") == "ssh cannot start: No such file or directory"

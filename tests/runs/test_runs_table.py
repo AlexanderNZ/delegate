@@ -174,6 +174,29 @@ def test_a_journal_that_cannot_be_read_is_skipped_and_named_on_stderr_and_the_ot
     assert "aaaa" in out and "bbbb" in out and "xxxx" not in out
 
 
+def test_a_lock_file_that_cannot_be_read_in_one_state_directory_gives_one_line_and_the_runs_of_the_other_repositories_are_listed(
+    machine, capsys
+):
+    two_repositories(machine)
+    state = machine / "zeta-0123456789ab"
+    run_dir = state / "runs" / "20261114T130000Z-xxxx"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.log").write_text("delegate run: the workflow file is missing\n")
+    lock = state / "locks" / "run%2Fdemo.lock"
+    lock.parent.mkdir()
+    lock.write_text("{}\n")
+    lock.chmod(0)
+
+    try:
+        code, out, err = runs(capsys)
+    finally:
+        lock.chmod(0o644)
+
+    assert code == 0
+    assert err == f"delegate runs: skipped the journal {state / 'runs'}: lock file {lock} cannot be read (PermissionError(13, 'Permission denied')); remove it by hand when no run uses it\n"
+    assert "aaaa" in out and "bbbb" in out and "xxxx" not in out
+
+
 def test_the_eta_is_the_local_clock_time_of_the_zone_of_the_machine(machine, monkeypatch, capsys):
     started = clock_time(13, 0)
     write_run(

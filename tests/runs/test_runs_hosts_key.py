@@ -8,6 +8,8 @@ The clock is `NOW`, 14:20; a case moves it on with the `clock` fixture.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from .journals import NOW, runs
@@ -127,3 +129,53 @@ def test_the_store_of_last_answers_is_one_file_for_each_host_in_the_state_root(m
     runs(capsys)
 
     assert sorted(path.name for path in (machine / "last-answers").iterdir()) == ["far.json"]
+
+
+def test_a_corrupt_file_of_the_store_gives_no_last_known_run_and_no_error_and_the_next_good_read_replaces_it(machine, far, ssh, capsys):
+    this_machine(machine)
+    ssh.serves("far", document("far", run_of("far", "docs-site", "a41e", "running", 3, 6)))
+    runs(capsys)
+    stored = machine / "last-answers" / "far.json"
+    stored.write_text("{this is not json\n")
+    ssh.exits("far", 255)
+
+    code, out, err = runs(capsys)
+
+    assert (code, err) == (0, "")
+    lines = out.splitlines()
+    assert next(line for line in lines if line.startswith("far ")).split() == ["far", "unreachable", "check", "host"]
+    assert "a41e" not in out
+    (ssh.directory / "far.code").unlink()  # the host is reachable again
+    runs(capsys)
+    assert json.loads(stored.read_text())["document"]["host"] == "far"
+
+
+def test_a_file_of_the_store_that_cannot_be_read_gives_no_last_known_run_and_no_error(machine, far, ssh, capsys):
+    this_machine(machine)
+    ssh.serves("far", document("far", run_of("far", "docs-site", "a41e", "running", 3, 6)))
+    runs(capsys)
+    stored = machine / "last-answers" / "far.json"
+    stored.chmod(0)
+    ssh.exits("far", 255)
+
+    try:
+        code, out, err = runs(capsys)
+    finally:
+        stored.chmod(0o644)
+
+    assert (code, err) == (0, "")
+    assert next(line for line in out.splitlines() if line.startswith("far ")).split() == ["far", "unreachable", "check", "host"]
+    assert "a41e" not in out
+
+
+def test_a_write_of_the_store_that_fails_keeps_the_older_file_and_the_read_still_shows_the_runs_of_the_host(machine, far, ssh, capsys):
+    this_machine(machine)
+    store = machine / "last-answers"
+    store.write_text("a file in the place of the directory, so the store cannot write\n")
+    ssh.serves("far", document("far", run_of("far", "docs-site", "a41e", "running", 3, 6)))
+
+    code, out, err = runs(capsys)
+
+    assert (code, err) == (0, "")
+    assert next(line for line in out.splitlines() if "a41e" in line).split() == ["│", "docs-site", "a41e", "running", "3/6", "16:05", "20k", "500k", "▇▇▇"]
+    assert store.read_text() == "a file in the place of the directory, so the store cannot write\n"

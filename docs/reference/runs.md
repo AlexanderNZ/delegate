@@ -36,7 +36,7 @@ An older run that ended is not listed.
 
 The table also lists the runs of the other hosts: each host that has a record in the [**run index**](../glossary.md#run-index), and each host of the key `hosts` of [the configuration file](#the-configuration-file). See [The other hosts](#the-other-hosts).
 
-A journal that cannot be read is skipped. The command names it on stderr, as `delegate status` does, and lists the other runs.
+A journal that cannot be read is skipped. The command names it on stderr, as `delegate status` does, and lists the other runs. A lock file that cannot be read, in the search for the runs that failed at start, skips the failed starts of its state directory in the same way: one line on stderr names the `runs` directory of the state directory and the lock file, and the other repositories are listed.
 
 ## The table
 
@@ -345,5 +345,5 @@ A reader of the document takes the alert from `idle_seconds`, `fixup_round`, `fi
 | Code | Condition |
 |---|---|
 | 0 | The command printed the table or the object, also when no run is listed. |
-| 2 | The state root is not an absolute path, [the configuration file](#the-configuration-file) has an error, a lock file cannot be read, or `--watch` has no terminal for standard output. |
+| 2 | The state root is not an absolute path, [the configuration file](#the-configuration-file) has an error, or `--watch` has no terminal for standard output. |
 | 130 | Ctrl-C ended `--watch`. |

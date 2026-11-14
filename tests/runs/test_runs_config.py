@@ -230,3 +230,71 @@ def test_the_header_line_names_the_configuration_file_the_index_and_the_hosts_th
 
     assert (code, err) == (0, "")
     assert out.splitlines()[0] == f"config {path} · index {shared} · hosts box, far"
+
+
+def test_delegate_run_writes_the_missing_records_of_the_other_repositories_when_one_state_directory_has_a_lock_file_that_cannot_be_read(
+    tmp_path, capsys, scripted, machine
+):
+    """The backfill of `delegate run` (#323) goes on: the run of `alpha` that has no record gets one, and the run itself ends built (#330)."""
+    alpha = one_run_of_an_earlier_version(machine)
+    state = machine / "zeta-0123456789ab"
+    (state / "runs" / "20261114T130000Z-xxxx").mkdir(parents=True)
+    (state / "runs" / "20261114T130000Z-xxxx" / "run.log").write_text("delegate run: the workflow file is missing\n")
+    lock = state / "locks" / "run%2Fdemo.lock"
+    lock.parent.mkdir()
+    lock.write_text("{}\n")
+    lock.chmod(0)
+    repo = make_repo(tmp_path, TWO_TICKETS)
+
+    try:
+        code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
+    finally:
+        lock.chmod(0o644)
+
+    assert (code, err) == (0, "")
+    assert read_journal(out)[-1]["result"] == "built"
+    assert alpha in records(machine / "index")
+
+
+@pytest.mark.parametrize("name", ["-x", "far/near", " far", "far "])
+def test_a_host_of_hosts_that_is_not_an_ssh_host_name_gives_the_exact_line_and_exit_2(machine, capsys, isolated_config_home, name):
+    path = config_file(isolated_config_home, f'hosts = ["{name}"]\n')
+
+    code, out, err = runs(capsys)
+
+    assert (code, out) == (2, "")
+    assert err == (
+        f"delegate runs: config {path}: hosts has {name!r}, which is not an ssh host name; "
+        'write hosts = ["build-host"] (a list of the ssh names of the other hosts)\n'
+    )
+
+
+def test_index_with_a_tilde_names_a_directory_of_the_home_of_the_user(machine, capsys, isolated_config_home, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    config_file(isolated_config_home, 'index = "~/shared-index"\n')
+    run_id = one_run_of_an_earlier_version(machine)
+
+    code, _, err = runs(capsys, "--local")
+
+    assert (code, err) == (0, "")
+    assert list(records(home / "shared-index")) == [run_id]
+    assert not (machine / "index").exists()
+
+
+@pytest.mark.parametrize("value", ["", "relative/dir"])
+def test_an_xdg_config_home_that_is_empty_or_not_absolute_gives_the_file_under_the_home_of_the_user(machine, capsys, tmp_path, monkeypatch, value):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", value)
+    path = config_file(home / ".config", 'hosts = "far"\n')
+
+    code, out, err = runs(capsys)
+
+    assert (code, out) == (2, "")
+    assert err == (
+        f"delegate runs: config {path}: hosts must be a list of host names, not 'far'; "
+        'write hosts = ["build-host"] (a list of the ssh names of the other hosts)\n'
+    )
