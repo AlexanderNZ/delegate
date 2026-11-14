@@ -332,3 +332,67 @@ def test_a_verifier_that_a_stop_ended_with_no_verdict_does_not_count_against_the
     starts = [e for e in read_journal_file(repo, run_id) if e["event"] == "verify-start"]
     assert [e["round"] for e in starts] == [0, 0, 1, 2]
     assert {"a.txt", "fixup-1.txt", "fixup-2.txt"} <= set(tree(repo, "run/demo"))
+
+
+def run_start_of(repo, run_id):
+    return read_journal_file(repo, run_id)[0]
+
+
+def test_the_run_start_of_a_new_run_records_the_repository_and_the_host_that_delegate_host_names(tmp_path, capsys, scripted, monkeypatch):
+    monkeypatch.setenv("DELEGATE_HOST", "build-box.example.org")
+    repo = make_repo(tmp_path, HEAD + ticket("a"))
+
+    run_id = finished_run(repo, capsys)
+
+    start = run_start_of(repo, run_id)
+    assert start["repo"] == str(repo.resolve())
+    assert start["host"] == "build-box.example.org"
+
+
+def test_the_run_start_records_the_short_host_name_when_delegate_host_is_not_set_or_is_empty(tmp_path, capsys, scripted, monkeypatch):
+    monkeypatch.setattr("socket.gethostname", lambda: "mac-mini.local")
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.delenv("DELEGATE_HOST", raising=False)
+    unset = finished_run(make_repo(first, HEAD + ticket("a")), capsys)
+    monkeypatch.setenv("DELEGATE_HOST", "")
+    empty = finished_run(make_repo(second, HEAD + ticket("a")), capsys)
+
+    assert run_start_of(first / "repo", unset)["host"] == "mac-mini"
+    assert run_start_of(second / "repo", empty)["host"] == "mac-mini"
+
+
+def test_a_resume_with_a_short_id_from_outside_the_repository_resumes_the_stopped_run_of_that_repository(tmp_path, capsys, scripted, monkeypatch):
+    repo = make_repo(tmp_path, THREE)
+    run_id, _ = kill_a_run(repo, 3)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    code, out, err = run_main(capsys, "--resume", run_id.rsplit("-", 1)[-1])
+
+    assert code == 0 and took_over_only(err, run_id)
+    assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
+    assert {"a.txt", "b.txt", "c.txt"} <= set(tree(repo, "run/demo"))
+    assert next(e for e in read_journal_file(repo, run_id) if e["event"] == "run-end")["result"] == "built"
+
+
+def test_a_resume_of_a_run_whose_run_start_has_no_repo_exits_one_and_the_message_names_repo(tmp_path, capsys, scripted, monkeypatch):
+    repo = make_repo(tmp_path, THREE)
+    run_id, _ = kill_a_run(repo, 3)
+    path = journal_path(repo, run_id)
+    first, *rest = path.read_text().splitlines()
+    start = json.loads(first)
+    del start["repo"]
+    path.write_text("\n".join([json.dumps(start), *rest]) + "\n")
+    before = path.read_bytes()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    code, out, err = run_main(capsys, "--resume", run_id)
+
+    assert code == 1 and "--repo" in err and run_id in err and "Traceback" not in err
+    assert path.read_bytes() == before
+    assert scripted.calls == []

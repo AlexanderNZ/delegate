@@ -209,6 +209,7 @@ from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
 )
+from .host import host_name
 from .journal import Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, describe_tries, probe_guard, refusal, stream_path
@@ -2214,7 +2215,7 @@ def _execute(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
             plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
-            agents=sealed, configuration=_configuration_record(workflow),
+            agents=sealed, configuration=_configuration_record(workflow), repo=str(repo.resolve()), host=host_name(),
         )
         progress = _Progress()
         was_skipped: dict[str, str] = {}

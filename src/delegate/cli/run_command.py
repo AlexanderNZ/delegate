@@ -70,7 +70,7 @@ from ..run.engine import (
 )
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
-from ..run.runs import LOG_NAME, RunsError, journal_of, locate, run_id_of
+from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
@@ -173,7 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # The run id that a detached start gives to the run process. The run process then runs in the foreground.
     parser.add_argument("--detached-run-id", help=argparse.SUPPRESS)
-    parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository to build in; default is the current directory")
+    parser.add_argument(
+        "--repo", type=Path, default=None,
+        help="the git repository to build in; default is the current directory; with --resume and no --repo, the repository that the run "
+        "records when the run is not in the current directory",
+    )
     parser.add_argument("--tiers", type=Path, help="path to a tiers.toml; default is the bundled table")
     add_opencode_override_flags(parser)
     return parser
@@ -370,11 +374,15 @@ def main(argv: list[str] | None = None) -> int:
     location: StateLocation | None = None
     if args.resume is not None:
         try:
+            if args.repo is None:
+                args.repo = repository_of_run(args.resume, vcs)  # the current directory, else the repository that `run-start` records (#306)
             location = locate(args.repo, vcs)
             args.resume = run_id_of(args.repo, args.resume, vcs, location=location)  # a short id names its run by the full id from here on
         except RunsError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
+    if args.repo is None:
+        args.repo = Path(".")
     if args.workflow is None:
         try:
             args.workflow = workflow_of_run(args.repo, args.resume, vcs, location=location)

@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Added
+
+- `run-start` records the repository and the host of a run, and `delegate run --resume <run id>` finds the repository of a run (#306). `run-start` has two new fields: `repo`, the absolute path of the top level of the repository that the run builds, and `host`, the name of the machine, which is `DELEGATE_HOST` when it is set and not empty, else the host name up to its first `.`. With no `--repo`, `--resume` looks for the run as `status` does: in the repository of the current directory, then under the state root. A run that is not in the repository of the current directory goes on in the `repo` of its `run-start`. A run of an earlier version has no `repo`: from outside its repository, the resume exits 1, and the message says to run the command in the repository or to give `--repo`. See `docs/reference/run.md`.
+
 ### Changed
 
 - `delegate status` and `delegate watch` find a run by its id from any directory (#305). With a run id and no `--repo`, a command looks first in the state directory of the repository of the current directory. When the current directory is in no git repository, or that repository has no such run, it looks in each state directory under the state root of this machine (`DELEGATE_STATE_ROOT`, or the default root). The id is the full run id or the short id, as before. One match shows that run. When more than one run has the short id, the command exits 2 and names each full run id. When no run matches, it exits 2 and names the state root. With `--repo`, and with no run id, the behaviour does not change. See `docs/reference/status-and-watch.md`.

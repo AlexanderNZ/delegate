@@ -150,6 +150,10 @@ class RunStart(TypedDict):
     # The configuration of each stack and the top-level fields that change the work (#289). Absent in a journal that an
     # earlier version of the kit wrote.
     configuration: NotRequired[ConfigurationRecord]
+    # The absolute path of the top level of the repository that the run builds, and the name of the machine that started
+    # the run (#306). Absent in a journal that an earlier version of the kit wrote.
+    repo: NotRequired[str]
+    host: NotRequired[str]
 
 
 class StepStart(TypedDict):

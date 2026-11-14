@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import EngineError, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
-from .journal import JournalError, newest_run_end, read_new_events
+from .journal import JournalError, newest_run_end, read_events, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
 
@@ -230,6 +230,36 @@ def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
     if not found:
         raise RunsError(f"run {run_id!r} not found: no journal in the state directories of the current directory or under the state root {root}")
     return found[0]
+
+
+def repository_of_run(run_id: str, vcs: VersionControl) -> Path:
+    """The repository to resume the run `run_id` in, for `delegate run --resume` with no `--repo` (#306).
+
+    `run_id` is a full run id or a short id. The command finds the run as `journal_of_run` does. When the run is in
+    the state directories of the repository of the current directory, that repository is the answer, as before. Else it
+    is the `repo` that `run-start` of the run records. Raise RunsError when no run has the id, when more than one has
+    it, or when the run is not in the repository of the current directory and its `run-start` has no `repo`: the
+    journal of a run of an earlier version. The message of the last case says to run the command in the repository or to
+    give `--repo`.
+    """
+    journal = journal_of_run(run_id, vcs)
+    try:
+        here = locate(Path("."), vcs)
+    except RunsError:
+        here = None  # the current directory is in no repository
+    if here is not None and journal.parent.parent.parent in here.run_directories():
+        return Path(".")
+    try:
+        events = read_events(journal, torn_tail=True)
+    except JournalError as error:
+        raise RunsError(f"run {run_id!r} cannot be resumed: {error}") from None
+    recorded = events[0].get("repo") if events and events[0].get("event") == "run-start" else None
+    if not isinstance(recorded, str) or not recorded:
+        raise RunsError(
+            f"run {journal.parent.name!r} cannot be resumed from here: its run-start does not record its repository "
+            "(the run is of an earlier version); run the command in the repository, or give --repo"
+        )
+    return Path(recorded)
 
 
 @dataclass(frozen=True)
