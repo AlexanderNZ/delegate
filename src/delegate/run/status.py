@@ -49,7 +49,7 @@ from pathlib import Path
 
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
-from . import domain, output
+from . import domain, output, run_state
 from .engine import StateLocation
 from .journal import (
     ABANDONED, JournalError, abandon_note, activity_files, crash_note, crash_of, halt_of, is_paused, last_change, newest_run_end, plan_ids,
@@ -516,11 +516,11 @@ def _chain_phase_of(event: dict[str, object]) -> str | None:
 def _since_chain_restart(events: list[dict[str, object]]) -> list[dict[str, object]]:
     """The events after the newest event that starts a new verification of an `economy` chain, or all events when none does.
 
-    This is the rule of the engine (`domain.starts_chain_verification`, `_verify_stacks`): a `retry`, except a retry at the
+    This is the rule of the engine (`run_state.starts_chain_verification`, `_verify_stacks`): a `retry`, except a retry at the
     chain fix-up, and a `plan-change` start the verification again, so the chain rows, the time of the chain and the
     verdicts of the chain count only the events after them (#304).
     """
-    starts = [index for index, event in enumerate(events) if domain.starts_chain_verification(event)]
+    starts = [index for index, event in enumerate(events) if run_state.starts_chain_verification(event)]
     return events[starts[-1] + 1 :] if starts else events
 
 

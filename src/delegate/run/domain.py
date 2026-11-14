@@ -211,18 +211,6 @@ def work_starts_at(base_commit: str, rebased_onto: str | None = None) -> str:
     return rebased_onto if rebased_onto is not None else base_commit
 
 
-def starts_chain_verification(event: Mapping[str, object]) -> bool:
-    """Tell whether a journal event starts a new verification of an `economy` chain (#297).
-
-    A `plan-change` and a `retry` start one, except a `retry` with the phase `chain-fixup`: that retry goes on with the
-    verification that the stop cut off, so the fix-up rounds and the time before it still count. The engine reads the
-    events after the newest such event, and `delegate status` and `delegate watch` use this function for the same
-    rule, so the round and the time of a chain are the same in the three.
-    """
-    kind = event["event"]
-    return kind == "plan-change" or (kind == "retry" and event.get("phase") != RETRY_CHAIN_FIXUP)
-
-
 def is_accepted(verdict: str) -> bool:
     """Tell whether a verdict lets the branch through."""
     return verdict == ACCEPT

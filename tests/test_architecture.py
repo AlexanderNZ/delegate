@@ -34,6 +34,8 @@ The rule, in words:
   no file system, no subprocess. `DOMAIN_ALLOWED` lists the modules it may import.
 * The rules of the fleet lines of `delegate runs`, `run/fleet_rules.py`, are as pure as the domain module. They may
   import `dataclasses` and `datetime` too, for the plain values of a run. `PURE_MODULES` lists each pure module.
+* The run state, `run/run_state.py`, is the one fold of the journal of a run (ADR 0009). It is as pure as the domain module,
+  and it may import `dataclasses` for its frozen values.
 
 The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
@@ -98,7 +100,13 @@ DOMAIN_ALLOWED = {"__future__", "collections.abc", "typing"}
 # Each pure module of the run context, with the modules that it may import: the domain module, and the rules of the
 # fleet lines of `delegate runs` (#308), which also hold their values in a dataclass with datetimes.
 FLEET_RULES_MODULE = "run/fleet_rules.py"
-PURE_MODULES = {DOMAIN_MODULE: DOMAIN_ALLOWED, FLEET_RULES_MODULE: DOMAIN_ALLOWED | {"dataclasses", "datetime"}}
+# The run state (#319), the one fold of the journal that the engine and the views decide from, is pure too. It holds its values in frozen dataclasses.
+RUN_STATE_MODULE = "run/run_state.py"
+PURE_MODULES = {
+    DOMAIN_MODULE: DOMAIN_ALLOWED,
+    FLEET_RULES_MODULE: DOMAIN_ALLOWED | {"dataclasses", "datetime"},
+    RUN_STATE_MODULE: DOMAIN_ALLOWED | {"dataclasses"},
+}
 
 
 def layer_of(parts: tuple[str, ...]) -> str | None:

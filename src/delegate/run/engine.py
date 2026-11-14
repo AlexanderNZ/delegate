@@ -195,7 +195,7 @@ from ..ports.index import RunIndex
 from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
-from . import domain
+from . import domain, run_state
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
@@ -1353,7 +1353,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     verification of the chain is its events after the newest `retry` that is not a retry at the chain fix-up, or the
     newest `plan-change`, as in `_ChainRun`.
     """
-    starts = [index for index, e in enumerate(events) if domain.starts_chain_verification(e)]
+    starts = [index for index, e in enumerate(events) if run_state.starts_chain_verification(e)]
     report = _unfinished_report([e for e in events[starts[-1] + 1 if starts else 0 :] if e["event"] == "fixup-report"])
     return report is not None and _report_names_hotspot(workflow, report, config_paths)
 
@@ -4214,7 +4214,7 @@ class _ChainRun:
         _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
         every_event = self.journal.events
         # A retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
-        retries = [index for index, e in enumerate(every_event) if domain.starts_chain_verification(e)]
+        retries = [index for index, e in enumerate(every_event) if run_state.starts_chain_verification(e)]
         # The verification of the chain since the last retry or plan change.
         events = every_event[retries[-1] + 1 :] if retries else every_event
         if any(e["event"] == "run-branch-advance" for e in events):
