@@ -68,12 +68,27 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 | `ETA` | The local clock time `HH:MM` of the end that the run is estimated to reach. It is `-` while the run runs and has no estimate. It is blank when the run is paused, halted, stopped or ended. |
 | `new` | The new tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `cache` | The cache tokens of the run. It is blank when the command cannot read the streams of the run. |
+| `alert` | What is wrong, at most one value, in `warn`. `⚠ idle <time>` when an agent of the run is idle for the stall time of `delegate watch` (5 minutes) or more. Else `fix-up <round>/<limit>` when a [**fix-up**](../glossary.md#fix-up) round of a ticket or of a [**chain**](../glossary.md#chain) runs. It is blank otherwise. A run that is not `running` or `pausing` has no alert. |
+| `do` | The next command. `watch` when the run has an alert. Else `resume` when the run is `paused`, `stopped` or `halted`, `retry` when the run ended `failed`, and `merge` when the run ended `built`. It is blank otherwise. A run that failed at start has none: it has no journal to resume. |
 
 The order of the rows is fixed. The runs that have no `run-end` come first, the newest start first. The runs that ended follow, the newest end first.
 
 When no run is listed, the table is the line `no run ended in the last 6h`. The command exits 0.
 
-Later versions add the columns `slip`, `trend`, `alert` and `do`.
+Later versions add the columns `slip` and `trend`.
+
+### The legend
+
+Under the table is a blank line and the legend: one line for each word of the column `do` that the table holds, once, in the order `watch`, `resume`, `retry`, `merge`. Each line has the word and its command. A word that is not in the table has no line, and a table with no word has no legend. The legend shows only on a terminal of 100 columns or more.
+
+| Word | Command |
+|---|---|
+| `watch` | `delegate watch <run>` |
+| `resume` | `delegate run --resume <run>` |
+| `retry` | `delegate run --resume <run> --retry <ticket>` |
+| `merge` | `git merge --ff-only <run branch>` |
+
+Each command works from any directory of this machine: `delegate watch` and `delegate run --resume` find the run by its id, and the journal records the repository of the run. Put the short id of the run in `<run>`.
 
 ## The JSON object
 
@@ -97,7 +112,9 @@ Later versions add the columns `slip`, `trend`, `alert` and `do`.
       "tickets_total": 2,
       "eta": null,
       "tokens_new": 12000,
-      "tokens_cache": 340000
+      "tokens_cache": 340000,
+      "alert": null,
+      "do": null
     }
   ]
 }
@@ -121,6 +138,8 @@ Later versions add the columns `slip`, `trend`, `alert` and `do`.
 | `eta` | The estimated end of the run, or `null` when the run does not run or has no estimate. |
 | `tokens_new` | The new tokens of the run, or `null` when the command cannot read its streams. |
 | `tokens_cache` | The cache tokens of the run, or `null` when the command cannot read its streams. |
+| `alert` | The text of the column `alert`, or `null`. The glyph of `⚠ idle` is always `⚠`, also in a terminal that is not UTF-8. |
+| `do` | The word of the column `do`, or `null`. |
 
 ## Exit codes
 

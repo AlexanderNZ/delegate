@@ -55,10 +55,10 @@ def test_the_table_lists_the_running_run_then_the_run_that_ended_in_the_window_a
         "runs  1 of 1 reachable  50%  1/2 ended  ETA - · 1 with no ETA  12k new · 340k cache",
         "13:40–14:20",
         "",
-        "host    repo   run   state    ended  ETA  new  cache",
+        "host    repo   run   state    ended  ETA  new  cache  alert  do",
         "laptop                        1/2         12k   340k",
         "│       alpha  aaaa  running  1/2    -    12k   340k",
-        "│       beta   bbbb  built    1/1          2k    50k",
+        "│       beta   bbbb  built    1/1          2k    50k         merge",
     ]
 
 
@@ -77,18 +77,18 @@ def test_the_json_object_has_the_format_the_host_the_window_and_each_listed_run_
             {
                 "run_id": "20261114T134000Z-aaaa", "repo": "alpha", "host": "laptop", "state": "running",
                 "started": "2026-11-14T13:40:00+00:00", "ended": None, "tickets_ended": 1, "tickets_total": 2, "eta": None,
-                "tokens_new": 12000, "tokens_cache": 340000,
+                "tokens_new": 12000, "tokens_cache": 340000, "alert": None, "do": None,
             },
             {
                 "run_id": "20261114T125000Z-bbbb", "repo": "beta", "host": "laptop", "state": "built",
                 "started": "2026-11-14T12:50:00+00:00", "ended": "2026-11-14T13:20:00+00:00", "tickets_ended": 1,
-                "tickets_total": 1, "eta": None, "tokens_new": 2000, "tokens_cache": 50000,
+                "tickets_total": 1, "eta": None, "tokens_new": 2000, "tokens_cache": 50000, "alert": None, "do": "merge",
             },
         ],
     }
     assert list(json.loads(out)) == ["format", "host", "time", "window_seconds", "runs"]
     assert list(json.loads(out)["runs"][0]) == [
-        "run_id", "repo", "host", "state", "started", "ended", "tickets_ended", "tickets_total", "eta", "tokens_new", "tokens_cache",
+        "run_id", "repo", "host", "state", "started", "ended", "tickets_ended", "tickets_total", "eta", "tokens_new", "tokens_cache", "alert", "do",
     ]
 
 
@@ -111,9 +111,9 @@ def test_the_eta_cell_is_a_clock_time_while_a_run_runs_and_is_blank_for_a_paused
 
     assert (code, err) == (0, "")
     assert out.splitlines()[4:] == [
-        "host    repo   run   state    ended  ETA    new  cache",
+        "host    repo   run   state    ended  ETA    new  cache  alert  do",
         "laptop                        2/5    15:10",
-        "│       gamma  pppp  paused   1/2",
+        "│       gamma  pppp  paused   1/2                              resume",
         "│       gamma  gggg  running  1/3    15:10",
     ]
     code, out, _ = runs(capsys, "--json")
@@ -129,7 +129,7 @@ def test_a_run_with_no_run_end_and_no_process_is_listed_as_stopped_however_old_i
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[-1].split() == ["│", "delta", "ssss", "stopped", "1/2"]
+    assert out.splitlines()[-1].split() == ["│", "delta", "ssss", "stopped", "1/2", "resume"]
 
 
 def test_a_run_that_failed_at_start_in_the_window_is_listed_as_failed_and_an_older_one_is_not(machine, capsys):

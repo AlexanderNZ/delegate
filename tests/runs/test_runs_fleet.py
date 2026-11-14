@@ -163,4 +163,4 @@ def test_with_only_an_ended_run_the_fleet_line_says_no_run_is_reachable_and_the_
     lines = out.splitlines()
     assert lines[1] == "runs  0 of 0 reachable"
     assert lines[2] == ""
-    assert lines[-1].split() == ["│", "omega", "eeee", "built", "1/1"]
+    assert lines[-3].split() == ["│", "omega", "eeee", "built", "1/1", "merge"]

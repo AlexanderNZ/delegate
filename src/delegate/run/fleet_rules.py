@@ -18,6 +18,18 @@ from datetime import datetime
 # The states of a run that are trouble by themselves: a run that stopped with no `run-end`, and a run that halted.
 TROUBLE_STATES: frozenset[str] = frozenset({"stopped", "halted"})
 
+# The states of a run that has an agent at work: only such a run can have an alert (#309).
+WORKING_STATES: frozenset[str] = frozenset({"running", "pausing"})
+
+# The kinds of an alert, and the words of the column `do` (copy deck W8.do.*).
+IDLE: str = "idle"
+FIXUP: str = "fix-up"
+WATCH: str = "watch"
+RESUME: str = "resume"
+RETRY: str = "retry"
+MERGE: str = "merge"
+DO_WORDS: tuple[str, ...] = (WATCH, RESUME, RETRY, MERGE)
+
 
 @dataclass(frozen=True)
 class RunFacts:
@@ -26,7 +38,7 @@ class RunFacts:
     `ended` is True for a run with a `run-end`, and for a run that failed at start (`failed_start`). `eta` is None for a
     run that has no estimate and for a run that does not run. `idle_seconds` is the longest time that an agent of the
     run is idle, or None when no agent runs or the run has no reader of its streams. The two token counts are None
-    when the run has none.
+    when the run has none. `fixup` is the round and the limit of a fix-up round of a ticket or of a chain that runs now (#309), or None.
     """
 
     state: str
@@ -39,6 +51,7 @@ class RunFacts:
     tokens_new: int | None
     tokens_cache: int | None
     idle_seconds: int | None
+    fixup: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -106,3 +119,47 @@ def reachable(runs: Sequence[RunFacts]) -> tuple[int, int]:
     """The runs that are reachable, and the runs that are listed with no `run-end`. Each run of this machine is reachable, so the two are the same."""
     count = len(counted(runs))
     return count, count
+
+
+@dataclass(frozen=True)
+class Alert:
+    """The one alert of a run: `IDLE` with the seconds that an agent is idle, or `FIXUP` with the round and the limit."""
+
+    kind: str
+    seconds: int = 0
+    round: int = 0
+    limit: int = 0
+
+
+def alert(run: RunFacts, idle_limit: int) -> Alert | None:
+    """The alert of a run, at most one (#309): an agent idle for `idle_limit` seconds or more, then a fix-up round that runs. None otherwise.
+
+    Only a run that works (`WORKING_STATES`) has an alert. A paused, halted or stopped run, and a run that ended, has none:
+    its command is `resume`, `retry` or `merge`, and `delegate watch` shows no live agent for it.
+    """
+    if run.ended or run.state not in WORKING_STATES:
+        return None
+    if run.idle_seconds is not None and run.idle_seconds >= idle_limit:
+        return Alert(IDLE, seconds=run.idle_seconds)
+    if run.fixup is not None:
+        return Alert(FIXUP, round=run.fixup[0], limit=run.fixup[1])
+    return None
+
+
+def next_command(run: RunFacts, alerted: bool) -> str | None:
+    """The word of the column `do` of a run (#309), or None when nothing is needed.
+
+    `watch` for a run with an alert; `resume` for a run that is paused, stopped or halted; `retry` for a run that ended
+    `failed`; `merge` for a run that ended `built`. A run that failed at start has no ticket to retry, so it has none.
+    """
+    if alerted:
+        return WATCH
+    if run.failed_start:
+        return None
+    if run.state in ("paused", "stopped", "halted") and not run.ended:
+        return RESUME
+    if run.state == "failed":
+        return RETRY
+    if run.state == "built":
+        return MERGE
+    return None
