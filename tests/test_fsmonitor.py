@@ -234,7 +234,9 @@ def test_the_engine_stops_the_fsmonitor_daemon_of_the_verifier_copy_before_it_re
         # is a race, so the test reads the daemon at the moment the engine removes the directory.
         # `git fsmonitor--daemon stop` returns once the socket stops listening, while the process may
         # still be exiting, so the test asks whether the socket takes a connection, not whether the process lives.
-        if copies:
+        # The test reads the daemon only at a removal that deletes a copy. The engine also removes other
+        # directories after the verifier, for example the scratch directory of the verifier (#294).
+        if any(copy.is_relative_to(path) for copy in copies):
             listening_at_removal.append(any(daemon_pid(copy) is not None for copy in copies))
         remove_tree(path, *args, **kwargs)
 
