@@ -16,7 +16,7 @@ and a fixed base branch never moves. When the run branch is gone already, the ba
 branches with `merged`, and without it every ticket branch stays.
 
 A run is cleaned only when the newest `run-end` of its journal after its newest
-`resume` has the result `built` (`journal.newest_run_end`), and no live process
+`resume` has the result `built` (`run_state.fold`), and no live process
 holds the lock of its run branch. Each other run keeps everything, and its line
 gives the reason: it is active, it failed, it is paused, or it stopped. The
 clean takes the lock of the run branch while it works, so a resume cannot start
@@ -58,8 +58,9 @@ from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_bra
 from .engine import (
     CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, EngineError, locate_state, restore_progress,
 )
+from . import run_state
 from .events import RUN_END
-from .journal import ABANDONED, Journal, JournalError, abandon_note, halt_of, is_paused, newest_run_end, read_events
+from .journal import ABANDONED, Journal, JournalError, abandon_note, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
 from .runs import JOURNAL_NAME, RunsError, journal_of
 
@@ -340,11 +341,12 @@ def _leftover_verifier_scratch(events: list[dict[str, object]], run_id: str) -> 
 
 def _not_built(events: list[dict[str, object]], run_id: str) -> str | None:
     """The reason that a run with no live process is not cleaned, or None for a run that ended `built`."""
-    end = newest_run_end(events)
+    found = run_state.fold(events)
+    end = found.run_end
     if end is None:
-        if is_paused(events):
+        if found.status.kind == run_state.PAUSED:
             return f"the run is paused; go on with delegate run --resume {run_id}"
-        if halt_of(events) is not None:
+        if found.status.kind == run_state.HALTED:
             return f"the run is halted; go on with delegate run --resume {run_id}"
         return f"the run stopped with no run-end, and no process works on it; go on with delegate run --resume {run_id}"
     if end["result"] == ABANDONED:
@@ -535,7 +537,7 @@ def _abandon_run(
         _record_lock_broken(handle, broken)
     start = events[0]
     run_branch = str(start["run_branch"])
-    end = newest_run_end(events)
+    end = run_state.fold(events).run_end
     if end is not None and end["result"] == BUILT:
         raise AbandonError(f"run {run_id} ended built; it has nothing to abandon, and delegate clean {run_id} removes what it left")
     already = end is not None and end["result"] == ABANDONED

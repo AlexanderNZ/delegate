@@ -21,10 +21,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from . import output
+from . import output, run_state
 from .clock import Clock
 from .journal import (
-    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, crash_of, halt_of, is_paused, last_change, read_new_events,
+    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, last_change, read_new_events,
 )
 
 # A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
@@ -262,10 +262,11 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
     events, _ = read_new_events(journal, 0, 1)
     if not events:
         raise JournalError(f"journal {journal} holds no event")
-    halt, crash = halt_of(events), crash_of(events)
+    found = run_state.fold(events).status
+    halt, crash = (found.event if found.kind == kind else None for kind in (run_state.HALTED, run_state.CRASHED))
     return StoppedRun(
-        journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), is_paused(events), None if halt is None else str(halt["message"]),
-        None if crash is None else crash_note(crash, journal.parent.name),
+        journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), found.kind == run_state.PAUSED,
+        None if halt is None else str(halt["message"]), None if crash is None else crash_note(dict(crash), journal.parent.name),
     )
 
 

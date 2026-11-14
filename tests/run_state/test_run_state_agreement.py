@@ -84,16 +84,14 @@ ECONOMY = [
     *chain_gates("c", 3), *verifier("c", "ACCEPT"), ev("run-branch-advance", ticket="c", commit="c" * 40), built("c"), BUILT_END,
 ]
 
-# The journals of the table: the name, the events, the mode, and whether the journal agrees at each point in time. A journal with
-# an `unskip` or a `plan-change` agrees at its end only. Between a `plan-change` and the `unskip`, the view fold reads a changed
-# ticket as skipped (rule 1 below). Before #320 the engine fold also read a ticket as skipped between its `unskip` and its
-# `step-start` (rule 2 below).
+# The journals of the table: the name, the events, the mode, and whether the journal agrees at each point in time. Since #320 and
+# #321 the engine and the views read the run state, so each journal agrees at each point in time.
 TABLE = [
     ("a plain run", PLAIN, "assure", True),
     ("a failed ticket and a skip", FAILED_AND_SKIP, "assure", True),
     ("a step that is open", OPEN_STEP, "assure", True),
-    ("a retry", RETRY, "assure", False),
-    ("a plan change", PLAN_CHANGE, "assure", False),
+    ("a retry", RETRY, "assure", True),
+    ("a plan change", PLAN_CHANGE, "assure", True),
     ("a pause", PAUSE, "assure", True),
     ("a pause and a resume", PAUSE_AND_RESUME, "assure", True),
     ("a halt", HALT, "assure", True),
@@ -199,10 +197,11 @@ def test_rule_1_a_plan_change_that_a_crash_cut_off_before_the_next_step_start_th
     assert run_state.fold(events).ticket("b").outcome == "pending"  # the run state: the plan change took b out of the skipped tickets
 
 
-def test_rule_1_the_views_read_a_changed_ticket_as_skipped_until_the_unskip_that_the_engine_writes_after_the_plan_change():
+def test_rule_1_the_views_read_a_changed_ticket_as_pending_before_the_unskip_that_the_engine_writes_after_the_plan_change():
     events = journal(started("a"), failed("a"), skipped("b"), RUN_ENDED, ev("resume"), plan_change(["a", "b"], changed=["b"]))
 
-    assert {t.id: t.state for t in snapshot(events).tickets} == {"a": "failed", "b": "skipped"}  # the view fold
+    # The view fold read b as skipped before #321.
+    assert {t.id: t.state for t in snapshot(events).tickets} == {"a": "failed", "b": "pending"}
     assert run_state.fold(events).ticket("b").outcome == "pending"
 
 

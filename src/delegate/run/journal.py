@@ -28,6 +28,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import run_state
 from .events import (
     CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, INDEX_WARNING, INVARIANT_VIOLATION, JOURNAL_CHANGED, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT,
 )
@@ -124,28 +125,14 @@ def plan_ids(events: list[dict[str, object]]) -> list[str]:
     return [str(t) for t in events[0]["tickets"]]  # type: ignore[union-attr]
 
 
-def newest_run_end(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The `run-end` event of a run that ended, or None.
-
-    A run that ended and was resumed works again, so its old `run-end` does not end it when a `resume` follows.
-    `delegate status` gives the state of a run by this rule, and an active run has no such `run-end`.
-    """
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "run-end":
-            return event
-    return None
-
-
 # The result of the `run-end` that `delegate clean --abandon` writes (#201). The engine never writes it.
 ABANDONED: str = "abandoned"
 
 
 def abandoned_end(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The `run-end` of a run that the owner abandoned, or None: the newest `run-end` has the result `abandoned` (`newest_run_end`)."""
-    end = newest_run_end(events)
-    return end if end is not None and end["result"] == ABANDONED else None
+    """The `run-end` of a run that the owner abandoned, or None: the run state of the events is ended, with the result `abandoned`."""
+    end = run_state.fold(events).run_end
+    return dict(end) if end is not None and end["result"] == ABANDONED else None
 
 
 def abandon_note(end: dict[str, object]) -> str:
@@ -166,53 +153,6 @@ def before_after_end(events: list[dict[str, object]]) -> list[dict[str, object]]
     while end and events[end - 1]["event"] in AFTER_END:
         end -= 1
     return events[:end]
-
-
-def is_paused(events: list[dict[str, object]]) -> bool:
-    """True when the run of the events is paused: its newest `paused` comes after its newest `resume`."""
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return False
-        if event["event"] == "paused":
-            return True
-    return False
-
-
-def halt_of(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The newest `halted` event of the run of the events, or None: the run is halted when it comes after the newest `resume`.
-
-    A failure of the harness halts a run (#177). The run process ends with no `run-end`, and a resume goes on.
-    """
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "halted":
-            return event
-    return None
-
-
-def crash_of(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The newest `crashed` event of the run of the events, or None: the run crashed when it comes after the newest `resume`.
-
-    A crash stops a run (#281). The run process ends with no `step-end` and no `run-end`, and a resume goes on with the
-    open step. A journal of an earlier version records a crash in a `step-end` and a `run-end`, and has no `crashed`.
-    """
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "crashed":
-            return event
-    return None
-
-
-def setup_problem_of(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The newest `setup-problem` event of the run of the events, or None: the check of the setup stopped the run when it comes after the newest `resume` (#296)."""
-    for event in reversed(events):
-        if event["event"] == "resume":
-            return None
-        if event["event"] == "setup-problem":
-            return event
-    return None
 
 
 def setup_problem_note(problem: dict[str, object], run_id: str) -> str:

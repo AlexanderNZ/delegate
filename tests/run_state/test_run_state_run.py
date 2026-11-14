@@ -180,3 +180,13 @@ def test_starts_chain_verification_is_true_for_a_plan_change_and_a_retry_except_
 
 def test_the_phase_of_a_retry_at_the_chain_fixup_is_the_phase_that_the_domain_module_names():
     assert run_state.RETRY_CHAIN_FIXUP == domain.RETRY_CHAIN_FIXUP
+
+
+def test_run_end_is_the_run_end_event_of_a_run_that_ended_and_none_when_a_resume_follows_it_or_the_run_is_paused():
+    ended = journal(started("a"), ev("run-end", result="failed", built=[], failed=[], skipped=[]))
+    resumed = journal(started("a"), ev("run-end", result="failed", built=[], failed=[], skipped=[]), ev("resume"))
+    paused = journal(started("a"), ev("paused", ticket="b", before="b"))
+
+    assert run_state.fold(ended).run_end == ended[-1]
+    assert run_state.fold(resumed).run_end is None
+    assert run_state.fold(paused).run_end is None

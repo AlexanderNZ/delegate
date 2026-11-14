@@ -7,7 +7,7 @@ a newer run is in the default state directory, so the functions here search both
 line of each journal. It needs no adapter and no workflow file.
 
 `runs_of` also finds the active runs. A run is active when its journal has no
-`run-end` after its newest `resume` (`journal.newest_run_end`, the rule of
+`run-end` after its newest `resume` (`run_state.fold`, the rule of
 `delegate status`), and a process holds the kernel lock of its run branch, and
 the lock file names the run (`lock.live_holder`, the lock check of `delegate
 run` and `delegate pause`, #288). A run with no `run-end` and no live process stopped: a crash, a kill,
@@ -32,7 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .engine import EngineError, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
-from .journal import JournalError, newest_run_end, read_events, read_new_events
+from . import run_state
+from .journal import JournalError, read_events, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
 
@@ -340,7 +341,7 @@ def is_active(journal: Path) -> bool:
     if not has_live_process(journal):
         return False
     events, _ = read_new_events(journal, 0, 1)
-    return newest_run_end(events) is None
+    return run_state.fold(events).status.kind != run_state.ENDED
 
 
 def runs_of(repo: Path, vcs: VersionControl, *, location: StateLocation | None = None) -> Runs:

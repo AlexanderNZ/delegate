@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
-from .journal import JournalError, is_paused, newest_run_end, read_new_events
+from . import run_state
+from .journal import JournalError, read_new_events
 from .lock import LockError, LockHolder, live_holder
 from .runs import RunsError, journal_of, locate
 
@@ -58,10 +59,11 @@ def stop_run(repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float) 
     if not events or events[0]["event"] != "run-start":
         raise StopError(f"journal {journal}: the first event is not 'run-start'")
     resume = f"delegate run --resume {run_id}"
-    end = newest_run_end(events)
+    found = run_state.fold(events)
+    end = found.run_end
     if end is not None:
         raise StopError(f"run {run_id!r} has ended with the result {end['result']!r}; there is nothing to stop")
-    if is_paused(events):
+    if found.status.kind == run_state.PAUSED:
         raise StopError(f"run {run_id!r} is paused already, and no process works on it; go on with {resume}")
     run_branch = str(events[0]["run_branch"])
     try:

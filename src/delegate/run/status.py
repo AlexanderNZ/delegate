@@ -52,8 +52,7 @@ from ..ports.vcs import VersionControl
 from . import domain, output, run_state
 from .engine import StateLocation
 from .journal import (
-    ABANDONED, JournalError, abandon_note, activity_files, crash_note, crash_of, halt_of, is_paused, last_change, newest_run_end, plan_ids,
-    read_new_events, setup_problem_note, setup_problem_of,
+    ABANDONED, JournalError, abandon_note, activity_files, crash_note, last_change, plan_ids, read_new_events, setup_problem_note,
 )
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
@@ -117,9 +116,9 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         ],
     ]
     states = {t.id: t.state for t in snap.tickets}
-    # An `economy` run reads the verdicts of the chain since its newest restart, as the engine does (#304): a retry that
+    # An `economy` run reads the verdicts of the current pass of the chain, as the engine does (#304): a retry that
     # started the verification again leaves the verdict of the first pass out.
-    verdict_events = _since_chain_restart(events) if domain.chain_units(str(start["mode"])) else events
+    verdict_events = events[run_state.fold(events).chain.start :] if domain.chain_units(str(start["mode"])) else events
     facts: dict[str, dict[str, str]] = {}
     for ticket in plan_ids(events):
         own = [e for e in events if e.get("ticket") == ticket]
@@ -340,9 +339,14 @@ def _seconds(start: datetime, end: datetime) -> int:
 
 
 def _ticket(
-    ticket: str, own: list[dict[str, object]], activity: StreamReader | None, now: datetime, run_ended: bool
+    ticket: str, own: list[dict[str, object]], settled: run_state.TicketState, activity: StreamReader | None, now: datetime,
+    run_ended: bool,
 ) -> tuple[TicketSnapshot, int | None]:
     """The snapshot of one ticket from its own events, and the seconds of its step when it ended after one.
+
+    The state of the ticket, and the reason of a failed or a skipped ticket, come from the run state (`settled`, ADR 0009). A ticket
+    that a retry runs again, or that has an open step, shows as running. The phase, the times, the tokens and the gate come from the
+    events of the ticket.
 
     With no reader (`activity` is None), the ticket has no tokens and no idle time, and its streams are not read. A
     result event that holds the totals of its agent (`journal_totals`) gives them, and its stream is not read (#183).
@@ -351,33 +355,27 @@ def _ticket(
     verifier of an `economy` chain starts after its ticket ended, so a ticket that ended can have an agent that runs.
     A gate runs from its `gate-start` until its `gate-result`, a `step-end` (a crash), or the end of the run.
     """
-    state, phase = PENDING, None
+    state = RUNNING if settled.retrying or settled.outcome == run_state.OPEN else settled.outcome
+    phase = None
     started = ended = None
     streams: list[str] = []
     totals: dict[str, Activity] = {}  # the totals that the result events hold, by event stream (#183)
     live: dict[str, object] | None = None  # the `agent-start` of the agent that runs now
     gate: dict[str, object] | None = None  # the `gate-start` of the gate that runs now
-    reason: str | None = None
+    reason = settled.reason if state in (FAILED, SKIPPED) else None
     trace: str | None = None
     fixup_round, continuation = 0, None
     for event in own:
         kind = str(event["event"])
         if kind in ("step-start", "retry"):
-            reason, trace, fixup_round, continuation = None, None, 0, None
+            trace, fixup_round, continuation = None, 0, None
         if kind == "step-start":
-            state, started = RUNNING, started or _time(event)
+            started = started or _time(event)
         elif kind == "step-end":
-            state, ended, live, gate = str(event["state"]), ended or _time(event), None, None
-            reason = None if event.get("reason") is None else str(event["reason"])
+            ended, live, gate = ended or _time(event), None, None
             trace = None if event.get("traceback") is None else str(event["traceback"])
         elif kind == "retry":
-            state, ended = RUNNING, None
-        elif kind == "skip":
-            state = SKIPPED
-            reason = None if event.get("reason") is None else str(event["reason"])
-        elif kind == "unskip":
-            # A resume took the ticket out of the skipped tickets: the old skip no longer applies (#298).
-            state, reason = PENDING, None
+            ended = None
         elif kind == "fixup-start":
             fixup_round = int(event["round"])  # type: ignore[call-overload]
         elif kind == "continuation":
@@ -513,26 +511,16 @@ def _chain_phase_of(event: dict[str, object]) -> str | None:
     return PHASE_OF_CHAIN_EVENT.get(kind)
 
 
-def _since_chain_restart(events: list[dict[str, object]]) -> list[dict[str, object]]:
-    """The events after the newest event that starts a new verification of an `economy` chain, or all events when none does.
-
-    This is the rule of the engine (`run_state.starts_chain_verification`, `_verify_stacks`): a `retry`, except a retry at the
-    chain fix-up, and a `plan-change` start the verification again, so the chain rows, the time of the chain and the
-    verdicts of the chain count only the events after them (#304).
-    """
-    starts = [index for index, event in enumerate(events) if run_state.starts_chain_verification(event)]
-    return events[starts[-1] + 1 :] if starts else events
-
-
 def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
     """The phase of the verification of an `economy` chain, and the seconds since it started. (None, 0) before it starts.
 
-    The verification starts with the first gate of the chain after the newest restart (`_since_chain_restart`), and its
+    `events` are the events of the current pass of the chain (`run_state.fold(...).chain.start`). The verification starts with the first
+    gate of the chain in the pass, and its
     phase follows the newest `gate-start` or `gate-skip` of the chain gates (`gates`), `verify-start` (`verifier`), or
     `fixup-start` (`fix-up`). After a fix-up round, the gates of the chain run again, so the phase is `gates` again.
     """
     phase, started = None, None
-    for event in _since_chain_restart(events):
+    for event in events:
         found = _chain_phase_of(event)
         if found is not None:
             phase, started = found, started or _time(event)
@@ -551,10 +539,10 @@ def _chains(
 
     The engine names the chain of a stack by the last ticket of the stack: the gates, the verifier and the fix-up rounds
     of the chain carry that ticket. A group is the events of one such ticket from its first event of the chain. A new
-    `step-start` ends its group. The function reads only the events after the newest event that starts a new verification
-    (`_since_chain_restart`, the rule of the engine): the chain after it is a new one, and the first pass of each stack is
-    gone, also when the `retry` names the tip of the chain and not the last ticket of the stack (#304). A `retry` at the
-    chain fix-up starts no new verification, so its group keeps the fix-up rounds and the time before it (#297).
+    `step-start` ends its group. `events` are the events of the current pass of the chain (`run_state.fold(...).chain.start`, the
+    rule of the engine): the chain after the start of the pass is a new one, and the first pass of each stack is gone, also when
+    the `retry` names the tip of the chain and not the last ticket of the stack (#304). A `retry` at the chain fix-up starts no
+    new pass, so its group keeps the fix-up rounds and the time before it (#297).
 
     The chain is `accepted` when its newest verdict is ACCEPT. It is `rejected` when its last ticket failed after the
     chain started (red gates, a crash), when its newest verdict is not ACCEPT and no fix-up follows it and a ticket
@@ -564,7 +552,7 @@ def _chains(
     chain = domain.GATES_OF_CHAIN
     groups: dict[str, list[tuple[int, dict[str, object]]]] = {}
     failures: list[int] = []  # the position of each `step-end` that failed a ticket
-    for index, event in enumerate(_since_chain_restart(events)):
+    for index, event in enumerate(events):
         kind, ticket = str(event["event"]), event.get("ticket")
         if kind == "step-end" and event.get("state") == FAILED:
             failures.append(index)
@@ -740,12 +728,9 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     The reader of the streams comes from `reader_of` once. When it gives None, the snapshot has no tokens and no activity.
     The two facts that the journal does not hold come from the disk: a live process that holds the lock of the run, and a
     pause request that waits. `snapshot_at` is the same snapshot with the two facts given. The lock is read only when its
-    answer decides the state (`asks`): the run has no `run-end`, no pause, no halt, no crash and no stop by the check of the setup.
+    answer decides the state (`asks`): the run state of the events is active.
     """
-    asks = (
-        newest_run_end(events) is None and not is_paused(events) and halt_of(events) is None and crash_of(events) is None
-        and setup_problem_of(events) is None
-    )
+    asks = run_state.fold(events).status.kind == run_state.ACTIVE
     return snapshot_at(
         events, journal, reader_of, now, live_process=asks and _has_live_process(journal), pause_request=pause_requested(journal),
     )
@@ -763,18 +748,21 @@ def snapshot_at(
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
     start = events[0]
-    end = newest_run_end(events)
-    paused = end is None and is_paused(events)
-    halt = halt_of(events) if end is None and not paused else None
+    # The state of the run is the state of the run state (ADR 0009). The lock and the pause request are the two facts it lacks.
+    folded = run_state.fold(events)
+    kind, stop = folded.status.kind, folded.status.event
+    end = stop if kind == run_state.ENDED else None
+    paused = kind == run_state.PAUSED
+    halt = stop if kind == run_state.HALTED else None
     # A crash ends the run process: the run is stopped, also in the moment before the process releases its lock (#281).
-    crash = crash_of(events) if end is None and not paused and halt is None else None
+    crash = stop if kind == run_state.CRASHED else None
     # A stop by the check of the setup ends the run process too (#296).
-    setup = setup_problem_of(events) if end is None and not paused and halt is None and crash is None else None
+    setup = stop if kind == run_state.SETUP_PROBLEM else None
     live = end is not None or paused or halt is not None or (crash is None and setup is None and live_process)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
-        now = _time(next(e for e in reversed(events) if e["event"] == "paused"))  # and the clock of a paused run at its pause
+        now = _time(stop)  # and the clock of a paused run at its pause
     elif halt is not None:
         now = _time(halt)  # and the clock of a halted run at its halt
     elif not live:
@@ -787,7 +775,7 @@ def snapshot_at(
     durations: list[float] = []
     owns = {ticket: [e for e in events if e.get("ticket") == ticket] for ticket in plan_ids(events)}
     for ticket, own in owns.items():
-        found, duration = _ticket(ticket, own, activity, now, stopped)
+        found, duration = _ticket(ticket, own, folded.ticket(ticket), activity, now, stopped)
         tickets.append(found)
         if duration is not None:
             durations.append(duration)
@@ -797,14 +785,14 @@ def snapshot_at(
     running = [t for t in tickets if t.state == RUNNING]
     # The verification of an `economy` chain is one more unit: it ends with the run, and while it runs it counts by its phase.
     chain = domain.chain_units(str(start["mode"]))
-    chain_phase, chain_seconds = _chain(events, now) if chain and not stopped else (None, 0)
+    chain_phase, chain_seconds = _chain(events[folded.chain.start :], now) if chain and not stopped else (None, 0)
     units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
-    chains = _chains(events, plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
+    chains = _chains(events[folded.chain.start :], plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
     state, note = _state(end, paused, journal, halt, live, crash, setup, pause_request)
-    pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
+    pause = stop if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,

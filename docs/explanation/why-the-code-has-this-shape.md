@@ -84,12 +84,21 @@ An arrow is an import that the package has today. The test forbids some imports,
 - No module outside `cli` parses command-line arguments.
 - The files of `run/` start no process. They import no `subprocess`, and they use no `os` function that starts a process.
 - `run/domain.py`, the rules of a run as functions of plain values, imports only `__future__`, `collections.abc` and `typing`.
+- `run/run_state.py`, the one fold of the [**journal**](../glossary.md#journal), is as pure as the domain module. It imports `dataclasses` too, for its frozen values.
 - No file keeps an import for compatibility. A `noqa: F401` comment fails the test.
 - The package top holds no module but `__init__.py`, and each directory with an `__init__.py` is in the `packages` list of `pyproject.toml`.
 
 The test sets no limit on what `cli` and `docs` import. They are the outside, and they may import any layer.
 
 I chose a test over a convention because a rule in a document drifts and a rule in the suite does not. The test reads the imports with the `ast` module, so it runs no code of the package. A second set of tests plants each violation in a [**temporary copy**](../glossary.md#temporary-copy) of the package and checks that the rule fails on it.
+
+## One fold of the journal
+
+The journal is the record of a run. Many parts of the code need to know what it says: the engine at a [**resume**](../glossary.md#resume), and `status`, `watch` and `runs` for each view. Before, each of them read the events in its own way. When two folds had different rules, the engine did one thing and a view showed another. Ticket #304 was such a case.
+
+The run state is the one fold of the journal. It is a pure function in `run/run_state.py`, and it gives the outcome of each ticket, the state of the run, and the current pass of the [**chain**](../glossary.md#chain) verification. The engine and each view decide these facts from it, so a change of a rule changes all of them together. [ADR 0009](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0009-the-journal-has-one-projection-the-run-state.md) records the decision.
+
+The run state holds only what the journal says. The lock of a live process, a [**pause**](../glossary.md#pause) request, the [**event streams**](../glossary.md#event-stream) and the clock are not in the journal. A view adds them to the run state, and it keeps its own rules for the phase, the times, the tokens and the idle time.
 
 ## What the rule does not give
 

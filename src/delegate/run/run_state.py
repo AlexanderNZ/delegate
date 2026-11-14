@@ -112,6 +112,11 @@ class RunState:
     status: RunStatus
     chain: ChainPass
 
+    @property
+    def run_end(self) -> Mapping[str, object] | None:
+        """The `run-end` event of a run that ended (no `resume` follows it), or None when the run is in any other state."""
+        return self.status.event if self.status.kind == ENDED else None
+
     def ticket(self, ticket_id: str) -> TicketState:
         """The state of the ticket `ticket_id`. Raise KeyError when the newest plan does not hold it."""
         for found in self.tickets:

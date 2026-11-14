@@ -45,8 +45,8 @@ from xml.sax.saxutils import escape
 
 from ..cli.status import stream_reader_of
 from ..cli.watch import PROMPT
-from ..run import live, output, status, watch
-from ..run.journal import ACTIVITY_FIELDS, halt_of, is_paused, newest_run_end, read_new_events
+from ..run import live, output, run_state, status, watch
+from ..run.journal import ACTIVITY_FIELDS, read_new_events
 from ..run.lock import run_lock
 
 # The journals and the event streams of the figures, in the package source, so a Nix build can read them.
@@ -219,7 +219,7 @@ def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Pat
                 shutil.copyfile(stream, path)
             else:
                 path.write_text("")  # a gate log: the code reads only its time
-        if newest_run_end(events) is None and not is_paused(events) and halt_of(events) is None:
+        if run_state.fold(events).status.kind == run_state.ACTIVE:
             locks.enter_context(run_lock(state, str(events[0]["run_branch"]), source.stem))
         newest = datetime.fromisoformat(str(events[-1]["time"])).timestamp()
         for path in [journal, *files]:

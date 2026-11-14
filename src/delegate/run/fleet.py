@@ -47,8 +47,8 @@ from pathlib import Path
 
 from ..ports.hosts import HostReader, Unreachable
 from ..ports.index import RunIndex, RunIndexError, RunRecord
-from . import clock, domain, fleet_rules, output
-from .journal import ABANDONED, JournalError, newest_run_end, read_new_events
+from . import clock, domain, fleet_rules, output, run_state
+from .journal import ABANDONED, JournalError, read_new_events
 from .runs import RunsError, all_journals, failed_starts, machine_states
 from .live import IDLE_WARNING_MINUTES
 from .status import (
@@ -446,7 +446,7 @@ def fleet_of(
             listed.add(journal)
             try:
                 events = reads.events(journal)
-                end = newest_run_end(events)
+                end = run_state.fold(events).run_end
                 if end is not None and not _in_window(_time(end), now):
                     continue  # an older run that ended is not listed, and its streams are not read
                 snap = snapshot_of(events, journal, reader_of, now)

@@ -26,7 +26,8 @@ from pathlib import Path
 
 from ..ports.vcs import VersionControl
 from .engine import PAUSE_REQUEST_NAME
-from .journal import JournalError, is_paused, newest_run_end, read_new_events
+from . import run_state
+from .journal import JournalError, read_new_events
 from .lock import LockError, live_holder
 from .runs import RunsError, journal_of, locate
 
@@ -58,10 +59,11 @@ def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -
     if not events or events[0]["event"] != "run-start":
         raise PauseError(f"journal {journal}: the first event is not 'run-start'")
     resume = f"delegate run --resume {run_id}"
-    end = newest_run_end(events)
+    found = run_state.fold(events)
+    end = found.run_end
     if end is not None:
         raise PauseError(f"run {run_id!r} has ended with the result {end['result']!r}; there is no step boundary to pause at")
-    if is_paused(events):
+    if found.status.kind == run_state.PAUSED:
         raise PauseError(f"run {run_id!r} is paused already; go on with {resume}")
     try:
         state_dir = location.state_directory(run_id)
