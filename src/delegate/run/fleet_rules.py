@@ -6,8 +6,8 @@ The spec is `design/docs/components.md`, C24 and C25. This module imports nothin
 
 The trend rules (#310) are here too: the cells of a run, the level of a cell, and the word of the trend.
 
-The runs of the sums are the runs that have no `run-end`. A run that ended, and a run that failed at start, are out of
-each sum. The sums are over the runs that the caller gives, so a host total gives the runs of one host, and the fleet
+The runs of the sums are the runs that have no `run-end`. A run that ended, a run that failed at start, and a run of an
+unreachable host (#317) are out of each sum. The sums are over the runs that the caller gives, so a host total gives the runs of one host, and the fleet
 line gives the runs of the machine.
 """
 
@@ -51,7 +51,8 @@ WATCH: str = "watch"
 RESUME: str = "resume"
 RETRY: str = "retry"
 MERGE: str = "merge"
-DO_WORDS: tuple[str, ...] = (WATCH, RESUME, RETRY, MERGE)
+CHECK_HOST: str = "check host"
+DO_WORDS: tuple[str, ...] = (WATCH, RESUME, RETRY, MERGE, CHECK_HOST)
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,8 @@ class RunFacts:
     run that has no estimate and for a run that does not run. `idle_seconds` is the longest time that an agent of the
     run is idle, or None when no agent runs or the run has no reader of its streams. The two token counts are None
     when the run has none. `fixup` is the round and the limit of a fix-up round of a ticket or of a chain that runs now (#309), or None.
-    `trend` is the tickets that ended built in each hour of the window, oldest first (`trend_cells`, #310).
+    `trend` is the tickets that ended built in each hour of the window, oldest first (`trend_cells`, #310). `unreachable` is True
+    for a run of a host that this machine cannot read (#317): its values are the last known, and it is in no sum.
     """
 
     state: str
@@ -77,6 +79,7 @@ class RunFacts:
     idle_seconds: int | None
     fixup: tuple[int, int] | None = None
     trend: tuple[int, ...] = (0,) * TREND_HOURS
+    unreachable: bool = False
 
 
 @dataclass(frozen=True)
@@ -95,8 +98,8 @@ class Totals:
 
 
 def counted(runs: Sequence[RunFacts]) -> list[RunFacts]:
-    """The runs of the sums: the runs with no `run-end`."""
-    return [run for run in runs if not run.ended]
+    """The runs of the sums: the runs with no `run-end` whose host is reachable."""
+    return [run for run in runs if not run.ended and not run.unreachable]
 
 
 def _sum(counts: Sequence[int | None]) -> int | None:
@@ -132,18 +135,17 @@ def earliest_start(runs: Sequence[RunFacts]) -> datetime | None:
 def in_trouble(runs: Sequence[RunFacts], idle_limit: int) -> int:
     """The runs in trouble: a run with an agent idle for `idle_limit` seconds or more, a stopped run, a halted run, and a run that failed at start.
 
-    A paused run is not in trouble. A run that ended is not, unless it failed at start.
+    A paused run is not in trouble. A run that ended is not, unless it failed at start. A run of an unreachable host is not: its host is.
     """
     return sum(
         1 for run in runs
-        if run.failed_start or (not run.ended and (run.state in TROUBLE_STATES or (run.idle_seconds is not None and run.idle_seconds >= idle_limit)))
+        if not run.unreachable and (run.failed_start or (not run.ended and (run.state in TROUBLE_STATES or (run.idle_seconds is not None and run.idle_seconds >= idle_limit))))
     )
 
 
 def reachable(runs: Sequence[RunFacts]) -> tuple[int, int]:
-    """The runs that are reachable, and the runs that are listed with no `run-end`. Each run of this machine is reachable, so the two are the same."""
-    count = len(counted(runs))
-    return count, count
+    """The runs that are reachable, and the runs that are listed with no `run-end` (#317). Each run of this machine is reachable; a run of an unreachable host is only in the second count."""
+    return len(counted(runs)), sum(1 for run in runs if not run.ended)
 
 
 @dataclass(frozen=True)
@@ -162,7 +164,7 @@ def alert(run: RunFacts, idle_limit: int) -> Alert | None:
     Only a run that works (`WORKING_STATES`) has an alert. A paused, halted or stopped run, and a run that ended, has none:
     its command is `resume`, `retry` or `merge`, and `delegate watch` shows no live agent for it.
     """
-    if run.ended or run.state not in WORKING_STATES:
+    if run.ended or run.unreachable or run.state not in WORKING_STATES:
         return None
     if run.idle_seconds is not None and run.idle_seconds >= idle_limit:
         return Alert(IDLE, seconds=run.idle_seconds)
@@ -175,8 +177,11 @@ def next_command(run: RunFacts, alerted: bool) -> str | None:
     """The word of the column `do` of a run (#309), or None when nothing is needed.
 
     `watch` for a run with an alert; `resume` for a run that is paused, stopped or halted; `retry` for a run that ended
-    `failed`; `merge` for a run that ended `built`. A run that failed at start has no ticket to retry, so it has none.
+    `failed`; `merge` for a run that ended `built`. A run that failed at start has no ticket to retry, so it has none. A run of an
+    unreachable host has none: the command is on the row of its host (`CHECK_HOST`, #317).
     """
+    if run.unreachable:
+        return None
     if alerted:
         return WATCH
     if run.failed_start:

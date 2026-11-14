@@ -1,16 +1,18 @@
 """The `delegate clean` command: parse the arguments, build the git backend, and clean the runs.
 
 The use case lives in `delegate.run.clean`, which never imports an adapter. This module is the composition point of
-the command: it makes the git backend of the version-control port and hands it to the use case.
+the command: it makes the git backend of the version-control port and the run index that `DELEGATE_INDEX` names (#317), and hands them to the use case.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
+from ..adapters.run_index import index_from_environment
 from ..run import clean
 from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
@@ -59,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         print("delegate clean: error: give a run id, or --ended for every run that ended built", file=sys.stderr)
         return EXIT_USAGE
     try:
-        result = clean.clean(args.repo, args.run_id, args.ended, args.merged, args.dry_run, GitVersionControl())
+        result = clean.clean(args.repo, args.run_id, args.ended, args.merged, args.dry_run, GitVersionControl(), index_from_environment(os.environ))
     except clean.CleanError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR
@@ -77,7 +79,9 @@ def _abandon(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.run_id or args.ended or args.merged or args.dry_run:
         parser.error("--abandon takes one run and no run id, --ended, --merged or --dry-run")
     try:
-        result = clean.abandon(args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, GitVersionControl())
+        result = clean.abandon(
+            args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, GitVersionControl(), index_from_environment(os.environ)
+        )
     except clean.AbandonError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR

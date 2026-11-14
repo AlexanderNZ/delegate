@@ -9,15 +9,20 @@ once for each `POLL_SECONDS`, no alternate screen, no spinner, and the size of t
 journal only from its last position (`fleet.JournalReads`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
 does: the cursor shows again, and `delegate` prints `delegate: interrupted` and exits with 130. A journal that cannot be read goes on stderr
 once, before the first frame when the first read finds it, and else after the last frame, so no line of stderr breaks a frame.
+
+With `DELEGATE_INDEX` set (#317), the view also has a group for each other host of the run index (`delegate.run.fleet`). `--local` limits the view to this
+machine and reads no index, and `--json` describes this machine only and reads no index.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 
+from ..adapters.run_index import index_from_environment
 from ..run import clock, fleet
 from ..run.host import host_name
 from ..run.runs import RunsError, state_root
@@ -36,7 +41,10 @@ POLL_SECONDS: float = 1.0
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="delegate runs",
-        description="List the runs of this machine in one table, across each repository: the runs that have not ended, and the runs that ended in the last 6 hours.",
+        description=(
+            "List the runs of this machine in one table, across each repository: the runs that have not ended, and the runs that ended in the last 6 hours. "
+            "With DELEGATE_INDEX set, list the runs of the other hosts of the run index too."
+        ),
         epilog=epilog(RUNS_PAGE),
         formatter_class=HelpFormatter,
     )
@@ -50,13 +58,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json",
     )
     parser.add_argument(
+        "--local", action="store_true",
+        help="show only the runs of this machine and read no run index; with DELEGATE_INDEX set, the view lists the runs of the other hosts of the index",
+    )
+    parser.add_argument(
         "--timeline", action="store_true",
         help="draw one lane for each run over the last 6 hours, to the latest ETA, in place of the table; it cannot be used with --json",
     )
     return parser
 
 
-def _watch(timeline: bool) -> int:
+def _watch(timeline: bool, local: bool) -> int:
     """Redraw the table in place until Ctrl-C. Return 2 with no terminal, or when the state root cannot be used."""
     if not sys.stdout.isatty():
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
@@ -70,7 +82,7 @@ def _watch(timeline: bool) -> int:
         try:
             with stop_signals_as_ctrl_c():
                 while True:
-                    found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of, reads)
+                    found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of, reads, index_from_environment(os.environ), not local)
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
                     reported.update(new)
                     if first:
@@ -97,9 +109,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeline and args.json:
         parser.error("--timeline cannot be used with --json")
     if args.watch:
-        return _watch(args.timeline)
+        return _watch(args.timeline, args.local)
     try:
-        found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of)
+        found = fleet.fleet_of(
+            state_root(), host_name(), utc_now(), stream_reader_of, index=index_from_environment(os.environ), read_index=not (args.local or args.json),
+        )
     except RunsError as error:
         print(f"delegate runs: {error}", file=sys.stderr)
         return EXIT_ERROR

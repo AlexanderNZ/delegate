@@ -21,6 +21,12 @@ rows of the ended runs, then a host with no alert and no command, until the line
 each journal only from the position where the call before stopped, so a redraw does not read each journal from the start. `Fleet.to_json` is the contract of `delegate runs --json`, and
 `fleet_lines` is the table. A journal that cannot be read is skipped, and `Fleet.unreadable` names it with the reason,
 as `delegate status` does.
+
+With a run index (#317, ADR 0008), `fleet_of` adds a group for each other host of the index, from the records of the index. The runs of this
+machine come from its journals, and its records in the index are not used. Until a later ticket reads other hosts, each other host is
+`unreachable` (C25): its row says so, with `heard <duration> ago` and the command `check host`, and its runs are the last-known values of their
+records, dim, with no ETA, no tokens and no trend. A record whose run ended before the window is not listed. An unreachable run is in no sum of
+the fleet lines, and the first line counts it in the total of `N of M reachable`. `--json` describes this machine only.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from itertools import groupby
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ..ports.index import RunIndex, RunIndexError, RunRecord
 from . import domain, fleet_rules, output
 from .journal import ABANDONED, JournalError, newest_run_end, read_new_events
 from .runs import RunsError, all_journals, failed_starts, machine_states
@@ -62,14 +69,18 @@ FIT_STEPS: tuple[frozenset[str], ...] = (
     frozenset({"new", "cache", "trend", "slip", "repo"}),
 )
 
-# The hosts in the line of a machine with no run (copy deck W8.empty): this machine is the one host, as no run index exists.
-HOSTS: int = 1
-
 # The command of each word of the column `do`, for the legend (copy deck W8.do.*). The placeholders stay as the copy deck writes them.
 COMMANDS: dict[str, str] = {
     fleet_rules.WATCH: "delegate watch <run>", fleet_rules.RESUME: "delegate run --resume <run>",
     fleet_rules.RETRY: "delegate run --resume <run> --retry <ticket>", fleet_rules.MERGE: "git merge --ff-only <run branch>",
+    fleet_rules.CHECK_HOST: "ssh <host>; on another host, put ssh <host> in front of each command",
 }
+
+# The state word of a host that this machine cannot read (copy deck W8.state.unreachable).
+UNREACHABLE: str = "unreachable"
+
+# The states of a run that has no `run-end`. The state of a record of the index that is not one of them is the result of a `run-end`.
+OPEN_STATES: frozenset[str] = frozenset({RUNNING, PAUSING, PAUSED, HALTED, STOPPED})
 
 # The header of the columns after the lane in the timeline (copy deck W9.table.header).
 W9_HEADER: tuple[str, ...] = ("ended", "ETA", "state", "alert")
@@ -100,6 +111,10 @@ class RunRow:
     the slip of the ETA, or None when it does not show (`fleet_rules.slip_seconds`, #311); `to_json` has it too. `built` is the time of
     each ticket that ended built (`fleet_rules.built_times`) and `last_event` is the time of the newest event of the journal, for the lane of the
     timeline (#314); `to_json` leaves them out.
+
+    `unreachable` is True for a run of another host, from its record in the run index (#317): its values are the last known, and `heard` is the time
+    of the write of the record. Such a run has no ETA, no tokens, no trend, no alert and no command, and `ended` is `heard` when its state is the
+    result of a `run-end`.
     """
 
     run_id: str
@@ -120,12 +135,15 @@ class RunRow:
     slip_seconds: int | None = None
     built: tuple[datetime, ...] = ()
     last_event: datetime | None = None
+    unreachable: bool = False
+    heard: datetime | None = None
 
     def facts(self) -> fleet_rules.RunFacts:
         """The run as the rules of the fleet read it."""
         return fleet_rules.RunFacts(
             self.state, self.started, self.ended is not None, self.failed_start, self.tickets_ended, self.tickets_total, self.eta,
             self.tokens_new, self.tokens_cache, self.idle_seconds, self.fixup, self.trend,
+            self.unreachable,
         )
 
     def alert(self) -> fleet_rules.Alert | None:
@@ -150,23 +168,37 @@ class RunRow:
 
 @dataclass(frozen=True)
 class Fleet:
-    """The runs of this machine: its name, the time of the command, the listed runs in the order of the table, and each
-    journal that the listing skipped with the reason."""
+    """The runs of this machine and of the other hosts of the run index: the name of this machine, the time of the command, the listed runs
+    in the order of the table, and each journal that the listing skipped with the reason.
+
+    The runs of this machine come first, then the runs of each other host, in the order of the names of the hosts (`RunRow.unreachable`).
+    `indexed` is True when a run index is set up, and then the line of the missing index does not show. `host_count` is this machine and
+    each other host that the index has a record of, whether the record is listed or not. `index_problem` is the reason that the index
+    could not be read, or None.
+    """
 
     host: str
     time: datetime
     runs: tuple[RunRow, ...]
     unreadable: tuple[tuple[Path, str], ...] = ()
+    indexed: bool = False
+    host_count: int = 1
+    index_problem: str | None = None
 
     def unreadable_lines(self, command: str) -> list[str]:
-        """One line for each journal that the listing skipped, for stderr: the command, the journal and the reason."""
-        return [f"{command}: skipped the journal {path}: {reason}" for path, reason in self.unreadable]
+        """One line for each journal that the listing skipped, and one for an index that could not be read, for stderr."""
+        lines = [f"{command}: skipped the journal {path}: {reason}" for path, reason in self.unreadable]
+        return lines + ([f"{command}: {self.index_problem}"] if self.index_problem else [])
+
+    def hosts(self) -> list[tuple[str, tuple[RunRow, ...]]]:
+        """The host groups of the table: this machine first, then each other host with a listed run, with the rows of each."""
+        return [(host, tuple(rows)) for host, rows in groupby(self.runs, key=lambda row: row.host)]
 
     def to_json(self) -> dict[str, object]:
         """The object of `delegate runs --json`. The reference page of the command documents it: a new field comes last."""
         return {
             "format": FORMAT, "host": self.host, "time": self.time.isoformat(), "window_seconds": WINDOW_SECONDS,
-            "runs": [row.to_json() for row in self.runs],
+            "runs": [row.to_json() for row in self.runs if not row.unreachable],
         }
 
 
@@ -220,10 +252,50 @@ class JournalReads:
             del self._seen[journal]
 
 
-def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: JournalReads | None = None) -> Fleet:
+def _remote(record: RunRecord, now: datetime) -> RunRow | None:
+    """The row of the run that a record of the index describes, or None when the record is not listed (#317).
+
+    The run is unreachable: its values are the last known. A run whose state is the result of a `run-end` ended when the record was written
+    (`heard`), and it is not listed when that time is out of the window. A record with a time that cannot be read is not listed.
+    """
+    try:
+        started, heard = datetime.fromisoformat(record.started), datetime.fromisoformat(record.heard)
+    except ValueError:
+        return None
+    ended = record.state not in OPEN_STATES
+    if ended and not _in_window(heard, now):
+        return None
+    return RunRow(
+        record.run_id, record.repo, record.host, record.state, started, heard if ended else None, record.tickets_ended, record.tickets_total,
+        None, None, None, last_event=heard, unreachable=True, heard=heard,
+    )
+
+
+def _others(index: RunIndex, host: str, now: datetime) -> tuple[list[RunRow], int]:
+    """The rows of the runs of the other hosts of the index, and the number of those hosts. Raise RunIndexError when the index cannot be read.
+
+    The records of `host`, this machine, are left out. The rows are in the order of the table within each host: the runs with no `run-end`,
+    newest start first, then the runs that ended, newest end first. The hosts are in the order of their names.
+    """
+    records = [record for record in index.list_records() if record.host != host]
+    rows = [row for row in (_remote(record, now) for record in records) if row is not None]
+    ordered: list[RunRow] = []
+    for name in sorted({row.host for row in rows}):
+        own = [row for row in rows if row.host == name]
+        ordered += sorted((row for row in own if row.ended is None), key=lambda row: row.started, reverse=True)
+        ordered += sorted((row for row in own if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
+    return ordered, len({record.host for record in records})
+
+
+def fleet_of(
+    root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: JournalReads | None = None, index: RunIndex | None = None,
+    read_index: bool = True,
+) -> Fleet:
     """The runs of the machine under the state root `root`. `host` is the name of the machine, and `now` is the time of the clock, in UTC.
 
-    `reads` holds what an earlier call read (`JournalReads`); with None, each journal is read from the start.
+    `reads` holds what an earlier call read (`JournalReads`); with None, each journal is read from the start. `index` is the run index, or
+    None when none is set up; the runs of the other hosts of the index follow the runs of this machine (#317). With `read_index` False
+    the index is not read (`delegate runs --local`), but it still counts as set up.
 
     The order is the order of the table: the runs with no `run-end`, newest start first, then the runs that ended,
     newest end first. Raise RunsError when a lock file cannot be read.
@@ -265,7 +337,14 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: J
     reads.keep_only(listed)
     working = sorted((row for row in rows if row.ended is None), key=lambda row: row.started, reverse=True)
     ended = sorted((row for row in rows if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
-    return Fleet(host, now, tuple(working + ended), tuple(unreadable))
+    others: list[RunRow] = []
+    count, problem = 0, None
+    if index is not None and read_index:
+        try:
+            others, count = _others(index, host, now)
+        except RunIndexError as error:
+            problem = str(error)
+    return Fleet(host, now, tuple(working + ended + others), tuple(unreadable), index is not None, 1 + count, problem)
 
 
 # The role of the state word in the table (components.md, C25). A state that has no entry has no role.
@@ -287,10 +366,21 @@ def _clock(eta: datetime) -> str:
     return eta.astimezone().strftime("%H:%M")
 
 
+def _whole_minutes(seconds: int) -> str:
+    """A duration in whole minutes, `55m`, or `1h05m` from an hour."""
+    minutes = seconds // 60
+    return f"{minutes}m" if minutes < 60 else format_duration(minutes * 60)
+
+
 def slip_text(seconds: int) -> str:
     """The slip as the copy deck writes it (W8.slip): `+55m`, whole minutes, or `+1h05m` from an hour."""
-    minutes = seconds // 60
-    return "+" + (f"{minutes}m" if minutes < 60 else format_duration(minutes * 60))
+    return "+" + _whole_minutes(seconds)
+
+
+def heard_text(heard: datetime, now: datetime) -> str:
+    """The alert of an unreachable host (copy deck W8.alert.heard): `heard 47m ago`, in whole minutes, or in seconds under a minute."""
+    seconds = max(int((now - heard).total_seconds()), 0)
+    return f"heard {format_duration(seconds) if seconds < 60 else _whole_minutes(seconds)} ago"
 
 
 def sparkline(cells: Sequence[int], largest: int, glyph: output.Glyphs) -> str:
@@ -304,6 +394,11 @@ def _cells(row: RunRow, glyph: output.Glyphs, largest: int) -> list[str]:
     The ETA is a clock time, or `-` while the run runs and has no estimate; it is empty for a run that is paused,
     halted, stopped or ended. The ended count is dim for a run that ended. `trend` is dim, on the scale `largest`. `alert` is in `warn`, and `do` is plain.
     """
+    if row.unreachable:  # the last-known values, dim, and nothing that this machine cannot know (#317)
+        return [
+            output.styled("plan", glyph.rail), output.styled("dim", row.repo), output.styled("dim", output.short_run_id(row.run_id)),
+            output.styled("dim", row.state), output.styled("dim", f"{row.tickets_ended}/{row.tickets_total}"), *[""] * 7,
+        ]
     eta = "" if row.state not in (RUNNING, PAUSING) else _clock(row.eta) if row.eta else "-"
     slip = "" if row.slip_seconds is None else output.styled("warn", slip_text(row.slip_seconds))
     counted = f"{row.tickets_ended}/{row.tickets_total}"
@@ -318,15 +413,15 @@ def _cells(row: RunRow, glyph: output.Glyphs, largest: int) -> list[str]:
     ]
 
 
-def _totals(fleet: Fleet) -> list[str]:
+def _totals(host: str, rows: Sequence[RunRow]) -> list[str]:
     """The cells of the first row of the host group: its name, and the totals of its runs with no `run-end` (`fleet_rules.totals`).
 
     The totals are the ended count summed, the latest ETA, and the tokens summed. A run that ended is out of every total.
     """
-    total = fleet_rules.totals([row.facts() for row in fleet.runs])
-    has_runs = any(row.ended is None for row in fleet.runs)
+    total = fleet_rules.totals([row.facts() for row in rows])
+    has_runs = any(row.ended is None for row in rows)
     return [
-        fleet.host, "", "", "", f"{total.tickets_ended}/{total.tickets_total}" if has_runs else "", _clock(total.eta) if total.eta else "", "",
+        host, "", "", "", f"{total.tickets_ended}/{total.tickets_total}" if has_runs else "", _clock(total.eta) if total.eta else "", "",
         "" if total.tokens_new is None else output.styled("dim", format_tokens(total.tokens_new)),
         "" if total.tokens_cache is None else output.styled("dim", format_tokens(total.tokens_cache)), "", "", "",
     ]
@@ -405,9 +500,12 @@ def _legend(width: int, glyph: output.Glyphs) -> str:
     return f"{glyph.node} a ticket ended{dot}{glyph.empty} to the ETA{dot}{cell}" if width >= BAR_COLUMNS else cell
 
 
-def legend_lines(runs: Sequence[RunRow]) -> list[str]:
-    """The legend (C27): one line for each word of the column `do` that the rows hold, once, with its command (copy deck W8.do.*)."""
-    present = {row.do() for row in runs}
+def legend_lines(runs: Sequence[RunRow], unreachable: bool = False) -> list[str]:
+    """The legend (C27): one line for each word of the column `do` that the rows hold, once, with its command (copy deck W8.do.*).
+
+    `unreachable` is True when the table has the row of an unreachable host: its word `check host` is in the legend (#317).
+    """
+    present = {row.do() for row in runs} | ({fleet_rules.CHECK_HOST} if unreachable else set())
     return [line.rstrip(" ") for line in output.columns([[word, COMMANDS[word]] for word in fleet_rules.DO_WORDS if word in present])]
 
 
@@ -428,40 +526,75 @@ class _Ended:
         return output.styled(role, mark) + output.styled("dim", " " + ", ".join(f"{counts[state]} {state}" for state in order))
 
 
-def _candidates(fleet: Fleet) -> list[list[RunRow | _Ended]]:
-    """The rows of the table for each step of the fit to the height (C25), from the most to the fewest.
+@dataclass(frozen=True)
+class _Section:
+    """One host group of the table: its name, all its runs (for its row), and the items that show under its row."""
 
-    First each run has its row. Then the runs that ended fold into one row. Then, when the runs that remain have no alert and
-    no command, the host folds to its totals row: no run row.
+    host: str
+    runs: tuple[RunRow, ...]
+    items: tuple[RunRow | _Ended, ...]
+
+    @property
+    def unreachable(self) -> bool:
+        return any(row.unreachable for row in self.runs)
+
+    def cells(self, now: datetime) -> list[str]:
+        """The cells of the row of the host: its totals (`_totals`), or for an unreachable host `unreachable`, `heard <duration> ago` and `check host` (C25, #317)."""
+        if not self.unreachable:
+            return _totals(self.host, self.runs)
+        heard = max(row.heard for row in self.runs if row.heard is not None)
+        cells = [self.host, "", "", output.styled("warn", UNREACHABLE), *[""] * 6, output.styled("warn", heard_text(heard, now)), fleet_rules.CHECK_HOST]
+        return cells
+
+
+def _candidates(fleet: Fleet) -> list[list[_Section]]:
+    """The sections of the table for each step of the fit to the height (C25), from the most to the fewest rows.
+
+    First each run has its row. Then the runs that ended fold into one row for each host. Then each host whose runs that remain have no alert
+    and no command folds to its totals row: no run row. An unreachable host has an alert and a command on its row, so it does not fold.
     """
-    working = [row for row in fleet.runs if row.ended is None]
-    ended = [row for row in fleet.runs if row.ended is not None]
-    folded: list[RunRow | _Ended] = [*working, *([_Ended(tuple(ended))] if ended else [])]
-    quiet = bool(working) and not any(row.alert() or row.do() for row in working)
-    return [[*working, *ended], folded, [] if quiet else folded]
+    full: list[_Section] = []
+    folded: list[_Section] = []
+    quiet: list[_Section] = []
+    for host, rows in fleet.hosts():
+        working = [row for row in rows if row.ended is None]
+        ended = [row for row in rows if row.ended is not None]
+        fold: tuple[RunRow | _Ended, ...] = (*working, *([_Ended(tuple(ended))] if ended else []))
+        is_quiet = bool(working) and not any(row.unreachable or row.alert() or row.do() for row in working)
+        full.append(_Section(host, rows, (*working, *ended)))
+        folded.append(_Section(host, rows, fold))
+        quiet.append(_Section(host, rows, () if is_quiet else fold))
+    return [full, folded, quiet]
 
 
-def _table(fleet: Fleet, items: Sequence[RunRow | _Ended], dropped: frozenset[str], glyph: output.Glyphs, largest: int) -> tuple[list[str], int]:
+def _table(sections: Sequence[_Section], now: datetime, dropped: frozenset[str], glyph: output.Glyphs, largest: int) -> tuple[list[str], int]:
     """The lines of the table without the columns of `dropped`, and the width of the widest line that is not the row of the ended runs.
 
-    The row of the ended runs has its text from the column `state`, over the cells that are blank on it.
+    The row of the ended runs has its text from the column `state`, over the cells that are blank on it. A blank line is between two host groups.
     """
     keep = [index for index, name in enumerate(COLUMNS) if name not in dropped]
     right = {place for place, index in enumerate(keep) if index in NUMBERS}
-    rows = [[output.styled("dim", COLUMNS[index]) for index in keep], [_totals(fleet)[index] for index in keep]]
     rail = output.styled("plan", glyph.rail)
-    rows += [[_cells(item, glyph, largest)[index] for index in keep] if isinstance(item, RunRow) else [rail, *[""] * (len(keep) - 1)] for item in items]
+    rows = [[output.styled("dim", COLUMNS[index]) for index in keep]]
+    folds: dict[int, _Ended] = {}
+    for number, section in enumerate(sections):
+        if number:
+            rows.append([""] * len(keep))
+        cells = section.cells(now)
+        rows.append([cells[index] for index in keep])
+        for item in section.items:
+            if isinstance(item, RunRow):
+                rows.append([_cells(item, glyph, largest)[index] for index in keep])
+            else:
+                folds[len(rows)] = item
+                rows.append([rail, *[""] * (len(keep) - 1)])
     lines = [line.rstrip(" ") for line in output.columns(rows, right=right)]
     widths = [max(output.width(row[place]) for row in rows) for place in range(len(keep))]
     state = keep.index(COLUMNS.index("state"))
     start = sum(widths[:state]) + len(output.GAP) * state
-    measured = 0
-    for place, item in enumerate(items, start=2):
-        if isinstance(item, _Ended):
-            lines[place] = rail + " " * (start - output.width(rail)) + item.text(glyph)
-        else:
-            measured = max(measured, output.width(lines[place]))
-    return lines, max(measured, *(output.width(line) for line in lines[:2]))
+    for place, item in folds.items():
+        lines[place] = rail + " " * (start - output.width(rail)) + item.text(glyph)
+    return lines, max(output.width(line) for place, line in enumerate(lines) if place not in folds)
 
 
 # The role and the glyph of each kind of cell of a lane (components.md C26). The life of the run has no role.
@@ -479,10 +612,12 @@ def _lane_text(row: RunRow, fleet: Fleet, minutes: int, length: int, glyph: outp
     ended ends with `✓` when it is built and `✗` when it is not. A stopped or halted run ends with `✗` at its newest event, and a
     paused run ends at its newest event with no mark. A run that failed at start is one `✗` in the cell of its log.
     """
-    running = row.ended is None and row.state in fleet_rules.WORKING_STATES
+    running = row.ended is None and row.state in fleet_rules.WORKING_STATES and not row.unreachable
     finish = row.ended or row.last_event
     outcome = None
-    if row.ended is not None:
+    if row.unreachable:
+        pass  # the last-known life of the run, up to the time that its host was heard from, and no mark of an end (#317)
+    elif row.ended is not None:
         outcome = fleet_rules.DONE if row.state == BUILT else fleet_rules.FAIL
     elif row.state in fleet_rules.TROUBLE_STATES:
         outcome = fleet_rules.FAIL
@@ -500,7 +635,7 @@ def _all_lane(fleet: Fleet, minutes: int, projection: int, glyph: output.Glyphs)
     """The lane of `all` (C26, #315): the sparkline of the tickets that ended built in each cell of the window, over the runs with no `run-end`,
     on a scale whose largest cell has the top level; then the column of now, and `░` to the latest ETA (`projection` cells).
     """
-    times = [time for row in fleet.runs if row.ended is None for time in row.built]
+    times = [time for row in fleet.runs if row.ended is None and not row.unreachable for time in row.built]
     cells = fleet_rules.ticket_cells(times, fleet.time, minutes)
     return (
         output.styled("dim", sparkline(cells, max(cells), glyph)) + output.styled("now", glyph.now)
@@ -524,29 +659,44 @@ def _timeline(fleet: Fleet, width: int, glyph: output.Glyphs) -> list[str]:
     projection = fleet_rules.projection_cells(latest, fleet.time, minutes)
     length = fleet_rules.window_cells(minutes) + 1 + projection
     rail = output.styled("plan", glyph.rail)
-    cells = [_cells(row, glyph, 0) for row in fleet.runs]
-    summary = _totals(fleet)
+    summary = _totals(fleet.host, fleet.runs)
 
     def tail(ended: str, eta: str, state: str, alert: str) -> list[str]:
         return [ended, state, alert] if compact else [ended, eta, state, alert]
 
-    labels = output.columns(
-        [[ALL], *[[found[2]] for found in cells]] if compact
-        else [[ALL, "", ""], *[[fleet.host if index == 0 else rail, found[1], found[2]] for index, found in enumerate(cells)]]
-    )
+    def cells_of(row: RunRow) -> list[str]:
+        """The cells of the row, with `unreachable` and `heard <duration> ago` for the run of an unreachable host (C26, #317)."""
+        found = _cells(row, glyph, 0)
+        if row.unreachable and row.heard is not None:
+            found[3], found[10] = output.styled("warn", UNREACHABLE), output.styled("warn", heard_text(row.heard, fleet.time))
+        return found
+
+    groups = [[(row, cells_of(row)) for row in rows] for _, rows in fleet.hosts()]
+    blank = [""] * (1 if compact else 3)
+    label_rows = [[ALL] if compact else [ALL, "", ""]]
+    lane_rows = [[_all_lane(fleet, minutes, projection, glyph), *tail(summary[4], summary[5], "", "")]]
+    for number, group in enumerate(groups):
+        if number and not compact:
+            label_rows.append(blank)
+            lane_rows.append([""] * 5)
+        for place, (row, found) in enumerate(group):
+            label_rows.append([found[2]] if compact else [row.host if place == 0 else rail, found[1], found[2]])
+            lane_rows.append([_lane_text(row, fleet, minutes, length, glyph), *tail(found[4], found[5], found[3], found[10])])
+    labels = output.columns(label_rows)
     label_width = max(output.width(label) for label in labels)
     header = [name for name in W9_HEADER if not compact or name != "ETA"]
-    body = output.columns([
-        ["", *[output.styled("dim", name) for name in header]],
-        [_all_lane(fleet, minutes, projection, glyph), *tail(summary[4], summary[5], "", "")],
-        *[[_lane_text(row, fleet, minutes, length, glyph), *tail(found[4], found[5], found[3], found[10])] for row, found in zip(fleet.runs, cells)],
-    ])
+    body = output.columns([["", *[output.styled("dim", name) for name in header]], *lane_rows])
     lead = "" if compact else output.styled("dim", f"last {window_label()}, to the latest ETA")
     lane_end = label_width + len(output.GAP) + length
     top = lead + " " * (lane_end - output.width(lead)) + body[0][length:]  # the header row from the gap before `ended`
     lanes = [label + " " * (label_width - output.width(label)) + output.GAP + line for label, line in zip(labels, body[1:])]
     if compact:
-        return [top, "", lanes[0], fleet.host, *lanes[1:]]
+        placed = [lanes[0]]
+        taken = 1
+        for number, group in enumerate(groups):
+            placed += [*([""] if number else []), fleet.hosts()[number][0], *lanes[taken:taken + len(group)]]
+            taken += len(group)
+        return [top, "", *placed]
     return [top, "", *lanes, "", FOOTER]
 
 
@@ -562,22 +712,25 @@ def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = Non
 
     With `timeline` (#314), the table and the legend are the lanes of `_timeline`; the empty machine has the same lines, and no row folds.
     """
+    index_line = [] if fleet.indexed else [NO_INDEX]
     if not fleet.runs:
         return [output.cut(line, max(width, 1)) for line in (
-            NO_INDEX, f"runs  0 of {HOSTS} hosts have an active run", f"no run ended in the last {window_label()}",
+            *index_line, f"runs  0 of {fleet.host_count} hosts have an active run", f"no run ended in the last {window_label()}",
         )]
     glyph = output.glyphs()
-    head = [line for line in (NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph, timeline)) if line is not None]
+    head = [line for line in (*index_line, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph, timeline)) if line is not None]
     if timeline:
         return [output.cut(line.rstrip(" "), max(width, 1)) for line in [*head, "", *_timeline(fleet, width, glyph)]]
     largest = max((cell for row in fleet.runs for cell in row.trend), default=0)
     candidates = _candidates(fleet)
-    for items in candidates:
-        legend = legend_lines([item for item in items if isinstance(item, RunRow)]) if width >= BAR_COLUMNS else []
-        if height is None or len(head) + 1 + 2 + len(items) + (1 + len(legend) if legend else 0) <= height - 1:
+    for sections in candidates:
+        shown = [item for section in sections for item in section.items if isinstance(item, RunRow)]
+        legend = legend_lines(shown, any(section.unreachable for section in sections)) if width >= BAR_COLUMNS else []
+        rows = sum(1 + len(section.items) for section in sections) + len(sections) - 1  # a row for each host, and a blank line between two hosts
+        if height is None or len(head) + 1 + 1 + rows + (1 + len(legend) if legend else 0) <= height - 1:
             break
     for dropped in FIT_STEPS:
-        table, measured = _table(fleet, items, dropped, glyph, largest)
+        table, measured = _table(sections, fleet.time, dropped, glyph, largest)
         if measured <= width:
             break
     return [output.cut(line, max(width, 1)) for line in [*head, "", *table, *([""] if legend else []), *legend]]

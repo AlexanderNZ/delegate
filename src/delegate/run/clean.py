@@ -29,8 +29,11 @@ with what went, what stayed and why, the copies removed, the scratch directory r
 A run where nothing went gets no event: a second clean adds no line. `watch` and `status` read a
 `cleanup` and a `lock-broken` after `run-end` as no continuation of the run (`journal.AFTER_END`).
 
-With `dry_run` nothing changes: no file, no branch, no journal, and no lock.
+With `dry_run` nothing changes: no file, no branch, no journal, no lock, and no record of the run index.
 The lines then say what the command would remove and keep.
+
+With a run index (#317, `delegate.ports.index`), the command forgets the record of each run that it cleaned or abandoned, so the other hosts
+list it no more. A run that keeps everything keeps its record. A record that cannot be forgotten is an error of the run, and the exit code is 1.
 
 `abandon` is the other use of the module (#201): it ends a run that is not built for good. It writes `run-end` with the
 result `abandoned` and the reason, and then removes the ticket worktrees, the ticket branches and the hooks directory
@@ -49,6 +52,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..ports.index import RunIndex, RunIndexError
 from ..ports.vcs import VcsError, VersionControl
 from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
 from .engine import (
@@ -129,7 +133,9 @@ class CleanResult:
         return not self.errors and not any(run.errors for run in self.runs)
 
 
-def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run: bool, vcs: VersionControl) -> CleanResult:
+def clean(
+    repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run: bool, vcs: VersionControl, index: RunIndex | None = None,
+) -> CleanResult:
     """Clean each run that `run_ids` names, and with `ended` each run of the repository. Return the outcome of each run.
 
     A run id is a full run id or the short id of one run. A run is in the default state directory or in
@@ -137,7 +143,7 @@ def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run
     no run is an error of the result, and the other runs are cleaned. Raise
     CleanError when `repo` is not a git repository. Before the runs and at the
     end, the port prunes the records of the worktrees whose directory is gone,
-    except with `dry_run`.
+    except with `dry_run`. `index` is the run index, or None when none is set up: the record of each run that was cleaned is forgotten (#317).
     """
     try:
         location = locate_state(repo, vcs)  # one lookup for the command and each run id of it (#239)
@@ -160,8 +166,21 @@ def clean(repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run
     _prune(vcs, top, dry_run, errors)
     # The journal of a run is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory of the run.
     outcomes = [_run(top, journal.parents[2], journal, merged, dry_run, vcs) for journal in sorted(journals)]
+    for outcome in outcomes:
+        if outcome.kept is None and not dry_run:
+            _forget(index, outcome)
     _prune(vcs, top, dry_run, errors)
     return CleanResult(outcomes, errors)
+
+
+def _forget(index: RunIndex | None, outcome: RunClean) -> None:
+    """Forget the record of the run of `outcome` in the run index. Add a failure to the errors of the run. Do nothing with no index."""
+    if index is None:
+        return
+    try:
+        index.forget(outcome.run_id)
+    except RunIndexError as error:
+        outcome.errors.append(str(error))
 
 
 def _prune(vcs: VersionControl, repo: Path, dry_run: bool, errors: list[str]) -> None:
@@ -447,7 +466,9 @@ class Abandoned:
         return [said, self.run.line(False), branch]
 
 
-def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: VersionControl) -> Abandoned:
+def abandon(
+    repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: VersionControl, index: RunIndex | None = None,
+) -> Abandoned:
     """End the run `run_id` for good (#201): write `run-end` with the result `abandoned` and the reason, then remove what the run left.
 
     The run is paused, halted, failed, or stopped with no `run-end`, and no live process works on it. The command
@@ -458,7 +479,8 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
 
     Raise AbandonError, and change nothing, when the run is unknown, its journal cannot be read, a live process works on
     it (the message names `delegate stop`), or it ended `built` (the message names `delegate clean`). A failure of the
-    port while it removes is an error of the result, and the other items are still removed.
+    port while it removes is an error of the result, and the other items are still removed. The command forgets the record of the
+    run in the run `index` (#317); with None, none is set up.
     """
     try:
         location = locate_state(repo, vcs)  # one lookup for the command (#239)
@@ -486,7 +508,9 @@ def abandon(repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: 
     try:
         # The lock keeps a resume out while the command works. A lock file that no process holds is free.
         with run_lock(state, run_branch, run_id) as broken:
-            return _abandon_run(location.top, state, journal, reason, delete_run_branch, vcs, broken)
+            abandoned = _abandon_run(location.top, state, journal, reason, delete_run_branch, vcs, broken)
+        _forget(index, abandoned.run)
+        return abandoned
     except LockError as error:
         raise AbandonError(f"run {run_id} has a live process: {error}; stop it with delegate stop {run_id}, then abandon it") from None
     except JournalError as error:

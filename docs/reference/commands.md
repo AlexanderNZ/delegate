@@ -245,6 +245,8 @@ The command holds the lock of the run branch while it cleans a run, so a [**resu
 
 The command prints one line for each run: the worktrees removed, the branches deleted, the verifier copies removed, the crash tracebacks removed, each item kept with its reason, the scratch directories removed, and the space freed. A run that it does not clean gets the line `run <run-id>: not cleaned: <reason>`, and a run with nothing left gets `run <run-id>: nothing to remove`. With `--dry-run`, the command changes nothing: no file, no branch, no journal and no lock. Each line then says what the command would remove and keep.
 
+With `DELEGATE_INDEX` set (see [the run index](run.md#the-run-index)), the command forgets the record of each run that it cleans in the [**run index**](../glossary.md#run-index), so `delegate runs` on another host lists it no more (#317). A run that it does not clean keeps its record, and `--dry-run` forgets none. A record that cannot be forgotten is an error of the run.
+
 The command exits 0 when it removed or kept each item by these rules. It exits 1 on an error: a run id that names no run, a journal that cannot be read, or a removal that git refused. Each error is a line on stderr. The command still cleans the other runs.
 
 ### Abandon a run
@@ -258,6 +260,8 @@ The command holds the lock of the [**run branch**](../glossary.md#run-branch), s
 3. It removes each verifier copy and proof copy that the journal names and the disk still holds, the scratch directory of the run, and each scratch directory of a verifier of the run that a kill left.
 4. It keeps the run branch, and prints its name. With `--delete-run-branch`, it deletes the run branch too.
 5. It appends a `cleanup` event after the `run-end`, as `clean` does.
+
+With `DELEGATE_INDEX` set, the command forgets the record of the run in the run index after the removal (#317).
 
 The command prints the line `run <run-id>: abandoned: <reason>`, then the line of what it removed, then the line of the run branch. It exits 0 when it removed each item. It exits 1 on an error: a run id that names no run, a journal that cannot be read, or a removal that git refused. Each error is a line on stderr. The `run-end` is written already when a removal fails. A second call with the same run id writes no second `run-end`: it removes what is left.
 

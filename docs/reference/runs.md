@@ -1,7 +1,7 @@
 ---
 man: DELEGATE-RUNS(1)
 man_name: "delegate-runs — list the runs of this machine"
-synopsis: "delegate runs [--json | --watch] [--timeline]"
+synopsis: "delegate runs [--json | --watch] [--local] [--timeline]"
 ---
 
 # Reference: `delegate runs`
@@ -9,7 +9,7 @@ synopsis: "delegate runs [--json | --watch] [--timeline]"
 `delegate runs` lists each [**run**](../glossary.md#run) of this machine in one table, across each repository. It reads the [**journal**](../glossary.md#journal) of each run, and the lock of each [**run branch**](../glossary.md#run-branch), from each [**state directory**](../glossary.md#state-directory) under the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`). Each repository has one directory there. The command needs no git repository, so you can run it from any directory.
 
 ```
-delegate runs [--json | --watch] [--timeline]
+delegate runs [--json | --watch] [--local] [--timeline]
 ```
 
 <!-- generated:begin runs-options -->
@@ -19,6 +19,7 @@ delegate runs [--json | --watch] [--timeline]
 |---|---|
 | `--json` | Print one object as JSON: the format, the host, the time, the window, and one object for each listed run; cannot be used with --watch. |
 | `--watch` | Redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json. |
+| `--local` | Show only the runs of this machine and read no run index; with DELEGATE_INDEX set, the view lists the runs of the other hosts of the index. |
 | `--timeline` | Draw one lane for each run over the last 6 hours, to the latest ETA, in place of the table; it cannot be used with --json. |
 
 <!-- generated:end runs-options -->
@@ -33,15 +34,17 @@ The table lists these runs:
 
 An older run that ended is not listed.
 
+With `DELEGATE_INDEX` set, the table also lists the runs of the other hosts of the [**run index**](../glossary.md#run-index). See [The other hosts](#the-other-hosts).
+
 A journal that cannot be read is skipped. The command names it on stderr, as `delegate status` does, and lists the other runs.
 
 ## The table
 
-The first line is `no run index is set up: these are the runs of this machine`. It is followed by the two fleet lines, a blank line and the table. The table has one group for this machine. The first row of the group holds the name of the machine, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run has a row, and the rail `│` stands in the column `host`.
+The first line is `no run index is set up: these are the runs of this machine`. It shows only when `DELEGATE_INDEX` is not set. It is followed by the two fleet lines, a blank line and the table. The table has one group for this machine. The first row of the group holds the name of the machine, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run has a row, and the rail `│` stands in the column `host`.
 
 ### The fleet lines
 
-The two fleet lines sum the runs that have no `run-end`. A run that ended is out of each sum, and so is a run that failed at start.
+The two fleet lines sum the runs that have no `run-end`. A run that ended is out of each sum, and so is a run that failed at start, and so is a run of an unreachable host.
 
 ```
 runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/9 ended  ETA 15:10 · 2 with no ETA  34k new · 126k cache
@@ -50,7 +53,7 @@ runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/
 
 | Part | Meaning |
 |---|---|
-| `N of N reachable` | The runs that have no `run-end`. Each run of this machine is reachable, so the two numbers are the same. |
+| `N of M reachable` | `M` is the runs that have no `run-end`, on this machine and on the other hosts of the run index. `N` is the runs of the hosts that this machine can read. Each run of this machine is reachable. See [The other hosts](#the-other-hosts). |
 | The bar and `N%` | The tickets that ended over the tickets of the plan, summed over the runs, and rounded down. It is never the mean of the percentages of the runs. The bar has the 16 cells of the run line of `delegate watch`, and it shows only on a terminal of 100 columns or more. |
 | `X/Y ended` | The two sums of the tickets that ended and the tickets of the plan. |
 | `ETA` | The latest ETA of the runs that have one, or `-` when no run has one. `· N with no ETA` counts the runs with no ETA, for example a run that is paused or stopped. It is left out when N is 0. |
@@ -86,7 +89,26 @@ runs  0 of 1 hosts have an active run
 no run ended in the last 6h
 ```
 
-This machine is the one host, because no [**run index**](../glossary.md#run-index) exists.
+The number of hosts is this machine and each other host that the [**run index**](../glossary.md#run-index) has a record of. With no run index, this machine is the one host. With `DELEGATE_INDEX` set, the first of the three lines is not there.
+
+### The other hosts
+
+With `DELEGATE_INDEX` set (see [the run index](run.md#the-run-index)), the table has one more group for each other host of the index, after the group of this machine, in the order of the names of the hosts, with a blank line between two groups. The runs of this machine come from its journals, as before: its own records in the index are not used. The runs of another host come from their records.
+
+Until a later release reads the other hosts, each such host is `unreachable`. This machine shows the last-known values of its records, and nothing else.
+
+For example, a host `build-host` with one run `a41e` that was `running` at 3 of 6 tickets, last heard 47 minutes ago, has these two rows. The first row has `unreachable` in `state`, `heard 47m ago` in `alert` and `check host` in `do`. The second row has `│` in `host`, `docs-site` in `repo`, `a41e` in `run`, `running` in `state` and `3/6` in `ended`, and nothing else.
+
+- The row of the host has the name of the host, the state `unreachable` in `warn`, the `alert` `heard <duration> ago` in `warn` (the time since the host wrote its newest record, in whole minutes, as `47m`, or `3h05m` from an hour), and the `do` word `check host`. It has no totals.
+- The rows of its runs are dim and hold the last-known `state` and `ended` of the record. They have no ETA, no `slip`, no tokens, no trend, no `alert` and no `do`.
+- A record of a run that ended is listed under its host, with the result as its state, while the time of the record is in the window. A record of a run that ended before the window is not listed, and a host with no listed record has no group.
+- The runs of an unreachable host are out of each sum of the fleet lines, and out of `⚠ N in trouble`. The first line counts them in the total: `runs  1 of 3 reachable`.
+
+In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`.
+
+`--local` limits the view to this machine and reads no index. `--json` always describes this machine only, and reads no index.
+
+[`delegate clean`](commands.md) forgets the record of each run that it cleans or abandons, so the other hosts list it no more.
 
 ### The slip
 
@@ -108,7 +130,7 @@ The trend word compares the tickets of the last 2 hours with the tickets of the 
 
 ### The legend
 
-Under the table is a blank line and the legend: one line for each word of the column `do` that the table holds, once, in the order `watch`, `resume`, `retry`, `merge`. Each line has the word and its command. A word that is not in the table has no line, and a table with no word has no legend. The legend shows only on a terminal of 100 columns or more.
+Under the table is a blank line and the legend: one line for each word of the column `do` that the table holds, once, in the order `watch`, `resume`, `retry`, `merge`, `check host`. Each line has the word and its command. A word that is not in the table has no line, and a table with no word has no legend. The legend shows only on a terminal of 100 columns or more.
 
 | Word | Command |
 |---|---|
@@ -116,6 +138,7 @@ Under the table is a blank line and the legend: one line for each word of the co
 | `resume` | `delegate run --resume <run>` |
 | `retry` | `delegate run --resume <run> --retry <ticket>` |
 | `merge` | `git merge --ff-only <run branch>` |
+| `check host` | `ssh <host>; on another host, put ssh <host> in front of each command` |
 
 Each command works from any directory of this machine: `delegate watch` and `delegate run --resume` find the run by its id, and the journal records the repository of the run. Put the short id of the run in `<run>`.
 
