@@ -120,8 +120,10 @@ def test_a_stopped_run_shows_resume_and_a_halted_run_shows_resume(machine, capsy
 
 
 def legend(out: str) -> list[str]:
+    """The lines after the last blank line of the table: the legend. The group `ended` is another group of the table, so the legend is the last group only when its lines hold a command."""
     lines = out.splitlines()
-    return lines[lines.index("", 4) + 1 :] if "" in lines[4:] else []
+    last = lines[len(lines) - 1 - lines[::-1].index(""):][1:] if "" in lines[4:] else []
+    return last if last and "  " in last[0] and last[0].split()[0] in ("watch", "resume", "retry", "merge") else []
 
 
 def test_the_legend_has_one_line_for_each_word_in_the_table_and_the_command_of_the_word(machine, capsys):

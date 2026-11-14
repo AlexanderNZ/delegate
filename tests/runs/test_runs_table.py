@@ -64,7 +64,9 @@ def test_the_table_lists_the_running_run_then_the_run_that_ended_in_the_window_a
         "host    repo   run   state    ended  ETA  slip  new  cache  trend   alert  do",
         "laptop                        1/2               12k   340k",
         "│       alpha  aaaa  running  1/2    -          12k   340k       ▇",
-        "│       beta   bbbb  built    1/1                2k    50k      ▇          merge",
+        "",
+        "ended",
+        "laptop  beta   bbbb  built    1/1                2k    50k      ▇          merge",
     ]
 
 
@@ -138,7 +140,7 @@ def test_a_run_with_no_run_end_and_no_process_is_listed_as_stopped_however_old_i
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[-1].split() == ["│", "delta", "ssss", "stopped", "1/2", "resume"]
+    assert out.splitlines()[-1].split() == ["│", "delta", "ssss", "stopped", "1/2", "stopped", "resume"]
 
 
 def test_a_run_that_failed_at_start_in_the_window_is_listed_as_failed_and_an_older_one_is_not(machine, capsys):
@@ -154,7 +156,7 @@ def test_a_run_that_failed_at_start_in_the_window_is_listed_as_failed_and_an_old
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert [line.split() for line in out.splitlines()[-1:]] == [["│", "epsilon", "ffff", "failed", "0/0"]]
+    assert [line.split() for line in out.splitlines()[-1:]] == [["laptop", "epsilon", "ffff", "failed", "0/0", "failed", "at", "start"]]
     assert "oooo" not in out
 
 
@@ -197,4 +199,6 @@ def test_a_terminal_with_no_utf8_locale_gets_the_ascii_rail(machine, monkeypatch
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert [line[0] for line in out.splitlines()[-2:]] == ["|", "|"]
+    lines = out.splitlines()
+    assert lines[-4].startswith("|       alpha")  # the rail under the host
+    assert lines[-1].startswith("laptop  beta") and "|" not in lines[-1]  # in the group `ended` the host is in the place of the rail

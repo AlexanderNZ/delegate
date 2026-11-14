@@ -40,7 +40,9 @@ A journal that cannot be read is skipped. The command names it on stderr, as `de
 
 ## The table
 
-The first line is `no run index is set up: these are the runs of this machine`. It shows only when `DELEGATE_INDEX` is not set. It is followed by the two fleet lines, a blank line and the table. The table has one group for this machine. The first row of the group holds the name of the machine, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run has a row, and the rail `│` stands in the column `host`.
+The first line is `no run index is set up: these are the runs of this machine`. It shows only when `DELEGATE_INDEX` is not set. It is followed by the two fleet lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
+
+The runs that ended in the window are not under their host. They are in one group after the hosts, with the header `ended` in `dim`. Each row of the group has its host in the column `host`, in place of the rail. The group has no totals row. A host that has only runs that ended has no group of its own.
 
 ### The fleet lines
 
@@ -66,7 +68,7 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 
 | Column | Meaning |
 |---|---|
-| `host` | The name of this machine on the first row of the group, and the rail on each run row. The name is `DELEGATE_HOST` when it is set, else the short host name. |
+| `host` | The name of the host on the first row of its group, and the rail on each run row under it. In the group `ended`, the name of the host is on each run row. The name of this machine is `DELEGATE_HOST` when it is set, else the short host name. |
 | `repo` | The name of the repository: the name part of the name of its state directory. |
 | `run` | The short id of the run. |
 | `state` | The state of the run, as `delegate status` gives it. A run that failed at start is `failed`. |
@@ -76,10 +78,10 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 | `new` | The new tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `cache` | The cache tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `trend` | The sparkline of the tickets of the run that ended in each hour of the window, in `dim`. See [The trend](#the-trend). The row of the machine has none. |
-| `alert` | What is wrong, at most one value, in `warn`. `⚠ idle <time>` when an agent of the run is idle for the stall time of `delegate watch` (5 minutes) or more. Else `fix-up <round>/<limit>` when a [**fix-up**](../glossary.md#fix-up) round of a ticket or of a [**chain**](../glossary.md#chain) runs. It is blank otherwise. A run that is not `running` or `pausing` has no alert. |
+| `alert` | What is wrong, at most one value, in `warn`. `⚠ idle <time>` when an agent of the run is idle for the stall time of `delegate watch` (5 minutes) or more. Else `fix-up <round>/<limit>` when a [**fix-up**](../glossary.md#fix-up) round of a ticket or of a [**chain**](../glossary.md#chain) runs. It is blank otherwise. A run that is not `running` or `pausing` has no such alert. A run in trouble shows why: `stopped` for a stopped run, `halted` for a halted run, and `failed at start` for a run that failed at start, in `warn`. |
 | `do` | The next command. `watch` when the run has an alert. Else `resume` when the run is `paused`, `stopped` or `halted`, `retry` when the run ended `failed`, and `merge` when the run ended `built`. It is blank otherwise. A run that failed at start has none: it has no journal to resume. |
 
-The order of the rows is fixed. The runs that have no `run-end` come first, the newest start first. The runs that ended follow, the newest end first.
+The order of the rows is fixed. In a group of a host, the runs that have no `run-end` are in order of their start, the newest first. The group `ended` follows the hosts, with the runs of this machine first, then the runs of each other host in the order of the names of the hosts, and in each host the newest end first.
 
 When no run is listed, there is no table. The command prints three lines and exits 0:
 
@@ -105,7 +107,7 @@ For example, a host `build-host` with one run `a41e` that was `running` at 3 of 
 
 - The row of the host has the name of the host, the state `unreachable` in `warn`, the `alert` `heard <duration> ago` in `warn` (the time since the host wrote its newest record, in whole minutes, as `47m`, or `3h05m` from an hour), and the `do` word `check host`. It has no totals.
 - The rows of its runs are dim and hold the last-known `state` and `ended` of the record. They have no ETA, no `slip`, no tokens, no trend, no `alert` and no `do`.
-- A record of a run that ended is listed under its host, with the result as its state, while the time of the record is in the window. A record of a run that ended before the window is not listed, and a host with no listed record has no group.
+- A record of a run that ended is listed under its host, dim, with the result as its state, while the time of the record is in the window. A record of a run that ended before the window is not listed, and a host with no listed record has no group.
 - The runs of an unreachable host are out of each sum of the fleet lines, and out of `⚠ N in trouble`. The first line counts them in the total: `runs  1 of 3 reachable`.
 
 In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`.
@@ -156,8 +158,8 @@ The command reads the size of the terminal: `COLUMNS` and `LINES`, else the size
 
 **Height.** When the lines are more than the lines of the terminal, less one line for the prompt, the rows fold in two stages. The command goes to the next stage only when the lines still do not fit:
 
-1. The runs that ended fold into one row, with the glyph of the first state and the count of each state, for example `✓ 1 built` or `✗ 1 failed`. The text starts in the column `state`. A run that ended is out of the totals, so the totals do not change. The legend then holds only the words of the rows that show.
-2. When the runs that have no `run-end` have no alert and no command, the host folds to its totals row: no run row shows.
+1. The group `ended` folds to one row for each host, with the glyph of the first state and the count of each state, for example `✓ 1 built` or `✗ 1 failed`. The name of the host is in the column `host`, and the text starts in the column `state`. A run that ended is out of the totals, so the totals do not change. The legend then holds only the words of the rows that show.
+2. When the runs that have no `run-end` of a host have no alert and no command, the host folds to its totals row: no run row shows, and no row of that host shows in the group `ended`.
 
 A host with an alert or a command does not fold to its totals row. When the lines still do not fit, the command prints them all.
 
@@ -247,7 +249,7 @@ The command fits the lanes to the width of the terminal only as far as the cell 
 | `eta` | The estimated end of the run, or `null` when the run does not run or has no estimate. |
 | `tokens_new` | The new tokens of the run, or `null` when the command cannot read its streams. |
 | `tokens_cache` | The cache tokens of the run, or `null` when the command cannot read its streams. |
-| `alert` | The text of the column `alert`, or `null`. The glyph of `⚠ idle` is always `⚠`, also in a terminal that is not UTF-8. |
+| `alert` | The text of the column `alert` that an agent at work gives (`⚠ idle <time>` or `fix-up <round>/<limit>`), or `null`. The reasons `stopped`, `halted` and `failed at start` are in the table only. The glyph of `⚠ idle` is always `⚠`, also in a terminal that is not UTF-8. |
 | `do` | The word of the column `do`, or `null`. |
 | `trend` | The 6 counts of the trend of the run: the tickets that ended built in each hour of the window, oldest first. |
 | `slip_seconds` | The slip of the ETA in seconds, or `null` when the column `slip` is blank. |

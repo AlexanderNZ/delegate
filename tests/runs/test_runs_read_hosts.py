@@ -69,7 +69,7 @@ def test_a_host_that_gives_its_document_shows_its_runs_as_live_runs_and_they_are
     assert ssh.calls == [["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "build-host", "delegate", "runs", "--local", "--json"]]
 
 
-def test_the_document_of_a_host_that_gives_an_ended_run_shows_it_under_its_host_and_out_of_the_sums(machine, index, ssh, capsys):
+def test_the_document_of_a_host_that_gives_an_ended_run_shows_it_in_the_group_ended_with_its_host_and_out_of_the_sums(machine, index, ssh, capsys):
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ended = run_of("build-host", "docs-site", "e2b1", "built", 6, 6, eta=None, do="merge")
@@ -81,7 +81,7 @@ def test_the_document_of_a_host_that_gives_an_ended_run_shows_it_under_its_host_
     assert (code, err) == (0, "")
     lines = out.splitlines()
     assert lines[0].startswith("runs  1 of 1 reachable") and "1/2 ended" in lines[0]
-    assert next(line for line in lines if "e2b1" in line).split()[:5] == ["│", "docs-site", "e2b1", "built", "6/6"]
+    assert next(line for line in lines if "e2b1" in line).split()[:5] == ["build-host", "docs-site", "e2b1", "built", "6/6"]
     assert lines[-2:] == ["", "merge  git merge --ff-only <run branch>; on another host, put ssh <host> in front of each command"]
 
 

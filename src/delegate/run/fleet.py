@@ -14,8 +14,11 @@ A run is listed when it has no `run-end` (running, pausing, paused, halted or st
 in the window, the last `WINDOW_SECONDS`. A run that failed at start (`runs.FailedStart`) and whose log last changed
 in the window is listed with the state `failed`. An older run that ended is not listed.
 
+The rows under the totals row of a host are the runs that the totals count, so the row is the sum of them (#322). The runs that ended in the window are in one group
+`ended` after the hosts, each with its host in place of the rail and with no totals row. The last-known runs of an unreachable host stay under its host.
+
 The table fits the terminal (C25, #312): `fleet_lines` drops the columns of `FIT_STEPS` until the table fits the width, and folds the
-rows of the ended runs, then a host with no alert and no command, until the lines fit the height.
+group of the ended runs to one row for each host, then a host with no alert and no command, until the lines fit the height.
 
 `fleet_of` reads the journals and gives the `Fleet`. With the same `JournalReads` at each call, as `delegate runs --watch` does (#313), a call reads
 each journal only from the position where the call before stopped, so a redraw does not read each journal from the start. `Fleet.to_json` is the contract of `delegate runs --json`, and
@@ -90,6 +93,9 @@ OTHER_HOST: str = "on another host, put ssh <host> in front of each command"
 HOST_READ_SECONDS: float = 10.0
 HOST_READ_INTERVAL_SECONDS: float = 30.0
 
+# The header of the group of the runs that ended (copy deck W8.group.ended).
+ENDED_GROUP: str = "ended"
+
 # The state word of a host that this machine cannot read (copy deck W8.state.unreachable).
 UNREACHABLE: str = "unreachable"
 
@@ -163,6 +169,10 @@ class RunRow:
     def alert(self) -> fleet_rules.Alert | None:
         """The one alert of the run (`fleet_rules.alert`), with the stall limit of `delegate watch`."""
         return fleet_rules.alert(self.facts(), IDLE_LIMIT_SECONDS)
+
+    def shown_alert(self) -> fleet_rules.Alert | None:
+        """The alert that the cell `alert` shows (`fleet_rules.shown_alert`): the one alert, or for a run in trouble the reason (#322). `to_json` has `alert`, not this."""
+        return fleet_rules.shown_alert(self.facts(), IDLE_LIMIT_SECONDS)
 
     def do(self) -> str | None:
         """The word of the column `do` (`fleet_rules.next_command`)."""
@@ -491,9 +501,14 @@ STATE_ROLES: dict[str, str] = {
 
 
 def alert_text(found: fleet_rules.Alert, idle_glyph: str) -> str:
-    """The words of an alert (copy deck W8.alert.idle and W8.alert.fixup): `⚠ idle 6m40s`, or `fix-up 1/2`."""
+    """The words of an alert (copy deck W8.alert.idle and W8.alert.fixup): `⚠ idle 6m40s`, or `fix-up 1/2`.
+
+    An alert that says why a run is in trouble (#322) is its words: `stopped`, `halted` or `failed at start`.
+    """
     if found.kind == fleet_rules.IDLE:
         return f"{idle_glyph} idle {format_duration(found.seconds)}"
+    if found.kind in fleet_rules.TROUBLE_KINDS:
+        return found.kind
     return f"{found.kind} {found.round}/{found.limit}"
 
 
@@ -538,7 +553,7 @@ def _cells(row: RunRow, glyph: output.Glyphs, largest: int) -> list[str]:
     eta = "" if row.state not in (RUNNING, PAUSING) else _clock(row.eta) if row.eta else "-"
     slip = "" if row.slip_seconds is None else output.styled("warn", slip_text(row.slip_seconds))
     counted = f"{row.tickets_ended}/{row.tickets_total}"
-    found = row.alert()
+    found = row.shown_alert()
     return [
         output.styled("plan", glyph.rail), row.repo, output.styled("bold", output.short_run_id(row.run_id)),
         output.styled(STATE_ROLES.get(row.state, ""), row.state), output.styled("dim", counted) if row.ended else counted, eta, slip,
@@ -651,8 +666,9 @@ def legend_lines(runs: Sequence[RunRow], host: str, unreachable: bool = False) -
 
 @dataclass(frozen=True)
 class _Ended:
-    """The one row that holds the runs that ended, when the lines do not fit the height (C25): `✓ 1 built`, `✗ 1 failed`."""
+    """The one row that holds the runs that ended of one host, when the lines do not fit the height (C25): `✓ 1 built`, `✗ 1 failed`."""
 
+    host: str
     runs: tuple[RunRow, ...]
 
     def text(self, glyph: output.Glyphs) -> str:
@@ -668,18 +684,25 @@ class _Ended:
 
 @dataclass(frozen=True)
 class _Section:
-    """One host group of the table: its name, all its runs (for its row), and the items that show under its row."""
+    """One group of the table: its name, the runs under its row (for its row), and the items that show under its row.
+
+    A host group (#322) holds the runs that its totals count, and the runs of an unreachable host. The group `ended` (`ended_group`) holds the runs
+    that ended in the window, each with its host in the place of the rail, and it has a header and no totals.
+    """
 
     host: str
     runs: tuple[RunRow, ...]
     items: tuple[RunRow | _Ended, ...]
+    ended_group: bool = False
 
     @property
     def unreachable(self) -> bool:
         return any(row.unreachable for row in self.runs)
 
     def cells(self, now: datetime) -> list[str]:
-        """The cells of the row of the host: its totals (`_totals`), or for an unreachable host `unreachable`, `heard <duration> ago` and `check host` (C25, #317)."""
+        """The cells of the row of the group: the header `ended`, the totals of the host (`_totals`), or for an unreachable host `unreachable`, `heard <duration> ago` and `check host` (C25, #317)."""
+        if self.ended_group:
+            return [output.styled("dim", ENDED_GROUP), *[""] * (len(COLUMNS) - 1)]
         if not self.unreachable:
             return _totals(self.host, self.runs)
         heard = max(row.heard for row in self.runs if row.heard is not None)
@@ -690,27 +713,32 @@ class _Section:
 def _candidates(fleet: Fleet) -> list[list[_Section]]:
     """The sections of the table for each step of the fit to the height (C25), from the most to the fewest rows.
 
-    First each run has its row. Then the runs that ended fold into one row for each host. Then each host whose runs that remain have no alert
-    and no command folds to its totals row: no run row. An unreachable host has an alert and a command on its row, so it does not fold.
+    The rows under the row of a host are the runs that its totals count, and the runs of an unreachable host (#322). The runs that ended are in the
+    group `ended` after the hosts. First each run has its row. Then the runs that ended fold into one row for each host. Then each host whose runs
+    have no alert and no command folds to its totals row, with no run row and no row of ended runs. An unreachable host has an alert and a command on its row, so it does not fold.
     """
-    full: list[_Section] = []
-    folded: list[_Section] = []
-    quiet: list[_Section] = []
+    groups: list[tuple[str, tuple[RunRow, ...], tuple[RunRow, ...], bool]] = []
     for host, rows in fleet.hosts():
-        working = [row for row in rows if row.ended is None]
-        ended = [row for row in rows if row.ended is not None]
-        fold: tuple[RunRow | _Ended, ...] = (*working, *([_Ended(tuple(ended))] if ended else []))
-        is_quiet = bool(working) and not any(row.unreachable or row.alert() or row.do() for row in working)
-        full.append(_Section(host, rows, (*working, *ended)))
-        folded.append(_Section(host, rows, fold))
-        quiet.append(_Section(host, rows, () if is_quiet else fold))
-    return [full, folded, quiet]
+        under = tuple(row for row in rows if row.unreachable or row.ended is None)
+        done = tuple(row for row in rows if not (row.unreachable or row.ended is None))
+        groups.append((host, under, done, bool(under) and not any(row.unreachable or row.alert() or row.do() for row in under)))
+
+    def build(fold_ended: bool, fold_quiet: bool) -> list[_Section]:
+        sections = [_Section(host, under, () if fold_quiet and quiet else under) for host, under, _, quiet in groups if under]
+        items: list[RunRow | _Ended] = []
+        for host, _, done, quiet in groups:
+            if done and not (fold_quiet and quiet):
+                items += [_Ended(host, done)] if fold_ended else done
+        return [*sections, *([_Section(ENDED_GROUP, (), tuple(items), True)] if items else [])]
+
+    return [build(False, False), build(True, False), build(True, True)]
 
 
 def _table(sections: Sequence[_Section], now: datetime, dropped: frozenset[str], glyph: output.Glyphs, largest: int) -> tuple[list[str], int]:
     """The lines of the table without the columns of `dropped`, and the width of the widest line that is not the row of the ended runs.
 
-    The row of the ended runs has its text from the column `state`, over the cells that are blank on it. A blank line is between two host groups.
+    The row of the ended runs has its text from the column `state`, over the cells that are blank on it. A blank line is between two groups.
+    A row of the group `ended` has its host in the place of the rail.
     """
     keep = [index for index, name in enumerate(COLUMNS) if name not in dropped]
     right = {place for place, index in enumerate(keep) if index in NUMBERS}
@@ -724,16 +752,19 @@ def _table(sections: Sequence[_Section], now: datetime, dropped: frozenset[str],
         rows.append([cells[index] for index in keep])
         for item in section.items:
             if isinstance(item, RunRow):
-                rows.append([_cells(item, glyph, largest)[index] for index in keep])
+                found = _cells(item, glyph, largest)
+                if section.ended_group:
+                    found[0] = item.host
+                rows.append([found[index] for index in keep])
             else:
                 folds[len(rows)] = item
-                rows.append([rail, *[""] * (len(keep) - 1)])
+                rows.append([item.host, *[""] * (len(keep) - 1)])
     lines = [line.rstrip(" ") for line in output.columns(rows, right=right)]
     widths = [max(output.width(row[place]) for row in rows) for place in range(len(keep))]
     state = keep.index(COLUMNS.index("state"))
     start = sum(widths[:state]) + len(output.GAP) * state
     for place, item in folds.items():
-        lines[place] = rail + " " * (start - output.width(rail)) + item.text(glyph)
+        lines[place] = item.host + " " * (start - output.width(item.host)) + item.text(glyph)
     return lines, max(output.width(line) for place, line in enumerate(lines) if place not in folds)
 
 

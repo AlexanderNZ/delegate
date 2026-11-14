@@ -112,7 +112,7 @@ def test_a_frame_of_80_by_24_has_the_columns_of_e15_and_folds_the_ended_runs_int
 
     lines = out.splitlines()
     assert (code, err) == (0, "")
-    assert len(lines) == 21  # 6 lines, 14 rows, and the row of the ended runs: the 23 lines of the screen are enough
+    assert len(lines) == 23  # 6 lines, 14 rows, a blank line, the header `ended` and the row of the ended runs: the 23 lines of the screen are enough
     assert lines[:2] == [NO_INDEX, "runs  14 of 14 reachable  0%  0/28 ended  ETA - · 14 with no ETA"]  # no bar
     assert lines[4:8] == [
         "host    run   state    ended  ETA  alert          do",  # `new`, `cache`, `trend`, `slip` and `repo` are not there
@@ -121,7 +121,7 @@ def test_a_frame_of_80_by_24_has_the_columns_of_e15_and_folds_the_ended_runs_int
         "│       w012  running  0/2    -",
     ]
     assert [line.split()[-2:] for line in lines[6:20] if "idle" in line] == [["10m00s", "watch"]] * 2
-    assert lines[-1] == "│" + " " * 13 + "✓ 5 built"  # from the column `state`
+    assert lines[-3:] == ["", "ended", "laptop" + " " * 8 + "✓ 5 built"]  # the host in the place of the rail, and the text from the column `state`
     assert "delegate watch <run>" not in out  # the legend drops under 100 columns
     assert "b000" not in out
 
@@ -132,7 +132,7 @@ def test_without_the_fold_the_frame_of_80_by_24_has_more_lines_than_the_screen(m
 
     _, out, _ = runs(capsys)
 
-    assert len(out.splitlines()) == 25 and "b000" in out
+    assert len(out.splitlines()) == 27 and "b000" in out
 
 
 def test_more_runs_than_rows_at_120_columns_fold_the_ended_runs_first_and_no_run_that_works(machine, monkeypatch, capsys):
@@ -140,16 +140,16 @@ def test_more_runs_than_rows_at_120_columns_fold_the_ended_runs_first_and_no_run
     ended(machine, 3)
     at_size(monkeypatch, 120, 1000)
     unfolded = runs(capsys)[1].splitlines()
-    at_size(monkeypatch, 120, 12)  # 11 lines for the output: the 13 lines of the table and the lines over it do not fit
+    at_size(monkeypatch, 120, 14)  # 13 lines for the output: the 15 lines of the table and the lines over it do not fit
 
     code, out, err = runs(capsys)
 
     lines = out.splitlines()
     assert (code, err) == (0, "")
-    assert len(unfolded) == 15 and unfolded[-2:] == ["", "merge  git merge --ff-only <run branch>"]
+    assert len(unfolded) == 17 and unfolded[-2:] == ["", "merge  git merge --ff-only <run branch>"]
     assert [line.split()[2] for line in lines[6:10]] == ["w003", "w002", "w001", "w000"]
-    assert lines[10] == "│                    ✓ 3 built"
-    assert len(lines) == 11
+    assert lines[10:] == ["", "ended", "laptop" + " " * 15 + "✓ 3 built"]
+    assert len(lines) == 13
     assert "merge" not in out  # the words of the legend are the words of the rows that show
 
 
@@ -173,10 +173,10 @@ def test_a_host_with_an_alert_does_not_fold_to_its_totals_row(machine, monkeypat
 
     lines = out.splitlines()
     assert (code, err) == (0, "")
-    assert len(lines) == 21  # the lines do not fit, and nothing more can fold: the ended run is the only one that folds. The legend has 3 lines
+    assert len(lines) == 23  # the lines do not fit, and nothing more can fold: the ended run is the only one that folds. The legend has 3 lines
 
     assert [line.split()[2] for line in lines[6:17]].count("1195") == 1 and "w000" in out
-    assert lines[-4] == "│                          ✓ 1 built"
+    assert lines[-6:-3] == ["", "ended", "laptop" + " " * 21 + "✓ 1 built"]
 
 
 def test_the_fleet_lines_drop_the_tokens_and_the_words_of_the_trend_when_they_do_not_fit_the_width(machine, monkeypatch, capsys):
@@ -263,4 +263,4 @@ def test_the_fold_row_of_the_ended_runs_has_the_ascii_glyph_in_a_c_locale(machin
 
     _, out, _ = runs(capsys)
 
-    assert out.splitlines()[-1] == "|" + " " * 18 + "+ 1 built, 1 failed"
+    assert out.splitlines()[-1] == "laptop" + " " * 13 + "+ 1 built, 1 failed"

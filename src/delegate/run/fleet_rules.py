@@ -52,6 +52,12 @@ RESUME: str = "resume"
 RETRY: str = "retry"
 MERGE: str = "merge"
 CHECK_HOST: str = "check host"
+
+# The kinds of an alert that say why a run is in trouble (#322). They show in the cell `alert`, and they are not in the document of `--json`.
+STOPPED: str = "stopped"
+HALTED: str = "halted"
+FAILED_START: str = "failed at start"
+TROUBLE_KINDS: frozenset[str] = frozenset({IDLE, STOPPED, HALTED, FAILED_START})
 DO_WORDS: tuple[str, ...] = (WATCH, RESUME, RETRY, MERGE, CHECK_HOST)
 
 
@@ -133,14 +139,11 @@ def earliest_start(runs: Sequence[RunFacts]) -> datetime | None:
 
 
 def in_trouble(runs: Sequence[RunFacts], idle_limit: int) -> int:
-    """The runs in trouble: a run with an agent idle for `idle_limit` seconds or more, a stopped run, a halted run, and a run that failed at start.
+    """The runs in trouble (#322): the runs whose cell `alert` (`shown_alert`) says `⚠ idle`, `stopped`, `halted` or `failed at start`.
 
     A paused run is not in trouble. A run that ended is not, unless it failed at start. A run of an unreachable host is not: its host is.
     """
-    return sum(
-        1 for run in runs
-        if not run.unreachable and (run.failed_start or (not run.ended and (run.state in TROUBLE_STATES or (run.idle_seconds is not None and run.idle_seconds >= idle_limit))))
-    )
+    return sum(1 for run in runs if (found := shown_alert(run, idle_limit)) is not None and found.kind in TROUBLE_KINDS)
 
 
 def reachable(runs: Sequence[RunFacts]) -> tuple[int, int]:
@@ -150,7 +153,10 @@ def reachable(runs: Sequence[RunFacts]) -> tuple[int, int]:
 
 @dataclass(frozen=True)
 class Alert:
-    """The one alert of a run: `IDLE` with the seconds that an agent is idle, or `FIXUP` with the round and the limit."""
+    """The one alert of a run: `IDLE` with the seconds that an agent is idle, or `FIXUP` with the round and the limit.
+
+    `shown_alert` adds the kinds `STOPPED`, `HALTED` and `FAILED_START`, which have no number.
+    """
 
     kind: str
     seconds: int = 0
@@ -171,6 +177,21 @@ def alert(run: RunFacts, idle_limit: int) -> Alert | None:
     if run.fixup is not None:
         return Alert(FIXUP, round=run.fixup[0], limit=run.fixup[1])
     return None
+
+
+def shown_alert(run: RunFacts, idle_limit: int) -> Alert | None:
+    """The alert that the cell `alert` of a run shows (#322): the alert of `alert`, or for a run in trouble the reason.
+
+    A stopped run gives `STOPPED`, a halted run gives `HALTED`, and a run that failed at start gives `FAILED_START`. The document of `--json` and the
+    word `do` use `alert`, which has none of these three, so a stopped run has `resume` and not `watch`. A run of an unreachable host has none.
+    """
+    if run.unreachable:
+        return None
+    if run.failed_start:
+        return Alert(FAILED_START)
+    if not run.ended and run.state in TROUBLE_STATES:
+        return Alert(run.state)
+    return alert(run, idle_limit)
 
 
 def next_command(run: RunFacts, alerted: bool) -> str | None:
