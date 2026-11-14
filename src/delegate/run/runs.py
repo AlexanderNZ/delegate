@@ -81,8 +81,11 @@ def _states(repo: Path, vcs: VersionControl, location: StateLocation | None = No
     return (location or locate(repo, vcs)).run_directories()
 
 
-def _all_journals(states: list[Path]) -> list[Path]:
-    """The journal of each run in the state directories, in the order of the paths. The list can be empty."""
+def all_journals(states: list[Path]) -> list[Path]:
+    """The journal of each run in the state directories, in the order of the paths. The list can be empty.
+
+    `delegate runs` (#307) reads the journals of each state directory under the state root with it.
+    """
     found: list[Path] = []
     for state in states:
         runs = state / "runs"
@@ -112,8 +115,8 @@ class FailedStart:
         return f"no run is active; the newest run {self.run_id} failed at start: {self.last_line}; log {self.log}"
 
 
-def _failed_starts(states: list[Path]) -> list[FailedStart]:
-    """Each run of the state directories that failed at start, in the order of the names.
+def failed_starts(states: list[Path]) -> list[FailedStart]:
+    """Each run of the state directories that failed at start, in the order of the names. `delegate runs` (#307) uses it too.
 
     Raise RunsError when a lock file cannot be read.
     """
@@ -182,7 +185,7 @@ def journal_of(repo: Path, run_id: str | None, vcs: VersionControl, *, location:
             if journal.is_file():
                 return journal
         raise RunsError(f"run {run_id!r} not found in {repo}: no journal at {states[0] / 'runs' / run_id / JOURNAL_NAME}")
-    journals = _all_journals(states)
+    journals = all_journals(states)
     if not journals:
         raise _no_run(repo, states)
     return max(journals, key=_start_time)
@@ -199,6 +202,14 @@ def state_root() -> Path:
     if not Path(root).is_absolute():
         raise RunsError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
     return Path(root)
+
+
+def machine_states(root: Path) -> list[Path]:
+    """Each state directory under the state root `root`, in the order of the names: one for each repository that has a directory `runs`.
+
+    The list is empty when `root` is not a directory.
+    """
+    return sorted(path for path in root.glob("*") if (path / "runs").is_dir()) if root.is_dir() else []
 
 
 def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
@@ -222,7 +233,7 @@ def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
             if (state / "runs" / in_repository / JOURNAL_NAME).is_file():
                 return state / "runs" / in_repository / JOURNAL_NAME
     root = state_root()
-    everywhere = sorted(path for path in root.glob("*") if (path / "runs").is_dir()) if root.is_dir() else []
+    everywhere = machine_states(root)
     full = _full_run_id(everywhere, run_id)
     found = [state / "runs" / full / JOURNAL_NAME for state in everywhere if (state / "runs" / full / JOURNAL_NAME).is_file()]
     if len(found) > 1:
@@ -341,8 +352,8 @@ def runs_of(repo: Path, vcs: VersionControl, *, location: StateLocation | None =
     or None to look it up here.
     """
     states = _states(repo, vcs, location)
-    journals = _all_journals(states)
-    failed = _failed_starts(states)
+    journals = all_journals(states)
+    failed = failed_starts(states)
     if not journals and not failed:
         raise _no_run(repo, states)
     unreadable: list[tuple[Path, str]] = []

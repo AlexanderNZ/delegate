@@ -34,7 +34,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..cli import agent_definitions, brief, clean, docs_command, pause, run_command, status, stop, watch
+from ..cli import agent_definitions, brief, clean, docs_command, pause, run_command, runs, status, stop, watch
 from ..definitions import declaration, render, validate
 from ..run import watch as run_watch
 from . import figures
@@ -45,6 +45,7 @@ RUN_PAGE: str = "docs/reference/run.md"
 STATUS_PAGE: str = "docs/reference/status-and-watch.md"
 COMMANDS_PAGE: str = "docs/reference/commands.md"
 SKILL_PAGE: str = "skills/agent-definitions/SKILL.md"
+RUNS_PAGE: str = "docs/reference/runs.md"
 DOCS_PAGE: str = "docs/reference/docs.md"
 
 
@@ -213,6 +214,7 @@ SECTIONS: tuple[Section, ...] = (
     Section(
         STATUS_PAGE, "status-options", "The argument parser of `delegate status`.", lambda: options_table(status.build_parser())
     ),
+    Section(RUNS_PAGE, "runs-options", "The argument parser of `delegate runs`.", lambda: options_table(runs.build_parser())),
     Section(STATUS_PAGE, "watch-options", "The argument parser of `delegate watch`.", lambda: options_table(watch.build_parser())),
     Section(
         STATUS_PAGE, "watch-exit-codes", "The exit codes of `delegate watch`.",

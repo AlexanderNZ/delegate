@@ -96,6 +96,7 @@ The test suite holds one drift test for each generated section, one for the abbr
 | `docs/reference/commands.md` | `stop-options` | The argument parser of `delegate stop`. |
 | `docs/reference/run.md` | `pause-options` | The argument parser of `delegate pause`. |
 | `docs/reference/status-and-watch.md` | `status-options` | The argument parser of `delegate status`. |
+| `docs/reference/runs.md` | `runs-options` | The argument parser of `delegate runs`. |
 | `docs/reference/status-and-watch.md` | `watch-options` | The argument parser of `delegate watch`. |
 | `docs/reference/status-and-watch.md` | `watch-exit-codes` | The exit codes of `delegate watch`. |
 | `docs/reference/commands.md` | `agent-definitions-options` | The options of `agent-definitions` before its subcommand. |

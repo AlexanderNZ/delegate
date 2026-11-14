@@ -45,6 +45,7 @@ HELP_PAGES = [
     ("delegate", ["pause"], "reference/run.md"),
     ("delegate", ["stop"], "reference/commands.md"),
     ("delegate", ["status"], "reference/status-and-watch.md"),
+    ("delegate", ["runs"], "reference/runs.md"),
     ("delegate", ["watch"], "reference/status-and-watch.md"),
     ("delegate", ["clean"], "reference/commands.md"),
     ("delegate", ["docs"], "reference/docs.md"),

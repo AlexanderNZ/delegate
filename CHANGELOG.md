@@ -8,6 +8,7 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ### Added
 
+- `delegate runs` lists the runs of this machine in one table, across each repository (#307). It reads each state directory under the state root, and lists each run that has no `run-end` and each run whose `run-end` is in the last 6 hours, with the columns `host repo run state ended ETA new cache`. A run that failed at start in the window is listed with the state `failed`. `--json` prints one object with `format` 1, `host`, `time`, `window_seconds` and `runs`. See `docs/reference/runs.md`.
 - `run-start` records the repository and the host of a run, and `delegate run --resume <run id>` finds the repository of a run (#306). `run-start` has two new fields: `repo`, the absolute path of the top level of the repository that the run builds, and `host`, the name of the machine, which is `DELEGATE_HOST` when it is set and not empty, else the host name up to its first `.`. With no `--repo`, `--resume` looks for the run as `status` does: in the repository of the current directory, then under the state root. A run that is not in the repository of the current directory goes on in the `repo` of its `run-start`. A run of an earlier version has no `repo`: from outside its repository, the resume exits 1, and the message says to run the command in the repository or to give `--repo`. See `docs/reference/run.md`.
 
 ### Changed

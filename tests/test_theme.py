@@ -26,6 +26,7 @@ REFERENCE = DOCS / "reference"
 COMMAND_PAGES: dict[str, list[str]] = {
     "run.md": ["run", "pause"],
     "status-and-watch.md": ["status", "watch"],
+    "runs.md": ["runs"],
     "docs.md": ["docs"],
     "commands.md": ["render", "schema", "validate", "bootstrap", "brief", "clean", "stop"],
 }

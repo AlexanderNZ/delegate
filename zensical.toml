@@ -46,6 +46,7 @@ nav = [
     { "The workflow file" = "reference/workflow.md" },
     { "delegate run" = "reference/run.md" },
     { "delegate status and delegate watch" = "reference/status-and-watch.md" },
+    { "delegate runs" = "reference/runs.md" },
     { "The commands" = "reference/commands.md" },
     { "delegate docs" = "reference/docs.md" },
     { "The claude-code adapter" = "reference/claude-code-adapter.md" },
