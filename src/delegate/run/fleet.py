@@ -611,10 +611,11 @@ def fleet_of(
             listed.add(journal)
             try:
                 events = reads.events(journal)
-                end = run_state.fold(events).run_end
+                folded = run_state.fold(events)
+                end = folded.run_end
                 if end is not None and not _in_window(_time(end), now):
                     continue  # an older run that ended is not listed, and its streams are not read
-                snap = snapshot_of(events, journal, reader_of, now)
+                snap = snapshot_of(events, journal, reader_of, now, folded=folded)
                 eta = snap.eta if snap.state in (RUNNING, PAUSING) else None
                 slip = fleet_rules.slip_seconds(eta, None if eta is None else _eta_then(events, journal, now), _time(events[0]), now)
             except (JournalError, RunsError) as error:

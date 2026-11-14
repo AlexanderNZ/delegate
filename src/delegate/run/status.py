@@ -80,6 +80,9 @@ HALTED: str = "halted"
 # A run whose newest `crashed` comes after its newest `resume` is stopped also while its process ends (#281).
 STOPPED: str = "stopped"
 
+# The states of the run state in which the clock of the snapshot stops at the event that gives the state (and the run has a live process).
+_CLOCK_STOPS: tuple[str, ...] = (run_state.ENDED, run_state.PAUSED, run_state.HALTED)
+
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
 PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
 
@@ -120,12 +123,15 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
     # started the verification again leaves the verdict of the first pass out.
     verdict_events = events[run_state.fold(events).chain.start :] if domain.chain_units(str(start["mode"])) else events
     facts: dict[str, dict[str, str]] = {}
-    for ticket in plan_ids(events):
-        own = [e for e in events if e.get("ticket") == ticket]
+    plan = plan_ids(events)
+    owns = _events_by_ticket(events, plan)
+    verdicts_of_run = [e for e in verdict_events if e["event"] == "verdict"]
+    for ticket in plan:
+        own = owns[ticket]
         # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
         verdicts = [
-            str(e["verdict"]) for e in verdict_events
-            if e["event"] == "verdict" and (e.get("ticket") == ticket or ticket in e.get("tickets", []))  # type: ignore[operator]
+            str(e["verdict"]) for e in verdicts_of_run
+            if e.get("ticket") == ticket or ticket in e.get("tickets", [])  # type: ignore[operator]
         ]
         branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), "")
         facts[ticket] = {
@@ -722,58 +728,60 @@ def read_stream(activity: StreamReader, stream: Path, is_live: bool) -> Activity
         return None
 
 
-def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime) -> Snapshot:
+def snapshot_of(
+    events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime, *, folded: run_state.RunState | None = None,
+) -> Snapshot:
     """The snapshot of a run from its journal events. `now` is the time of the clock, in UTC.
 
     The reader of the streams comes from `reader_of` once. When it gives None, the snapshot has no tokens and no activity.
     The two facts that the journal does not hold come from the disk: a live process that holds the lock of the run, and a
     pause request that waits. `snapshot_at` is the same snapshot with the two facts given. The lock is read only when its
-    answer decides the state (`asks`): the run state of the events is active.
+    answer decides the state (`asks`): the run state of the events is active. The events fold once: the fold answers the
+    question of the lock and goes to `snapshot_at`. A caller that has the fold of the events (`folded`) gives it, and the
+    events fold no more.
     """
-    asks = run_state.fold(events).status.kind == run_state.ACTIVE
+    folded = run_state.fold(events) if folded is None else folded
+    asks = folded.status.kind == run_state.ACTIVE
     return snapshot_at(
         events, journal, reader_of, now, live_process=asks and _has_live_process(journal), pause_request=pause_requested(journal),
+        folded=folded,
     )
 
 
 def snapshot_at(
     events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime, *, live_process: bool, pause_request: bool,
+    folded: run_state.RunState | None = None,
 ) -> Snapshot:
     """The snapshot of a run, a function of its journal events, the time `now`, and two facts (#311). It reads no lock and no pause request.
 
     `live_process` is True when a process holds the lock of the run. `pause_request` is True when a pause request waits.
     `journal` only names the run and its files. The snapshot of a run at an earlier time t is the events up to t, the time
-    t, a live process, and no pause request.
+    t, a live process, and no pause request. `folded` is the run state of `events`, when the caller has it already: it
+    folds the events when it is None.
     """
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
     start = events[0]
     # The state of the run is the state of the run state (ADR 0009). The lock and the pause request are the two facts it lacks.
-    folded = run_state.fold(events)
-    kind, stop = folded.status.kind, folded.status.event
-    end = stop if kind == run_state.ENDED else None
-    paused = kind == run_state.PAUSED
-    halt = stop if kind == run_state.HALTED else None
-    # A crash ends the run process: the run is stopped, also in the moment before the process releases its lock (#281).
-    crash = stop if kind == run_state.CRASHED else None
-    # A stop by the check of the setup ends the run process too (#296).
-    setup = stop if kind == run_state.SETUP_PROBLEM else None
-    live = end is not None or paused or halt is not None or (crash is None and setup is None and live_process)
-    if end is not None:
-        now = _time(end)  # the clock of a run that ended stops at its end
-    elif paused:
-        now = _time(stop)  # and the clock of a paused run at its pause
-    elif halt is not None:
-        now = _time(halt)  # and the clock of a halted run at its halt
+    folded = run_state.fold(events) if folded is None else folded
+    stop = folded.status.event
+    # A run that ended, paused or halted keeps its clock at that event. A crash and a stop by the check of the setup end the
+    # run process too: the run is stopped, also in the moment before the process releases its lock (#281, #296).
+    at_stop = folded.status.kind in _CLOCK_STOPS
+    live = at_stop or (folded.status.kind == run_state.ACTIVE and live_process)
+    if at_stop:
+        now = _time(stop)  # the clock of a run that ended, paused or halted stops at that event
     elif not live:
         now = _time(events[-1])  # and the clock of a stopped run at its newest event
     now = now.replace(microsecond=0)
     # No agent and no gate works in a run that ended, paused, halted or stopped.
-    stopped = end is not None or paused or halt is not None or not live
+    stopped = at_stop or not live
+    run_ended = folded.run_end is not None
     activity = reader_of(str(start["adapter"]))
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
-    owns = {ticket: [e for e in events if e.get("ticket") == ticket] for ticket in plan_ids(events)}
+    plan = plan_ids(events)
+    owns = _events_by_ticket(events, plan)
     for ticket, own in owns.items():
         found, duration = _ticket(ticket, own, folded.ticket(ticket), activity, now, stopped)
         tickets.append(found)
@@ -786,24 +794,33 @@ def snapshot_at(
     # The verification of an `economy` chain is one more unit: it ends with the run, and while it runs it counts by its phase.
     chain = domain.chain_units(str(start["mode"]))
     chain_phase, chain_seconds = _chain(events[folded.chain.start :], now) if chain and not stopped else (None, 0)
-    units, units_ended = len(tickets) + chain, ended + (chain if end is not None else 0)
+    units, units_ended = len(tickets) + chain, ended + (chain if run_ended else 0)
     to_end = domain.seconds_to_end(durations, units - units_ended, sum(t.elapsed_seconds for t in running) + chain_seconds)
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
-    chains = _chains(events[folded.chain.start :], plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
-    state, note = _state(end, paused, journal, halt, live, crash, setup, pause_request)
-    pause = stop if paused else None
+    chains = _chains(events[folded.chain.start :], plan, stacks, activity, now, stopped, run_ended) if chain else []
+    state, note = _state(folded.status, live, pause_request, journal.parent.name)
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase] + ([chain_phase] if chain_phase else []), units),
-        eta=None if to_end is None or (to_end == 0 and unit_runs) or paused or halt is not None or not live else now + timedelta(seconds=to_end),
+        eta=None if to_end is None or (to_end == 0 and unit_runs) or not live or (at_stop and not run_ended) else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
         tokens_cache=None if activity is None else sum(t.tokens_cache or 0 for t in tickets), tickets=tuple(tickets),
         phase=chain_phase, note=note, mode=str(start["mode"]),
-        paused_before=None if pause is None else (str(pause.get("ticket")), str(pause.get("before"))), plan=_plan(events),
+        paused_before=_paused_before(folded.status), plan=_plan(events),
         chains=tuple(chains),
     )
+
+
+def _events_by_ticket(events: list[dict[str, object]], plan: list[str]) -> dict[str, list[dict[str, object]]]:
+    """The events of each ticket of `plan`, in order, from one pass over `events`."""
+    owns: dict[str, list[dict[str, object]]] = {ticket: [] for ticket in plan}
+    for event in events:
+        own = owns.get(event.get("ticket"))  # type: ignore[arg-type]
+        if own is not None:
+            own.append(event)
+    return owns
 
 
 def _has_live_process(journal: Path) -> bool:
@@ -814,35 +831,42 @@ def _has_live_process(journal: Path) -> bool:
         return True
 
 
-def _state(
-    end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None, live: bool = True,
-    crash: dict[str, object] | None = None, setup: dict[str, object] | None = None, requested: bool = False,
-) -> tuple[str, str | None]:
-    """The state of a run and its note.
+def _paused_before(stop: run_state.RunStatus) -> tuple[str, str] | None:
+    """The ticket and the point of a pause (`before` of its `paused` event), or None when the run is not paused."""
+    if stop.kind != run_state.PAUSED or stop.event is None:
+        return None
+    return str(stop.event.get("ticket")), str(stop.event.get("before"))
 
-    The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
-    request waits (`requested`) and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
-    and no live process, or `running`. The note of a halted run is `halt_note`. The note of a stopped run is
-    `stopped_note`, or `journal.crash_note` when a crash (`crash`, its `crashed` event) stopped it (#281). The note of an abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
-    and None otherwise.
+
+def _state(stop: run_state.RunStatus, live: bool, requested: bool, run_id: str) -> tuple[str, str | None]:
+    """The state of a run and its note, from the status of its run state (`stop`, ADR 0009).
+
+    `live` is True when the run has a live process (a run that ended, paused or halted has one for this function), and
+    `requested` when a pause request waits. The state is the `result` of its `run-end`, `paused`, `halted`, `pausing` while
+    a pause request waits and the run is live, `running` while it is live, or `stopped` when it has no live process. The
+    note of a halted run is `halt_note`. The note of a stopped run is `stopped_note`, or `journal.crash_note` when a crash
+    stopped it (#281), or `journal.setup_problem_note` when the check of the setup stopped it (#296). The note of an
+    abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request
+    waits and the run has no live process, and None otherwise.
     """
-    if halt is not None:
-        return HALTED, halt_note(halt)
-    if end is None and not paused and requested and live:
-        return PAUSING, None
-    if end is None and not paused and not live:
-        if crash is not None:
-            removes = "; the resume removes the pause request that waits" if requested else ""
-            return STOPPED, crash_note(crash, journal.parent.name) + removes
-        if setup is not None:
-            return STOPPED, setup_problem_note(setup, journal.parent.name)
-        return STOPPED, stopped_note(journal.parent.name, requested)
-    note = PAUSE_REQUEST_NOTE if requested else None
-    if end is not None and end["result"] == ABANDONED:
-        return ABANDONED, abandon_note(end)
-    if end is not None:
-        return str(end["result"]), note
-    return (PAUSED if paused else RUNNING), note
+    kind, event = stop.kind, stop.event
+    if kind == run_state.HALTED:
+        return HALTED, halt_note(event)  # type: ignore[arg-type]
+    if kind in (run_state.ENDED, run_state.PAUSED):
+        note = PAUSE_REQUEST_NOTE if requested else None
+        if kind == run_state.PAUSED:
+            return PAUSED, note
+        if event["result"] == ABANDONED:  # type: ignore[index]
+            return ABANDONED, abandon_note(event)  # type: ignore[arg-type]
+        return str(event["result"]), note  # type: ignore[index]
+    if live:
+        return (PAUSING, None) if requested else (RUNNING, None)
+    removes = "; the resume removes the pause request that waits" if requested else ""
+    if kind == run_state.CRASHED:
+        return STOPPED, crash_note(event, run_id) + removes  # type: ignore[arg-type]
+    if kind == run_state.SETUP_PROBLEM:
+        return STOPPED, setup_problem_note(event, run_id)  # type: ignore[arg-type]
+    return STOPPED, stopped_note(run_id, requested)
 
 
 def stopped_note(run_id: str, requested: bool = False) -> str:
