@@ -69,6 +69,7 @@ RUN_BRANCH_MOVED: str = "run-branch-moved"
 STEP_END: str = "step-end"
 CLEANUP: str = "cleanup"
 JOURNAL_REPAIRED: str = "journal-repaired"
+INDEX_WARNING: str = "index-warning"
 RUN_END: str = "run-end"
 
 
@@ -619,6 +620,10 @@ class JournalRepaired(TypedDict):
     bytes_removed: int
 
 
+class IndexWarning(TypedDict):
+    reason: str
+
+
 class RunEnd(TypedDict):
     result: str
     built: list[str]
@@ -675,6 +680,7 @@ EVENTS: dict[str, type] = {
     STEP_END: StepEnd,
     CLEANUP: Cleanup,
     JOURNAL_REPAIRED: JournalRepaired,
+    INDEX_WARNING: IndexWarning,
     RUN_END: RunEnd,
 }
 

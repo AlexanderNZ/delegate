@@ -814,6 +814,28 @@ The paths below are relative to the state directory.
 
 The run id is the UTC time and four hexadecimal characters, for example `20261008T093837Z-e9dc`.
 
+### The run index
+
+The [**run index**](../glossary.md#run-index) is a list of the runs of each host, in a directory that each host can read (#316, [ADR 0008](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0008-the-run-index-is-derived-from-the-journals.md)). `DELEGATE_INDEX` names the directory. When the variable is not set, or is empty, the engine writes no record and adds no event.
+
+The backend keeps one file for each run, `<run id>.json`, with one JSON object. It writes the object to a temporary file in the directory and renames it, so a reader never sees half a file. The object has these fields:
+
+| Field | Value |
+| --- | --- |
+| `run_id` | The run id. |
+| `host` | The name of the machine, from `run-start`. |
+| `repo` | The name of the repository, not its path. |
+| `started` | The time of `run-start`, as ISO 8601 text. |
+| `state` | The state of the snapshot of the run, as [`delegate status`](status-and-watch.md) gives it. |
+| `tickets_ended` | The number of tickets that ended. |
+| `tickets_total` | The number of tickets of the plan. |
+| `eta` | The estimated end as ISO 8601 text, or `null`. |
+| `heard` | The time of the write, as ISO 8601 text in UTC. |
+
+The values come from the snapshot of the run at the write. The engine writes the record after the events `run-start`, `resume`, `step-end`, `paused`, `halted` and `run-end`. The journal stays the record of the run. The index comes from it, and the engine never reads it back.
+
+A write of the index never changes the run. When a write fails, the engine adds one `index-warning` event with the reason, and the run goes on with the same result. The event does not continue a run: after `run-end`, `paused` or `halted` it is like `cleanup`, and `delegate status` and `delegate watch` show the run as it ended.
+
 ## The detached run
 
 With `--detach`, the command first makes the checks of the run that need no agent: the options, the workflow and its tiers, the lock of the run branch, and, for a new run, `base-branch` and a run branch and ticket branches that do not exist. For a resume, they are also the rules of [a plan change](#the-plan-change), with `--reviewed`. These are steps 1 to 3 of [what a run does](#what-a-run-does). A check that fails prints its error on stderr and exits 1 or 2, as without `--detach`. The command then starts no process, and makes no directory of the run and no log. Then the command starts the run in a new process with the `setsid` system call, and exits 0. The new process has no terminal, and it is outside the process group of the shell that started the command. A harness that stops its tool shell, or a background task at a time limit, does not stop the run.
@@ -1068,6 +1090,7 @@ The journal is a public interface. Tools outside the kit read it, and `delegate 
 | `step-end` | `ticket`, `state` (`built` or `failed`), `reason` (`null` when built), `traceback` (only for a crash in a journal of version 1.19.2 or earlier: the path of the file that holds the traceback, see [a crash in a step](#a-crash-in-a-step)). In `economy` mode a ticket can have a second `step-end` with the state `failed`, from the chain verification. The newest one wins. |
 | `cleanup` | `worktrees_removed` (the paths of the worktrees that the engine removed), `branches_deleted` (the ticket branches that it deleted), `worktrees_kept` (a list of objects, each with the `worktree` and the `reason`), `branches_kept` (a list of objects, each with the `branch` and the `reason`). The engine writes it just before a `run-end` with the result `built`, when the workflow does not set `keep-worktrees = true`. See [the clean-up](#the-clean-up). `delegate clean` writes it after the `run-end`, with more fields: `copies_removed` (the verifier copies and proof copies that it removed), `tracebacks_removed` (the paths of the crash traceback files that it removed), `scratch_removed` (the scratch directory of the run, `runs/<run id>/scratch/`, when it removed it, then each scratch directory of a verifier that a kill left; an empty list when it removed none) and `bytes_freed` (the bytes that the removed items held on the disk). In `branches_deleted`, the run branch comes last when `--merged` deleted it. See [`delegate clean`](commands.md#delegate-clean). |
 | `journal-repaired` | `bytes_removed` (the number of bytes of the last line that the engine removed because it had no newline at its end: a write that a power loss cut). The command that opened the journal to append writes it first, before the event that it came to write, so the numbers of the lines go on from the last complete line. |
+| `index-warning` | `reason` (why the write of the [run index](#the-run-index) failed). The engine writes it after the event that it indexed, and the run goes on. A run with no `DELEGATE_INDEX` never writes it. |
 | `run-end` | `result` (`built`, `failed` or `abandoned`), `built`, `failed`, `skipped` (lists of ticket ids). The engine writes the result `failed` when a step failed or a ticket was skipped. `delegate clean --abandon` writes the result `abandoned` and the field `reason`, the text that the owner gave. Only that `run-end` has `reason`. See [the abandoned run](#the-abandoned-run). |
 
 ### The schema version

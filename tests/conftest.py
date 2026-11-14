@@ -230,7 +230,7 @@ def scripted(git_identity):
 # The environment variables of a host that change how the engine works: where it keeps its state (#97), and what
 # each agent gets (#96). A host that sets them for its own runs must not change what a test sees, so each test
 # starts without them.
-HOST_VARIABLES: tuple[str, ...] = ("DELEGATE_STATE_ROOT", "DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE")
+HOST_VARIABLES: tuple[str, ...] = ("DELEGATE_STATE_ROOT", "DELEGATE_AGENT_SETTINGS", "DELEGATE_PERMISSION_MODE", "DELEGATE_INDEX")
 
 
 @pytest.fixture(autouse=True)

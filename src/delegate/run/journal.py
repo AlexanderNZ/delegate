@@ -24,11 +24,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .events import (
-    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, INVARIANT_VIOLATION, JOURNAL_CHANGED, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT,
+    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, INDEX_WARNING, INVARIANT_VIOLATION, JOURNAL_CHANGED, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT,
 )
 
 # The events whose line must be on the disk before the engine goes on: a run that ended, a move of the run branch, and a
@@ -154,8 +155,9 @@ def abandon_note(end: dict[str, object]) -> str:
 
 # The events that a command writes to the journal of a run that ended, after its `run-end`. They do not continue the
 # run: `delegate clean` writes `cleanup` (#168), and `lock-broken` when it removes a stale lock (#207). The engine
-# writes its own `cleanup` before `run-end`.
-AFTER_END: frozenset[str] = frozenset({"cleanup", "lock-broken"})
+# writes its own `cleanup` before `run-end`. The engine writes `index-warning` (#316) after the event that it indexes, so
+# a failed write of the index at `run-end`, `paused` or `halted` leaves that event the end of the run.
+AFTER_END: frozenset[str] = frozenset({"cleanup", "lock-broken", INDEX_WARNING})
 
 
 def before_after_end(events: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -278,6 +280,8 @@ class Journal:
         self._seq = seq
         self._events: list[dict[str, object]] = []
         self._data = bytearray()
+        # Called with the event name after each event that `append` wrote (#316). The run index uses it.
+        self.after_append: Callable[[str], None] | None = None
         if create:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch(exist_ok=False)
@@ -320,7 +324,7 @@ class Journal:
         """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line.
 
         Raise JournalChanged when the file does not have the size that the journal wrote last: another writer changed it.
-        The event is then not written (see `_put_back`).
+        The event is then not written (see `_put_back`). After the write, `after_append` gets the name of the event.
         """
         try:
             size = self.path.stat().st_size
@@ -329,6 +333,8 @@ class Journal:
         if size != len(self._data):
             raise self._put_back(max(size, 0))
         self._write(event, fields)
+        if self.after_append is not None:
+            self.after_append(event)
 
     def _write(self, event: str, fields: dict[str, object]) -> None:
         seq = self._seq + 1

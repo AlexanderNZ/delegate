@@ -86,7 +86,7 @@ runs  0 of 1 hosts have an active run
 no run ended in the last 6h
 ```
 
-This machine is the one host, because no run index exists.
+This machine is the one host, because no [**run index**](../glossary.md#run-index) exists.
 
 ### The slip
 

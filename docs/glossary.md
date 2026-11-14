@@ -376,6 +376,10 @@ A run is one execution of `delegate run` over a workflow, with its own run id an
 
 The run branch is the branch that the engine owns, and only accepted work lands on it. The coordinator merges the run branch into the base branch. See [the fields of a workflow](reference/workflow.md#top-level-fields).
 
+## Run index
+
+The run index is a list of the runs of each host, in a directory that each host can read. A run writes its record there. The journal stays the record of the run, so a failed write of the index loses nothing. `DELEGATE_INDEX` names the directory. See [the run index](reference/run.md#the-run-index).
+
 ## Run lock
 
 The run lock is a kernel lock on a file that stops a second run on one run branch. The process of the run holds it, and the kernel releases it when that process ends, also after a kill. Two runs cannot race on one branch, and a lock file that no process holds is free. See [the run lock](reference/run.md#the-run-lock).

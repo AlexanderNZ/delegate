@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -59,6 +60,7 @@ from pathlib import Path
 
 from .. import adapters
 from ..adapters.git import GitVersionControl
+from ..adapters.run_index import index_from_environment
 from ..adapters.shell import ShellGateRunner
 from ..run import status
 from ..run.domain import START_RUN_BRANCH
@@ -449,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
                     agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit, location=location,
-                    stack_changed=args.stack_changed,
+                    stack_changed=args.stack_changed, index=index_from_environment(os.environ),
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

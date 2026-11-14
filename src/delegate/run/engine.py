@@ -191,6 +191,7 @@ from typing import NamedTuple
 
 from ..ports import harness
 from ..ports.gates import GateRunner
+from ..ports.index import RunIndex
 from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
@@ -2038,7 +2039,7 @@ def run_workflow(
     resume: str | None = None, retry: str | None = None, break_lock: bool = False,
     on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
     agents_changed: bool = False, coordinator_commit: str | None = None, location: StateLocation | None = None,
-    stack_changed: bool = False,
+    stack_changed: bool = False, index: RunIndex | None = None,
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -2093,6 +2094,10 @@ def run_workflow(
 
     `location` is the location that the command looked up (see `locate_state`), or None to look it up here. The run
     looks it up at most one time (#239).
+
+    `index` is the run index (#316). The run writes its record to it at `run-start`, `resume`, each `step-end`, `paused`,
+    `halted` and `run-end` (see `delegate.run.index`). A write that fails adds `index-warning` to the journal, and the run
+    goes on. With None, the run writes nothing.
     """
     if coordinator_commit is not None and retry is None:
         raise EngineError("--coordinator-commit needs --retry TICKET")
@@ -2109,7 +2114,7 @@ def run_workflow(
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed,
+                    reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed, index,
                 )
             except JournalChanged as changed:
                 raise EngineError(_end_changed_journal(changed, run_id)) from None
@@ -2198,6 +2203,7 @@ def _execute(
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
     retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
     agents_changed: bool = False, tiers: Tiers | None = None, coordinator_commit: str | None = None, stack_changed: bool = False,
+    index: RunIndex | None = None,
 ) -> RunResult:
     order = plan_order(workflow)
     agents_note: str | None = None
@@ -2211,6 +2217,7 @@ def _execute(
             run_base = vcs.commit_of(repo, workflow.base_branch)
             vcs.create_branch(repo, workflow.run_branch, run_base)
         journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
+        _follow_in_index(journal, index, repo)
         journal.append(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
@@ -2221,6 +2228,7 @@ def _execute(
         was_skipped: dict[str, str] = {}
     else:
         journal, events = _journal_events(state_dir, run_id)
+        _follow_in_index(journal, index, repo)
         review, progress, run_base, plan = _resume_checks(
             workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
             project_config_paths(adapter), stack_changed,
@@ -2361,6 +2369,14 @@ def _execute(
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, agents_note=agents_note)
+
+
+def _follow_in_index(journal: Journal, index: RunIndex | None, repo: Path) -> None:
+    """Make the journal write the record of the run to the run index (#316). See `delegate.run.index.follow`."""
+    # Imported here: `status` imports this module, and the module of the index imports `status`.
+    from .index import follow
+
+    follow(journal, index, repo)
 
 
 def _prepare_resume(workflow: Workflow, order: list[Ticket], progress: _Progress, plan: _RetryPlan | None) -> tuple[str, dict[str, str]]:
