@@ -759,7 +759,7 @@ The command takes the lock of the run branch as a run does. When the lock file n
 
 The events of the commands are in this order:
 
-- `delegate clean`: `lock-broken` first, and `cleanup` after it, both after the `run-end` of the run. A run where nothing went, and whose lock file named no old holder, gets no event.
+- `delegate clean`: `lock-broken` first, and `cleanup` after it, both after the `run-end` of the run. The first clean of a run always writes `cleanup`, also when nothing went, so that the journal says that the run was cleaned (#327). A second clean of a run where nothing went, and whose lock file named no old holder, gets no event.
 - `delegate clean --abandon`: `lock-broken` first, then `run-end`, then `cleanup`.
 
 `lock-broken` after a `run-end` does not continue the run, as `cleanup` does not. `delegate status` and `delegate watch` show the run as it ended, and they show `lock-broken` as they show it for a resume: the live view and the one line have no line for it.
@@ -838,7 +838,7 @@ The backend keeps one file for each run, `<run id>.json`, with one JSON object. 
 | `eta` | The estimated end as ISO 8601 text, or `null`. |
 | `heard` | The time of the write, as ISO 8601 text in UTC. |
 
-The values come from the snapshot of the run at the write. The engine writes the record after the events `run-start`, `resume`, `step-end`, `paused`, `halted` and `run-end`. The journal stays the record of the run. The index comes from it, and the engine never reads it back.
+The values come from the snapshot of the run at the write. The engine writes the record after the events `run-start`, `resume`, `step-end`, `paused`, `halted`, `crashed`, `interrupted`, `setup-problem` and `run-end`. After `crashed`, `interrupted` and `setup-problem` the process of the run ends, so the record has the state `stopped`, as `delegate status` shows the run. The journal stays the record of the run. The index comes from it, and the engine never reads it back.
 
 A write of the index never changes the run. When a write fails, the engine adds one `index-warning` event with the reason, and the run goes on with the same result. The event does not continue a run: after `run-end`, `paused` or `halted` it is like `cleanup`, and `delegate status` and `delegate watch` show the run as it ended.
 

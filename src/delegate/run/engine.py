@@ -2088,7 +2088,7 @@ def run_workflow(
     looks it up at most one time (#239).
 
     `index` is the run index (#316). The run writes its record to it at `run-start`, `resume`, each `step-end`, `paused`,
-    `halted` and `run-end` (see `delegate.run.index`). A write that fails adds `index-warning` to the journal, and the run
+    `halted`, `crashed`, `interrupted`, `setup-problem` and `run-end` (see `delegate.run.index`). A write that fails adds `index-warning` to the journal, and the run
     goes on. With None, the run writes nothing.
     """
     if coordinator_commit is not None and retry is None:
@@ -2112,7 +2112,7 @@ def run_workflow(
                 raise EngineError(_end_changed_journal(changed, run_id)) from None
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
-                raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id)) from None
+                raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id, index, repo)) from None
             return replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
@@ -2132,13 +2132,17 @@ def _end_changed_journal(changed: JournalChanged, run_id: str) -> str:
     return f"invariant violation: {changed}"
 
 
-def _record_interrupt(state_dir: Path, run_id: str) -> Path | None:
-    """Append `interrupted` to the journal of the run, and return its path. Return None when the run has no journal that can be read."""
+def _record_interrupt(state_dir: Path, run_id: str, index: RunIndex | None, repo: Path) -> Path | None:
+    """Append `interrupted` to the journal of the run, and return its path. Return None when the run has no journal that can be read.
+
+    The run writes its record to the run `index` after the event (#327), as after each other stop.
+    """
     path = state_dir / "runs" / run_id / "journal.jsonl"
     try:
         journal, _ = Journal.reopen(path)
     except JournalError:
         return None
+    _follow_in_index(journal, index, repo)
     journal.append("interrupted", run_id=run_id)
     return path
 

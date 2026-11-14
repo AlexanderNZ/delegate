@@ -54,6 +54,7 @@ from pathlib import Path
 
 from ..ports.index import RunIndex, RunIndexError
 from ..ports.vcs import VcsError, VersionControl
+from .index import cleaned
 from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
 from .engine import (
     CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, EngineError, locate_state, restore_progress,
@@ -277,8 +278,13 @@ def _clean_run(
     if dry_run:
         return outcome
     remove_empty_directories(state / "worktrees" / run_id, state / "hooks" / run_id)
-    # A run where nothing went gets no event, so a second clean of the same run adds no line to its journal.
-    if outcome.copies_removed or outcome.tracebacks_removed or outcome.scratch_removed or cleanup.worktrees_removed or cleanup.branches_deleted:
+    # A run where nothing went gets no event, so a second clean of the same run adds no line to its journal. The first clean of a run
+    # always adds one, even when the engine cleaned up the run already: the event tells the backfill of `delegate runs` that the
+    # command forgot the record of the run and that it stays forgotten (#327).
+    if (
+        outcome.copies_removed or outcome.tracebacks_removed or outcome.scratch_removed or cleanup.worktrees_removed or cleanup.branches_deleted
+        or not cleaned(events)
+    ):
         handle, _ = Journal.reopen(journal)
         handle.append(
             "cleanup", **cleanup.fields(), copies_removed=outcome.copies_removed,

@@ -58,7 +58,7 @@ from . import clock, domain, fleet_rules, output, run_state
 from .journal import ABANDONED, JournalError, read_new_events
 from .last_answers import LastAnswers
 from .runs import RunsError, all_journals, failed_starts, machine_states
-from .index import record_of
+from .index import cleaned, record_of
 from .live import IDLE_WARNING_MINUTES
 from .status import (
     BAR_CELLS, BAR_COLUMNS, BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, ReaderOf, format_duration, format_tokens,
@@ -144,6 +144,9 @@ class RunRow:
     `unreachable` is True for a run of another host, from its record in the run index (#317): its values are the last known, and `heard` is the time
     of the write of the record. Such a run has no ETA, no tokens, no trend, no alert and no command, and `ended` is `heard` when its state is the
     result of a `run-end`.
+
+    `record` is the run index record that the journal gives, and `cleaned` is True for a run that `delegate clean` cleaned (`index.cleaned`, #327): the
+    backfill writes no record for it.
     """
 
     run_id: str
@@ -167,6 +170,7 @@ class RunRow:
     unreachable: bool = False
     heard: datetime | None = None
     record: RunRecord | None = field(default=None, compare=False, repr=False)
+    cleaned: bool = field(default=False, compare=False, repr=False)
 
     def facts(self) -> fleet_rules.RunFacts:
         """The run as the rules of the fleet read it."""
@@ -557,12 +561,12 @@ def _record_unrecorded(index: RunIndex, rows: Sequence[RunRow]) -> str | None:
     """Write the record of each run of `rows` that has no record in `index`, or an older one (#323). Return the reason of the first failure, or None.
 
     The rows are the listed runs of this machine. A run that failed at start has no journal, so it gets no record. A run of an earlier version, or a run
-    that started with no index, so gets its record. The record is the one that `record_of` makes from the journal, so the write is safe at any time (ADR 0008).
+    that started with no index, so gets its record. A run that `delegate clean` cleaned gets none: the command forgot its record (#327). The record is the one that `record_of` makes from the journal, so the write is safe at any time (ADR 0008).
     """
     try:
         recorded = {record.run_id: record for record in index.list_records()}
         for row in rows:
-            if row.failed_start:
+            if row.failed_start or row.cleaned:
                 continue
             old = recorded.get(row.run_id)
             if row.record is not None and (old is None or _is_older(old, row)):
@@ -629,7 +633,7 @@ def fleet_of(
                 snap.tickets_total, eta, snap.tokens_new, snap.tokens_cache,
                 idle_seconds=max(idle) if idle else None, fixup=fixup,
                 trend=fleet_rules.trend_cells(built_times, now), slip_seconds=slip, built=tuple(built_times), last_event=_time(events[-1]),
-                record=record_of(events, journal, Path(repo), now, host=host, snapshot=snap),
+                record=record_of(events, journal, Path(repo), now, host=host, snapshot=snap), cleaned=cleaned(events),
             ))
         for start in failed_starts([state]):
             if _in_window(start.changed, now):

@@ -1,6 +1,6 @@
 # ADR 0008: The run index is derived from the journals
 
-- Status: accepted, amended 2026-11-14 (#323)
+- Status: accepted, amended 2026-11-14 (#323), amended 2026-11-15 (#327)
 - Date: 2026-11-14
 - Applies to: the engine, the run index port, `delegate runs`, and the configuration file of the user
 
@@ -14,7 +14,7 @@ The view needs a list of the runs of each host, in a place that each host can re
 
 The run index is a list with one record for each run. The engine writes the record of its run. It does not read the record back, and no decision of the engine depends on it.
 
-The index is derived from the journals. The record holds the values of the snapshot of the run at the write: the same values that `delegate status` gives from the journal. A record can therefore be wrong or late, but a journal cannot be wrong because of a record. The engine writes the record after `run-start`, `resume`, each `step-end`, `paused`, `halted` and `run-end`.
+The index is derived from the journals. The record holds the values of the snapshot of the run at the write: the same values that `delegate status` gives from the journal. A record can therefore be wrong or late, but a journal cannot be wrong because of a record. The engine writes the record after `run-start`, `resume`, each `step-end`, `paused`, `halted`, `crashed`, `interrupted`, `setup-problem` and `run-end` (amended by #327).
 
 A write of the index never changes the run. When a write fails, for any reason, the engine adds one `index-warning` event with the reason to the journal, and the run goes on with the same result. A run with no index configured writes nothing and adds no event. A failed write loses nothing, because the journal holds each fact, and a later write replaces the record.
 
@@ -31,7 +31,7 @@ The record holds `run_id`, `host`, `repo` (the name of the repository, not its p
 ## Consequences
 
 - A host that cannot write the index still runs, and its journal says so with `index-warning`.
-- A record shows the state at the last write. A run that a kill stopped keeps its last record until a later write or a command forgets it.
+- A record shows the state at the last write. A run that a kill stopped keeps its last record until a later write or a command forgets it. A run that ends with `crashed`, `interrupted` or `setup-problem` writes its last record with the state `stopped` (#327).
 - `index-warning` is written after the event that it follows. A warning after `run-end`, `paused` or `halted` does not continue the run, as `cleanup` after `run-end` does not.
 - A second backend, for example a service, is another adapter of the same port. The engine does not change.
 
@@ -63,3 +63,19 @@ The engine wrote a record only when `DELEGATE_INDEX` was set in the environment 
 - `delegate runs` with no setting shows the runs of this machine, and the header line names the configuration file, the index and the hosts that it read, so a person sees the settings in use.
 - A host with an earlier `delegate` is `unreachable` with the reason `delegate on <host> is older than 1.22.0`.
 - The state root of a machine has two more entries, `index/` and `last-answers/`. A test that lists the state directories of the state root leaves them out.
+
+## Amendment (#327): each stop of a run writes a record, and the backfill leaves a cleaned run out
+
+### Context
+
+The engine wrote the record at `run-start`, `resume`, `step-end`, `paused`, `halted` and `run-end`. A run that ended with `crashed`, `interrupted` or `setup-problem` kept a record with the state `running`. On a shared index the other hosts then listed the run as running for as long as its host was unreachable: a record in an open state never leaves the window. Also, `delegate clean` forgets the record of a run (#317) and keeps the journal, and the backfill of #323 found a listed run with no record and wrote it again, at the next `delegate runs` or `delegate run`. With `delegate runs --watch` open, the forget was undone in one second.
+
+### Decision
+
+- **The events that write a record are** `run-start`, `resume`, `step-end`, `paused`, `halted`, `crashed`, `interrupted`, `setup-problem` and `run-end`. After `crashed`, `interrupted` and `setup-problem` the process of the run ends, so the record is of a run with no live process: its state is `stopped`.
+- **The backfill writes no record for a cleaned run.** A run is cleaned when it ended `abandoned`, or when its journal has a `cleanup` event after its newest `run-start`, `resume`, `run-end` or stop. The `cleanup` event that the engine writes before `run-end` does not count. A later `resume` makes the run not cleaned. `delegate clean` keeps the rule of #317: it forgets the record of each run that it cleans. It now also adds one `cleanup` event for the first clean of a run, also when the engine cleaned up the run already and nothing went, so that the journal says that the run was cleaned. A second clean of the same run adds no event.
+
+### Rejected alternatives
+
+- **A marker file for a forgotten run.** The journal is the record of the run, and a second place for the same fact can differ from it.
+- **No backfill of an ended run.** A run that an earlier version wrote, or that started with no index, needs its record.
