@@ -144,6 +144,10 @@
 *[Guard probes]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
 *[guard probe]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
 *[guard probes]: A guard probe is a short session that the engine starts to show that the harness runs the guard of a sealed agent.
+*[Halted]: Halted is the state of a run that a failure of the harness stopped, for example a harness that is not logged in.
+*[Halteds]: Halted is the state of a run that a failure of the harness stopped, for example a harness that is not logged in.
+*[halted]: Halted is the state of a run that a failure of the harness stopped, for example a harness that is not logged in.
+*[halteds]: Halted is the state of a run that a failure of the harness stopped, for example a harness that is not logged in.
 *[Harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
 *[Harnesses]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
 *[harness]: A harness is the tool that runs a coding agent, for example Claude Code or OpenCode.
@@ -244,6 +248,10 @@
 *[Run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
+*[Run that cannot be resumed]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
+*[Run that cannot be resumeds]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
+*[run that cannot be resumed]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
+*[run that cannot be resumeds]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
 *[Sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
 *[Sealed agents]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
 *[sealed agent]: The sealed agent is the copy of an agent file, its harness hooks and its project skills.
