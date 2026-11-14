@@ -12,8 +12,9 @@ The rule, in words:
 * `ports` holds the interfaces that the domain drives. It imports neither
   `adapters`, `cli` nor `docs`.
 * `adapters` implement the ports, and `cli` drives the domain. Both point
-  inward, so both may import the contexts and the ports. `adapters` never
-  imports `cli` or `docs`.
+  inward. `cli` may import the contexts and the ports. `adapters` import the
+  ports and `shared` only: they never import `run`, `cli` or `docs` (#333), so
+  a policy, such as the choice of the run index, is in `cli`.
 * `cli` holds the command-line drivers: the `delegate` umbrella command, `agent-definitions`,
   `verifier-brief`, `delegate run`, `delegate pause`, `delegate stop`, `delegate status`, `delegate watch` and `delegate docs`. A driver
   is the composition point: it parses its arguments, makes the adapters (the git
@@ -62,7 +63,7 @@ FORBIDDEN = {
     "run": {"adapters", "cli", "docs", "definitions"},
     "definitions": {"adapters", "cli", "docs", "run"},
     "ports": {"adapters", "cli", "docs"},
-    "adapters": {"cli", "docs"},
+    "adapters": {"cli", "docs", "run"},
     "shared": {"adapters", "cli", "docs", "run", "definitions", "ports"},
 }
 
@@ -244,6 +245,9 @@ def test_the_package_follows_the_dependency_rule():
         ("run/bad.py", "def late():\n    from ..cli import main\n", "run", "cli"),
         ("ports/bad.py", "from delegate.adapters import Adapter\n", "ports", "adapters"),
         ("ports/bad.py", "from .. import cli\n", "ports", "cli"),
+        ("adapters/bad.py", "from delegate.run.fleet import older_reason\n", "adapters", "run"),
+        ("adapters/bad.py", "from ..run import user_config\n", "adapters", "run"),
+        ("adapters/bad.py", "def late():\n    from ..run.status import snapshot\n", "adapters", "run"),
         ("adapters/bad.py", "from delegate.cli import main\n", "adapters", "cli"),
         ("adapters/bad.py", "from .. import cli\n", "adapters", "cli"),
         ("run/engine.py", "from delegate.adapters import get\n", "run", "adapters"),
@@ -272,7 +276,7 @@ def test_an_inward_import_passes_the_rule(tmp_path):
 
 
 def test_an_outer_layer_may_import_inward(tmp_path):
-    source = "from delegate.run import something\nfrom delegate.ports.harness import other\n"
+    source = "from delegate.ports.harness import other\nfrom delegate.shared import tiers\n"
     copy = planted_copy(tmp_path, "adapters/fine.py", source)
 
     assert violations(copy) == []

@@ -12,14 +12,21 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
+# The kind of an `Unreachable` for a host whose `delegate` is older than the first version with `delegate runs`: it has no subcommand `runs`, or it gives a
+# document of an earlier format. The use case makes the sentence for it, with the version that it knows (#333).
+OLDER_VERSION: str = "older-version"
+
+
 @dataclass(frozen=True)
 class Unreachable:
     """The answer for a host that could not be read: the read failed, the time limit passed, or the host gave no document.
 
-    `reason` is for a person who looks into the failure: the view shows it in the row under the row of the host (#323).
+    `reason` is for a person who looks into the failure: the view shows it in the row under the row of the host (#323). `kind` names a cause that the use case
+    knows how to say (`OLDER_VERSION`); a backend that makes the sentence itself leaves it empty. For a kind, the use case replaces `reason` (#333).
     """
 
     reason: str
+    kind: str = ""
 
 
 @runtime_checkable

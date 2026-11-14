@@ -8,7 +8,7 @@ decoded as UTF-8 with replacement, so a banner that is not UTF-8 does not hide t
 
 The reason of an unreachable host says what failed (#323): `ssh` cannot reach the host (exit status 255, with the last line that `ssh` wrote on
 standard error), the host has no `delegate` command (exit status 127), the `delegate` of the host is older than the first version with
-`delegate runs` (it does not know the subcommand), or `delegate runs` on the host failed (with its last line of standard error).
+`delegate runs` (it does not know the subcommand: the kind `OLDER_VERSION`, and the use case makes the sentence, #333), or `delegate runs` on the host failed (with its last line of standard error).
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ import tempfile
 import threading
 import time
 
-from ..ports.hosts import Unreachable
-from ..run.fleet import older_reason
+from ..ports.hosts import OLDER_VERSION, Unreachable
 from .environment import process_environment
 from .process import end_group
 
@@ -70,7 +69,7 @@ class SshHostReader:
                 return Unreachable(f"no answer from {host} in {timeout_seconds:g} seconds")
             if process.returncode != 0:
                 err.seek(0)
-                return Unreachable(_failure(host, process.returncode, _text(err.read(_STDERR_LIMIT))))
+                return _failure(host, process.returncode, _text(err.read(_STDERR_LIMIT)))
             out.seek(0)
             try:
                 document = json.loads(_text(out.read()))
@@ -99,14 +98,14 @@ def _text(output: bytes) -> str:
     return output.decode("utf-8", errors="replace")
 
 
-def _failure(host: str, status: int, stderr: str) -> str:
-    """The reason of a read that exited with `status` and wrote `stderr`."""
+def _failure(host: str, status: int, stderr: str) -> Unreachable:
+    """The answer of a read that exited with `status` and wrote `stderr`. A host with no `delegate runs` has the kind `OLDER_VERSION`; the use case says it (#333)."""
     lines = [line.strip() for line in stderr.splitlines() if line.strip()]
     said = f": {lines[-1]}" if lines else ""
     if status == SSH_FAILED:
-        return f"ssh cannot reach {host}{said}"
+        return Unreachable(f"ssh cannot reach {host}{said}")
     if status == NO_COMMAND:
-        return f"{host} has no delegate command on its PATH{said}"
+        return Unreachable(f"{host} has no delegate command on its PATH{said}")
     if any(words in stderr for words in NO_RUNS_COMMAND):
-        return older_reason(host)
-    return f"delegate runs on {host} exited with status {status}{said}"
+        return Unreachable(f"{host} has no delegate runs command{said}", OLDER_VERSION)
+    return Unreachable(f"delegate runs on {host} exited with status {status}{said}")

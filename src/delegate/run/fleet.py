@@ -54,7 +54,7 @@ from itertools import groupby
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ..ports.hosts import HostReader, Unreachable
+from ..ports.hosts import OLDER_VERSION, HostReader, Unreachable
 from ..ports.index import RunIndex, RunIndexError, RunRecord
 from . import clock, domain, fleet_rules, output, run_state
 from .journal import ABANDONED, JournalError, read_new_events
@@ -511,7 +511,7 @@ def _live(answer: dict[str, object] | Unreachable, host: str) -> list[RunRow] | 
     `Fleet.to_json` makes it. A document with no `format`, or an earlier one, is of a `delegate` older than `RUNS_VERSION`.
     """
     if isinstance(answer, Unreachable):
-        return answer
+        return Unreachable(older_reason(host)) if answer.kind == OLDER_VERSION else answer
     found = answer.get("format")
     if type(found) is not int or found < FORMAT:
         return Unreachable(older_reason(host))

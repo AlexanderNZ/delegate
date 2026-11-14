@@ -1,8 +1,8 @@
 """The settings of this machine for a command: the configuration file of the user, the state root, and the run index (#323).
 
 `delegate run`, `delegate runs` and `delegate clean` read them here, in one way. The configuration file is
-`delegate.run.user_config`, and the index directory comes from `delegate.adapters.run_index.chosen_index`: `DELEGATE_INDEX`,
-else the key `index` of the file, else `index/` in the state root.
+`delegate.run.user_config`, and the index directory comes from `chosen_index` (#333), the policy that the backend of the index does not hold: `DELEGATE_INDEX`,
+when it is set and not empty, else the key `index` of the file, else `index/` in the state root. The backend `delegate.adapters.run_index` takes the directory.
 
 `index_check` is the part of the setup check of `delegate run --dry-run` for the run index: the file that the run reads,
 the index directory and where it comes from, and a write probe of the directory.
@@ -12,12 +12,51 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..adapters.run_index import IndexChoice, chosen_index
+from ..adapters.run_index import DirectoryRunIndex
 from ..run.runs import state_root
 from ..run.user_config import UserConfig, load_user_config
+
+
+INDEX_VARIABLE: str = "DELEGATE_INDEX"
+
+# The name of the default index directory in the state root of this machine.
+DEFAULT_NAME: str = "index"
+
+# Where the index directory comes from, as the dry run and the header line of `delegate runs` name it.
+FROM_VARIABLE: str = INDEX_VARIABLE
+FROM_FILE: str = "the configuration file"
+FROM_DEFAULT: str = "the default of the state root"
+
+
+@dataclass(frozen=True)
+class IndexChoice:
+    """The run index of this process, and where its directory comes from: `FROM_VARIABLE`, `FROM_FILE` or `FROM_DEFAULT`."""
+
+    index: DirectoryRunIndex
+    source: str
+
+    @property
+    def directory(self) -> Path:
+        return self.index.directory
+
+    @property
+    def shared(self) -> bool:
+        """True when a setting names the directory, so other hosts can share it; False for the index of this machine only."""
+        return self.source != FROM_DEFAULT
+
+
+def chosen_index(environment: Mapping[str, str], config: UserConfig, state_root: Path) -> IndexChoice:
+    """The run index of a process: `DELEGATE_INDEX` when it is set and not empty, else the key `index` of `config`, else `index/` in `state_root`."""
+    named = environment.get(INDEX_VARIABLE)
+    if named:
+        return IndexChoice(DirectoryRunIndex(Path(named).expanduser()), FROM_VARIABLE)
+    if config.index is not None:
+        return IndexChoice(DirectoryRunIndex(config.index), FROM_FILE)
+    return IndexChoice(DirectoryRunIndex(state_root / DEFAULT_NAME), FROM_DEFAULT)
 
 
 @dataclass(frozen=True)
