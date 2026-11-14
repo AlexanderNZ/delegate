@@ -26,11 +26,12 @@ among the other runs.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .engine import EngineError, StateLocation, StateRootError, locate_state
+from .engine import EngineError, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from .journal import JournalError, newest_run_end, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
 from ..ports.vcs import VersionControl
@@ -185,6 +186,50 @@ def journal_of(repo: Path, run_id: str | None, vcs: VersionControl, *, location:
     if not journals:
         raise _no_run(repo, states)
     return max(journals, key=_start_time)
+
+
+def state_root() -> Path:
+    """The state root of this machine: `DELEGATE_STATE_ROOT`, or else the default root (`engine.default_state_root`).
+
+    Raise RunsError when `DELEGATE_STATE_ROOT` is not an absolute path.
+    """
+    root = os.environ.get(STATE_ROOT_VARIABLE)
+    if not root:
+        return default_state_root()
+    if not Path(root).is_absolute():
+        raise RunsError(f"{STATE_ROOT_VARIABLE} is {root!r}, which is not an absolute path")
+    return Path(root)
+
+
+def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
+    """The journal file of the run `run_id`, for a command that got no `--repo` (#305).
+
+    `run_id` is a full run id, or the short id of one run. The command looks first in the state directories of the
+    repository of the current directory (`journal_of`). When the current directory is in no git repository, or the
+    run is not in that repository, it looks in each state directory under the state root of this machine (`state_root`),
+    where each repository has one. Raise RunsError when more than one run has the short id, in the repository or under
+    the state root; the message names each full run id. Raise RunsError when no run has the id; the message names the
+    state root.
+    """
+    here = Path(".")
+    try:
+        states = _states(here, vcs)
+    except RunsError:
+        states = []  # not in a repository, or no valid state root: the search under the state root gives its own error
+    if states:
+        in_repository = _full_run_id(states, run_id)  # raises RunsError when more than one run of the repository has the short id
+        for state in states:
+            if (state / "runs" / in_repository / JOURNAL_NAME).is_file():
+                return state / "runs" / in_repository / JOURNAL_NAME
+    root = state_root()
+    everywhere = sorted(path for path in root.glob("*") if (path / "runs").is_dir()) if root.is_dir() else []
+    full = _full_run_id(everywhere, run_id)
+    found = [state / "runs" / full / JOURNAL_NAME for state in everywhere if (state / "runs" / full / JOURNAL_NAME).is_file()]
+    if len(found) > 1:
+        raise RunsError(f"run id {run_id!r} matches more than one run: {', '.join(str(path) for path in found)}; give the full run id")
+    if not found:
+        raise RunsError(f"run {run_id!r} not found: no journal in the state directories of the current directory or under the state root {root}")
+    return found[0]
 
 
 @dataclass(frozen=True)

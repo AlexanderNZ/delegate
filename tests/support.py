@@ -633,6 +633,24 @@ def write_journal(repo: Path, run_id: str, *events: tuple[str, dict[str, object]
     return path
 
 
+def write_journal_in_state_root(repo: Path, run_id: str, *events: tuple[str, dict[str, object]]) -> Path:
+    """Write a journal as `write_journal` does, but in the state directory that the state root gives to `repo` (#200).
+
+    The state root is `DELEGATE_STATE_ROOT`, or else the default root. A command that is not in the repository finds
+    the run there. Return the path of the journal file.
+    """
+    from delegate.adapters.git import GitVersionControl
+    from delegate.run.engine import state_directory
+    from delegate.run.journal import Journal
+
+    _, state = state_directory(repo, GitVersionControl())
+    path = state / "runs" / run_id / "journal.jsonl"
+    journal = Journal(path)
+    for name, fields in events:
+        journal.append(name, **fields)
+    return path
+
+
 def append_events(path: Path, *events: tuple[str, dict[str, object]]) -> None:
     """Append `(event name, fields)` pairs to an existing journal file, as a run in progress does."""
     from delegate.run.journal import Journal

@@ -8,6 +8,7 @@ removed before `status` runs, so each case also shows that `status` needs no
 adapter.
 """
 
+import json
 import re
 
 import pytest
@@ -16,7 +17,8 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from .support import (
-    ScriptedAdapter, bare_repo, make_repo, read_journal, run_end, run_start, status_row, step_end, step_start, write_journal,
+    ScriptedAdapter, bare_repo, committed_repo, make_repo, read_journal, run_end, run_start, status_row, step_end, step_start, write_journal,
+    write_journal_in_state_root,
 )
 from .test_run_multi import HEAD, ticket
 
@@ -133,3 +135,100 @@ def test_status_of_a_repository_with_no_run_exits_2_and_names_the_repository(tmp
 
     assert (code, out) == (2, "")
     assert str(repo) in err and "no run" in err
+
+
+@pytest.fixture
+def outside(tmp_path, monkeypatch):
+    """A current directory that is in no git repository: the person of #305 who is not in the directory of the run."""
+    path = tmp_path / "outside"
+    path.mkdir()
+    monkeypatch.chdir(path)
+    return path
+
+
+def status_here(capsys, *args):
+    """`delegate status` with no `--repo`: the repository, if any, is the current directory."""
+    code = delegate.main(["status", *args])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_status_from_outside_each_repository_shows_the_run_of_a_repository_under_the_state_root_by_its_short_id(tmp_path, capsys, outside):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"), step_start("a"))
+
+    code, out, err = status_here(capsys, "ab12")
+
+    assert (code, err) == (0, "")
+    assert out.splitlines()[0] == "run 20260101T000000Z-ab12: stopped (mode assure, adapter scripted)"
+
+
+def test_status_from_outside_each_repository_shows_the_run_of_a_repository_by_its_full_id_and_as_json(tmp_path, capsys, outside):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"), step_start("a"))
+
+    code, out, err = status_here(capsys, "20260101T000000Z-ab12", "--json")
+
+    assert (code, err) == (0, "")
+    assert json.loads(out)["run_id"] == "20260101T000000Z-ab12"
+
+
+def test_status_from_another_repository_finds_the_run_of_the_first_repository_under_the_state_root(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"), step_start("a"))
+    other = committed_repo(tmp_path / "other", {})
+    monkeypatch.chdir(other)
+
+    code, out, err = status_here(capsys, "ab12")
+
+    assert (code, err) == (0, "")
+    assert out.splitlines()[0] == "run 20260101T000000Z-ab12: stopped (mode assure, adapter scripted)"
+
+
+def test_status_from_outside_each_repository_exits_2_and_names_each_full_id_when_two_repositories_hold_the_short_id(
+    tmp_path, capsys, outside,
+):
+    first = bare_repo(tmp_path)
+    second = committed_repo(tmp_path / "other", {})
+    write_journal_in_state_root(first, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+    write_journal_in_state_root(second, "20260202T000000Z-ab12", run_start("20260202T000000Z-ab12", "a"))
+
+    code, out, err = status_here(capsys, "ab12")
+
+    assert (code, out) == (2, "")
+    assert "20260101T000000Z-ab12" in err and "20260202T000000Z-ab12" in err
+
+
+def test_status_with_repo_looks_only_in_that_repository(tmp_path, capsys, outside):
+    first = bare_repo(tmp_path)
+    second = committed_repo(tmp_path / "other", {})
+    write_journal_in_state_root(first, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+    write_journal_in_state_root(second, "20260202T000000Z-cd34", run_start("20260202T000000Z-cd34", "a"))
+
+    code, out, err = status(first, capsys, "cd34")
+
+    assert (code, out) == (2, "")
+    assert "cd34" in err and str(first) in err
+
+
+def test_status_from_outside_each_repository_exits_2_and_names_the_state_root_when_no_run_matches(tmp_path, capsys, outside, isolated_state_home):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+
+    code, out, err = status_here(capsys, "zz99")
+
+    assert (code, out) == (2, "")
+    assert "zz99" in err and str(isolated_state_home / "delegate") in err
+
+
+def test_status_from_outside_each_repository_looks_under_delegate_state_root_when_the_variable_is_set(tmp_path, capsys, outside, monkeypatch):
+    root = tmp_path / "custom-root"
+    monkeypatch.setenv("DELEGATE_STATE_ROOT", str(root))
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+
+    code, out, err = status_here(capsys, "ab12")
+
+    assert (code, err) == (0, "")
+    assert out.splitlines()[0].startswith("run 20260101T000000Z-ab12:")
+    assert any(root.glob("repo-*/runs/20260101T000000Z-ab12/journal.jsonl"))

@@ -146,7 +146,11 @@ def report(
 
     The errors are the errors of `snapshot`. `location` is as in `snapshot`.
     """
-    journal = journal_of(repo, run_id, vcs, location=location)
+    return report_of_journal(journal_of(repo, run_id, vcs, location=location), reader_of, now)
+
+
+def report_of_journal(journal: Path, reader_of: ReaderOf, now: datetime) -> list[str]:
+    """The lines of the report for the run of the journal file `journal`, as `report` gives them, with no lookup of the repository."""
     events, _ = read_new_events(journal, 0, 1)
     if not events:
         raise JournalError(f"journal {journal} holds no event")

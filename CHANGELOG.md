@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Changed
+
+- `delegate status` and `delegate watch` find a run by its id from any directory (#305). With a run id and no `--repo`, a command looks first in the state directory of the repository of the current directory. When the current directory is in no git repository, or that repository has no such run, it looks in each state directory under the state root of this machine (`DELEGATE_STATE_ROOT`, or the default root). The id is the full run id or the short id, as before. One match shows that run. When more than one run has the short id, the command exits 2 and names each full run id. When no run matches, it exits 2 and names the state root. With `--repo`, and with no run id, the behaviour does not change. See `docs/reference/status-and-watch.md`.
+
 ### Fixed
 
 - `delegate status` and `delegate watch` show only the new pass of an `economy` chain after a retry (#304). After `delegate run --resume <run id> --retry <tip>`, the chain rows, the phase and the time of the chain, and the `verdict` column read only the events after the newest event that starts a new verification (`domain.starts_chain_verification`), as the engine does. Before, the `retry` named the tip, and the chain of each stack stayed in the group of the last ticket of its stack. The row of the first stack showed `rejected`, with the time and the tokens of the first pass, while the verifier of the new pass ran. The ETA counted the time of the first pass in the time of the chain, and each revived ticket showed the `REJECT` of the first pass. A retry at the chain fix-up keeps its rounds and its time (#297). `status --json` keeps each field and its type.

@@ -14,6 +14,10 @@ Both commands find the journal in the state directory of the repository, in `run
 
 Each command takes the full run id, or its short id: the part after the last `-`, as `abcd` of `20261016T030000Z-abcd`. When more than one run has the short id, the command does nothing. It prints an error that names each run with that short id, and exits 2.
 
+### Where the commands look for a run
+
+With `--repo`, a command looks for the run only in the state directory of that repository. With a run id and no `--repo`, a command looks first in the state directory of the repository of the current directory. When the current directory is in no git repository, or that repository has no such run, the command looks in each state directory under the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`). Each repository has one directory there. So you can ask for a run of any repository from any directory. One match shows that run, as if `--repo` named its repository. When more than one run has the short id, the command exits 2, and the message names each full run id. When no run matches, the command exits 2, and the message names the state root. A run that started before #200 and is in `<git common dir>/delegate` is found only through `--repo` or from its repository. With no run id, the commands look only in the repository of `--repo` or of the current directory.
+
 ## `delegate status`
 
 ```
@@ -30,7 +34,7 @@ With no run id, `status` shows the one active run, or the newest run when no run
 | Option | Meaning |
 |---|---|
 | `[<run-id>]` | The run to show; default is the one active run, or the newest run of the repository when no run is active. |
-| `--repo <repo>` | The git repository that holds the run; default is the current directory. |
+| `--repo <repo>` | The git repository that holds the run; default is the current directory, and a run id that is not found there is looked up under the state root. |
 | `--json` | Print one snapshot of the run as JSON: the progress, the ETA, the tokens, and the activity of each agent. |
 
 <!-- generated:end status-options -->
@@ -290,7 +294,7 @@ On a terminal, `watch` also shows the progress of the run in the title of the te
 | Option | Meaning |
 |---|---|
 | `[<run-id>]` | The run to follow; default is the one active run, or the newest run of the repository when no run is active. |
-| `--repo <repo>` | The git repository that holds the run; default is the current directory. |
+| `--repo <repo>` | The git repository that holds the run; default is the current directory, and a run id that is not found there is looked up under the state root. |
 | `--until verdict` | Also exit when a verifier verdict is written to the journal; default is to follow the run to its end. |
 | `--stall-minutes <n>` | Exit when the journal, the captured event streams and the gate logs have not changed for N minutes; N is a number greater than 0. |
 | `--max-minutes <n>` | Exit after N minutes, before a harness time limit, and print the position to go on from; N is a number greater than 0. |

@@ -53,7 +53,7 @@ from ..adapters.git import GitVersionControl
 from ..run import clock, live, status, watch
 from ..run.journal import JournalError
 from ..run.output import cut, short_run_id, styled
-from ..run.runs import FailedStart, RunsError, journal_of, runs_of
+from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
 from .status import stream_reader_of, utc_now
 from .stop_signals import stop_signals_as_ctrl_c
@@ -114,7 +114,10 @@ def build_parser() -> argparse.ArgumentParser:
         "run_id", nargs="?",
         help="the run to follow; default is the one active run, or the newest run of the repository when no run is active",
     )
-    parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
+    parser.add_argument(
+        "--repo", type=Path, default=None,
+        help="the git repository that holds the run; default is the current directory, and a run id that is not found there is looked up under the state root",
+    )
     parser.add_argument(
         "--until", choices=[watch.UNTIL_VERDICT],
         help="also exit when a verifier verdict is written to the journal; default is to follow the run to its end",
@@ -332,6 +335,7 @@ def _pick(runs: list[status.ActiveRun], raw: bool) -> status.ActiveRun | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    repo = Path(".") if args.repo is None else args.repo
     from_position = 0 if args.from_position is None else args.from_position
     live_view = not args.raw and not args.json and sys.stdout.isatty()
     # The live view and `--follow` follow the run through a problem; the raw and JSON forms end at a new problem (#222).
@@ -340,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         if args.run_id is None:
-            runs = runs_of(args.repo, GitVersionControl())
+            runs = runs_of(repo, GitVersionControl())
             for line in runs.unreadable_lines("delegate watch"):
                 print(line, file=sys.stderr)
             if runs.chosen is None:
@@ -375,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 # The one active run, or, with `--from` and no active run, the newest run from the position.
                 journal = runs.chosen
+        elif args.repo is None:
+            journal = journal_of_run(args.run_id, GitVersionControl())  # the repository of the current directory, then the state root (#305)
         else:
             journal = journal_of(args.repo, args.run_id, GitVersionControl())
         the_clock = clock.current()

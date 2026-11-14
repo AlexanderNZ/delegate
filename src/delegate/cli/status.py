@@ -27,7 +27,7 @@ from ..adapters.git import GitVersionControl
 from ..ports.harness import Activity
 from ..run import clock, status
 from ..run.journal import JournalError
-from ..run.runs import FailedStart, RunsError, locate, runs_of
+from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, locate, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
 
 # The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid. With
@@ -47,7 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         "run_id", nargs="?",
         help="the run to show; default is the one active run, or the newest run of the repository when no run is active",
     )
-    parser.add_argument("--repo", type=Path, default=Path("."), help="the git repository that holds the run; default is the current directory")
+    parser.add_argument(
+        "--repo", type=Path, default=None,
+        help="the git repository that holds the run; default is the current directory, and a run id that is not found there is looked up under the state root",
+    )
     parser.add_argument(
         "--json", action="store_true",
         help="print one snapshot of the run as JSON: the progress, the ETA, the tokens, and the activity of each agent",
@@ -75,11 +78,17 @@ def utc_now() -> datetime:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     vcs = GitVersionControl()
+    repo = Path(".") if args.repo is None else args.repo
     try:
-        location = locate(args.repo, vcs)  # one lookup for the command (#239)
+        journal: Path | None = None
+        location = None
+        if args.run_id is not None and args.repo is None:
+            journal = journal_of_run(args.run_id, vcs)  # the repository of the current directory, then the state root (#305)
+        else:
+            location = locate(repo, vcs)  # one lookup for the command (#239)
         run_id = args.run_id
         if run_id is None:
-            runs = runs_of(args.repo, vcs, location=location)
+            runs = runs_of(repo, vcs, location=location)
             for line in runs.unreadable_lines("delegate status"):
                 print(line, file=sys.stderr)
             if runs.chosen is None:
@@ -97,11 +106,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(runs.chosen.line())
                 return 0
             run_id = runs.chosen.parent.name
+        if journal is None:
+            journal = journal_of(repo, run_id, vcs, location=location)
         if args.json:
-            snap = status.snapshot(args.repo, run_id, vcs, stream_reader_of, utc_now(), location=location)
+            snap = status.snapshot_of_journal(journal, stream_reader_of, utc_now())
             print(json.dumps(snap.to_json(), indent=2))
             return 0
-        lines = status.report(args.repo, run_id, vcs, stream_reader_of, utc_now(), location=location)
+        lines = status.report_of_journal(journal, stream_reader_of, utc_now())
     except (RunsError, JournalError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR

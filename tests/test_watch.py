@@ -19,7 +19,10 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, fake_clock, live_lock, run_end, run_start, step_end, step_start, write_journal
+from .support import (
+    append_events, bare_repo, committed_repo, fake_clock, live_lock, run_end, run_start, step_end, step_start, write_journal,
+    write_journal_in_state_root,
+)
 
 # The commands of each case use the fake clock of the case (#297): a case sets its wait.
 pytestmark = pytest.mark.usefixtures("clock")
@@ -334,3 +337,70 @@ def test_watch_exits_2_and_names_the_line_when_the_journal_holds_a_line_that_is_
 
     assert code == 2
     assert str(path) in err and "line 2" in err
+
+
+@pytest.fixture
+def outside(tmp_path, monkeypatch):
+    """A current directory that is in no git repository: the person of #305 who is not in the directory of the run."""
+    path = tmp_path / "outside"
+    path.mkdir()
+    monkeypatch.chdir(path)
+    return path
+
+
+def watch_here(capsys, *args):
+    """`delegate watch` with no `--repo`: the repository, if any, is the current directory."""
+    code = delegate.main(["watch", *POLL, *args])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_watch_from_outside_each_repository_prints_the_last_frame_of_a_run_that_ended_under_the_state_root_by_its_short_id(
+    tmp_path, capsys, outside,
+):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(
+        repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"), step_start("a"), step_end("a"), run_end("built", ["a"]),
+    )
+
+    code, out, err = watch_here(capsys, "ab12")
+
+    assert (code, err) == (0, "")
+    assert [line.split()[2] for line in out.splitlines()[:4]] == ["run-start", "step-start", "step-end", "run-end"]
+    assert out.splitlines()[-1] == "position 4"
+
+
+def test_watch_from_outside_each_repository_exits_2_and_names_each_full_id_when_two_repositories_hold_the_short_id(
+    tmp_path, capsys, outside,
+):
+    first = bare_repo(tmp_path)
+    second = committed_repo(tmp_path / "other", {})
+    write_journal_in_state_root(first, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+    write_journal_in_state_root(second, "20260202T000000Z-ab12", run_start("20260202T000000Z-ab12", "a"))
+
+    code, out, err = watch_here(capsys, "ab12")
+
+    assert (code, out) == (2, "")
+    assert "20260101T000000Z-ab12" in err and "20260202T000000Z-ab12" in err
+
+
+def test_watch_with_repo_looks_only_in_that_repository(tmp_path, capsys, outside):
+    first = bare_repo(tmp_path)
+    second = committed_repo(tmp_path / "other", {})
+    write_journal_in_state_root(first, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"), run_end("built", []))
+    write_journal_in_state_root(second, "20260202T000000Z-cd34", run_start("20260202T000000Z-cd34", "a"), run_end("built", []))
+
+    code, out, err = watch(first, capsys, "cd34")
+
+    assert (code, out) == (2, "")
+    assert "cd34" in err and str(first) in err
+
+
+def test_watch_from_outside_each_repository_exits_2_and_names_the_state_root_when_no_run_matches(tmp_path, capsys, outside, isolated_state_home):
+    repo = bare_repo(tmp_path)
+    write_journal_in_state_root(repo, "20260101T000000Z-ab12", run_start("20260101T000000Z-ab12", "a"))
+
+    code, out, err = watch_here(capsys, "zz99")
+
+    assert (code, out) == (2, "")
+    assert "zz99" in err and str(isolated_state_home / "delegate") in err
