@@ -26,9 +26,9 @@ CODES = {"dim": "2", "bold": "1", "ok": "32", "now": "36", "warn": "33", "bad": 
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")
 
-# The last glyph is the dash of a range of the rows that fold (#144).
-UNICODE = ("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠", "–")
-ASCII = ("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!", "-")
+# The last glyphs are the dash of a range of the rows that fold (#144), the sparkline (#310), and the now column (#314).
+UNICODE = ("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠", "–", "▁▂▃▄▅▆▇", "┊")
+ASCII = ("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!", "-", ".:-=+*#", ":")
 
 
 def on_a_terminal(monkeypatch) -> None:

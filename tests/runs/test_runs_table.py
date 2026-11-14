@@ -183,7 +183,7 @@ def test_the_eta_is_the_local_clock_time_of_the_zone_of_the_machine(machine, mon
         })],
         tickets=("1", "2", "3"), lock=True,
     )
-    monkeypatch.setenv("TZ", "Pacific/Auckland")  # UTC+13 on this date: the ETA 15:10 UTC is 04:10 the next day
+    monkeypatch.setenv("TZ", "NZT-13")  # POSIX form of Auckland (UTC+13) that needs no zone database: the ETA 15:10 UTC is 04:10 the next day
     time.tzset()
 
     code, out, err = runs(capsys)
