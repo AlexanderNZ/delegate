@@ -235,3 +235,27 @@ def test_a_journal_that_breaks_during_the_watch_is_named_on_stderr_after_the_las
     assert [len(frames(out)), err.count("skipped the journal")] == [2, 1]
     assert err.startswith("delegate runs: skipped the journal") and err.endswith("delegate: interrupted\n")
     assert not any(" 3c98 " in line for line in final_screen(out))
+
+
+def test_timeline_with_watch_redraws_the_lanes_in_place(machine, monkeypatch, capsys):
+    """A ticket that ends between two redraws shows as one more `●` in the lane of the second frame (#314)."""
+    journal = a_working_run(machine)
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 1:
+            append(journal, "step-end", ticket="1", state="built", reason=None)
+        else:
+            ctrl_c()
+
+    fake_clock().on_sleep = sleep
+
+    code, out, err = watching(monkeypatch, capsys, "--timeline", columns=120)
+
+    first, second = frames(out)
+    lane = next(line for line in first if " 3c98 " in line)
+    assert "▶" in lane and "●" not in lane
+    assert sum(line.count("●") for line in second if " 3c98 " in line) == 1
+    assert any(line.startswith("last 6h, to the latest ETA") for line in second)
+    assert (code, err) == (INTERRUPTED, "delegate: interrupted\n")

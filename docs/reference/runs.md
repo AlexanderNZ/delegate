@@ -1,7 +1,7 @@
 ---
 man: DELEGATE-RUNS(1)
 man_name: "delegate-runs — list the runs of this machine"
-synopsis: "delegate runs [--json | --watch]"
+synopsis: "delegate runs [--json | --watch] [--timeline]"
 ---
 
 # Reference: `delegate runs`
@@ -9,7 +9,7 @@ synopsis: "delegate runs [--json | --watch]"
 `delegate runs` lists each [**run**](../glossary.md#run) of this machine in one table, across each repository. It reads the [**journal**](../glossary.md#journal) of each run, and the lock of each [**run branch**](../glossary.md#run-branch), from each [**state directory**](../glossary.md#state-directory) under the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`). Each repository has one directory there. The command needs no git repository, so you can run it from any directory.
 
 ```
-delegate runs [--json | --watch]
+delegate runs [--json | --watch] [--timeline]
 ```
 
 <!-- generated:begin runs-options -->
@@ -19,6 +19,7 @@ delegate runs [--json | --watch]
 |---|---|
 | `--json` | Print one object as JSON: the format, the host, the time, the window, and one object for each listed run; cannot be used with --watch. |
 | `--watch` | Redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json. |
+| `--timeline` | Draw one lane for each run over the last 6 hours, to the latest ETA, in place of the table; it cannot be used with --json. |
 
 <!-- generated:end runs-options -->
 
@@ -133,9 +134,28 @@ A host with an alert or a command does not fold to its totals row. When the line
 
 **Colour and glyphs.** With `NO_COLOR` set and not empty, or when standard output is not a terminal, the output has no colour code. When the locale is not UTF-8, each glyph is its ASCII glyph, and each ASCII glyph has the width of the Unicode glyph, so the columns are in the same positions. The title of the terminal is not a colour code: `DELEGATE_NO_TITLE=1` turns it off.
 
+## The option `--timeline`
+
+`delegate runs --timeline` shows the same two fleet lines, and then one lane for each run in place of the table. A lane shows the time of a run across the window, the last 6 hours, and on to the latest ETA of the runs. It shows the same runs in the same order as the table. `--timeline` can be used with `--watch`, and it cannot be used with `--json`.
+
+The legend is the end of the second fleet line, after the trend word. Under 100 columns it is only `one cell is 12m`. The header under the blank line holds the label `last 6h, to the latest ETA` and the headers `ended`, `ETA`, `state` and `alert`. Each lane row has the label `host repo run` (the host on the first row, the rail `│` under it), the lane, and then `ended`, `ETA`, `state` and `alert` as in the table.
+
+One cell is 10 minutes on a terminal of 120 columns or more, and 12 minutes on a narrower one. Cell 0 starts at the start of the window, now minus 6 hours. The window has 36 cells of 10 minutes, or 30 cells of 12 minutes. The cell after them is the column of now, and the cells after that are the projection. The lane ends at the latest ETA of the runs, or at the column of now when no run has an ETA. A time is in the cell that holds it. A time before the window is in cell 0, and a time after now is in the last cell of the window.
+
+| Glyph | ASCII | Role | Meaning |
+|---|---|---|---|
+| `─` | `-` | none | The life of the run, from the cell of its start. |
+| `●` | `*` | `ok` | A ticket that ended built, in the cell of its first `step-end` built (the rule of [The trend](#the-trend)). |
+| `✓` or `✗` | `+` or `x` | `ok` or `bad` | The end of a run that ended, in the cell of its `run-end`: `✓` for `built`, `✗` for each other result. A run that is `stopped` or `halted` ends with `✗` in the cell of its newest event. A run that failed at start is one `✗` in the cell of its log. A `paused` run ends in the cell of its newest event, with no mark. |
+| `▶` | `>` | `now`, or `warn` | Now, for a run that is `running` or `pausing`. It is `warn` when the run has an alert. |
+| `░` | `.` | `dim` | The projection of a run that runs, from now to its ETA. |
+| `┊` | `:` | `now` | The present, for each run that does not run. It is in the same column in each lane. |
+
+The command fits the lanes to the width of the terminal only as far as the cell size. The folds of the rows to the height of the terminal do not apply to `--timeline`.
+
 ## The option `--watch`
 
-`delegate runs --watch` shows the same view, and redraws it in place once a second, the poll rate of `delegate watch`. The command lists the state root again at each redraw, so a run that starts, or that is cleaned away, shows or goes at the next redraw. It reads each journal again only from the position where it stopped, not from the start.
+`delegate runs --watch` shows the same view (with `--timeline`, the lanes), and redraws it in place once a second, the poll rate of `delegate watch`. The command lists the state root again at each redraw, so a run that starts, or that is cleaned away, shows or goes at the next redraw. It reads each journal again only from the position where it stopped, not from the start.
 
 - The frame replaces itself in place. The command does not use the alternate screen, so the last frame stays in the scrollback. The first frame hides the cursor, and each end of the command shows it again.
 - A redraw writes only the lines that changed, and nothing when the frame is the frame before, as the live view of `delegate watch` does. The view has no spinner.

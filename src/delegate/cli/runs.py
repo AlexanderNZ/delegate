@@ -49,10 +49,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--watch", action="store_true",
         help="redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json",
     )
+    parser.add_argument(
+        "--timeline", action="store_true",
+        help="draw one lane for each run over the last 6 hours, to the latest ETA, in place of the table; it cannot be used with --json",
+    )
     return parser
 
 
-def _watch() -> int:
+def _watch(timeline: bool) -> int:
     """Redraw the table in place until Ctrl-C. Return 2 with no terminal, or when the state root cannot be used."""
     if not sys.stdout.isatty():
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
@@ -75,7 +79,7 @@ def _watch() -> int:
                     else:
                         late += new
                     width, height = screen.size()
-                    screen.draw(fleet.fleet_lines(found, width, height or None))
+                    screen.draw(fleet.fleet_lines(found, width, height or None, timeline))
                     first = False
                     the_clock.sleep(POLL_SECONDS)
         finally:
@@ -88,9 +92,12 @@ def _watch() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.timeline and args.json:
+        parser.error("--timeline cannot be used with --json")
     if args.watch:
-        return _watch()
+        return _watch(args.timeline)
     try:
         found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of)
     except RunsError as error:
@@ -102,5 +109,5 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(found.to_json(), indent=2))
         return 0
     size = shutil.get_terminal_size(fallback=(80, 0))  # a terminal that gives no height: the lines are 0, and no row folds
-    print("\n".join(fleet.fleet_lines(found, size.columns, size.lines or None)))
+    print("\n".join(fleet.fleet_lines(found, size.columns, size.lines or None, args.timeline)))
     return 0

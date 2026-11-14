@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # The window of the trend, in hours, and so the cells of a trend: one cell for each hour, oldest first.
 TREND_HOURS: int = 6
@@ -257,3 +257,72 @@ def trend_word(cells: Sequence[int]) -> str | None:
     if recent < SLOWING_RATIO * before:
         return SLOWING
     return STEADY
+
+
+# The lanes of the timeline (components.md C26, #314). One cell is `CELL_MINUTES_WIDE` minutes on a terminal of `WIDE_COLUMNS` or more,
+# and `CELL_MINUTES_NARROW` minutes on a narrower one. The window has `window_cells` cells, the cell after them is the column of
+# now, and the cells after that are the projection to the latest ETA.
+WIDE_COLUMNS: int = 120
+CELL_MINUTES_WIDE: int = 10
+CELL_MINUTES_NARROW: int = 12
+
+# The kinds of a cell of a lane. A cell with no mark is the empty string.
+LIFE: str = "life"
+TICKET: str = "ticket"
+DONE: str = "done"
+FAIL: str = "fail"
+NOW: str = "now"
+RUNNING: str = "running"
+PROJECTION: str = "projection"
+
+
+def cell_minutes(width: int) -> int:
+    """The minutes in one cell of a lane on a terminal of `width` columns: 10 from `WIDE_COLUMNS`, else 12."""
+    return CELL_MINUTES_WIDE if width >= WIDE_COLUMNS else CELL_MINUTES_NARROW
+
+
+def window_cells(minutes: int) -> int:
+    """The cells of the window of `TREND_HOURS` hours when one cell is `minutes` minutes. The column of now has this index."""
+    return TREND_HOURS * 60 // minutes
+
+
+def cell_of(time: datetime, now: datetime, minutes: int) -> int:
+    """The index of the cell that holds `time`: cell 0 starts at the start of the window, `now` minus `TREND_HOURS` hours.
+
+    A time before the window is in cell 0, and a time at or after `now` is in the last cell of the window.
+    """
+    seconds = (time - (now - timedelta(hours=TREND_HOURS))).total_seconds()
+    return min(max(int(seconds // (minutes * 60)), 0), window_cells(minutes) - 1)
+
+
+def projection_cells(eta: datetime | None, now: datetime, minutes: int) -> int:
+    """The whole cells from `now` to `eta`; 0 with no ETA, and for an ETA that is not after `now`."""
+    return 0 if eta is None else max(int((eta - now).total_seconds() // (minutes * 60)), 0)
+
+
+def lane(
+    *, now: datetime, minutes: int, length: int, started: datetime, tickets: Sequence[datetime], finish: datetime | None,
+    outcome: str | None, running: bool, eta: datetime | None,
+) -> list[str]:
+    """The `length` cells of the lane of one run (C26), each a kind: `LIFE`, `TICKET`, `DONE`, `FAIL`, `NOW`, `RUNNING`, `PROJECTION`, or "".
+
+    The life of the run goes from the cell of `started` to the cell of `finish`, or to the last cell of the window while the run
+    runs (`running`). A ticket of `tickets`, the time of a ticket that ended built, is in its cell. `outcome` (`DONE`, `FAIL` or None) is the
+    end of a run that ended or stopped, in the cell of `finish`. The column of now is `RUNNING` for a run that runs and `NOW` for the
+    other runs. A run that runs and has an `eta` has the projection from now to it.
+    """
+    cells = [""] * length
+    present = window_cells(minutes)
+    first = cell_of(started, now, minutes)
+    last = present - 1 if running or finish is None else max(cell_of(finish, now, minutes), first)
+    for index in range(first, last + 1):
+        cells[index] = LIFE
+    for time in tickets:
+        cells[cell_of(time, now, minutes)] = TICKET
+    if outcome is not None:
+        cells[last] = outcome
+    cells[present] = RUNNING if running else NOW
+    if running:
+        for index in range(present + 1, min(present + 1 + projection_cells(eta, now, minutes), length)):
+            cells[index] = PROJECTION
+    return cells

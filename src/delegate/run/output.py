@@ -114,10 +114,11 @@ class Glyphs:
     idle: str       # idle past the threshold
     dash: str       # a range of ticket ids or of rows
     spark: str      # the 7 levels of a sparkline, lowest first (#310); a cell with no ticket is a space
+    now: str        # the present, through each lane of `delegate runs --timeline` (#314)
 
 
-UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠", "–", "▁▂▃▄▅▆▇")
-ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!", "-", ".:-=+*#")
+UNICODE = Glyphs("✓", "✗", "▶", "·", "●", "○", "–", "█", "░", "│", "─", "⚠", "–", "▁▂▃▄▅▆▇", "┊")
+ASCII = Glyphs("+", "x", ">", ".", "*", "o", "-", "#", ".", "|", "-", "!", "-", ".:-=+*#", ":")
 
 
 def utf8_locale() -> bool:

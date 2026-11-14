@@ -6,6 +6,9 @@ This slice has the table of one host and the columns `host repo run state ended 
 two fleet lines (C24, #308): the sums of the runs with no `run-end`, from the rules of `fleet_rules`. The column `trend` and the end of the second
 line are the sparklines of the tickets that ended in each hour of the window (#310).
 
+With `timeline` (`delegate runs --timeline`, #314), `fleet_lines` has the same two fleet lines and then one lane for each run instead of the table (C26, frame W9): the
+life of the run, the tickets that ended built, its end or its projection to the ETA, and the column of now, over the window and on to the latest ETA (`fleet_rules.lane`).
+
 A run is listed when it has no `run-end` (running, pausing, paused, halted or stopped), or when its `run-end` is
 in the window, the last `WINDOW_SECONDS`. A run that failed at start (`runs.FailedStart`) and whose log last changed
 in the window is listed with the state `failed`. An older run that ended is not listed.
@@ -25,6 +28,7 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import groupby
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -66,6 +70,9 @@ COMMANDS: dict[str, str] = {
     fleet_rules.RETRY: "delegate run --resume <run> --retry <ticket>", fleet_rules.MERGE: "git merge --ff-only <run branch>",
 }
 
+# The header of the columns after the lane in the timeline (copy deck W9.table.header).
+W9_HEADER: tuple[str, ...] = ("ended", "ETA", "state", "alert")
+
 # The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`engine.state_directory`).
 KEY = re.compile(r"-[0-9a-f]{12}$")
 
@@ -85,7 +92,9 @@ class RunRow:
     is True for a run that failed at start. `idle_seconds` is the longest time that an agent of the run is idle, or None
     when no agent runs. `fixup` is the round and the limit of a fix-up round that runs now, or None. `trend` is the
     tickets that ended built in each hour of the window, oldest first (`fleet_rules.trend_cells`); `to_json` has it. `slip_seconds` is
-    the slip of the ETA, or None when it does not show (`fleet_rules.slip_seconds`, #311); `to_json` has it too.
+    the slip of the ETA, or None when it does not show (`fleet_rules.slip_seconds`, #311); `to_json` has it too. `built` is the time of
+    each ticket that ended built (`fleet_rules.built_times`) and `last_event` is the time of the newest event of the journal, for the lane of the
+    timeline (#314); `to_json` leaves them out.
     """
 
     run_id: str
@@ -104,6 +113,8 @@ class RunRow:
     fixup: tuple[int, int] | None = None
     trend: tuple[int, ...] = (0,) * fleet_rules.TREND_HOURS
     slip_seconds: int | None = None
+    built: tuple[datetime, ...] = ()
+    last_event: datetime | None = None
 
     def facts(self) -> fleet_rules.RunFacts:
         """The run as the rules of the fleet read it."""
@@ -231,6 +242,7 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: J
             except (JournalError, RunsError) as error:
                 unreadable.append((journal, str(error)))
                 continue
+            built_times = fleet_rules.built_times(events)
             idle = [ticket.idle_seconds for ticket in snap.tickets if ticket.idle_seconds is not None]
             rounds = [t.fixup_round for t in snap.tickets if t.phase == domain.PHASE_FIXUP] + [
                 c.fixup_round for c in snap.chains if c.phase == domain.PHASE_FIXUP
@@ -240,7 +252,7 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: J
                 snap.run_id, repo, host, snap.state, _time(events[0]), None if end is None else _time(end), snap.tickets_ended,
                 snap.tickets_total, eta, snap.tokens_new, snap.tokens_cache,
                 idle_seconds=max(idle) if idle else None, fixup=fixup,
-                trend=fleet_rules.trend_cells(fleet_rules.built_times(events), now), slip_seconds=slip,
+                trend=fleet_rules.trend_cells(built_times, now), slip_seconds=slip, built=tuple(built_times), last_event=_time(events[-1]),
             ))
         for start in failed_starts([state]):
             if _in_window(start.changed, now):
@@ -350,12 +362,14 @@ def _fleet_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str:
     return line
 
 
-def _span_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str | None:
+def _span_line(fleet: Fleet, width: int, glyph: output.Glyphs, timeline: bool = False) -> str | None:
     """The second fleet line (C24): the earliest start of the runs of the sums to now, and the runs in trouble. None with no run in the sums.
 
     The line ends with the trend (#310): the words `trend: tickets ended an hour, last 6h`, the sparkline of all the runs of the
     sums on a scale of its own largest cell, and the trend word when there is one. The limit of idle time is the stall limit of `delegate watch`.
     When the line is wider than `width`, the words and the sparkline drop and the trend word stays (#312), as the column `trend` of the table drops.
+
+    With `timeline` (#314), the line has no sparkline: it ends with the trend word and the legend of the lanes (`_legend`).
     """
     runs = [row.facts() for row in fleet.runs]
     start = fleet_rules.earliest_start(runs)
@@ -367,11 +381,23 @@ def _span_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str | None:
         parts.append(output.styled("warn", f"{glyph.idle} {trouble} in trouble"))
     cells = fleet_rules.trend_sum(runs)
     word = fleet_rules.trend_word(cells)
+    if timeline:
+        return output.GAP.join([*parts, *([output.styled("dim", word)] if word else []), output.styled("dim", _legend(width, glyph))])
     trend = f"trend: tickets ended an hour, last {window_label()} {glyph.pending} all {sparkline(cells, max(cells), glyph)}" + (f" {word}" if word else "")
     line = output.GAP.join([*parts, output.styled("dim", trend.rstrip(" "))])
     if output.width(line) > width:
         line = output.GAP.join([*parts, *([output.styled("dim", word)] if word else [])])
     return line
+
+
+def _legend(width: int, glyph: output.Glyphs) -> str:
+    """The legend of the lanes (copy deck W9.fleet.legend): what a ticket and the projection look like, and the minutes of one cell.
+
+    The glyphs drop under `BAR_COLUMNS`, as the legend of the table does (C27).
+    """
+    cell = f"one cell is {fleet_rules.cell_minutes(width)}m"
+    dot = f" {glyph.pending} "
+    return f"{glyph.node} a ticket ended{dot}{glyph.empty} to the ETA{dot}{cell}" if width >= BAR_COLUMNS else cell
 
 
 def legend_lines(runs: Sequence[RunRow]) -> list[str]:
@@ -433,7 +459,63 @@ def _table(fleet: Fleet, items: Sequence[RunRow | _Ended], dropped: frozenset[st
     return lines, max(measured, *(output.width(line) for line in lines[:2]))
 
 
-def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = None) -> list[str]:
+# The role and the glyph of each kind of cell of a lane (components.md C26). The life of the run has no role.
+def _lane_marks(glyph: output.Glyphs) -> dict[str, tuple[str, str]]:
+    return {
+        fleet_rules.LIFE: ("", glyph.rule), fleet_rules.TICKET: ("ok", glyph.node), fleet_rules.DONE: ("ok", glyph.built),
+        fleet_rules.FAIL: ("bad", glyph.failed), fleet_rules.NOW: ("now", glyph.now), fleet_rules.PROJECTION: ("dim", glyph.empty),
+    }
+
+
+def _lane_text(row: RunRow, fleet: Fleet, minutes: int, length: int, glyph: output.Glyphs) -> str:
+    """The lane of one run, `length` cells wide (C26, #314): see `fleet_rules.lane`.
+
+    A run that works (`fleet_rules.WORKING_STATES`) shows `▶` in the column of now, in `warn` when it has an alert, else in `now`. A run that
+    ended ends with `✓` when it is built and `✗` when it is not. A stopped or halted run ends with `✗` at its newest event, and a
+    paused run ends at its newest event with no mark. A run that failed at start is one `✗` in the cell of its log.
+    """
+    running = row.ended is None and row.state in fleet_rules.WORKING_STATES
+    finish = row.ended or row.last_event
+    outcome = None
+    if row.ended is not None:
+        outcome = fleet_rules.DONE if row.state == BUILT else fleet_rules.FAIL
+    elif row.state in fleet_rules.TROUBLE_STATES:
+        outcome = fleet_rules.FAIL
+    kinds = fleet_rules.lane(
+        now=fleet.time, minutes=minutes, length=length, started=row.started, tickets=row.built, finish=finish, outcome=outcome,
+        running=running, eta=row.eta,
+    )
+    marks = _lane_marks(glyph)
+    marks[fleet_rules.RUNNING] = ("warn" if row.alert() else "now", glyph.running)
+    marks[""] = ("", " ")
+    return "".join(output.styled(marks[kind][0], marks[kind][1] * len(list(group))) for kind, group in groupby(kinds))
+
+
+def _timeline(fleet: Fleet, width: int, glyph: output.Glyphs) -> list[str]:
+    """The lines under the fleet lines of the timeline (C26, #314): the header with the axis label, a blank line, and one lane for each run.
+
+    A line is the label of the run (`host repo run`, with the host on the first row and the rail under it), the lane, and
+    `ended ETA state alert` as in the table. The lane is as long as the window, the column of now, and the projection to the latest ETA of the runs.
+    """
+    minutes = fleet_rules.cell_minutes(width)
+    latest = fleet_rules.totals([row.facts() for row in fleet.runs]).eta
+    length = fleet_rules.window_cells(minutes) + 1 + fleet_rules.projection_cells(latest, fleet.time, minutes)
+    rail = output.styled("plan", glyph.rail)
+    cells = [_cells(row, glyph, 0) for row in fleet.runs]
+    labels = output.columns([[fleet.host if index == 0 else rail, found[1], found[2]] for index, found in enumerate(cells)])
+    label_width = max((output.width(label) for label in labels), default=0)
+    body = output.columns([
+        [output.styled("dim", name) for name in ("", *W9_HEADER)],
+        *[[_lane_text(row, fleet, minutes, length, glyph), found[4], found[5], found[3], found[10]] for row, found in zip(fleet.runs, cells)],
+    ])
+    axis = output.styled("dim", f"last {window_label()}, to the latest ETA")
+    lane_end = label_width + len(output.GAP) + length
+    right = body[0][length:]  # the header row from the gap before `ended`
+    header = axis + " " * (lane_end - output.width(axis)) + right
+    return [header, "", *[label + " " * (label_width - output.width(label)) + output.GAP + line for label, line in zip(labels, body[1:])]]
+
+
+def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = None, timeline: bool = False) -> list[str]:
     """The lines of `delegate runs`: the line of the missing index, the two fleet lines, a blank line, the table, and the legend.
 
     `width` and `height` are the size of the terminal. The bar of the first fleet line and the legend need `BAR_COLUMNS`. When a
@@ -442,13 +524,17 @@ def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = Non
     The table has the header, the row of the host with its totals, and one row for each listed run, with the rail under the name
     of the host. The legend has a blank line over it, and no line when the table has no command. With no listed run, there are no
     fleet lines, and the rest is the two lines of an empty machine (copy deck W8.empty and W8.empty.ended).
+
+    With `timeline` (#314), the table and the legend are the lanes of `_timeline`; the empty machine has the same lines, and no row folds.
     """
     if not fleet.runs:
         return [output.cut(line, max(width, 1)) for line in (
             NO_INDEX, f"runs  0 of {HOSTS} hosts have an active run", f"no run ended in the last {window_label()}",
         )]
     glyph = output.glyphs()
-    head = [line for line in (NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph)) if line is not None]
+    head = [line for line in (NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph, timeline)) if line is not None]
+    if timeline:
+        return [output.cut(line.rstrip(" "), max(width, 1)) for line in [*head, "", *_timeline(fleet, width, glyph)]]
     largest = max((cell for row in fleet.runs for cell in row.trend), default=0)
     candidates = _candidates(fleet)
     for items in candidates:
