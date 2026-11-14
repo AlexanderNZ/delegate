@@ -864,47 +864,29 @@ class _Progress:
 
 
 def restore_progress(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
-    """Rebuild the progress of a run from its journal. Raise EngineError when the run has ended, unless `retrying`.
+    """Rebuild the progress of a run from the run state of its journal (ADR 0009). Raise EngineError when it ended, unless `retrying`.
 
-    A `run-end` before the newest `plan-change` does not end the run: a plan change goes on with a run that ended.
+    The run state decides each ticket of the newest plan, the open ticket and the state of the run (`run_state.fold`).
+    A `run-end` that a `resume` follows does not end the run: a retry and a plan change go on with a run that ended.
+    The lists are in plan order.
     """
-    progress = _Progress(events=events)
-    started: str | None = None
-    last_change = max((index for index, event in enumerate(events) if event["event"] == "plan-change"), default=-1)
-    for index, event in enumerate(events):
-        kind, ticket = event["event"], str(event.get("ticket"))
-        if kind == "run-end" and not retrying and index > last_change:
-            raise EngineError(f"run {run_id!r} has ended with the result {event['result']!r}; it cannot be resumed")
-        if kind == "step-start":
-            started = ticket
-            # An `economy` retry checks a skipped ticket again, and can build it.
-            progress.skipped.pop(ticket, None)
-        elif kind == "step-end":
-            # The newest step-end of a ticket wins: the verification at the end of an
-            # `economy` chain can fail a ticket that was built.
-            # A retry can build a ticket that failed before.
-            if ticket in progress.built:
-                progress.built.remove(ticket)
-            if event["state"] == BUILT:
-                if ticket in progress.failed:
-                    progress.failed.remove(ticket)
-                    del progress.failures[ticket]
-                progress.built.append(ticket)
-            else:
-                if ticket not in progress.failed:
-                    progress.failed.append(ticket)
-                # A null reason gives a short text, not the text None.
-                progress.failures[ticket] = str(event.get("reason") or "the step failed")
-            if started == ticket:
-                started = None
-        elif kind == "skip":
-            progress.skipped[ticket] = str(event.get("reason") or "the journal gives no reason")
+    state = run_state.fold(events)
+    if state.status.kind == run_state.ENDED and not retrying:
+        result = state.status.event["result"]  # type: ignore[index]
+        raise EngineError(f"run {run_id!r} has ended with the result {result!r}; it cannot be resumed")
+    progress = _Progress(events=events, open_ticket=state.open_ticket)
+    for ticket in state.tickets:
+        if ticket.outcome == run_state.BUILT:
+            progress.built.append(ticket.id)
+        elif ticket.outcome == run_state.FAILED:
+            progress.failed.append(ticket.id)
+            # A null reason gives a short text, not the text None.
+            progress.failures[ticket.id] = ticket.reason or "the step failed"
+        elif ticket.outcome == run_state.SKIPPED:
+            progress.skipped[ticket.id] = ticket.reason or "the journal gives no reason"
             # A ticket that the run did not reach has no blockers in its `skip`.
-            if event.get("blockers"):
-                progress.blocked.add(ticket)
-            else:
-                progress.blocked.discard(ticket)
-    progress.open_ticket = started
+            if ticket.blocked:
+                progress.blocked.add(ticket.id)
     return progress
 
 
@@ -1164,7 +1146,7 @@ def _review(
     (see `_check_same_run`), when the plan changed and the journal records
     no plan to compare with, or when the owner abandoned the run (#201).
 
-    `retry` is the ticket of `--retry`. When its newest `step-end` is `failed`,
+    `retry` is the ticket of `--retry`. When the run state gives it as failed,
     its text can change (rule 10): the retry starts it again. `stack_changed` is `--stack-changed`: the changes of stacks
     that it lets the resume record are in `stack_changes` of the result (see `_check_same_configuration`).
     """
@@ -1190,9 +1172,9 @@ def _review(
     if old == new_plan:
         return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted, stack_changes=stack_changes)
     started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
-    ended = [str(event["state"]) for event in events if event["event"] == "step-end" and event["ticket"] == retry]
+    outcome = next((t.outcome for t in run_state.fold(events).tickets if t.id == retry), None)
     check = domain.check_plan_change(
-        old, new_plan, started, retry if ended and ended[-1] == FAILED else None, _failed_chain(workflow, events, run_id)
+        old, new_plan, started, retry if outcome == run_state.FAILED else None, _failed_chain(workflow, events, run_id)
     )
     other = [
         f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
@@ -1353,8 +1335,8 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     verification of the chain is its events after the newest `retry` that is not a retry at the chain fix-up, or the
     newest `plan-change`, as in `_ChainRun`.
     """
-    starts = [index for index, e in enumerate(events) if run_state.starts_chain_verification(e)]
-    report = _unfinished_report([e for e in events[starts[-1] + 1 if starts else 0 :] if e["event"] == "fixup-report"])
+    start = run_state.fold(events).chain.start
+    report = _unfinished_report([e for e in events[start:] if e["event"] == "fixup-report"])
     return report is not None and _report_names_hotspot(workflow, report, config_paths)
 
 
@@ -1957,12 +1939,10 @@ def _chain_fixup_plan(
     the round of the stopped fix-up.
     """
     stop_index = max(index for index, e in enumerate(progress.events) if e is stop or e == stop)
-    ended = {
-        str(e["ticket"]): (index, e["state"]) for index, e in enumerate(progress.events) if e["event"] == "step-end"
-    }
+    ended = {str(e["ticket"]): index for index, e in enumerate(progress.events) if e["event"] == "step-end"}
     revive = tuple(
         ticket.id for ticket in plan_order(workflow)
-        if ticket.id != ticket_id and ticket.id in progress.failed and ended[ticket.id][0] > stop_index
+        if ticket.id != ticket_id and ticket.id in progress.failed and ended[ticket.id] > stop_index
     )
     return _RetryPlan(ticket_id, RETRY_CHAIN_FIXUP, int(stop["round"]), prior, revive=revive)  # type: ignore[call-overload]
 
@@ -4213,12 +4193,13 @@ class _ChainRun:
     def _verify_stacks(self) -> list[str]:
         _check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
         every_event = self.journal.events
-        # A retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
-        retries = [index for index, e in enumerate(every_event) if run_state.starts_chain_verification(e)]
-        # The verification of the chain since the last retry or plan change.
-        events = every_event[retries[-1] + 1 :] if retries else every_event
-        if any(e["event"] == "run-branch-advance" for e in events):
+        # The current pass of the verification of the chain: the events since the last retry or plan change (ADR 0009). A
+        # retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
+        chain_pass = run_state.fold(every_event).chain
+        events = every_event[chain_pass.start :]
+        if chain_pass.advanced:
             return []  # a resume after the run branch moved: nothing is left to verify
+        stack_passes = {stack_pass.stack: stack_pass for stack_pass in chain_pass.stacks}
         tip_ticket = self.chain[-1]
         _check_verifier_stop(
             self.journal, self.vcs, self.state_dir / "worktrees" / self.run_id / tip_ticket.id, tip_ticket.id, events
@@ -4231,7 +4212,8 @@ class _ChainRun:
         last: _Step | None = None
         for position, name in enumerate(stacks):
             tickets = [ticket for ticket in self.chain if ticket.stack == name]
-            verdicts = [e["verdict"] for e in events if e["event"] == "verdict" and e.get("stack") == name]
+            stack_pass = stack_passes.get(name, run_state.StackPass(name, (), ()))
+            verdicts = stack_pass.verdicts
             # A fix-up of the stack uses the strongest specialist tier of the tickets that the verification covers (#231).
             tier = strongest_tier(specialist_tier(self.workflow, ticket) for ticket in tickets)
             step = _Step(
@@ -4242,10 +4224,7 @@ class _ChainRun:
             if verdicts and domain.is_accepted(verdicts[-1]):
                 continue  # a resume: an earlier run accepted this stack already
             try:
-                self._verify_stack(
-                    step, [e for e in events if e["event"] == "fixup-start" and e.get("stack") == name], chain_start,
-                    _chain_redo(events, tickets[-1].id, name),
-                )
+                self._verify_stack(step, stack_pass.fixup_starts, chain_start, _chain_redo(events, tickets[-1].id, name))
             except _StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
@@ -4255,7 +4234,7 @@ class _ChainRun:
         return []
 
     def _verify_stack(
-        self, step: _Step, fixup_starts: list[dict[str, object]], chain_start: str, redo: _ChainRedo | None = None
+        self, step: _Step, fixup_starts: Sequence[Mapping[str, object]], chain_start: str, redo: _ChainRedo | None = None
     ) -> None:
         """Run the gates of one stack on the chain tip, the fix-up rounds, and the verifiers, until a verifier accepts.
 

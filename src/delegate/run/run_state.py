@@ -17,8 +17,8 @@ The three rules where the folds of the engine and of the views differed before t
 
 1. A `plan-change` takes each removed ticket, and each changed ticket, out of the skipped tickets.
 2. An `unskip` makes the ticket pending.
-3. A `run-end` ends the run when no `resume` comes after it. The engine writes `plan-change` only after `resume`, so this
-   rule and the old rule of the engine agree on each journal that the engine writes.
+3. A `run-end` ends the run when no `resume` comes after it. Before #320 the engine ended a run with a `run-end` after the
+   newest `plan-change`, so it read a retry of a run that ended, which then stopped, as a run that ended.
 """
 
 from __future__ import annotations

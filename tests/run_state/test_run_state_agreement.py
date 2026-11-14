@@ -6,7 +6,8 @@ journals are the events that the engine writes, in the order that it writes them
 each point in time: the run state of the first `n` events is the same as the state that the two folds give for them.
 
 The named differences are in the last cases. Each one names the rule of the run state that decides it, and the fold that
-read the journal in another way.
+read the journal in another way. Since #320 the engine reads the run state (`restore_progress`), so the cases of the
+engine fold show that it now agrees with the run state.
 """
 
 from __future__ import annotations
@@ -84,8 +85,9 @@ ECONOMY = [
 ]
 
 # The journals of the table: the name, the events, the mode, and whether the journal agrees at each point in time. A journal with
-# an `unskip` or a `plan-change` agrees at its end only. Between the `unskip` of a ticket and its `step-start`, the engine fold
-# reads the ticket as skipped (rule 2 below), and so does the view fold between a `plan-change` and the `unskip` (rule 1 below).
+# an `unskip` or a `plan-change` agrees at its end only. Between a `plan-change` and the `unskip`, the view fold reads a changed
+# ticket as skipped (rule 1 below). Before #320 the engine fold also read a ticket as skipped between its `unskip` and its
+# `step-start` (rule 2 below).
 TABLE = [
     ("a plain run", PLAIN, "assure", True),
     ("a failed ticket and a skip", FAILED_AND_SKIP, "assure", True),
@@ -189,10 +191,11 @@ def test_the_fixup_round_of_a_chain_row_is_the_newest_fixup_start_of_the_pass():
 
 
 # The three rules. In each case the run state is the right reading, and the case names the fold that read the journal in another way.
-def test_rule_1_a_plan_change_that_a_crash_cut_off_before_the_next_step_start_the_engine_read_a_changed_ticket_as_skipped():
+def test_rule_1_a_plan_change_that_a_crash_cut_off_before_the_next_step_start_the_engine_reads_a_changed_ticket_as_not_skipped():
     events = journal(started("a"), failed("a"), skipped("b"), RUN_ENDED, ev("resume"), plan_change(["a", "b"], changed=["b"]))
 
-    assert restore_progress(events, "run", retrying=True).skipped == {"b": "blocked by a, which failed"}  # the engine fold: skipped
+    progress = restore_progress(events, "run", retrying=True)
+    assert (progress.skipped, progress.failed) == ({}, ["a"])  # the engine fold: b is pending (it read b as skipped before #320)
     assert run_state.fold(events).ticket("b").outcome == "pending"  # the run state: the plan change took b out of the skipped tickets
 
 
@@ -203,19 +206,22 @@ def test_rule_1_the_views_read_a_changed_ticket_as_skipped_until_the_unskip_that
     assert run_state.fold(events).ticket("b").outcome == "pending"
 
 
-def test_rule_2_the_engine_read_a_ticket_with_an_unskip_as_skipped_until_its_step_start():
+def test_rule_2_the_engine_reads_a_ticket_with_an_unskip_as_pending_before_its_step_start():
     events = journal(started("a"), failed("a"), skipped("b"), RUN_ENDED, ev("resume"), ev("unskip", ticket="b", outlook="runs again"))
 
-    assert restore_progress(events, "run", retrying=True).skipped == {"b": "blocked by a, which failed"}  # the engine fold: skipped
+    progress = restore_progress(events, "run", retrying=True)
+    assert (progress.skipped, progress.blocked) == ({}, set())  # the engine fold: pending (it read b as skipped before #320)
     assert {t.id: t.state for t in snapshot(events).tickets}["b"] == "pending"  # the view fold: pending
     assert run_state.fold(events).ticket("b").outcome == "pending"  # the run state: pending, as the view fold reads it
 
 
-def test_rule_3_the_engine_read_a_run_end_before_a_resume_as_the_end_of_the_run_when_no_plan_change_followed_it():
+def test_rule_3_the_engine_reads_a_run_end_before_a_resume_as_no_end_of_the_run_also_when_no_plan_change_followed_it():
     events = journal(started("a"), failed("a"), RUN_ENDED, ev("resume"), started("a"))
 
-    with pytest.raises(EngineError, match="has ended"):
-        restore_progress(events, "run")  # the engine fold: the run ended
+    # The engine fold: the run goes on with the open step (before #320 it read the run as ended, and refused the resume).
+    assert restore_progress(events, "run").open_ticket == "a"
+    with pytest.raises(EngineError, match="has ended with the result 'failed'"):
+        restore_progress(events[:-2], "run")  # a run-end that no resume follows ends the run
     assert snapshot(events).state == "running"  # the view fold: a resume came after the run-end
     assert run_state.fold(events).status.kind == "active"  # the run state: a resume came after the run-end
 

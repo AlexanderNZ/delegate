@@ -332,9 +332,10 @@ def test_a_ticket_that_a_resume_runs_again_and_then_skips_again_with_its_old_rea
     tmp_path, capsys, scripted
 ):
     # Ticket b waits on a, c on b, and d on c. A and x fail, so the first run skips b, c and d. A retry of a builds a and
-    # pauses in the specialist of b. The retry of x takes c and d out of the skipped tickets, but the step of b fails.
-    # The engine skips c and d again. The new reason of d is the same as its old reason: the resume must still write a
-    # `skip` of d after its `unskip`, or the status shows d as pending after the run ended (#298).
+    # pauses in the specialist of b. The retry of a wrote `unskip` of c and d, so they are pending (rule 2 of ADR 0009), and
+    # the retry of x writes no second `unskip` (#320). The step of b fails. The engine skips c and d again. The new reason
+    # of d is the same as its old reason: the resume must still write a `skip` of d, or the status shows d as pending
+    # after the run ended (#298).
     scripted.files_by_ticket["x"] = {"x.txt": "x\n"}
     end_with_no_verdict(scripted, scoped_only=False)
     tickets = ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",)) + ticket("d", ("c",)) + ticket("x")
@@ -353,9 +354,7 @@ def test_a_ticket_that_a_resume_runs_again_and_then_skips_again_with_its_old_rea
     assert "ticket d: skipped: blocked by c, which was skipped\n" in err
     events = read_journal_file(repo, run_id)
     resumed = events[[index for index, event in enumerate(events) if event["event"] == "resume"][-1] :]
-    assert [(e["event"], e["ticket"]) for e in resumed if e["event"] in ("unskip", "skip")] == [
-        ("unskip", "c"), ("unskip", "d"), ("skip", "c"), ("skip", "d")
-    ]
+    assert [(e["event"], e["ticket"]) for e in resumed if e["event"] in ("unskip", "skip")] == [("skip", "c"), ("skip", "d")]
     end = events[-1]
     assert (end["event"], end["result"], end["failed"], end["skipped"]) == ("run-end", "failed", ["b"], ["c", "d"])
     snapshot = status_json(repo, capsys, run_id)
@@ -520,18 +519,16 @@ def skipped_section(out: str) -> list[str]:
     return [line for line in lines[lines.index(SKIPPED_SECTION) + 1 :] if line.startswith("  ")]
 
 
-def test_the_dry_run_of_a_resume_says_that_a_ticket_runs_again_when_a_retry_built_its_blocker_and_stopped_before_it(
-    tmp_path, capsys, scripted
-):
-    # The journal still holds the `skip` of b from the first run. The resume applies the skip rule again (#245), so b
-    # runs. The dry run says it before the resume (#260), and the resume then does what the dry run said.
+def test_a_resume_builds_the_tickets_that_a_retry_took_out_of_the_skipped_tickets_before_it_stopped(tmp_path, capsys, scripted):
+    # The retry of a wrote `unskip` of b and c, so they are pending (rule 2 of ADR 0009, #320): the dry run does not list
+    # them as skipped tickets (#260), and the resume builds them.
     repo, run_id = a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted)
     before, verifiers = journal_path(repo, run_id).read_bytes(), len(scripted.verifier_calls)
 
     code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
 
     assert (code, err) == (0, "")
-    assert "  ticket b: runs again: each blocker is built" in skipped_section(out)
+    assert skipped_section(out) == ["  ticket e: stays skipped: blocked by d, which failed"]
     assert journal_path(repo, run_id).read_bytes() == before
     assert scripted.calls == [] and len(scripted.verifier_calls) == verifiers
     healthy(scripted, "ACCEPT", "ACCEPT", "ACCEPT")
@@ -556,18 +553,17 @@ def test_the_dry_run_of_a_resume_says_that_a_ticket_whose_blocker_still_failed_s
     assert "  ticket e: stays skipped: blocked by d, which failed" in skipped_section(out)
 
 
-def test_the_dry_run_of_a_resume_says_that_the_dependant_of_a_ticket_that_runs_again_runs_again(tmp_path, capsys, scripted):
-    # C waits on b, which is not built yet. B runs earlier in the same resume, so c runs too when b is built.
+def test_the_dry_run_of_a_resume_and_the_status_read_the_tickets_that_a_retry_unskipped_as_pending(tmp_path, capsys, scripted):
+    # C waits on b, which is not built yet. The retry of a wrote `unskip` of both, and stopped before b. The engine and the
+    # status read the run state (ADR 0009), so both read b and c as pending, and only e as skipped (#320).
     repo, run_id = a_retry_of_a_that_paused_before_b(tmp_path, capsys, scripted)
 
     code, out, err = resume_main(repo, capsys, run_id, "--dry-run")
 
     assert (code, err) == (0, "")
-    assert skipped_section(out) == [
-        "  ticket b: runs again: each blocker is built",
-        "  ticket c: runs again if b is built earlier in this resume",
-        "  ticket e: stays skipped: blocked by d, which failed",
-    ]
+    assert skipped_section(out) == ["  ticket e: stays skipped: blocked by d, which failed"]
+    states = {t["id"]: t["state"] for t in status_json(repo, capsys, run_id)["tickets"]}
+    assert (states["b"], states["c"], states["e"]) == ("pending", "pending", "skipped")
 
 
 def test_the_dry_run_of_a_resume_says_that_a_ticket_that_a_crash_left_unreached_stays_skipped_until_a_retry_of_that_step(
