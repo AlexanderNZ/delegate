@@ -21,7 +21,7 @@ The repository holds three things: two skills that an agent reads, one Python pa
 | `scripts/` | The release script. |
 | `pyproject.toml`, `package.nix`, `flake.nix` | The package build for `pip` and for Nix. Nix is optional. |
 | `zensical.toml`, `overrides/`, `includes/` | The configuration, the theme and the generated abbreviations of the docs site. |
-| `design/` | A snapshot of the design of the docs theme, and in `design/design_handoff_delegate_terminal_output/` the design of the terminal output. |
+| `design/` | The design handoff of the terminal output and the docs theme: the frames, and their tokens, components and copy in `design/docs/`. |
 
 ## The package
 

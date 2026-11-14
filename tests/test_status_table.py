@@ -1,6 +1,6 @@
 """The text of `delegate status` is the ticket table of frame 1i of the design (#117, #143).
 
-The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Ticket table (status)) and
+The spec is `design/docs/components.md` (Ticket table (status)) and
 `docs/copy-deck.md`. Under the header lines (run, progress, journal), `status` prints the ticket table of the live view
 of `watch` on the same tracks, with `state` 8 cells wide and three more columns: `verdict` and `branch` after `after`,
 and `last event` last. The progress line of each ticket folds into its row. Status is a snapshot, so it has no live

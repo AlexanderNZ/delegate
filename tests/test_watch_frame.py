@@ -1,6 +1,6 @@
 """The frame of the live view of `delegate watch`: the run line, the ticket table, the divider and the feed (#116, #143).
 
-The spec is `design/design_handoff_delegate_terminal_output/`: the frames 3a and 1d to 1h of its README (design turn
+The spec is `design/`: the frames 3a and 1d to 1h of its README (design turn
 3), and `docs/components.md`, `docs/tokens.md` and `docs/copy-deck.md`. A case writes the journal of a run in the state
 directory of a real temporary git repository and calls `delegate.main(["watch", ...])`. The system boundaries are
 faked as in `test_watch_live`: the terminal (a standard output whose `isatty` is true, `COLUMNS` and `LINES`), the

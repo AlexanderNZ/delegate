@@ -1,5 +1,5 @@
 // The delegate theme: the things that CSS and templates cannot do.
-// design/README.md is the spec.
+// design/docs/tokens.md and design/docs/components.md (Docs site) are the spec.
 (function () {
   // A code block shows its language in the top-right corner.
   document.querySelectorAll(".md-typeset .highlight").forEach(function (block) {

@@ -1,6 +1,6 @@
 """The live view of `delegate watch` fits the height and the width of the terminal (#144).
 
-The spec is frame 3b of `design/design_handoff_delegate_terminal_output/` (design turn 3), its `docs/components.md`
+The spec is frame 3b of `design/` (design turn 3), its `docs/components.md`
 § Ticket table (watch) (Fit to height) and § 80 columns, and its `docs/copy-deck.md`. The table has the rows that the
 terminal gives it: the terminal rows, less the line of the cursor, the run line, the blank line, the header, the divider
 and 4 lines of the feed. When the plan has more rows, the tail folds into one row above the divider. When that is not

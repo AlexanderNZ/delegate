@@ -10,7 +10,7 @@ repo_url = "https://github.com/AlexanderNZ/delegate"
 repo_name = "AlexanderNZ/delegate"
 docs_dir = "docs"
 site_dir = "site"
-# The theme: design/README.md is the spec, design/delegate-docs-theme-2c.dc.html the prototype.
+# The theme: design/docs/tokens.md and design/docs/components.md (Docs site) are the spec, "design/Theme 2c Guide and Quiet Reference.dc.html" the prototype.
 extra_css = ["stylesheets/delegate.css"]
 extra_javascript = ["javascripts/glossary.js", "javascripts/delegate.js"]
 

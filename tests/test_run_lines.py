@@ -1,6 +1,6 @@
 """The three new lines of `delegate run`, frame 1k of the design (#119).
 
-The spec is `design/design_handoff_delegate_terminal_output/docs/copy-deck.md` (run start, run end):
+The spec is `design/docs/copy-deck.md` (run start, run end):
 
 * When the run holds its lock and its journal records the start, after `run <id>` and `journal <path>`:
   `follow it with delegate watch · pause it with delegate pause <short id>`.

@@ -4,7 +4,7 @@ the feed of the ticket that runs now (#116).
 `LiveView` is a sink of `delegate.run.watch.follow`. At each poll it makes a frame: the run line and the ticket table
 (`status.view_lines`, of the same snapshot as `delegate status`, with the rail and the `after` cells of
 `status.plan_links`), a divider, and the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in place on the terminal. The spec is
-`design/design_handoff_delegate_terminal_output/docs/components.md`.
+`design/docs/components.md`.
 
 A line of the feed is short: the local time (`HH:MM`), the ticket, and what happened. It shows no path and no `None`.
 The parts sit on the tracks of components.md § Feed: the time (5 cells), 2 cells, the subject (`#70`, or `stack python`

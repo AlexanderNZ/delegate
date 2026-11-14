@@ -1,6 +1,6 @@
 """The parts of the terminal output: the paint roles, the glyph set, and the column measurer (#115, #143).
 
-The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and `docs/accessibility.md`.
+The spec is `design/docs/tokens.md` and `docs/accessibility.md`.
 
 * `paint(role, text)` gives the text in the ANSI code of a role. Colour is semantic, so it follows the theme of the
   terminal: only the 16 ANSI colours, bold and faint, and never a background colour. `dim` is faint (SGR 2), not

@@ -23,7 +23,7 @@ The path of the temporary state directory shows as `STATE_DIRECTORY` in a frame.
 It reads the SGR codes of each line, and writes one `<text>` row for each line, with one `<tspan>` for each run of
 one role. Each character is one monospace cell, and each `<tspan>` starts at the cell of its first character. Bold
 is `font-weight` 600, and faint is the `dim` colour. The colours are the tokens of the docs theme
-(`design/README.md`, Design tokens), written as hex values.
+(`design/docs/tokens.md`, Docs site: colour), written as hex values.
 """
 
 from __future__ import annotations

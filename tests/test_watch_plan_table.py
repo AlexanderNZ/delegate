@@ -1,6 +1,6 @@
 """The ticket table of `delegate watch` is flat, in plan order, with a rail and an `after` column (#143).
 
-The spec is frame 3a of `design/design_handoff_delegate_terminal_output/` (design turn 3) and its `docs/components.md`
+The spec is frame 3a of `design/` (design turn 3) and its `docs/components.md`
 § Ticket table (watch): the tracks are `#` 3 (right) · rail 2 · `plan` 6 · `state` 10 · `phase` 13 · `after` 8 ·
 `used` 7 (right) · `new` 5 (right) · `cache` 6 (right) · the live tail, with 2 cells between two tracks. The width of
 the table does not change with the depth of the plan. The rail `│` joins a row to the row directly above when that row

@@ -1,6 +1,6 @@
 """The run picker of frame 2b (#118): `delegate watch` and `delegate status` with no run id and more than one active run.
 
-The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Run picker) and `docs/copy-deck.md`
+The spec is `design/docs/components.md` (Run picker) and `docs/copy-deck.md`
 (several active runs). On a terminal, `watch` prints `<n> runs are active in this repository`, a table of the active
 runs with the newest first, and the prompt `watch which? [1]`. It reads one line, and Enter takes 1. Then it follows the
 run that the reader chose. When standard input or standard output is not a terminal, `watch` prints one line on stderr

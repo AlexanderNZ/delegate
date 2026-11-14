@@ -1,6 +1,6 @@
 """The terminal output parts of #115: the paint roles, the glyph set with its ASCII fallback, and the column measurer.
 
-The spec is `design/design_handoff_delegate_terminal_output/docs/tokens.md` and `docs/accessibility.md`. Colour is an
+The spec is `design/docs/tokens.md` and `docs/accessibility.md`. Colour is an
 ANSI role, never a background and never an RGB value. With `NO_COLOR` set, or with a standard output that is not a
 terminal, the text has no SGR code. With a locale that is not UTF-8, the glyphs are the ASCII set of tokens.md, with
 the same width in cells, so the columns stay in the same positions.

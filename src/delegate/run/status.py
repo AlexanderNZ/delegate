@@ -963,7 +963,7 @@ def view_lines(
 ) -> list[str]:
     """The lines of the live view of a snapshot: the run line, a blank line, and the ticket table, each cut to `width`.
 
-    The spec is `design/design_handoff_delegate_terminal_output/docs/components.md`. `links` gives the rail and the
+    The spec is `design/docs/components.md`. `links` gives the rail and the
     `after` cell of each ticket (`plan_links`). The rows are flat and in plan order, and the running ticket has a
     sub-row for each phase after its first. When the lines would be more than `height`, the rows fold (`_fit`): first
     the tail, then the rows in the middle. With no `height`, no row folds. When a line of the table is wider than
@@ -1445,7 +1445,7 @@ PICKER_NUMBERS: frozenset[int] = frozenset({0})
 def picker_lines(runs: Sequence[ActiveRun], now: datetime) -> list[str]:
     """The lines of the run picker: `<n> runs are active in this repository`, and a table with one row for each run.
 
-    The spec is `design/design_handoff_delegate_terminal_output/docs/components.md` (Run picker). The rows keep the
+    The spec is `design/docs/components.md` (Run picker). The rows keep the
     order of `runs`. A row gives the number to choose, the full run id with its short id bold, the run branch, the mode,
     the local start time (with the day of the week when the run did not start today), the progress, and what runs now
     with the time since the last activity, as `active 2s ago` (`liveness`). `now` is the time of the clock, in UTC.

@@ -1,6 +1,6 @@
 """The docs theme: the files that zensical.toml names, and the man-page data of the reference pages.
 
-design/README.md is the spec of the theme. A reference page carries `man`,
+design/docs/tokens.md and design/docs/components.md (Docs site) are the spec of the theme. A reference page carries `man`,
 `man_name` and `synopsis` in its front matter, and the theme renders them as the
 man header line and the NAME and SYNOPSIS block. The synopsis must not drift from
 the parser of the command, so each option in it must be an option of the command.
@@ -108,4 +108,4 @@ def test_the_design_folder_holds_the_spec_and_the_prototype():
     design = ROOT / "design"
 
     assert (design / "README.md").is_file()
-    assert (design / "delegate-docs-theme-2c.dc.html").is_file()
+    assert (design / "Theme 2c Guide and Quiet Reference.dc.html").is_file()
