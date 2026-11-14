@@ -189,7 +189,6 @@ from typing import NamedTuple
 
 from ..ports import harness
 from ..ports.gates import GateRunner
-from ..ports.index import RunIndex
 from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
@@ -210,8 +209,7 @@ from .guards import (
     snapshot_worktree, WorktreeSnapshot,
 )
 from .host import host_name
-from .index import follow
-from .journal import Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
+from .journal import EventObserver, Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, describe_tries, probe_guard, refusal, stream_path
 from .progress import Progress, restore_progress
@@ -626,10 +624,10 @@ def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
     return f"{workflow.run_branch}-{ticket.id}"
 
 
-def _journal_events(state_dir: Path, run_id: str) -> tuple[Journal, list[dict[str, object]]]:
+def _journal_events(state_dir: Path, run_id: str, observers: Sequence[EventObserver] = ()) -> tuple[Journal, list[dict[str, object]]]:
     """Open the journal of an earlier run for appending. Raise EngineError when the run has none or its journal is not valid."""
     try:
-        journal, events = Journal.reopen(state_dir / "runs" / run_id / "journal.jsonl")
+        journal, events = Journal.reopen(state_dir / "runs" / run_id / "journal.jsonl", observers=observers)
     except JournalError as error:
         raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
     if not events or events[0]["event"] != "run-start":
@@ -1778,7 +1776,7 @@ def run_workflow(
     resume: str | None = None, retry: str | None = None, break_lock: bool = False,
     on_start: Callable[[str, Path], None] | None = None, run_id: str | None = None, reviewed: tuple[str, ...] = (),
     agents_changed: bool = False, coordinator_commit: str | None = None, location: StateLocation | None = None,
-    stack_changed: bool = False, index: RunIndex | None = None,
+    stack_changed: bool = False, observers: Sequence[EventObserver] = (),
 ) -> RunResult:
     """Build the tickets of a workflow in dependency order, through `adapter`. Return the result of the run.
 
@@ -1834,9 +1832,12 @@ def run_workflow(
     `location` is the location that the command looked up (see `locate_state`), or None to look it up here. The run
     looks it up at most one time (#239).
 
-    `index` is the run index (#316). The run writes its record to it at `run-start`, `resume`, each `step-end`, `paused`,
-    `halted`, `crashed`, `interrupted`, `setup-problem` and `run-end` (see `delegate.run.index`). A write that fails adds `index-warning` to the journal, and the run
-    goes on. With None, the run writes nothing.
+    `observers` are the observers of the events of the run (#332). The journal of the run, and the journal that the run reopens
+    to record an interrupt, call each of them with the journal and the name of each event after the journal wrote it. The driver
+    of `delegate run` gives the observer of the run index (#316, `delegate.run.index.index_observers`): it writes the record of
+    the run at `run-start`, `resume`, each `step-end`, `paused`, `halted`, `crashed`, `interrupted`, `setup-problem` and
+    `run-end`. A write of the index that fails adds `index-warning` to the journal, and the run goes on. With no observer,
+    the run writes nothing besides its journal.
     """
     if coordinator_commit is not None and retry is None:
         raise EngineError("--coordinator-commit needs --retry TICKET")
@@ -1853,13 +1854,13 @@ def run_workflow(
             try:
                 result = _execute(
                     workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed, index,
+                    reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed, observers,
                 )
             except JournalChanged as changed:
                 raise EngineError(_end_changed_journal(changed, run_id)) from None
             except KeyboardInterrupt:
                 # The block of the lock ends with this exception, so the lock is released.
-                raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id, index, repo)) from None
+                raise RunInterrupted(run_id, _record_interrupt(state_dir, run_id, observers)) from None
             return replace(result, taken_over=broken)
     except LockError as error:
         raise EngineError(str(error)) from None
@@ -1879,17 +1880,16 @@ def _end_changed_journal(changed: JournalChanged, run_id: str) -> str:
     return f"invariant violation: {changed}"
 
 
-def _record_interrupt(state_dir: Path, run_id: str, index: RunIndex | None, repo: Path) -> Path | None:
+def _record_interrupt(state_dir: Path, run_id: str, observers: Sequence[EventObserver]) -> Path | None:
     """Append `interrupted` to the journal of the run, and return its path. Return None when the run has no journal that can be read.
 
-    The run writes its record to the run `index` after the event (#327), as after each other stop.
+    The `observers` of the run see the event (#327, #332), as they see each other event.
     """
     path = state_dir / "runs" / run_id / "journal.jsonl"
     try:
-        journal, _ = Journal.reopen(path)
+        journal, _ = Journal.reopen(path, observers=observers)
     except JournalError:
         return None
-    _follow_in_index(journal, index, repo)
     journal.append("interrupted", run_id=run_id)
     return path
 
@@ -1943,7 +1943,7 @@ def _execute(
     roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
     retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
     agents_changed: bool = False, tiers: Tiers | None = None, coordinator_commit: str | None = None, stack_changed: bool = False,
-    index: RunIndex | None = None,
+    observers: Sequence[EventObserver] = (),
 ) -> RunResult:
     order = plan_order(workflow)
     agents_note: str | None = None
@@ -1956,8 +1956,7 @@ def _execute(
         with _vcs_errors():
             run_base = vcs.commit_of(repo, workflow.base_branch)
             vcs.create_branch(repo, workflow.run_branch, run_base)
-        journal = Journal(state_dir / "runs" / run_id / "journal.jsonl")
-        _follow_in_index(journal, index, repo)
+        journal = Journal(state_dir / "runs" / run_id / "journal.jsonl", observers=observers)
         journal.append(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
@@ -1967,8 +1966,7 @@ def _execute(
         progress = Progress()
         was_skipped: dict[str, str | None] = {}
     else:
-        journal, events = _journal_events(state_dir, run_id)
-        _follow_in_index(journal, index, repo)
+        journal, events = _journal_events(state_dir, run_id, observers)
         review, progress, run_base, plan = _resume_checks(
             workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
             project_config_paths(adapter), stack_changed,
@@ -2109,11 +2107,6 @@ def _execute(
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
     return RunResult(run_id, journal.path, built, failed, failures, skipped, unmapped, agents_note=agents_note)
-
-
-def _follow_in_index(journal: Journal, index: RunIndex | None, repo: Path) -> None:
-    """Make the journal write the record of the run to the run index (#316). See `delegate.run.index.follow`."""
-    follow(journal, index, repo)
 
 
 def _prepare_resume(workflow: Workflow, order: list[Ticket], progress: Progress, plan: _RetryPlan | None) -> tuple[str, dict[str, str]]:

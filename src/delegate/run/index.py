@@ -17,7 +17,7 @@ from pathlib import Path
 from ..ports.index import RunIndex, RunRecord
 from .events import CLEANUP, CRASHED, HALTED, INDEX_WARNING, INTERRUPTED, PAUSED, RESUME, RUN_END, RUN_START, SETUP_PROBLEM, STEP_END
 from .host import host_name
-from .journal import Journal
+from .journal import EventObserver, Journal
 from .status import Snapshot, snapshot_at
 
 # The events after which the engine writes the record of the run.
@@ -68,15 +68,16 @@ def record_of(
     )
 
 
-def follow(journal: Journal, index: RunIndex | None, repo: Path) -> None:
-    """Write the record of the run to `index` after each event of `INDEXED` that `journal` appends. Do nothing with no index.
+def index_observers(index: RunIndex | None, repo: Path) -> tuple[EventObserver, ...]:
+    """The observers that write the record of the run to `index` after each event of `INDEXED` that a journal appends. None with no index.
 
-    Each failure of the write, whatever its cause, adds `index-warning` with the reason: the rule is that the index never changes the run.
+    The command-line driver gives them to `run_workflow` (#332). Each failure of the write, whatever its cause, adds `index-warning`
+    with the reason: the rule is that the index never changes the run.
     """
     if index is None:
-        return
+        return ()
 
-    def write(event: str) -> None:
+    def write(journal: Journal, event: str) -> None:
         if event not in INDEXED:
             return
         try:
@@ -84,4 +85,4 @@ def follow(journal: Journal, index: RunIndex | None, repo: Path) -> None:
         except Exception as error:  # noqa: BLE001 - nothing that the index does may change the run
             journal.append(INDEX_WARNING, reason=str(error) or type(error).__name__)
 
-    journal.after_append = write
+    return (write,)

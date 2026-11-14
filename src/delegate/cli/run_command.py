@@ -67,6 +67,7 @@ from ..run.domain import PLAN_RULES
 from ..run.engine import PlanReview, RetryHint, RunInterrupted, check_start, new_run_id, project_config_paths, retry_hints, review_plan_change, run_workflow
 from ..run.errors import EngineError
 from ..run.host import host_name
+from ..run.index import index_observers
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
 from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
@@ -491,7 +492,8 @@ def main(argv: list[str] | None = None) -> int:
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
                     agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit, location=location,
-                    stack_changed=args.stack_changed, index=settings.index.index,
+                    stack_changed=args.stack_changed,
+                    observers=index_observers(settings.index.index, location.top if location else args.repo),
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)

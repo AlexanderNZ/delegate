@@ -672,3 +672,33 @@ def test_a_planted_engine_import_in_a_view_module_fails_the_rule(tmp_path, sourc
     (tmp_path / "run" / "status.py").write_text(source)
 
     assert engine_imports(tmp_path) == ["run/status.py:1: view imports run.engine"]
+
+
+def late_imports(package_dir: Path, layer: str) -> list[str]:
+    """Every import inside a function body of a file of `layer`, as `file:line: <import>`. An import at the top of a file is not one of them."""
+    found = []
+    for path in sorted((package_dir / layer).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for function in ast.walk(tree):
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for node in ast.walk(function):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        found.append(f"{package_dir.name}/{path.relative_to(package_dir)}:{node.lineno}: {ast.unparse(node)}")
+    return sorted(set(found))
+
+
+def test_no_function_of_the_run_context_imports_a_module_inside_its_body():
+    assert late_imports(PACKAGE, "run") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["def hide():\n    from . import index\n", "def hide():\n    import json\n", "class A:\n    def hide(self):\n        from delegate.run import index\n"],
+)
+def test_a_planted_import_inside_a_function_of_the_run_context_fails_the_rule(tmp_path, source):
+    copy = planted_copy(tmp_path, "run/planted.py", source)
+
+    found = late_imports(copy, "run")
+
+    assert len(found) == 1
+    assert found[0].startswith("delegate/run/planted.py:")

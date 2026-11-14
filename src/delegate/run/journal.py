@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +32,10 @@ from . import run_state
 from .events import (
     CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, INDEX_WARNING, INVARIANT_VIOLATION, JOURNAL_CHANGED, JOURNAL_REPAIRED, RUN_BRANCH_ADVANCE, RUN_END, VERDICT,
 )
+
+# An observer of the events of a journal: a function that gets the journal and the name of an event, after the journal wrote it (#332).
+# The run index is one. An observer may append to the journal; the events that it appends reach the observers too.
+EventObserver = Callable[["Journal", str], None]
 
 # The events whose line must be on the disk before the engine goes on: a run that ended, a move of the run branch, and a
 # verdict. A power loss then cannot take a fact that the repository already shows.
@@ -215,23 +219,25 @@ CHANGED_BYTES_PREFIX: str = "journal-changed-"
 class Journal:
     """Appends events to one file, and keeps in memory each event of the file (#291)."""
 
-    def __init__(self, path: Path, seq: int = 0, *, create: bool = True) -> None:
+    def __init__(self, path: Path, seq: int = 0, *, create: bool = True, observers: Sequence[EventObserver] = ()) -> None:
         self.path = path
         self._seq = seq
         self._events: list[dict[str, object]] = []
         self._data = bytearray()
-        # Called with the event name after each event that `append` wrote (#316). The run index uses it.
-        self.after_append: Callable[[str], None] | None = None
+        # Called with the journal and the event name after each event that `append` wrote (#316, #332). Fixed at the start of the journal.
+        self._observers: tuple[EventObserver, ...] = tuple(observers)
         if create:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch(exist_ok=False)
 
     @classmethod
-    def reopen(cls, path: Path) -> tuple[Journal, list[dict[str, object]]]:
+    def reopen(cls, path: Path, *, observers: Sequence[EventObserver] = ()) -> tuple[Journal, list[dict[str, object]]]:
         """Open the journal of an earlier run for appending. Return it with the events it holds.
 
         The file is read one time. A last line with no newline at its end is a write that a power loss cut. It is removed,
         and `journal-repaired` records the number of bytes removed; the events that come back hold that event.
+
+        The journal calls `observers` after each event that it appends, including `journal-repaired`.
 
         Raise JournalError when the file is missing or a line is not an event.
         """
@@ -244,7 +250,7 @@ class Journal:
             data = data[: len(data) - removed]
             os.truncate(path, len(data))
         events = _parse(path, data.decode())
-        journal = cls(path, seq=len(events), create=False)
+        journal = cls(path, seq=len(events), create=False, observers=observers)
         journal._events, journal._data = events, bytearray(data)
         if removed:
             journal.append(JOURNAL_REPAIRED, bytes_removed=removed)
@@ -264,7 +270,7 @@ class Journal:
         """Write one event as one line. `seq` grows only when the write succeeded; a failed write leaves no part of the line.
 
         Raise JournalChanged when the file does not have the size that the journal wrote last: another writer changed it.
-        The event is then not written (see `_put_back`). After the write, `after_append` gets the name of the event.
+        The event is then not written (see `_put_back`). After the write, each observer gets the journal and the name of the event.
         """
         try:
             size = self.path.stat().st_size
@@ -273,8 +279,8 @@ class Journal:
         if size != len(self._data):
             raise self._put_back(max(size, 0))
         self._write(event, fields)
-        if self.after_append is not None:
-            self.after_append(event)
+        for observe in self._observers:
+            observe(self, event)
 
     def _write(self, event: str, fields: dict[str, object]) -> None:
         seq = self._seq + 1
