@@ -18,23 +18,28 @@ from ..ports.index import RunIndex, RunRecord
 from .events import HALTED, INDEX_WARNING, PAUSED, RESUME, RUN_END, RUN_START, STEP_END
 from .host import host_name
 from .journal import Journal
-from .status import snapshot_at
+from .status import Snapshot, snapshot_at
 
 # The events after which the engine writes the record of the run.
 INDEXED: frozenset[str] = frozenset({RUN_START, RESUME, STEP_END, PAUSED, HALTED, RUN_END})
 
 
-def record_of(events: list[dict[str, object]], journal: Path, repo: Path, now: datetime) -> RunRecord:
-    """The record of the run whose journal events are `events`, as of the time `now` (UTC).
+def record_of(
+    events: list[dict[str, object]], journal: Path, repo: Path, now: datetime, *, host: str | None = None, snapshot: Snapshot | None = None,
+) -> RunRecord:
+    """The record of the run whose journal events are `events`, as of the time `now` (UTC). It is the one builder of a record (#326).
 
-    The run that writes the record holds its lock, so the snapshot has a live process and no pause request, and it reads
-    no stream. The host and the name of the repository come from `run-start`; a journal of an earlier version without
-    them gets the host of this process and the repository of the run.
+    The engine and the backfill of `delegate runs` (#323) both call it, so a run has one record whatever the process that writes it. The host
+    and the name of the repository come from `run-start`; a journal of an earlier version without them gets `host`, the host name of this
+    process when it is None, and the name of `repo`.
+
+    The engine holds the lock of its run, so with no `snapshot` the record is of a snapshot with a live process and no pause request, and it reads
+    no stream. The backfill reads the lock and the pause request of the run, and gives the `snapshot` that it made from them.
     """
-    snap = snapshot_at(events, journal, lambda adapter: None, now, live_process=True, pause_request=False)
+    snap = snapshot or snapshot_at(events, journal, lambda adapter: None, now, live_process=True, pause_request=False)
     start = events[0]
     return RunRecord(
-        run_id=snap.run_id, host=str(start.get("host") or host_name()), repo=Path(str(start.get("repo") or repo)).name,
+        run_id=snap.run_id, host=str(start.get("host") or host or host_name()), repo=Path(str(start.get("repo") or repo)).name,
         started=str(start["time"]), state=snap.state, tickets_ended=snap.tickets_ended, tickets_total=snap.tickets_total,
         eta=snap.eta.isoformat() if snap.eta else None, heard=now.isoformat(),
     )

@@ -58,6 +58,7 @@ from . import clock, domain, fleet_rules, output, run_state
 from .journal import ABANDONED, JournalError, read_new_events
 from .last_answers import LastAnswers
 from .runs import RunsError, all_journals, failed_starts, machine_states
+from .index import record_of
 from .live import IDLE_WARNING_MINUTES
 from .status import (
     BAR_CELLS, BAR_COLUMNS, BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, ReaderOf, format_duration, format_tokens,
@@ -165,6 +166,7 @@ class RunRow:
     last_event: datetime | None = None
     unreachable: bool = False
     heard: datetime | None = None
+    record: RunRecord | None = field(default=None, compare=False, repr=False)
 
     def facts(self) -> fleet_rules.RunFacts:
         """The run as the rules of the fleet read it."""
@@ -537,30 +539,25 @@ def _others(
     return ordered, names, lost
 
 
-def _record_of_row(row: RunRow, host: str, now: datetime) -> RunRecord:
-    """The record of a run of this machine, from its row: the snapshot of its journal at `now` (ADR 0008)."""
-    return RunRecord(
-        run_id=row.run_id, host=host, repo=row.repo, started=row.started.isoformat(), state=row.state, tickets_ended=row.tickets_ended,
-        tickets_total=row.tickets_total, eta=row.eta.isoformat() if row.eta else None, heard=now.isoformat(),
-    )
+def _is_older(record: RunRecord, row: RunRow) -> bool:
+    """True when `record` is older than the journal of its run: it was written before the newest event, or it differs from the record that `record_of` makes now.
 
-
-def _is_older(record: RunRecord, row: RunRow, host: str) -> bool:
-    """True when `record` is older than the journal of its run: it was written before the newest event, or its values are not the values of the row."""
+    The ETA and the time of the write are not compared: they change with the clock (#326).
+    """
     try:
         heard = datetime.fromisoformat(record.heard)
     except ValueError:
         return True
     if row.last_event is not None and heard < row.last_event:
         return True
-    return (record.host, record.state, record.tickets_ended, record.tickets_total) != (host, row.state, row.tickets_ended, row.tickets_total)
+    return row.record is not None and replace(record, eta=None, heard="") != replace(row.record, eta=None, heard="")
 
 
-def _record_unrecorded(index: RunIndex, host: str, now: datetime, rows: Sequence[RunRow]) -> str | None:
+def _record_unrecorded(index: RunIndex, rows: Sequence[RunRow]) -> str | None:
     """Write the record of each run of `rows` that has no record in `index`, or an older one (#323). Return the reason of the first failure, or None.
 
     The rows are the listed runs of this machine. A run that failed at start has no journal, so it gets no record. A run of an earlier version, or a run
-    that started with no index, so gets its record. The record is the snapshot of the journal, so the write is safe at any time (ADR 0008).
+    that started with no index, so gets its record. The record is the one that `record_of` makes from the journal, so the write is safe at any time (ADR 0008).
     """
     try:
         recorded = {record.run_id: record for record in index.list_records()}
@@ -568,8 +565,8 @@ def _record_unrecorded(index: RunIndex, host: str, now: datetime, rows: Sequence
             if row.failed_start:
                 continue
             old = recorded.get(row.run_id)
-            if old is None or _is_older(old, row, host):
-                index.record(_record_of_row(row, host, now))
+            if row.record is not None and (old is None or _is_older(old, row)):
+                index.record(row.record)
     except RunIndexError as error:
         return str(error)
     return None
@@ -632,6 +629,7 @@ def fleet_of(
                 snap.tickets_total, eta, snap.tokens_new, snap.tokens_cache,
                 idle_seconds=max(idle) if idle else None, fixup=fixup,
                 trend=fleet_rules.trend_cells(built_times, now), slip_seconds=slip, built=tuple(built_times), last_event=_time(events[-1]),
+                record=record_of(events, journal, Path(repo), now, host=host, snapshot=snap),
             ))
         for start in failed_starts([state]):
             if _in_window(start.changed, now):
@@ -645,7 +643,7 @@ def fleet_of(
     lost: list[LostHost] = []
     problem = None
     if index is not None:
-        problem = _record_unrecorded(index, host, now, rows)
+        problem = _record_unrecorded(index, rows)
     if read_index:
         records: list[RunRecord] = []
         if index is not None:

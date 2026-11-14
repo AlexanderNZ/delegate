@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import socket
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -104,6 +105,41 @@ def test_an_older_record_is_written_again_and_a_record_as_new_as_the_journal_is_
 
     assert (first["tickets_ended"], first["heard"]) == (1, NOW.isoformat())
     assert records(index)[run_id]["eta"] == "kept"
+
+
+def test_a_record_with_the_host_of_run_start_keeps_that_host_when_another_host_reads_and_a_second_command_writes_nothing(machine, capsys, clock):
+    """#326: the host of `run-start` is `ci-box`; the reader is `laptop`. The record keeps `ci-box`, and the next command leaves the file as it is."""
+    started = clock_time(13, 40)
+    path = write_run(machine, "alpha", "aaaa", started, [*built("1", started, clock_time(14, 0)), working("2", clock_time(14, 5))], lock=True, host="ci-box")
+    run_id = path.parent.name
+    index = machine / "index"
+    index.mkdir()
+    engine = {
+        "run_id": run_id, "host": "ci-box", "repo": "alpha", "started": started.isoformat(), "state": "running", "tickets_ended": 0,
+        "tickets_total": 2, "eta": None, "heard": clock_time(14, 1).isoformat(),
+    }
+    (index / f"{run_id}.json").write_text(json.dumps(engine))
+
+    runs(capsys, "--local")
+    first = (index / f"{run_id}.json").read_text()
+    clock.at = (NOW + timedelta(minutes=5)).timestamp()
+    runs(capsys, "--local")
+
+    written = json.loads(first)
+    assert {key: value for key, value in written.items() if key not in ("eta", "heard")} == {
+        key: value for key, value in {**engine, "tickets_ended": 1}.items() if key not in ("eta", "heard")
+    }
+    assert written["heard"] == NOW.isoformat()
+    assert (index / f"{run_id}.json").read_text() == first
+
+
+def test_a_run_with_the_host_of_run_start_and_no_record_gets_a_record_with_that_host(machine, capsys):
+    started = clock_time(13, 40)
+    path = write_run(machine, "alpha", "aaaa", started, [*built("1", started, clock_time(14, 0))], lock=True, host="ci-box")
+
+    runs(capsys, "--local")
+
+    assert records(machine / "index")[path.parent.name]["host"] == "ci-box"
 
 
 def test_a_run_that_ended_before_the_window_gets_no_record(machine, capsys):

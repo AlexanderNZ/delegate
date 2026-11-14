@@ -19,9 +19,9 @@ def clock_time(hours: int, minutes: int, days_back: int = 0) -> datetime:
 
 def write_run(
     root: Path, repo: str, short: str, started: datetime, events: list[tuple[datetime, str, dict[str, object]]],
-    tickets: tuple[str, ...] = ("1", "2"), adapter: str = "scripted", lock: bool = False,
+    tickets: tuple[str, ...] = ("1", "2"), adapter: str = "scripted", lock: bool = False, host: str | None = None,
 ) -> Path:
-    """Write the journal of the run `<started>-<short>` in the state directory `<root>/<repo>-<key>`, and return its path."""
+    """Write the journal of the run `<started>-<short>` in the state directory `<root>/<repo>-<key>`, and return its path. `host` is the host of `run-start`; with None, `run-start` has no host."""
     run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{short}"
     path = root / f"{repo}-0123456789ab" / "runs" / run_id / "journal.jsonl"
     path.parent.mkdir(parents=True)
@@ -29,6 +29,8 @@ def write_run(
         "run_id": run_id, "workflow": "/w/workflow.toml", "mode": "assure", "adapter": adapter, "base_branch": "main",
         "run_branch": "run/demo", "tickets": list(tickets),
     }
+    if host is not None:
+        start["host"] = host
     lines = []
     for seq, (at, name, fields) in enumerate([(started, "run-start", start), *events], start=1):
         lines.append(json.dumps({"seq": seq, "time": at.isoformat(), "event": name, **fields}))
