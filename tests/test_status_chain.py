@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -350,3 +350,79 @@ def test_the_table_of_a_chain_with_a_fix_up_round_and_no_retry_shows_the_round(t
 
     assert (chain["state"], chain["phase"], chain["fixup_round"], chain["elapsed_seconds"]) == ("running", "gates", 1, 700)
     assert "gates ●" in row and "1/2" in row and "11m40s" in row
+
+
+def a_run_whose_first_pass_of_the_chain_was_rejected_and_whose_retry_runs_the_verifier(run: Run) -> None:
+    """Two stacks: ticket a is the only ticket of docs, ticket b is the only ticket of python and the tip of the chain.
+
+    The chain verifier rejected the first stack and the run ended failed. A resume and a retry of the tip with `--stack-changed`
+    revived the two tickets. The chain gates ran green, then the verifier of the new pass started on ticket a, the last ticket
+    of the first stack.
+    """
+    for ticket, stack, start in (("a", "docs", 0), ("b", "python", 100)):
+        run.add(start, "step-start", ticket=ticket, stack=stack, branch=f"run/demo-{ticket}", worktree=f"/w/{ticket}",
+                base_commit="0" * 40, agent="x", tier="strong", model="m")
+        run.add(start + 100, "step-end", ticket=ticket, state="built", reason=None)
+    chain_gate_starts(run, 300, ticket="a")
+    run.add(310, "gate-result", ticket="a", round=0, phase="chain", command=CHAIN_GATE, commit="3", exit_status=0, green=True, output_tail="")
+    run.add(320, "verify-start", ticket="a", round=0, agent="v", tier="verifier", model="m", commit="3", copy="/c", stack="docs", tickets=["a"])
+    run.agent_start(320, "a", "verifier", run.stream("first.stream.jsonl", claude("finished.jsonl")))
+    run.add(400, "adapter-result", ticket="a", exit_status=0, end_state="finished", session_id=None, event_stream=str(run.streams / "first.stream.jsonl"))
+    run.add(401, "verdict", ticket="a", round=0, mode="full", verdict="REJECT", findings=["a: x"], unverified=[], report="/r",
+            stack="docs", tickets=["a"], mapped={"a": ["a: x"]}, unmapped=[])
+    run.add(402, "step-end", ticket="a", state="failed", reason="rejected: a: x")
+    run.add(403, "run-end", result="failed", built=["b"], failed=["a"], skipped=[])
+    run.add(1000, "resume", run_id="r1", built=["b"], failed=["a"], skipped={}, open="a")
+    run.add(1001, "retry", ticket="b", phase="chain", round=0, reason="the stack changed", revived=["a", "b"])
+    run.add(1001, "step-end", ticket="a", state="built", reason=None)
+    run.add(1001, "step-end", ticket="b", state="built", reason=None)
+    chain_gate_starts(run, 1100, ticket="a")
+    run.add(1110, "gate-result", ticket="a", round=0, phase="chain", command=CHAIN_GATE, commit="3", exit_status=0, green=True, output_tail="")
+    run.add(1120, "verify-start", ticket="a", round=0, agent="v", tier="verifier", model="m", commit="3", copy="/c", stack="docs", tickets=["a"])
+    run.agent_start(1120, "a", "verifier", run.stream("second.stream.jsonl", ""))
+
+
+def test_after_a_retry_of_the_tip_the_chain_row_shows_the_new_pass_and_not_the_rejected_first_pass(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a", "b", mode="economy")
+    a_run_whose_first_pass_of_the_chain_was_rejected_and_whose_retry_runs_the_verifier(run)
+    frozen(monkeypatch, 1300)
+
+    (chain,) = snapshot(repo, capsys)["chains"]
+    row = chain_row_of(status_lines(repo, capsys), "docs")
+
+    # The new pass started at the first chain gate after the retry (1100 s), 200 s before the clock.
+    assert (chain["stack"], chain["state"], chain["phase"], chain["verdict"], chain["elapsed_seconds"]) == ("docs", "running", "verifier", None, 200)
+    assert (chain["tokens_new"], chain["tokens_cache"]) == (0, 0)
+    assert "rejected" not in row and "verifier" in row
+
+
+def test_after_a_retry_of_the_tip_the_eta_counts_the_chain_from_its_first_event_after_the_retry(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a", "b", mode="economy")
+    a_run_whose_first_pass_of_the_chain_was_rejected_and_whose_retry_runs_the_verifier(run)
+    frozen(monkeypatch, 1300)
+
+    snap = snapshot(repo, capsys)
+
+    # The steps of the tickets took 100 s (a) and 901 s (b), so the mean is 500.5 s. One unit is left, the chain, which ran 200 s.
+    assert snap["eta"] is not None
+    assert datetime.fromisoformat(snap["eta"]) == START + timedelta(seconds=1300 + 300)
+
+
+def test_after_a_retry_of_the_tip_no_ticket_shows_the_verdict_of_the_first_pass(tmp_path, capsys, monkeypatch):
+    repo = bare_repo(tmp_path)
+    run = Run(repo, "r1", "a", "b", mode="economy")
+    a_run_whose_first_pass_of_the_chain_was_rejected_and_whose_retry_runs_the_verifier(run)
+    frozen(monkeypatch, 1300)
+
+    status = status_lines(repo, capsys)
+    rows = [line for line in status if line.split()[:1] in (["1"], ["2"])]
+
+    assert [line.split()[2] for line in rows] == ["a", "b"]
+    assert "REJECT" not in "\n".join(status)
+
+
+def chain_row_of(lines: list[str], stack: str) -> str:
+    (row,) = [line for line in lines if stack in line and "run/demo" not in line and line.split()[:1] not in (["1"], ["2"])]
+    return row

@@ -6,6 +6,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+### Fixed
+
+- `delegate status` and `delegate watch` show only the new pass of an `economy` chain after a retry (#304). After `delegate run --resume <run id> --retry <tip>`, the chain rows, the phase and the time of the chain, and the `verdict` column read only the events after the newest event that starts a new verification (`domain.starts_chain_verification`), as the engine does. Before, the `retry` named the tip, and the chain of each stack stayed in the group of the last ticket of its stack. The row of the first stack showed `rejected`, with the time and the tokens of the first pass, while the verifier of the new pass ran. The ETA counted the time of the first pass in the time of the chain, and each revived ticket showed the `REJECT` of the first pass. A retry at the chain fix-up keeps its rounds and its time (#297). `status --json` keeps each field and its type.
+
 ## [1.21.1] - 2026-11-11
 
 ### Consumer impact

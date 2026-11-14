@@ -117,12 +117,15 @@ def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> li
         ],
     ]
     states = {t.id: t.state for t in snap.tickets}
+    # An `economy` run reads the verdicts of the chain since its newest restart, as the engine does (#304): a retry that
+    # started the verification again leaves the verdict of the first pass out.
+    verdict_events = _since_chain_restart(events) if domain.chain_units(str(start["mode"])) else events
     facts: dict[str, dict[str, str]] = {}
     for ticket in plan_ids(events):
         own = [e for e in events if e.get("ticket") == ticket]
         # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
         verdicts = [
-            str(e["verdict"]) for e in events
+            str(e["verdict"]) for e in verdict_events
             if e["event"] == "verdict" and (e.get("ticket") == ticket or ticket in e.get("tickets", []))  # type: ignore[operator]
         ]
         branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), "")
@@ -506,15 +509,26 @@ def _chain_phase_of(event: dict[str, object]) -> str | None:
     return PHASE_OF_CHAIN_EVENT.get(kind)
 
 
+def _since_chain_restart(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The events after the newest event that starts a new verification of an `economy` chain, or all events when none does.
+
+    This is the rule of the engine (`domain.starts_chain_verification`, `_verify_stacks`): a `retry`, except a retry at the
+    chain fix-up, and a `plan-change` start the verification again, so the chain rows, the time of the chain and the
+    verdicts of the chain count only the events after them (#304).
+    """
+    starts = [index for index, event in enumerate(events) if domain.starts_chain_verification(event)]
+    return events[starts[-1] + 1 :] if starts else events
+
+
 def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
     """The phase of the verification of an `economy` chain, and the seconds since it started. (None, 0) before it starts.
 
-    The verification starts with the first gate of the chain, and its phase follows the newest `gate-start` or `gate-skip`
-    of the chain gates (`gates`), `verify-start` (`verifier`), or `fixup-start` (`fix-up`). After a fix-up round, the
-    gates of the chain run again, so the phase is `gates` again.
+    The verification starts with the first gate of the chain after the newest restart (`_since_chain_restart`), and its
+    phase follows the newest `gate-start` or `gate-skip` of the chain gates (`gates`), `verify-start` (`verifier`), or
+    `fixup-start` (`fix-up`). After a fix-up round, the gates of the chain run again, so the phase is `gates` again.
     """
     phase, started = None, None
-    for event in events:
+    for event in _since_chain_restart(events):
         found = _chain_phase_of(event)
         if found is not None:
             phase, started = found, started or _time(event)
@@ -533,9 +547,10 @@ def _chains(
 
     The engine names the chain of a stack by the last ticket of the stack: the gates, the verifier and the fix-up rounds
     of the chain carry that ticket. A group is the events of one such ticket from its first event of the chain. A new
-    `step-start` ends its group, and so does a `retry` that starts a new verification (`domain.starts_chain_verification`,
-    the rule of the engine): the chain after it is a new one. A `retry` at the chain fix-up does not, so its group keeps the
-    fix-up rounds and the time before it (#297).
+    `step-start` ends its group. The function reads only the events after the newest event that starts a new verification
+    (`_since_chain_restart`, the rule of the engine): the chain after it is a new one, and the first pass of each stack is
+    gone, also when the `retry` names the tip of the chain and not the last ticket of the stack (#304). A `retry` at the
+    chain fix-up starts no new verification, so its group keeps the fix-up rounds and the time before it (#297).
 
     The chain is `accepted` when its newest verdict is ACCEPT. It is `rejected` when its last ticket failed after the
     chain started (red gates, a crash), when its newest verdict is not ACCEPT and no fix-up follows it and a ticket
@@ -545,13 +560,13 @@ def _chains(
     chain = domain.GATES_OF_CHAIN
     groups: dict[str, list[tuple[int, dict[str, object]]]] = {}
     failures: list[int] = []  # the position of each `step-end` that failed a ticket
-    for index, event in enumerate(events):
+    for index, event in enumerate(_since_chain_restart(events)):
         kind, ticket = str(event["event"]), event.get("ticket")
         if kind == "step-end" and event.get("state") == FAILED:
             failures.append(index)
         if not isinstance(ticket, str):
             continue
-        if kind == "step-start" or domain.starts_chain_verification(event):
+        if kind == "step-start":
             groups.pop(ticket, None)
         elif _chain_phase_of(event) is not None or (ticket in groups and kind in CHAIN_RESULT_EVENTS and event.get("phase", chain) == chain):
             groups.setdefault(ticket, []).append((index, event))
