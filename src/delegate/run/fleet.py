@@ -13,7 +13,8 @@ in the window is listed with the state `failed`. An older run that ended is not 
 The table fits the terminal (C25, #312): `fleet_lines` drops the columns of `FIT_STEPS` until the table fits the width, and folds the
 rows of the ended runs, then a host with no alert and no command, until the lines fit the height.
 
-`fleet_of` reads the journals and gives the `Fleet`. `Fleet.to_json` is the contract of `delegate runs --json`, and
+`fleet_of` reads the journals and gives the `Fleet`. With the same `JournalReads` at each call, as `delegate runs --watch` does (#313), a call reads
+each journal only from the position where the call before stopped, so a redraw does not read each journal from the start. `Fleet.to_json` is the contract of `delegate runs --json`, and
 `fleet_lines` is the table. A journal that cannot be read is skipped, and `Fleet.unreadable` names it with the reason,
 as `delegate status` does.
 """
@@ -179,19 +180,48 @@ def _in_window(ended: datetime, now: datetime) -> bool:
     return (now - ended).total_seconds() <= WINDOW_SECONDS
 
 
-def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf) -> Fleet:
+class JournalReads:
+    """The events that `fleet_of` read from each journal so far, and the byte position after the last of them (#313).
+
+    A new call of `events` for a journal reads only the bytes after that position, and adds the new events to the old ones. A journal
+    that cannot be read keeps its old position, so the next call reads from it again, not from the start.
+    """
+
+    def __init__(self) -> None:
+        self._seen: dict[Path, tuple[list[dict[str, object]], int]] = {}
+
+    def events(self, journal: Path) -> list[dict[str, object]]:
+        """All the events of the journal. Raise JournalError as `journal.read_new_events` does."""
+        events, offset = self._seen.get(journal, ([], 0))
+        new, offset = read_new_events(journal, offset, len(events) + 1)
+        events.extend(new)
+        self._seen[journal] = (events, offset)
+        return events
+
+    def keep_only(self, journals: set[Path]) -> None:
+        """Forget each journal that is not in `journals`: a run that was cleaned away."""
+        for journal in set(self._seen) - journals:
+            del self._seen[journal]
+
+
+def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: JournalReads | None = None) -> Fleet:
     """The runs of the machine under the state root `root`. `host` is the name of the machine, and `now` is the time of the clock, in UTC.
+
+    `reads` holds what an earlier call read (`JournalReads`); with None, each journal is read from the start.
 
     The order is the order of the table: the runs with no `run-end`, newest start first, then the runs that ended,
     newest end first. Raise RunsError when a lock file cannot be read.
     """
+    reads = JournalReads() if reads is None else reads
     rows: list[RunRow] = []
     unreadable: list[tuple[Path, str]] = []
+    listed: set[Path] = set()
     for state in machine_states(root):
         repo = repository_name(state)
         for journal in all_journals([state]):
+            listed.add(journal)
             try:
-                events, _ = read_new_events(journal, 0, 1)
+                events = reads.events(journal)
                 end = newest_run_end(events)
                 if end is not None and not _in_window(_time(end), now):
                     continue  # an older run that ended is not listed, and its streams are not read
@@ -215,6 +245,7 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf) -> Fleet
         for start in failed_starts([state]):
             if _in_window(start.changed, now):
                 rows.append(RunRow(start.run_id, repo, host, FAILED, start.changed, start.changed, 0, 0, None, None, None, failed_start=True))
+    reads.keep_only(listed)
     working = sorted((row for row in rows if row.ended is None), key=lambda row: row.started, reverse=True)
     ended = sorted((row for row in rows if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
     return Fleet(host, now, tuple(working + ended), tuple(unreadable))

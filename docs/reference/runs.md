@@ -1,7 +1,7 @@
 ---
 man: DELEGATE-RUNS(1)
 man_name: "delegate-runs — list the runs of this machine"
-synopsis: "delegate runs [--json]"
+synopsis: "delegate runs [--json | --watch]"
 ---
 
 # Reference: `delegate runs`
@@ -9,7 +9,7 @@ synopsis: "delegate runs [--json]"
 `delegate runs` lists each [**run**](../glossary.md#run) of this machine in one table, across each repository. It reads the [**journal**](../glossary.md#journal) of each run, and the lock of each [**run branch**](../glossary.md#run-branch), from each [**state directory**](../glossary.md#state-directory) under the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`). Each repository has one directory there. The command needs no git repository, so you can run it from any directory.
 
 ```
-delegate runs [--json]
+delegate runs [--json | --watch]
 ```
 
 <!-- generated:begin runs-options -->
@@ -17,7 +17,8 @@ delegate runs [--json]
 
 | Option | Meaning |
 |---|---|
-| `--json` | Print one object as JSON: the format, the host, the time, the window, and one object for each listed run. |
+| `--json` | Print one object as JSON: the format, the host, the time, the window, and one object for each listed run; cannot be used with --watch. |
+| `--watch` | Redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json. |
 
 <!-- generated:end runs-options -->
 
@@ -132,6 +133,17 @@ A host with an alert or a command does not fold to its totals row. When the line
 
 **Colour and glyphs.** With `NO_COLOR` set and not empty, or when standard output is not a terminal, the output has no colour code. When the locale is not UTF-8, each glyph is its ASCII glyph, and each ASCII glyph has the width of the Unicode glyph, so the columns are in the same positions. The title of the terminal is not a colour code: `DELEGATE_NO_TITLE=1` turns it off.
 
+## The option `--watch`
+
+`delegate runs --watch` shows the same view, and redraws it in place once a second, the poll rate of `delegate watch`. The command lists the state root again at each redraw, so a run that starts, or that is cleaned away, shows or goes at the next redraw. It reads each journal again only from the position where it stopped, not from the start.
+
+- The frame replaces itself in place. The command does not use the alternate screen, so the last frame stays in the scrollback. The first frame hides the cursor, and each end of the command shows it again.
+- A redraw writes only the lines that changed, and nothing when the frame is the frame before, as the live view of `delegate watch` does. The view has no spinner.
+- The command reads the size of the terminal at each redraw, so the frame follows a new size. It fits the width and the height as [Fit to the terminal](#fit-to-the-terminal) says.
+- A journal that cannot be read goes on stderr one time. The command names it before the first frame when the first read finds it. A journal that breaks later is named after the last frame, so no line of stderr breaks a frame.
+- Ctrl-C, SIGTERM and SIGHUP end the command. It prints `delegate: interrupted` on stderr and exits with 130, with no traceback.
+- When standard output is not a terminal, the command prints `delegate runs: --watch needs a terminal` on stderr and exits with 2. `--watch` and `--json` exclude each other.
+
 ## The JSON object
 
 `--json` prints one object. The object is a contract with a version: a later version can add a field, and a change to a field needs a new `format`.
@@ -192,4 +204,5 @@ A host with an alert or a command does not fold to its totals row. When the line
 | Code | Condition |
 |---|---|
 | 0 | The command printed the table or the object, also when no run is listed. |
-| 2 | The state root is not an absolute path, or a lock file cannot be read. |
+| 2 | The state root is not an absolute path, a lock file cannot be read, or `--watch` has no terminal for standard output. |
+| 130 | Ctrl-C ended `--watch`. |
