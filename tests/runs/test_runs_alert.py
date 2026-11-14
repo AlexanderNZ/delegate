@@ -7,6 +7,7 @@ the legend shows. The expected words come from the ticket and the copy deck (W8.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -165,3 +166,30 @@ def test_the_legend_drops_under_100_columns(machine, capsys, monkeypatch):
 
     assert "delegate watch <run>" not in out
     assert "git merge" not in out
+
+
+def failed_start(root) -> None:
+    """A run that failed at start: it has a log and no journal. The log last changed at 13:30."""
+    log = root / "theta-0123456789ab" / "runs" / "20261114T133000Z-ssss" / "run.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("delegate run: the workflow file is missing\n")
+    stamp = clock_time(13, 30).timestamp()
+    os.utime(log, (stamp, stamp))
+
+
+def test_the_json_of_each_run_has_the_idle_seconds_the_fix_up_round_the_fix_up_limit_and_the_failed_start_as_values(machine, capsys):
+    every_kind(machine)
+    failed_start(machine)
+
+    code, out, _ = runs(capsys, "--json")
+
+    found = {run["run_id"][-4:]: run for run in json.loads(out)["runs"]}
+    values = {short: (run["idle_seconds"], run["fixup_round"], run["fixup_limit"], run["failed_start"]) for short, run in found.items()}
+    assert (code, json.loads(out)["format"]) == (0, 1)
+    assert values == {
+        "iiii": (600, None, None, False),  # idle since 14:10, now 14:20
+        "ffff": (None, 1, 2, False),
+        "pppp": (None, None, None, False), "llll": (None, None, None, False), "bbbb": (None, None, None, False), "rrrr": (None, None, None, False),
+        "ssss": (None, None, None, True),
+    }
+    assert found["ssss"]["alert"] is None

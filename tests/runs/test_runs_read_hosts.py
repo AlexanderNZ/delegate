@@ -9,7 +9,9 @@ directory of the directory backend. The clock is `NOW`, 14:20.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -21,6 +23,7 @@ from delegate.run import fleet
 
 from ..support import Terminal, fake_clock, frames
 from .journals import NOW, clock_time, runs
+from .test_runs_alert import every_kind, failed_start
 from .test_runs_hosts import index, record, this_machine, two_other_hosts
 from .test_runs_watch import ctrl_c, watching
 
@@ -63,14 +66,16 @@ def row_of(lines: list[str], start: str) -> list[str]:
 
 def run_of(
     host: str, repo: str, short: str, state: str, ended: int, total: int, eta: str | None = "16:05", tokens: tuple[int, int] = (20_000, 500_000),
-    alert: str | None = None, do: str | None = None, trend: tuple[int, ...] = (0, 0, 1, 1, 1, 0),
+    alert: str | None = None, do: str | None = None, trend: tuple[int, ...] = (0, 0, 1, 1, 1, 0), idle_seconds: int | None = None,
+    fixup: tuple[int, int] | None = None, failed_start: bool = False,
 ) -> dict[str, object]:
-    """One run of the document of a host. It started at 12:00, and it has not ended."""
+    """One run of the document of a host. It started at 12:00, and it has not ended. `alert` is the text for a person; the reader uses `idle_seconds`, `fixup` and `failed_start`."""
     started = clock_time(12, 0)
     return {
         "run_id": f"{started.strftime('%Y%m%dT%H%M%SZ')}-{short}", "repo": repo, "host": host, "state": state, "started": started.isoformat(), "ended": None,
         "tickets_ended": ended, "tickets_total": total, "eta": clock_time(*map(int, eta.split(":"))).isoformat() if eta else None,
         "tokens_new": tokens[0], "tokens_cache": tokens[1], "alert": alert, "do": do, "trend": list(trend), "slip_seconds": None,
+        "idle_seconds": idle_seconds, "fixup_round": fixup[0] if fixup else None, "fixup_limit": fixup[1] if fixup else None, "failed_start": failed_start,
     }
 
 
@@ -120,7 +125,7 @@ def test_the_alert_of_a_run_of_another_host_shows_and_counts_in_trouble(machine,
     """The document has an alert `⚠ idle 6m40s` and the word `watch`: the row shows both, the second fleet line counts one run in trouble."""
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
-    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6, alert="⚠ idle 6m40s", do="watch")))
+    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6, alert="⚠ idle 6m40s", idle_seconds=400, do="watch")))
 
     code, out, err = runs(capsys)
 
@@ -133,7 +138,7 @@ def test_the_alert_of_a_run_of_another_host_shows_and_counts_in_trouble(machine,
 def test_the_legend_line_for_another_host_shows_when_a_host_other_than_this_machine_has_a_do_word(machine, index, ssh, capsys):
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
-    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6, alert="⚠ idle 6m40s", do="watch")))
+    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6, alert="⚠ idle 6m40s", idle_seconds=400, do="watch")))
 
     _, out, _ = runs(capsys)
 
@@ -442,3 +447,51 @@ def test_sigint_during_a_read_that_hangs_exits_130_in_less_than_one_second_and_n
     assert (process.returncode, err.decode()) == (130, "delegate: interrupted\n")
     assert took < 1
     assert group_is_gone(ssh.pids[0])
+
+
+def rest_of(out: str, short: str) -> list[str]:
+    """The cells of the row of a run after its `run` cell: the same for the run of this machine and for the run of another host."""
+    line = next(line for line in out.splitlines() if re.search(rf"\s{short}\s", line))
+    return line.split(None, 3)[3].split()
+
+
+def test_the_reader_shows_the_same_alert_and_do_word_from_the_fields_as_the_host_that_wrote_them(machine, index, ssh, tmp_path, monkeypatch, capsys):
+    """A host has an idle agent, a fix-up round, a run that is paused, a run that failed at start, and a run that works with nothing wrong. Its document is the one that `--local --json` writes."""
+    every_kind(machine)
+    failed_start(machine)
+    _, written, _ = runs(capsys)
+    _, text, _ = runs(capsys, "--local", "--json")
+    found = json.loads(text)
+    found["host"] = "build-host"
+    for run in found["runs"]:
+        run["host"] = "build-host"
+        run.pop("alert")  # the reader takes the values from the fields: it does not need the text
+    elsewhere = tmp_path / "other-root"
+    elsewhere.mkdir()
+    monkeypatch.setenv("DELEGATE_STATE_ROOT", str(elsewhere))
+    record(index, "build-host", "alpha", "iiii", "running", 0, 2, 47)
+    ssh.serves("build-host", found)
+
+    code, read, err = runs(capsys)
+
+    shorts = ("iiii", "ffff", "pppp", "llll", "bbbb", "rrrr", "ssss")
+    assert (code, err) == (0, "")
+    for short in shorts:
+        assert rest_of(read, short) == rest_of(written, short), short
+    assert "⚠ idle 10m00s" in read and "fix-up 1/2" in read and "failed at start" in read
+
+
+def test_a_document_whose_run_has_no_alert_fields_is_a_document_that_this_version_cannot_read(machine, index, ssh, capsys):
+    """The reader takes the alert from the fields and never from the text, so a run with only the text of the alert is not read."""
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    old = run_of("build-host", "docs-site", "a41e", "running", 3, 6, alert="⚠ idle 6m40s", do="watch")
+    for name in ("idle_seconds", "fixup_round", "fixup_limit", "failed_start"):
+        del old[name]
+    ssh.serves("build-host", document("build-host", old))
+
+    code, out, err = runs(capsys)
+
+    lines = out.splitlines()
+    assert (code, err) == (0, "")
+    assert reason_of(lines, "build-host") == "build-host gave a document that this version of delegate cannot read"

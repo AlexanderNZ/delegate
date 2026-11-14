@@ -86,20 +86,21 @@ def test_the_json_object_has_the_format_the_host_the_window_and_each_listed_run_
                 "run_id": "20261114T134000Z-aaaa", "repo": "alpha", "host": "laptop", "state": "running",
                 "started": "2026-11-14T13:40:00+00:00", "ended": None, "tickets_ended": 1, "tickets_total": 2, "eta": None,
                 "tokens_new": 12000, "tokens_cache": 340000, "alert": None, "do": None, "trend": [0, 0, 0, 0, 0, 1],
-                "slip_seconds": None,
+                "slip_seconds": None, "idle_seconds": None, "fixup_round": None, "fixup_limit": None, "failed_start": False,
             },
             {
                 "run_id": "20261114T125000Z-bbbb", "repo": "beta", "host": "laptop", "state": "built",
                 "started": "2026-11-14T12:50:00+00:00", "ended": "2026-11-14T13:20:00+00:00", "tickets_ended": 1,
                 "tickets_total": 1, "eta": None, "tokens_new": 2000, "tokens_cache": 50000, "alert": None, "do": "merge",
                 "trend": [0, 0, 0, 0, 1, 0],  # the ticket ended at 13:20: 1 hour ago, so the hour 12:20–13:20
-                "slip_seconds": None,
+                "slip_seconds": None, "idle_seconds": None, "fixup_round": None, "fixup_limit": None, "failed_start": False,
             },
         ],
     }
     assert list(json.loads(out)) == ["format", "host", "time", "window_seconds", "runs"]
     assert list(json.loads(out)["runs"][0]) == [
         "run_id", "repo", "host", "state", "started", "ended", "tickets_ended", "tickets_total", "eta", "tokens_new", "tokens_cache", "alert", "do", "trend", "slip_seconds",
+        "idle_seconds", "fixup_round", "fixup_limit", "failed_start",
     ]
 
 

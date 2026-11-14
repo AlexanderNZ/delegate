@@ -301,7 +301,11 @@ The command fits the lanes to the width of the terminal only as far as the cell 
       "alert": null,
       "do": null,
       "trend": [0, 0, 0, 0, 0, 1],
-      "slip_seconds": null
+      "slip_seconds": null,
+      "idle_seconds": null,
+      "fixup_round": null,
+      "fixup_limit": null,
+      "failed_start": false
     }
   ]
 }
@@ -329,6 +333,12 @@ The command fits the lanes to the width of the terminal only as far as the cell 
 | `do` | The word of the column `do`, or `null`. |
 | `trend` | The 6 counts of the trend of the run: the tickets that ended built in each hour of the window, oldest first. |
 | `slip_seconds` | The slip of the ETA in seconds, or `null` when the column `slip` is blank. |
+| `idle_seconds` | The seconds that the longest idle agent of the run has been idle, when `alert` is `⚠ idle <time>`. Otherwise `null`. |
+| `fixup_round` | The round of the fix-up round that runs, when `alert` is `fix-up <round>/<limit>`. Otherwise `null`. |
+| `fixup_limit` | The limit of the rounds of the fix-up round that runs, when `alert` is `fix-up <round>/<limit>`. Otherwise `null`. |
+| `failed_start` | `true` for a run that failed at start, `false` for any other run. The table shows the alert `failed at start` for it, and `alert` is `null`. |
+
+A reader of the document takes the alert from `idle_seconds`, `fixup_round`, `fixup_limit` and `failed_start`, and parses no text. `alert` is the text for a person: a later version can change its words, its glyph or its duration format with no change of `format`. `delegate runs` reads the document of another host in this way, so each of the four fields must be in each run. A document without them is a document that this version cannot read, and its host is `unreachable`.
 
 ## Exit codes
 

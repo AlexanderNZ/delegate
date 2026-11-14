@@ -199,14 +199,17 @@ class RunRow:
         return fleet_rules.next_command(self.facts(), self.alert() is not None)
 
     def to_json(self) -> dict[str, object]:
+        """The document of one run. `idle_seconds`, `fixup_round` and `fixup_limit` are the values of the one alert in `alert` (#329), or None, so a reader works out its own alert from them and parses no text."""
         found = self.alert()
+        idle = found.seconds if found is not None and found.kind == fleet_rules.IDLE else None
+        round_of, limit_of = (found.round, found.limit) if found is not None and found.kind == fleet_rules.FIXUP else (None, None)
         return {
             "run_id": self.run_id, "repo": self.repo, "host": self.host, "state": self.state,
             "started": self.started.isoformat(), "ended": self.ended.isoformat() if self.ended else None,
             "tickets_ended": self.tickets_ended, "tickets_total": self.tickets_total,
             "eta": self.eta.isoformat() if self.eta else None, "tokens_new": self.tokens_new, "tokens_cache": self.tokens_cache,
             "alert": None if found is None else alert_text(found, output.UNICODE.idle), "do": self.do(), "trend": list(self.trend),
-            "slip_seconds": self.slip_seconds,
+            "slip_seconds": self.slip_seconds, "idle_seconds": idle, "fixup_round": round_of, "fixup_limit": limit_of, "failed_start": self.failed_start,
         }
 
 
@@ -434,13 +437,6 @@ class HostReads:
         return None if found is None else (found.heard, found.document)
 
 
-# The alert of a run in a document (copy deck W8.alert.*): `⚠ idle 6m40s` or `fix-up 1/2`. The duration is `format_duration`: `45s`, `12m05s`, `2h03m` or `3d04h`.
-_IDLE_ALERT = re.compile(r"\S+ idle ((?:\d+[dhms])+)")
-_FIXUP_ALERT = re.compile(r"fix-up (\d+)/(\d+)")
-_DURATION_PART = re.compile(r"(\d+)([dhms])")
-_UNIT_SECONDS: dict[str, int] = {"d": 86400, "h": 3600, "m": 60, "s": 1}
-
-
 def _count(value: object) -> int:
     """A count of a document: a whole number, and not a boolean. Raise ValueError for anything else."""
     if type(value) is not int:
@@ -456,25 +452,31 @@ def _moment(value: object) -> datetime:
     return moment
 
 
-def _alert_facts(alert: object) -> tuple[int | None, tuple[int, int] | None]:
-    """The idle seconds and the fix-up round of the alert text of a document, as `RunRow.idle_seconds` and `RunRow.fixup` hold them."""
-    if alert is None:
-        return None, None
-    text = str(alert)
-    idle = _IDLE_ALERT.fullmatch(text)
-    if idle:
-        return sum(int(count) * _UNIT_SECONDS[unit] for count, unit in _DURATION_PART.findall(idle.group(1))), None
-    fixup = _FIXUP_ALERT.fullmatch(text)
-    if fixup:
-        return None, (int(fixup.group(1)), int(fixup.group(2)))
-    raise ValueError(f"{text!r} is not an alert")
+def _optional_count(value: object) -> int | None:
+    """A count of a document that can be `null`: a whole number, or None. Raise ValueError for anything else."""
+    return None if value is None else _count(value)
+
+
+def _flag(value: object) -> bool:
+    """A flag of a document: true or false. Raise ValueError for anything else."""
+    if type(value) is not bool:
+        raise ValueError(f"{value!r} is not true or false")
+    return value
+
+
+def _fixup_of(round_of: object, limit_of: object) -> tuple[int, int] | None:
+    """The fix-up round and its limit of a document, as `RunRow.fixup` holds them: both numbers, or both `null`. Raise ValueError for one number."""
+    found = (_optional_count(round_of), _optional_count(limit_of))
+    if (found[0] is None) != (found[1] is None):
+        raise ValueError("fixup_round and fixup_limit are not both set or both null")
+    return None if found[0] is None or found[1] is None else (found[0], found[1])
 
 
 def _live_run(item: object, host: str, taken: datetime) -> RunRow:
     """The row of one run of the document of a host. Raise ValueError, KeyError or TypeError for a run that this version cannot read.
 
-    The values the document holds are the values of the host at `taken`. The fields that older hosts do not write (`tokens_new`,
-    `tokens_cache`, `trend`, `slip_seconds`, `alert`) can be missing. The rows are of the group `host`, the name that the index has for it.
+    The values the document holds are the values of the host at `taken`. The alert comes from the fields `idle_seconds`, `fixup_round`, `fixup_limit`
+    and `failed_start` (#329): the reader parses no text. The fields `tokens_new`, `tokens_cache`, `trend` and `slip_seconds` can be missing. The rows are of the group `host`, the name that the index has for it.
     """
     if not isinstance(item, dict):
         raise TypeError("a run is not an object")
@@ -486,12 +488,13 @@ def _live_run(item: object, host: str, taken: datetime) -> RunRow:
     if len(trend) != fleet_rules.TREND_HOURS:
         raise ValueError("trend has the wrong number of cells")
     slip = item.get("slip_seconds")
-    idle, fixup = _alert_facts(item.get("alert"))
+    idle = _optional_count(item["idle_seconds"])
+    fixup = _fixup_of(item["fixup_round"], item["fixup_limit"])
     tokens = [item.get(name) for name in ("tokens_new", "tokens_cache")]
     return RunRow(
         str(item["run_id"]), str(item["repo"]), host, state, _moment(item["started"]), ended, _count(item["tickets_ended"]), total, eta,
         *(None if count is None else _count(count) for count in tokens),
-        failed_start=state == FAILED and total == 0, idle_seconds=idle, fixup=fixup, trend=trend,
+        failed_start=_flag(item["failed_start"]), idle_seconds=idle, fixup=fixup, trend=trend,
         slip_seconds=None if slip is None else _count(slip), last_event=taken,
     )
 
