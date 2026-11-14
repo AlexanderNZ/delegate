@@ -11,7 +11,8 @@ The run state holds:
   skipped it, and whether an `unskip` made it pending (`TicketState`);
 * the open ticket, or none;
 * the state of the run, and the event that gives it (`RunStatus`);
-* the current pass of the chain verification (`ChainPass`).
+* the current pass of the chain verification (`ChainPass`);
+* whether the run cannot be resumed for good, with its event (`Unresumable`, #358).
 
 The three rules where the folds of the engine and of the views differed before this module are in `_tickets` and `_status`:
 
@@ -110,14 +111,60 @@ class ChainPass:
     advanced: bool
 
 
+# The events that end a run for good: no resume goes on with it, also not with `--retry` or a plan change.
+UNRESUMABLE_EVENTS: tuple[str, ...] = ("invariant-violation", "run-branch-moved")
+
+# The `kind` of an `invariant-violation` that another writer of the journal caused (#291). The module `events` holds the
+# same value (`JOURNAL_CHANGED`): a pure module imports no other module.
+_JOURNAL_CHANGED: str = "journal-changed"
+
+
+@dataclass(frozen=True)
+class Unresumable:
+    """The fact that a run cannot be resumed (#358): an `invariant-violation` or a `run-branch-moved` ended it for good.
+
+    `event` is the newest such event of the journal. A stop of the harness (`halted`) is no such fact: a resume goes on
+    with a run that it stopped.
+    """
+
+    event: Mapping[str, object]
+
+    @property
+    def reason(self) -> str:
+        """Why the run cannot be resumed, from the fields of the event. The text does not hold the advice to start a new run."""
+        event = self.event
+        if event["event"] == "run-branch-moved":
+            return moved_text(str(event["run_branch"]), str(event["expected"]), str(event["found"]))
+        if event.get("kind") == _JOURNAL_CHANGED:
+            return f"an invariant violation ended the run: another writer changed the journal {event['journal']} at byte {event['offset']}"
+        changes = "; ".join(str(change) for change in event["changes"])  # type: ignore[attr-defined]
+        return (
+            f"an invariant violation ended the run at ticket {event['ticket']!r}: "
+            f"the verifier changed the real worktree {event['worktree']}: {changes}"
+        )
+
+
+def moved_text(run_branch: str, expected: str, found: str) -> str:
+    """The text of a moved run branch: where it is, where the journal says it is, and what that means."""
+    return (
+        f"the run branch {run_branch} is at {found}, but the journal says it is at {expected}; "
+        "a commit that the engine did not advance to is on the run branch"
+    )
+
+
 @dataclass(frozen=True)
 class RunState:
-    """What the journal of a run says: its tickets, its open ticket, its state, and the current pass of its chain."""
+    """What the journal of a run says: its tickets, its open ticket, its state, and the current pass of its chain.
+
+    `unresumable` is set when the run cannot be resumed (see `Unresumable`). It does not depend on the state: a run that
+    an invariant violation or a moved run branch ended has the state `ended`, with the result `failed`.
+    """
 
     tickets: tuple[TicketState, ...]
     open_ticket: str | None
     status: RunStatus
     chain: ChainPass
+    unresumable: Unresumable | None = None
 
     @property
     def run_end(self) -> Mapping[str, object] | None:
@@ -146,7 +193,15 @@ def starts_chain_verification(event: Mapping[str, object]) -> bool:
 
 def fold(events: Sequence[Mapping[str, object]]) -> RunState:
     """The run state of the events of a journal, in order. A list with no event gives a run state with no ticket."""
-    return RunState(*_tickets(events), status=_status(events), chain=_chain(events))
+    return RunState(*_tickets(events), status=_status(events), chain=_chain(events), unresumable=_unresumable(events))
+
+
+def _unresumable(events: Sequence[Mapping[str, object]]) -> Unresumable | None:
+    """The newest event that ends the run for good (`UNRESUMABLE_EVENTS`), or None."""
+    for event in reversed(events):
+        if event["event"] in UNRESUMABLE_EVENTS:
+            return Unresumable(event)
+    return None
 
 
 def _plan(events: Sequence[Mapping[str, object]]) -> list[str]:

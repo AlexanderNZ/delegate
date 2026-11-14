@@ -32,7 +32,7 @@ the step fails. The run branch moves only on ACCEPT.
 The engine checks that. The tip that the journal says is the `to_commit` of the newest `run-branch-advance`, or the
 `base_commit` of `run-start`. Before each rebase onto the run branch, before each fast-forward, before the chain
 verification and at each resume, the engine compares it with the real tip (see `_check_run_branch`). A difference
-writes `run-branch-moved` and halts the run as an invariant violation does: the run cannot be resumed.
+writes `run-branch-moved` and ends the run as an invariant violation does: the run cannot be resumed.
 
 The engine records the HEAD and the status of the worktree of the ticket before
 and after each verifier run (see `guards.py`). A difference is an invariant
@@ -344,7 +344,7 @@ class _Halted(Exception):
 
 
 class _RunBranchMoved(Exception):
-    """The run branch is not where the journal says. The journal holds `run-branch-moved`. The message is the reason the run halts."""
+    """The run branch is not where the journal says. The journal holds `run-branch-moved`. The message is the reason the run ends."""
 
 
 class _Rejected(_StepFailed):
@@ -560,19 +560,12 @@ def _expected_tip(events: list[dict[str, object]]) -> str | None:
     return None if base is None else str(base)
 
 
-def _moved_text(run_branch: str, expected: str, found: str) -> str:
-    return (
-        f"the run branch {run_branch} is at {found}, but the journal says it is at {expected}; "
-        "a commit that the engine did not advance to is on the run branch"
-    )
-
-
 def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_branch: str, ticket: str) -> str:
     """Halt the run when the run branch is not at the tip that the journal says (#186). Return the tip.
 
     The run branch moves only when the engine advances it after an ACCEPT. A difference means that a commit landed with
     no verification. The engine writes `run-branch-moved` (the expected tip and the tip that it found) and raises
-    `_RunBranchMoved`, which halts the run as an invariant violation does. When the tips agree, return the tip that the
+    `_RunBranchMoved`, which ends the run as an invariant violation does. When the tips agree, return the tip that the
     check read, so the caller does not read it again (#239). A journal with no expected tip has no check.
     """
     expected = _expected_tip(journal.events)
@@ -580,7 +573,7 @@ def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_bra
     if expected is None or found == expected:
         return found
     journal.append("run-branch-moved", ticket=ticket, run_branch=run_branch, expected=expected, found=found)
-    raise _RunBranchMoved(_moved_text(run_branch, expected, found))
+    raise _RunBranchMoved(run_state.moved_text(run_branch, expected, found))
 
 
 def _accepted_unrecorded(events: list[dict[str, object]]) -> list[str]:
@@ -620,7 +613,7 @@ def _check_run_branch_at_resume(
     if journal is not None:
         journal.append("run-branch-moved", ticket=None, run_branch=run_branch, expected=expected, found=found)
         journal.append("run-end", result=FAILED, built=built, failed=failed, skipped=list(skipped))
-    raise EngineError(f"run cannot be resumed: {_moved_text(run_branch, expected, found)}; a halted run cannot be resumed: start a new run")
+    raise EngineError(f"run cannot be resumed: {run_state.moved_text(run_branch, expected, found)}; start a new run")
 
 
 def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
@@ -1053,8 +1046,7 @@ class PlanReview:
     run. `missing` holds the later tickets that `--reviewed` does not cover.
     `texts` holds the text of each added or changed ticket. `other` holds the
     problems that are not a rule of the plan: an unknown id in `--reviewed`,
-    the branch of a new ticket that exists already, and a run that an
-    invariant violation halted.
+    and the branch of a new ticket that exists already.
     """
 
     run_id: str
@@ -1131,24 +1123,6 @@ class PlanReview:
         ]
 
 
-def _violation_text(violation: dict[str, object]) -> str:
-    """The text that refuses a resume of a run that an invariant violation halted: the ticket, the worktree and each change.
-
-    For a change of the journal by another writer (#291), the text names the journal and the byte offset of the change.
-    """
-    if violation.get("kind") == JOURNAL_CHANGED:
-        return (
-            f"an invariant violation halted the run: another writer changed the journal {violation['journal']} "
-            f"at byte {violation['offset']}; a halted run cannot be resumed: start a new run"
-        )
-    changes = "; ".join(str(change) for change in violation["changes"])  # type: ignore[union-attr]
-    return (
-        f"an invariant violation halted the run at ticket {violation['ticket']!r}: "
-        f"the verifier changed the real worktree {violation['worktree']}: {changes}; "
-        "a halted run cannot be resumed: start a new run"
-    )
-
-
 def _review(
     workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, reviewed: tuple[str, ...],
     branch_exists: Callable[[str], bool], retry: str | None = None, stack_changed: bool = False,
@@ -1172,8 +1146,6 @@ def _review(
     stack_changes = _check_same_configuration(workflow, workflow_path, events, run_id, stack_changed)
     old_order, new_plan = plan_ids(events), _plan_of(workflow)
     new_order = [t.id for t in new_plan]
-    violations = [event for event in events if event["event"] == "invariant-violation"]
-    halted = [_violation_text(violations[-1])] if violations else []
     old = _recorded_plan(events)
     if old is None:
         if old_order != new_order:
@@ -1182,9 +1154,9 @@ def _review(
                 "the journal of the run records no plan, because an earlier version of delegate started it, "
                 "so a plan change cannot be checked: start a new run"
             )
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted, stack_changes=stack_changes)
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None, stack_changes=stack_changes)
     if old == new_plan:
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None, other=halted, stack_changes=stack_changes)
+        return PlanReview(run_id, workflow.mode, old_order, new_order, None, stack_changes=stack_changes)
     started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
     outcome = next((t.outcome for t in run_state.fold(events).tickets if t.id == retry), None)
     check = domain.check_plan_change(
@@ -1194,7 +1166,6 @@ def _review(
         f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
         for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
     ]
-    other.extend(halted)
     for ticket in workflow.tickets:
         branch = _ticket_branch(workflow, ticket)
         if ticket.id in check.added and branch_exists(branch):
@@ -1585,8 +1556,8 @@ def _retry_plan(
     specialist, gave no valid report that says committed is refused. So is a step that the verifier accepted, or rejected
     after the last fix-up round. For `economy` mode, see `_economy_retry_plan`.
 
-    A run that an invariant violation halted is refused in each mode: the state
-    of the worktree that the verifier changed cannot be trusted.
+    A run that cannot be resumed (an invariant violation or a moved run branch ended it, see `run_state.Unresumable`) is
+    refused in each mode: the state of the worktree that the verifier changed cannot be trusted.
 
     With `restart` the retry changes the text of the ticket, and starts it again
     from its base (see `_restart_step`). It spawns a specialist, so no phase of the
@@ -1604,9 +1575,9 @@ def _retry_plan(
     hotspot path.
     """
     refused = _refused(ticket_id, run_id)
-    violations = [e for e in progress.events if e["event"] == "invariant-violation"]
-    if violations:
-        raise EngineError(f"{refused}: {_violation_text(violations[-1])}")
+    found = run_state.fold(progress.events).unresumable
+    if found is not None:
+        raise EngineError(f"{refused}: {found.reason}; start a new run")
     if ticket_id not in {ticket.id for ticket in workflow.tickets}:
         raise EngineError(f"{refused}: it is not a ticket of the run")
     if ticket_id in progress.built:
@@ -2191,12 +2162,9 @@ def _resume_checks(
     says is also written to it (see `_check_run_branch_at_resume`). With `journal` None the checks change nothing:
     `check_start` makes them before `delegate run --detach` starts the run process, so a refusal is not only in its log (#240).
     """
-    moved = [e for e in events if e["event"] == "run-branch-moved"]
-    if moved:
-        raise EngineError(
-            f"run {run_id!r} cannot be resumed: {_moved_text(workflow.run_branch, str(moved[-1]['expected']), str(moved[-1]['found']))}; "
-            "a halted run cannot be resumed: start a new run"
-        )
+    unresumable = run_state.fold(events).unresumable
+    if unresumable is not None:
+        raise EngineError(f"run {run_id!r} cannot be resumed: {unresumable.reason}; start a new run")
     with _vcs_errors():
         review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry, stack_changed)
     # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.

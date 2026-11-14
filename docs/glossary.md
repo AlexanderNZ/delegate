@@ -228,6 +228,10 @@ A guard probe is a short session that the engine starts to show that the harness
 
 Not: canary, guard check.
 
+## Halted
+
+Halted is the state of a run that a failure of the harness stopped, for example a harness that is not logged in. The journal holds `halted` and no `run-end`, and a resume goes on with the run. A run that cannot be resumed is not halted. See [a failure of the harness](reference/run.md#a-failure-of-the-harness) and [a run that cannot be resumed](#run-that-cannot-be-resumed).
+
 ## Harness
 
 A harness is the tool that runs a coding agent, for example Claude Code or OpenCode. The engine drives each harness through an adapter, so the protocol is the same in every harness. See [what a harness is](explanation/the-concepts-behind-the-words.md#harness) and [the adapters](reference/workflow.md#adapters).
@@ -387,6 +391,10 @@ The run index is a list of runs, one record for each run. Each run writes its re
 ## Run lock
 
 The run lock is a kernel lock on a file that stops a second run on one run branch. The process of the run holds it, and the kernel releases it when that process ends, also after a kill. Two runs cannot race on one branch, and a lock file that no process holds is free. See [the run lock](reference/run.md#the-run-lock).
+
+## Run that cannot be resumed
+
+A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good. The journal holds `invariant-violation` or `run-branch-moved`. No resume goes on with such a run, also not with `--retry` or a plan change. `delegate status` shows the reason in the note, and you start a new run. See [the retry](reference/run.md#the-retry) and [the run branch check](reference/run.md#the-run-branch-check).
 
 ## Sealed agent
 

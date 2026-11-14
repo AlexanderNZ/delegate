@@ -25,8 +25,8 @@ AFTER_A_DETERMINER = {"run", "step", "report", "skill", "resume", "skip", "brief
 # use the term, and "the context of a decision" and "a context window" do not.
 AFTER_A_QUALIFIER = {"context": ("run", "definitions", "bounded", "two", "both")}
 
-# A term that is only ever a state name in code, never a word of the prose.
-NOT_PROSE = {"built"}
+# A term that is a state name in code, or a word that the docs use in its plain sense in prose, and so need no bold link.
+NOT_PROSE = {"built", "halted"}
 
 # A verdict is a term only in capitals: "REJECT" is the verdict, "rejects" is a verb.
 CASE_SENSITIVE = {"accept", "reject"}

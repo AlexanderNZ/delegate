@@ -799,7 +799,7 @@ def snapshot_at(
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
     chains = _chains(events[folded.chain.start :], plan, stacks, activity, now, stopped, run_ended) if chain else []
-    state, note = _state(folded.status, live, pause_request, journal.parent.name)
+    state, note = _state(folded.status, live, pause_request, journal.parent.name, folded.unresumable)
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
         elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
@@ -838,7 +838,9 @@ def _paused_before(stop: run_state.RunStatus) -> tuple[str, str] | None:
     return str(stop.event.get("ticket")), str(stop.event.get("before"))
 
 
-def _state(stop: run_state.RunStatus, live: bool, requested: bool, run_id: str) -> tuple[str, str | None]:
+def _state(
+    stop: run_state.RunStatus, live: bool, requested: bool, run_id: str, unresumable: run_state.Unresumable | None = None,
+) -> tuple[str, str | None]:
     """The state of a run and its note, from the status of its run state (`stop`, ADR 0009).
 
     `live` is True when the run has a live process (a run that ended, paused or halted has one for this function), and
@@ -846,7 +848,8 @@ def _state(stop: run_state.RunStatus, live: bool, requested: bool, run_id: str) 
     a pause request waits and the run is live, `running` while it is live, or `stopped` when it has no live process. The
     note of a halted run is `halt_note`. The note of a stopped run is `stopped_note`, or `journal.crash_note` when a crash
     stopped it (#281), or `journal.setup_problem_note` when the check of the setup stopped it (#296). The note of an
-    abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request
+    abandoned run is `journal.abandon_note`: the state and the reason (#201). The note of a run that ended and cannot be
+    resumed (`unresumable`, #358) is `unresumable_note`: it comes before the note of a pause request, which no resume removes. Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request
     waits and the run has no live process, and None otherwise.
     """
     kind, event = stop.kind, stop.event
@@ -854,6 +857,8 @@ def _state(stop: run_state.RunStatus, live: bool, requested: bool, run_id: str) 
         return HALTED, halt_note(event)  # type: ignore[arg-type]
     if kind in (run_state.ENDED, run_state.PAUSED):
         note = PAUSE_REQUEST_NOTE if requested else None
+        if kind == run_state.ENDED and unresumable is not None and event["result"] != ABANDONED:  # type: ignore[index]
+            note = unresumable_note(unresumable)
         if kind == run_state.PAUSED:
             return PAUSED, note
         if event["result"] == ABANDONED:  # type: ignore[index]
@@ -873,6 +878,11 @@ def stopped_note(run_id: str, requested: bool = False) -> str:
     """The note of a stopped run: no process works on it, and the command that goes on with it."""
     note = f"no process works on the run; go on with delegate run --resume {run_id}"
     return note + ("; the resume removes the pause request that waits" if requested else "")
+
+
+def unresumable_note(found: run_state.Unresumable) -> str:
+    """The note of a run that cannot be resumed (#358): why, and that the person starts a new run."""
+    return f"cannot be resumed: {found.reason}; start a new run"
 
 
 def halt_note(halt: dict[str, object]) -> str:
