@@ -27,6 +27,7 @@ nav = [
     { "Give the agents an MCP server" = "how-to/give-the-agents-an-mcp-server.md" },
     { "Run an economy chain" = "how-to/run-an-economy-chain.md" },
     { "Watch and resume a run" = "how-to/watch-and-resume-a-run.md" },
+    { "See the runs of more than one host" = "how-to/see-the-runs-of-more-than-one-host.md" },
     { "Point the tiers at a gateway" = "how-to/point-the-tiers-at-a-gateway.md" },
     { "Add a harness adapter" = "how-to/add-a-harness-adapter.md" },
     { "Use the kit after to-spec and to-tickets" = "how-to/use-the-kit-after-to-spec-and-to-tickets.md" },

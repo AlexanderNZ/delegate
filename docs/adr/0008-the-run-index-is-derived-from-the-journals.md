@@ -1,8 +1,8 @@
 # ADR 0008: The run index is derived from the journals
 
-- Status: accepted
+- Status: accepted, amended 2026-11-14 (#323)
 - Date: 2026-11-14
-- Applies to: the engine, the run index port, and `delegate runs`
+- Applies to: the engine, the run index port, `delegate runs`, and the configuration file of the user
 
 ## Context
 
@@ -34,3 +34,32 @@ The record holds `run_id`, `host`, `repo` (the name of the repository, not its p
 - A record shows the state at the last write. A run that a kill stopped keeps its last record until a later write or a command forgets it.
 - `index-warning` is written after the event that it follows. A warning after `run-end`, `paused` or `halted` does not continue the run, as `cleanup` after `run-end` does not.
 - A second backend, for example a service, is another adapter of the same port. The engine does not change.
+
+## Amendment (#323): the index is on by default
+
+### Context
+
+The engine wrote a record only when `DELEGATE_INDEX` was set in the environment of the process that started the run. A run that a shell, a service or an agent started without the variable wrote no record, and nothing told the person. The runs that an earlier version started had no record. Each of these was a step that a person can forget. A shared directory is also not on each pair of machines.
+
+### Decision
+
+- **The index is always on.** With no setting, the index is the directory `index/` in the state root of the machine, and each run writes its record there. A run never runs with no index.
+- **One setting for each machine, in a file.** The configuration file of the user, `$XDG_CONFIG_HOME/delegate/config.toml` (`~/.config/delegate/config.toml`), has the key `index`, the directory of a shared index. Each `delegate` process reads the file, whatever its environment. `DELEGATE_INDEX`, when it is set and not empty, wins over the file. The order is `DELEGATE_INDEX`, the file, the default of the state root. A configuration manager can write the file once for each machine.
+- **The key `hosts`.** The same file has `hosts`, a list of the ssh names of the other hosts that `delegate runs` reads on this machine. Only the file of the viewer needs the key: a host that is read needs no setting. `delegate runs` reads each host of `hosts` and each host of the records of the index, one time each, with `ssh -o BatchMode=yes <host> delegate runs --local --json` (#318). So the index of each host can stay on that host.
+- **The store of last answers.** The viewer keeps the newest answer of each host that it read in its own state root, in `last-answers/<host>.json`, written to a temporary file and renamed, as the index is. When a host is unreachable, its rows are the runs of its last answer (or of its records, the newer of the two), dim, with `heard <duration> ago`, and its row says `unreachable` with the reason.
+- **Records for the runs that have none.** Each command that opens the index (`delegate run`, `delegate run --resume`, `delegate runs`, and `delegate runs --local`) writes a record for each run of the state root of this machine that `delegate runs` lists and that has no record, or an older one. The record is the snapshot of the journal, so the write is safe at any time. So a read of a host over ssh also brings the records of that host up to date.
+- **No write of a run goes to another host.** A command writes the records of the runs of its own machine only, to the index of its own process. It reads other hosts and never writes to them.
+- **The configuration is checked before a run starts.** An error of the file (a file that cannot be read, a file that is not valid TOML, an unknown key, a value of the wrong type, or a host of `hosts` that names this machine) is one line that names the file, the key and the expected form. `delegate runs` exits 2 with it. `delegate run --dry-run` reports it as a problem of the setup check, with the index directory, where it comes from, and a write probe. `delegate run`, `--detach` and `--resume` exit 1 with it before they create a branch or write a journal event: nothing of the run exists yet, so a refusal loses nothing.
+- **After the start, the rule of this ADR does not change.** A write of the index that fails adds `index-warning` to the journal, and the run goes on with the same result. A failure of the records of the other runs of the machine changes nothing in the run. A command that is not `delegate run` prints one warning line on stderr for a write that fails, and goes on.
+
+### Rejected alternatives
+
+- **A setting in the environment only.** Each shell, service and agent must then set it, and a run that does not set it is invisible with no warning.
+- **A configuration error that only warns at the start of a run.** The fix is one line of the file, and the dry run shows it before each launch. A run that starts with the wrong index writes records that the person does not see.
+- **Writes to the index of another host.** A host can be unreachable, and two writers of one record can disagree. Each host keeps the records of its own runs.
+
+### Consequences
+
+- `delegate runs` with no setting shows the runs of this machine, and the header line names the configuration file, the index and the hosts that it read, so a person sees the settings in use.
+- A host with an earlier `delegate` is `unreachable` with the reason `delegate on <host> is older than 1.22.0`.
+- The state root of a machine has two more entries, `index/` and `last-answers/`. A test that lists the state directories of the state root leaves them out.

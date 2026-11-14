@@ -5,7 +5,8 @@ each `step-end`, `paused`, `halted` and `run-end`. The values come from the snap
 the journal events give. The journal stays the record of the run, and the index is derived from it.
 
 A write of the index never changes the run. A write that fails adds one `index-warning` event with the reason, and the
-run goes on. A run with no index writes nothing and adds no event.
+run goes on. A run with no index writes nothing and adds no event. The command-line driver always gives an index (#323): with
+no setting, the index is `index/` in the state root of the machine.
 """
 
 from __future__ import annotations

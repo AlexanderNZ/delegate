@@ -156,6 +156,10 @@
 *[Headlesses]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
 *[headless]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
 *[headlesses]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
+*[Hosts key]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
+*[Hosts keys]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
+*[hosts key]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
+*[hosts keys]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
 *[Hotspot]: A hotspot is a path that only the coordinator changes, for example the licence or the CI configuration.
 *[Hotspots]: A hotspot is a path that only the coordinator changes, for example the licence or the CI configuration.
 *[hotspot]: A hotspot is a path that only the coordinator changes, for example the licence or the CI configuration.
@@ -232,10 +236,10 @@
 *[Run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branch]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
-*[Run index]: The run index is a list of the runs of each host, in a directory that each host can read.
-*[Run indexes]: The run index is a list of the runs of each host, in a directory that each host can read.
-*[run index]: The run index is a list of the runs of each host, in a directory that each host can read.
-*[run indexes]: The run index is a list of the runs of each host, in a directory that each host can read.
+*[Run index]: The run index is a list of runs, one record for each run.
+*[Run indexes]: The run index is a list of runs, one record for each run.
+*[run index]: The run index is a list of runs, one record for each run.
+*[run indexes]: The run index is a list of runs, one record for each run.
 *[Run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[Run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.

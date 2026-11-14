@@ -15,7 +15,7 @@ from typing import Protocol, runtime_checkable
 class Unreachable:
     """The answer for a host that could not be read: the read failed, the time limit passed, or the host gave no document.
 
-    `reason` is for a person who looks into the failure. The view does not show it.
+    `reason` is for a person who looks into the failure: the view shows it in the row under the row of the host (#323).
     """
 
     reason: str

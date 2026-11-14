@@ -30,14 +30,28 @@ The check prints `stack <name>: checked` on stdout for each stack with no proble
 
 3. For each stack with no problem, the check runs the [**guard probe**](../glossary.md#guard-probe) of its verifier, when the adapter has one. `claude-code` has one. `opencode` has none, because nobody measured that the harness enforces the permission map of a [**sealed agent**](../glossary.md#sealed-agent) while the agent runs (decision D-e of #213, in [**ADR**](../glossary.md#adr) 0007). See [the guard probe of the adapter](opencode-adapter.md#the-guard-probe). The probe is a short [**session**](../glossary.md#session) of the sealed verifier on the tier `cheap`, in a temporary repository outside the repository under check. It must show that the guard denies the command `touch delegate-guard-probe`. The check prints `stack <name>: guard probe denied` on stdout when it does, or `stack <name>: guard probe denied (2 tries: inconclusive, denied)` when the probe needed a second session (see [the guard probe](run.md#the-guard-probe)). It prints each other result, `ran` or `inconclusive`, on stderr with the stack, the verifier and the limits page, and the command exits 1. A verifier that two stacks name gets one probe. The probe starts a session of the harness, so it costs a little, and no option turns it off. See [the guard probe](run.md#the-guard-probe).
 
-An adapter with no check prints one line on stdout: `setup check skipped: ...`, with the reason, and it gets no probe. Only `claude-code` and `opencode` have a check. The check starts the hook of the verifier, and the probe session of a `claude-code` stack. It changes nothing on disk except its temporary directories, which it removes. `--resume <run-id> --dry-run` makes no setup check.
+An adapter with no check prints one line on stdout: `setup check skipped: ...`, with the reason, and it gets no probe. Only `claude-code` and `opencode` have a check. The check starts the hook of the verifier, and the probe session of a `claude-code` stack. It changes nothing on disk except its temporary directories, which it removes. `--resume <run-id> --dry-run` makes no check of the stacks.
+
+4. The last part of the check is the [**run index**](../glossary.md#run-index) (#323): see [the run index](run.md#the-run-index). Each dry run makes it, also `--resume <run-id> --dry-run`, and also for an adapter with no check of its stacks. It prints three lines on stdout:
+
+    ```
+    config: /home/me/.config/delegate/config.toml
+    run index: /home/me/.local/state/delegate/index (from the default of the state root)
+    run index write: ok
+    ```
+
+    - `config: <path>` is the [configuration file](runs.md#the-configuration-file) that the run reads, or `config: none, the defaults apply` when there is none.
+    - `run index: <directory> (from <source>)` is the index directory, and the source is `DELEGATE_INDEX`, `the configuration file` or `the default of the state root`.
+    - `run index write: ok` is the result of a write probe: the check writes a temporary file in the index directory and removes it, and it removes each directory that it made for the probe. When it cannot write the file, the line is `run index write: failed`, and the problem on stderr is `run index <directory>: cannot write a file: <reason>`. The fix is a directory that the user of the run can write: correct `DELEGATE_INDEX` or the key `index`, or the permissions of the directory.
+
+    An error of the configuration file (a file that cannot be read, a file that is not valid TOML, an unknown key, a value of the wrong type, or a host of `hosts` that names this machine) is a problem too: the check prints `config: <path>`, and the problem on stderr is the line of the error, which names the file, the key and the expected form. The fix is one line of the file. `hosts` is checked only for its form: the dry run starts no `ssh`, because `hosts` is a setting of the view, not of the run. A problem of the run index makes the dry run exit 1, as each other problem of the setup check does. Run the dry run again after each change of the configuration file.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | The workflow is valid, and the setup check found no problem. The plan and the quality check are on stdout. A `warn` line of the quality check does not change the exit code. |
-| 1 | The workflow or the tier file is not valid, or it cannot be read, or the [setup check](#the-setup-check-of-the-dry-run) found a missing agent file, a gate that the verifier denies, or a guard probe that did not show a denial. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
+| 1 | The workflow or the tier file is not valid, or it cannot be read, or the [setup check](#the-setup-check-of-the-dry-run) found a missing agent file, a gate that the verifier denies, a guard probe that did not show a denial, an error of the configuration file, or a run index that it cannot write. Each problem is on stderr, one for each line. The message names the field, the ticket, or the [**stack**](../glossary.md#stack). With `--resume`, also: the run is unknown, the file changes a field that a [**resume**](../glossary.md#resume) keeps, or a rule of the [**plan change**](../glossary.md#plan-change) refuses the change. See [change the workflow between resumes](#change-the-workflow-between-resumes). |
 | 2 | A usage error. |
 
 The command reports the problems of a file in one run, not only the first. A ticket or a stack with a problem is left out of the later checks, so correct the problems and check the file again.

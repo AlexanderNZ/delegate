@@ -804,6 +804,19 @@ end.
    An invariant violation halts a run for good: a resume, a plan change and a
    retry of that run are refused. Start a new run.
 
+### See the runs of each host
+To see the runs of each host, run `delegate runs`. It lists the runs of
+this machine, and the runs of each other host that the run index or the key
+`hosts` of the configuration file names. Its first line names the
+configuration file, the run index and the hosts that it read.
+
+The run index and the hosts are settings of the machine and of the person.
+An agent never writes the configuration file
+(`~/.config/delegate/config.toml`), never edits, copies or deletes a file of
+the run index or of the store of last answers, and never sets
+`DELEGATE_INDEX`. When `delegate runs` shows a host as `unreachable`, tell
+the person the reason from the row under the host. Do not change a setting.
+
 ### Change the plan of a run
 A run can take a new ticket without a new run. Do these steps in this order:
 

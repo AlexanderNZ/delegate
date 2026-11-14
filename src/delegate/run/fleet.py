@@ -25,16 +25,20 @@ each journal only from the position where the call before stopped, so a redraw d
 `fleet_lines` is the table. A journal that cannot be read is skipped, and `Fleet.unreadable` names it with the reason,
 as `delegate status` does.
 
-With a run index (#317, ADR 0008), `fleet_of` adds a group for each other host of the index, from the records of the index. The runs of this
-machine come from its journals, and its records in the index are not used. A host that is not read, or whose read fails (#318), is
-`unreachable` (C25): its row says so, with `heard <duration> ago` and the command `check host`, and its runs are the last-known values of their
-records, dim, with no ETA, no tokens and no trend. A record whose run ended before the window is not listed. An unreachable run is in no sum of
-the fleet lines, and the first line counts it in the total of `N of M reachable`. `--json` describes this machine only.
+With a run index (#317, ADR 0008), `fleet_of` adds a group for each other host of the index, from the records of the index, and for each host of the key
+`hosts` of the configuration file (#323, `ViewSettings`). The runs of this machine come from its journals, and its records in the index are not used. A host that
+is not read, or whose read fails (#318), is `unreachable` (C25): its row says so, with `heard <duration> ago` and the command `check host`, the row under it
+gives the reason (#323), and its runs are the last-known values, dim, with no ETA, no tokens and no trend: the runs of its last answer in the store of last
+answers (`delegate.run.last_answers`), or of its records, the newer of the two. A run that ended before the window is not listed. An unreachable run is in no
+sum of the fleet lines, and the first line counts it in the total of `N of M reachable`. `--json` describes this machine only.
 
-With a host reader (#318, `delegate.ports.hosts`), `fleet_of` reads each other host of the index, at the same time, with a time limit (`HOST_READ_SECONDS`). A host that
+With a host reader (#318, `delegate.ports.hosts`), `fleet_of` reads each other host, at the same time, with a time limit (`HOST_READ_SECONDS`). A host that
 gives the document of `delegate runs --local --json` with a `format` that this version knows shows its runs as live runs: they are in the sums, with the alert and the
-`do` word that the host worked out. A host whose read fails, times out, or gives another `format` is unreachable, as before, and the view does not say why. `HostReads` keeps
-the answers, so `delegate runs --watch` reads the other hosts at most each `HOST_READ_INTERVAL_SECONDS`.
+`do` word that the host worked out, and the store of last answers keeps the document. A host whose read fails, times out, or gives another `format` is unreachable,
+as before. `HostReads` keeps the answers, so `delegate runs --watch` reads the other hosts at most each `HOST_READ_INTERVAL_SECONDS`.
+
+The run index is always on (#323). With an index, `fleet_of` writes the record of each listed run of this machine that has no record, or an older one, so a run
+of an earlier version, or a run that started with no index, gets its record. The first line of the view is the header line of the settings (`settings_line`).
 """
 
 from __future__ import annotations
@@ -233,7 +237,7 @@ class Fleet:
     time: datetime
     runs: tuple[RunRow, ...]
     unreadable: tuple[tuple[Path, str], ...] = ()
-    view: ViewSettings = field(default_factory=lambda: ViewSettings())
+    view: ViewSettings = field(default_factory=ViewSettings)
     host_count: int = 1
     index_problem: str | None = None
     read: tuple[str, ...] = ()

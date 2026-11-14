@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate.cli import agent_definitions, brief, clean, delegate, docs_command, pause, run_command, status, stop, watch
+from delegate.cli import agent_definitions, brief, clean, delegate, docs_command, pause, run_command, runs, status, stop, watch
 from delegate.docs.neutrality import KIT_ROOT_VAR
 
 KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[1] / "skills")
@@ -50,6 +50,7 @@ SUBCOMMAND_PARSERS: dict[str, Callable] = {
     "pause": pause.build_parser,
     "stop": stop.build_parser,
     "status": status.build_parser,
+    "runs": runs.build_parser,
     "watch": watch.build_parser,
     "clean": clean.build_parser,
     "docs": docs_command.build_parser,

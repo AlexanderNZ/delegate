@@ -19,7 +19,7 @@ delegate runs [--json | --watch] [--local] [--timeline]
 |---|---|
 | `--json` | Print one object as JSON: the format, the host, the time, the window, and one object for each listed run; cannot be used with --watch. |
 | `--watch` | Redraw the table in place once a second, until Ctrl-C; it needs a terminal, and it cannot be used with --json. |
-| `--local` | Show only the runs of this machine and read no run index; with DELEGATE_INDEX set, the view lists the runs of the other hosts of the index. |
+| `--local` | Show only the runs of this machine and read no other host; it still writes the records of the runs of this machine that have none. |
 | `--timeline` | Draw one lane for each run over the last 6 hours, to the latest ETA, in place of the table; it cannot be used with --json. |
 
 <!-- generated:end runs-options -->
@@ -34,13 +34,25 @@ The table lists these runs:
 
 An older run that ended is not listed.
 
-With `DELEGATE_INDEX` set, the table also lists the runs of the other hosts of the [**run index**](../glossary.md#run-index). See [The other hosts](#the-other-hosts).
+The table also lists the runs of the other hosts: each host that has a record in the [**run index**](../glossary.md#run-index), and each host of the key `hosts` of [the configuration file](#the-configuration-file). See [The other hosts](#the-other-hosts).
 
 A journal that cannot be read is skipped. The command names it on stderr, as `delegate status` does, and lists the other runs.
 
 ## The table
 
-The first line is `no run index is set up: these are the runs of this machine`. It shows only when `DELEGATE_INDEX` is not set. It is followed by the two fleet lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
+The first line is the header line. It names the settings that the command uses, so you can see them at once (#323):
+
+```
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts build-host, ci-runner
+```
+
+| Part | Meaning |
+|---|---|
+| `config <path>` | The [configuration file](#the-configuration-file) that the command read. It is `no configuration file` when the file does not exist. |
+| `index <directory>` | The shared directory of the run index, from `DELEGATE_INDEX` or the key `index`. It is `the index of this machine only` when no setting names a directory. |
+| `hosts <names>` | The other hosts that the command read: the hosts of the records of the index and the hosts of the key `hosts`. It is `no other host` when the command read none. With `--local`, it is `--local: no other host is read`. |
+
+The header line is followed by the two fleet lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
 
 The runs that ended in the window are not under their host. They are in one group after the hosts, with the header `ended` in `dim`. Each row of the group has its host in the column `host`, in place of the rail. The group has no totals row. A host that has only runs that ended has no group of its own.
 
@@ -86,35 +98,60 @@ The order of the rows is fixed. In a group of a host, the runs that have no `run
 When no run is listed, there is no table. The command prints three lines and exits 0:
 
 ```
-no run index is set up: these are the runs of this machine
+no configuration file · the index of this machine only · no other host
 runs  0 of 1 hosts have an active run
 no run ended in the last 6h
 ```
 
-The number of hosts is this machine and each other host that the [**run index**](../glossary.md#run-index) has a record of. With no run index, this machine is the one host. With `DELEGATE_INDEX` set, the first of the three lines is not there.
+The number of hosts is this machine and each other host that the command read. When a host that the command could not read has no listed run, its row and its reason still show, under these three lines and a blank line.
 
 ### The other hosts
 
-With `DELEGATE_INDEX` set (see [the run index](run.md#the-run-index)), the table has one more group for each other host of the index, after the group of this machine, in the order of the names of the hosts, with a blank line between two groups. The runs of this machine come from its journals, as before: its own records in the index are not used.
+The other hosts are each host that has a record in the [run index](run.md#the-run-index), and each host of the key `hosts` of [the configuration file](#the-configuration-file). A host that both name is read one time. The table has one more group for each other host, after the group of this machine, in the order of the names of the hosts, with a blank line between two groups. The runs of this machine come from its journals, as before: its own records in the index are not used. To set up the view, see [see the runs of more than one host](../how-to/see-the-runs-of-more-than-one-host.md).
 
-The command reads each other host. For each host it runs `ssh -o BatchMode=yes -o ConnectTimeout=5 <host> delegate runs --local --json`, and `<host>` is the name of the host in the index. So `ssh` must reach each host with no password, and `delegate` must be on the `PATH` of the login shell of that host. The hosts are read at the same time, and the read of one host ends after 10 seconds at the latest. This is the only process that `delegate runs` starts.
+The command reads each other host. For each host it runs `ssh -o BatchMode=yes -o ConnectTimeout=5 <host> delegate runs --local --json`, and `<host>` is the name of the host in the index or in `hosts`. So `ssh` must reach each host with no password, and `delegate` 1.22.0 or later must be on the `PATH` of the login shell of that host. The host needs no setting. The hosts are read at the same time, and the read of one host ends after 10 seconds at the latest. This is the only process that `delegate runs` starts. No command writes a record of a run to another host.
 
 A host that gives its document of `format` 1 shows its runs as live runs, as the runs of this machine show. They have the ETA, the `slip`, the tokens, the trend, the `alert` and the `do` word that the host worked out, and they are in the sums of the fleet lines and in `⚠ N in trouble`. The rows of the group of the host are not dim, and the row of the host has its totals. The records of that host in the index are not used. In `--timeline`, such a lane has the life of the run and the projection to the ETA, but not the `●` marks of the tickets, because the document holds the number of the tickets that ended in each hour, not their times.
 
-A host is `unreachable` when its read fails (`ssh` exits with a status other than 0, or cannot start), when the read takes more than 10 seconds, and when the host gives a document that this version cannot read: a `format` other than 1, or text that is not the document. The view does not say which. This machine then shows the last-known values of the records of that host, and nothing else.
+This machine keeps the newest document of each host that it read in the [store of last answers](#the-store-of-last-answers).
 
-For example, a host `build-host` with one run `a41e` that was `running` at 3 of 6 tickets, last heard 47 minutes ago, has these two rows. The first row has `unreachable` in `state`, `heard 47m ago` in `alert` and `check host` in `do`. The second row has `│` in `host`, `docs-site` in `repo`, `a41e` in `run`, `running` in `state` and `3/6` in `ended`, and nothing else.
+A host is `unreachable` when its read fails, when the read takes more than 10 seconds, and when the host gives a document that this version cannot read. The row under the row of the host gives the reason, in `warn`, from the column `state`:
 
-- The row of the host has the name of the host, the state `unreachable` in `warn`, the `alert` `heard <duration> ago` in `warn` (the time since the host wrote its newest record, in whole minutes, as `47m`, or `3h05m` from an hour), and the `do` word `check host`. It has no totals.
-- The rows of its runs are dim and hold the last-known `state` and `ended` of the record. They have no ETA, no `slip`, no tokens, no trend, no `alert` and no `do`.
-- A record of a run that ended is listed under its host, dim, with the result as its state, while the time of the record is in the window. A record of a run that ended before the window is not listed, and a host with no listed record has no group.
+| Reason | Why | The fix |
+|---|---|---|
+| `ssh cannot reach <host>: <line>` | `ssh` exited with 255: it cannot connect, or it needs a password or a passphrase. `<line>` is the last line that `ssh` wrote on stderr. | Make `ssh -o BatchMode=yes <host> true` work with no prompt. |
+| `<host> has no delegate command on its PATH: <line>` | The login shell of the host exited with 127. | Install `delegate` on the host, on the `PATH` of a shell that is not interactive. |
+| `delegate on <host> is older than 1.22.0` | The `delegate` of the host has no `delegate runs`, or it gives a document with no `format` or an earlier one. | Install `delegate` 1.22.0 or later on the host. |
+| `delegate on <host> is newer than this one (format <n>); update delegate on this machine` | The host gives a `format` later than 1. | Install the same version on this machine. |
+| `delegate runs on <host> exited with status <n>: <line>` | `delegate runs` on the host failed, for example because its own configuration file has an error. `<line>` is its last line of stderr. | Run `delegate runs --local` on the host and correct what it says. |
+| `no answer from <host> in 10 seconds` | The read took more than 10 seconds. | Look at the network and the load of the host. |
+| `<host> gave no JSON document`, `<host> gave a document that is not an object`, `<host> gave a document that this version of delegate cannot read` | The output of the host is not the document of `delegate runs --local --json`. | Look at what the login shell of the host prints. |
+| `ssh cannot start: <reason>` | This machine cannot start `ssh`. | Install `ssh` on this machine. |
+
+This machine then shows the last-known runs of that host, and nothing else. They are the runs of its last answer in the store of last answers, or the runs of its records in the index, the newer of the two. A host with no last answer and no record has only its row and the row of its reason.
+
+For example, a host `build-host` with one run `a41e` that was `running` at 3 of 6 tickets, last heard 47 minutes ago, has these three rows. The first row has `unreachable` in `state`, `heard 47m ago` in `alert` and `check host` in `do`. The second row has `│` in `host` and the reason from the column `state`. The third row has `│` in `host`, `docs-site` in `repo`, `a41e` in `run`, `running` in `state` and `3/6` in `ended`, and nothing else.
+
+- The row of the host has the name of the host, the state `unreachable` in `warn`, the `alert` `heard <duration> ago` in `warn` (the time since this machine heard its last answer, or since the host wrote its newest record, in whole minutes, as `47m`, or `3h05m` from an hour), and the `do` word `check host`. It has no totals. A host that was never heard from has no `alert`.
+- The rows of its runs are dim and hold the last-known `state` and `ended`. They have no ETA, no `slip`, no tokens, no trend, no `alert` and no `do`.
+- A run that ended is listed under its host, dim, while its end is in the window. A run that ended before the window is not listed.
 - The runs of an unreachable host are out of each sum of the fleet lines, and out of `⚠ N in trouble`. The first line counts them in the total: `runs  1 of 3 reachable`.
 
-In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`.
+In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`. A host with no last-known run has no lane.
 
-`--local` limits the view to this machine and reads no index, and starts no `ssh`. `--json` always describes this machine only, reads no index, and starts no `ssh`: this is the document that another host gives. With `--watch`, the command reads the other hosts at most each 30 seconds, and redraws with the last answers between two reads.
+`--local` limits the view to this machine and reads no other host, and starts no `ssh`. `--json` always describes this machine only, reads no other host, and starts no `ssh`: this is the document that another host gives. With `--watch`, the command reads the other hosts at most each 30 seconds, and redraws with the last answers between two reads.
 
 [`delegate clean`](commands.md) forgets the record of each run that it cleans or abandons, so the other hosts list it no more.
+
+### The store of last answers
+
+The store of last answers is the directory `last-answers/` in the state root of this machine. It holds one file for each other host that `delegate runs` read, `<host>.json`, with the time that this machine heard the answer and the document of the host. The command writes a temporary file in the same directory and renames it, as the run index does, so a reader never sees half a file. A write that fails keeps the older answer, and the command says nothing: the next read of the host writes it again. Do not edit, copy or delete a file of the store.
+
+### The records of the runs that have none
+
+Each form of the command (`delegate runs`, `--local`, `--json` and `--watch`) writes a record in the run index for each run of this machine that the table lists and that has no record, or an older one: a record written before the newest event of the journal, or a record whose host, state or ticket counts are not the values of the journal. So a run of an earlier version, and a run that started with no index, get a record. The record is the snapshot of the journal ([ADR 0008](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0008-the-run-index-is-derived-from-the-journals.md)), so the write is safe at any time. A run that failed at start has no journal and gets no record. `delegate run` and `delegate run --resume` write the same records before the run starts.
+
+A write that fails changes nothing else: the command prints one warning line on stderr, `delegate runs: run index <directory>: ...`, and goes on. Each read of a host over ssh runs `delegate runs --local --json` there, so it also brings the records of that host up to date.
 
 ### The slip
 
@@ -149,6 +186,45 @@ Under the table is a blank line and the legend: one line for each word of the co
 When a host other than this machine has a `do` word in the table, the last line of the legend ends with `; on another host, put ssh <host> in front of each command`. An unreachable host has the word `check host`, so the legend has it then.
 
 Each command works from any directory of this machine: `delegate watch` and `delegate run --resume` find the run by its id, and the journal records the repository of the run. Put the short id of the run in `<run>`.
+
+## The configuration file
+
+The configuration file holds the settings of a machine for the run index and the view. Each `delegate` process reads it, whatever its environment, so no setting of a shell, a service or an agent is necessary. A configuration manager can write it once for each machine. The file is optional: with no file, the defaults apply.
+
+The path is `$XDG_CONFIG_HOME/delegate/config.toml`. When `XDG_CONFIG_HOME` is not set, is empty, or is not an absolute path, the path is `~/.config/delegate/config.toml`. The file is TOML.
+
+```toml
+hosts = ["build-host", "ci-runner"]
+```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `index` | text: an absolute path, `~` permitted | `index/` in the state root of this machine | The directory of a run index that more than one host shares. See [the run index](run.md#the-run-index). |
+| `hosts` | a list of text | no host | The ssh names of the other hosts that `delegate runs` reads on this machine. See [The other hosts](#the-other-hosts). |
+
+The run index of a process is, in this order:
+
+1. `DELEGATE_INDEX`, when it is set and not empty.
+2. The key `index` of the configuration file.
+3. The directory `index/` in the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`).
+
+`hosts` and `index` are settings of a machine and of a person, not of a repository. Do not put them in a file of a repository or in `workflow.toml`.
+
+### The errors of the configuration file
+
+Each error is one line that names the file, the key and the expected form:
+
+| Error | Example of the line |
+|---|---|
+| The file cannot be read. | `config <path>: cannot read the file: Is a directory` |
+| The file is not valid TOML. | `config <path>: the file is not valid TOML: Expected '=' after a key in a key/value pair (at line 1, column 6)` |
+| An unknown key, for example `host` in place of `hosts`. | `config <path>: unknown key 'host'; the keys are index = "/an/absolute/directory" (text: the path of a shared directory); hosts = ["build-host"] (a list of the ssh names of the other hosts)` |
+| A value of the wrong type, for example a string in place of a list. | `config <path>: hosts must be a list of host names, not 'far'; write hosts = ["build-host"] (a list of the ssh names of the other hosts)` |
+| `index` that is not an absolute path. | `config <path>: index is 'relative/dir', which is not an absolute path; write index = "/an/absolute/directory" (text: the path of a shared directory)` |
+| A host of `hosts` that is not an ssh host name: it starts with `-`, or it has `/` or a space at an end. | `config <path>: hosts has '-x', which is not an ssh host name; write hosts = ["build-host"] (a list of the ssh names of the other hosts)` |
+| A host of `hosts` that names this machine: its host name, its short host name, `localhost` or `DELEGATE_HOST`, in any case. The host would show two times. | `config <path>: hosts has 'localhost', which is this machine; remove it: delegate runs always shows the runs of this machine` |
+
+`delegate runs` prints the line after `delegate runs: ` on stderr and exits 2. `delegate run --dry-run` reports it as a problem of [the setup check](workflow.md#the-setup-check-of-the-dry-run) and exits 1. `delegate run`, `--detach` and `--resume` print it and exit 1 before they create a branch or write a journal event, so nothing of the run exists yet. `delegate clean` prints it and exits 1. The file is read one time, when the command starts: a file that changes or breaks while a run goes on does not change that run.
 
 ## Fit to the terminal
 
@@ -259,5 +335,5 @@ The command fits the lanes to the width of the terminal only as far as the cell 
 | Code | Condition |
 |---|---|
 | 0 | The command printed the table or the object, also when no run is listed. |
-| 2 | The state root is not an absolute path, a lock file cannot be read, or `--watch` has no terminal for standard output. |
+| 2 | The state root is not an absolute path, [the configuration file](#the-configuration-file) has an error, a lock file cannot be read, or `--watch` has no terminal for standard output. |
 | 130 | Ctrl-C ended `--watch`. |

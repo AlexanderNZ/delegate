@@ -18,6 +18,7 @@ PAGES = [
     "give-the-agents-an-mcp-server.md",
     "run-an-economy-chain.md",
     "watch-and-resume-a-run.md",
+    "see-the-runs-of-more-than-one-host.md",
     "point-the-tiers-at-a-gateway.md",
     "add-a-harness-adapter.md",
     "use-the-kit-after-to-spec-and-to-tickets.md",

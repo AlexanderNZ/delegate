@@ -248,6 +248,10 @@ Not: print mode.
 
 See [the `claude-code` command](reference/claude-code-adapter.md#the-command).
 
+## Hosts key
+
+The hosts key is the key `hosts` of the configuration file of the user, `~/.config/delegate/config.toml`. It is a list of the ssh names of the other hosts that `delegate runs` reads on this machine. It is a setting of a machine and of a person, not of a repository, and an agent never writes it. See [the configuration file](reference/runs.md#the-configuration-file).
+
 ## Hotspot
 
 A hotspot is a path that only the coordinator changes, for example the licence or the CI configuration. The engine stops a step whose diff touches a hotspot, and no verifier starts.
@@ -378,7 +382,7 @@ The run branch is the branch that the engine owns, and only accepted work lands 
 
 ## Run index
 
-The run index is a list of the runs of each host, in a directory that each host can read. A run writes its record there. The journal stays the record of the run, so a failed write of the index loses nothing. `DELEGATE_INDEX` names the directory. See [the run index](reference/run.md#the-run-index).
+The run index is a list of runs, one record for each run. Each run writes its record there, with no setting. The journal stays the record of the run, so a failed write of the index loses nothing. The directory is `DELEGATE_INDEX`, else the key `index` of the configuration file of the user, else `index/` in the state root of the machine. See [the run index](reference/run.md#the-run-index).
 
 ## Run lock
 
