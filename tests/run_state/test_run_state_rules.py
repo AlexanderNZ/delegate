@@ -47,6 +47,17 @@ def test_rule_2_an_unskip_makes_the_ticket_pending():
     assert (state.ticket("b").outcome, state.ticket("b").reason, state.ticket("b").blocked) == ("pending", None, False)
 
 
+def test_rule_2_a_pending_ticket_tells_that_an_unskip_took_it_out_of_the_skipped_tickets_until_its_step_starts():
+    # A resume after a stop between the `unskip` and the `step-start` tells again that the ticket runs again (#298, #320).
+    unskipped = journal(skipped("b"), ev("resume"), ev("unskip", ticket="b", outlook="runs again"))
+    started_after = journal(skipped("b"), ev("resume"), ev("unskip", ticket="b", outlook="runs again"), started("b"))
+    never_skipped = journal(started("a"), built("a"))
+
+    assert (run_state.fold(unskipped).ticket("b").outcome, run_state.fold(unskipped).ticket("b").unskipped) == ("pending", True)
+    assert (run_state.fold(started_after).ticket("b").outcome, run_state.fold(started_after).ticket("b").unskipped) == ("open", False)
+    assert (run_state.fold(never_skipped).ticket("b").outcome, run_state.fold(never_skipped).ticket("b").unskipped) == ("pending", False)
+
+
 def test_rule_2_a_skip_after_the_unskip_skips_the_ticket_again():
     events = journal(skipped("b"), ev("unskip", ticket="b", outlook="runs again"), skipped("b", "blocked by a, which failed"))
 

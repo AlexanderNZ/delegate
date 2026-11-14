@@ -16,7 +16,7 @@ When two folds have different rules, the engine does one thing and a view shows 
 
 ## Decision
 
-The journal has one projection: the **run state**. It is one pure function of the events of a journal, `run_state.fold`, in the module `delegate.run.run_state`. The value that it gives is frozen. It holds, for each ticket of the newest plan, the outcome (`pending`, `open`, `built`, `failed` or `skipped`), the reason, and whether the skip rule skipped the ticket; the open ticket; the state of the run (active, ended, paused, halted, crashed, or stopped by the check of the setup) with the event that gives it; and the current pass of the chain verification.
+The journal has one projection: the **run state**. It is one pure function of the events of a journal, `run_state.fold`, in the module `delegate.run.run_state`. The value that it gives is frozen. It holds, for each ticket of the newest plan, the outcome (`pending`, `open`, `built`, `failed` or `skipped`), the reason, whether the skip rule skipped the ticket, and whether an `unskip` made it pending before its step started; the open ticket; the state of the run (active, ended, paused, halted, crashed, or stopped by the check of the setup) with the event that gives it; and the current pass of the chain verification.
 
 The engine and each view decide the state of a run and of its tickets from the run state. A later ticket moves each caller, one at a time. The run state at an earlier time is the run state of the events up to that time.
 
@@ -26,7 +26,7 @@ The run state has one rule for each difference above:
 
 1. A `plan-change` takes each removed ticket, and each changed ticket, out of the skipped tickets.
 2. An `unskip` makes the ticket pending.
-3. A `run-end` ends the run when no `resume` comes after it. The engine writes `plan-change` only after `resume`, so this rule and the old rule of the engine agree on each journal that the engine writes.
+3. A `run-end` ends the run when no `resume` comes after it. The old rule of the engine and this rule disagree on one journal that the engine writes: a retry of a run that ended, which then pauses, halts or crashes before a plan change. The old rule read that run as ended and refused a plain resume. This rule reads it as stopped, so a plain resume goes on with it, as the note of the pause says.
 
 The facts that are not in the journal stay outside the run state: the lock of a live process, a pause request, the event streams, and the clock. A caller adds them to the run state. `snapshot_at` does it already for the first two and for the clock.
 
@@ -40,4 +40,5 @@ The facts that are not in the journal stay outside the run state: the lock of a 
 - A rule of the state of a run is in one place. A change of the rule changes the engine and each view together.
 - The agreement test in `tests/run_state/` compares the run state with `restore_progress` and with `snapshot_at` on a table of journals. It names the three differences above, so the move of a caller shows each change of behavior.
 - The outcome of a ticket with a `retry` stays `failed` or `built` until its `step-end`, as the engine reads it. The field `retrying` of the ticket tells a view to show it as running.
-- The run state holds the tickets of the newest plan only. A ticket that a plan change removed is not in it, but `restore_progress` still lists it as built or failed.
+- The run state holds the tickets of the newest plan only. A ticket that a plan change removed is not in it, and `restore_progress` does not list it. The rules of a plan change refuse to remove a ticket whose step started, so a removed ticket was pending or skipped.
+- A resume records what it does with each ticket that the run skipped (#298). A ticket that an `unskip` made pending, and whose step did not start before the run stopped, is in that record too: the field `unskipped` of the ticket gives it. So the dry run of the resume lists it under `skipped tickets:`, as before the run state.

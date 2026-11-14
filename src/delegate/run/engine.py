@@ -859,8 +859,16 @@ class _Progress:
     skipped: dict[str, str] = field(default_factory=dict)
     # The skipped tickets that the skip rule skipped: the newest `skip` of each names a blocker that was not built.
     blocked: set[str] = field(default_factory=set)
+    # The pending tickets that an `unskip` took out of the skipped tickets, and whose step did not start (rule 2 of ADR 0009).
+    unskipped: list[str] = field(default_factory=list)
     open_ticket: str | None = None
     events: list[dict[str, object]] = field(default_factory=list)
+
+    def was_skipped(self) -> dict[str, str | None]:
+        """The tickets that the run skipped, before the plan change and the retry of a resume: each skipped ticket with its
+        reason, and each ticket of `unskipped` with None. A resume records what it does with each of them (`_record_outlook`).
+        """
+        return {**self.skipped, **dict.fromkeys(self.unskipped)}
 
 
 def restore_progress(events: list[dict[str, object]], run_id: str, retrying: bool = False) -> _Progress:
@@ -887,6 +895,8 @@ def restore_progress(events: list[dict[str, object]], run_id: str, retrying: boo
             # A ticket that the run did not reach has no blockers in its `skip`.
             if ticket.blocked:
                 progress.blocked.add(ticket.id)
+        elif ticket.unskipped:
+            progress.unskipped.append(ticket.id)
     return progress
 
 
@@ -1371,7 +1381,7 @@ def _skipped_outlook(
         plan = _retry_plan(workflow, progress, run_id, retry, restart, coordinator, config_paths) if retry is not None else None
     except EngineError:
         return ()
-    was_skipped = set(progress.skipped)
+    was_skipped = set(progress.was_skipped())
     if review.check is not None:
         _apply_plan_change(review.check, progress)
     _prepare_resume(workflow, order, progress, plan)
@@ -1429,11 +1439,13 @@ def _outlook_of_skipped(order: list[Ticket], progress: _Progress, was_skipped: s
 
 
 def _record_outlook(
-    journal: Journal, order: list[Ticket], progress: _Progress, was_skipped: dict[str, str], before: dict[str, str]
+    journal: Journal, order: list[Ticket], progress: _Progress, was_skipped: dict[str, str | None], before: dict[str, str]
 ) -> None:
     """Record in the journal what the resume does with each ticket that the run skipped, before the first step (#298).
 
-    `was_skipped` holds the reason of each ticket that the journal gives as skipped, before the plan change and the retry.
+    `was_skipped` holds the reason of each ticket that the journal gives as skipped, before the plan change and the retry,
+    and None for each ticket that an `unskip` made pending before its step started (`_Progress.was_skipped`). Such a
+    ticket that stays skipped always gets a new `skip`: else `delegate status` shows it as pending.
     A ticket whose step runs gets `unskip`, with the text of the dry run: the old `skip` no longer applies. A ticket that
     stays skipped with a new reason gets its new `skip` now. `before` gets the reason of each ticket that stays skipped,
     so the loop of the resume writes a `skip` for it only when the reason is different then. `before` loses each ticket
@@ -2205,7 +2217,7 @@ def _execute(
             agents=sealed, configuration=_configuration_record(workflow), repo=str(repo.resolve()), host=host_name(),
         )
         progress = _Progress()
-        was_skipped: dict[str, str] = {}
+        was_skipped: dict[str, str | None] = {}
     else:
         journal, events = _journal_events(state_dir, run_id)
         _follow_in_index(journal, index, repo)
@@ -2213,7 +2225,7 @@ def _execute(
             workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
             project_config_paths(adapter), stack_changed,
         )
-        was_skipped = dict(progress.skipped)  # before the plan change and the retry, as in the dry run (`_skipped_outlook`)
+        was_skipped = progress.was_skipped()  # before the plan change and the retry, as in the dry run (`_skipped_outlook`)
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
         if agents_changed or recorded_agents(events) is None:

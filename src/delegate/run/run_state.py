@@ -7,8 +7,8 @@ that time, so a caller that wants it gives `events[:n]`.
 
 The run state holds:
 
-* for each ticket of the newest plan, its outcome, the reason of a failed or a skipped ticket, and whether the skip rule
-  skipped it (`TicketState`);
+* for each ticket of the newest plan, its outcome, the reason of a failed or a skipped ticket, whether the skip rule
+  skipped it, and whether an `unskip` made it pending (`TicketState`);
 * the open ticket, or none;
 * the state of the run, and the event that gives it (`RunStatus`);
 * the current pass of the chain verification (`ChainPass`).
@@ -62,6 +62,9 @@ class TicketState:
 
     `retrying` is True when a `retry` of the ticket comes after its newest `step-start` or `step-end`. The outcome then
     stays `failed` or `built` until the retry ends, as the engine reads it, and a view shows the ticket as running.
+
+    `unskipped` is True for a pending ticket whose newest event is an `unskip`: the run skipped it, and its step did not
+    start after the `unskip`. A resume then records again that the ticket runs again, or skips it again (#298).
     """
 
     id: str
@@ -69,6 +72,7 @@ class TicketState:
     reason: str | None = None
     blocked: bool = False
     retrying: bool = False
+    unskipped: bool = False
 
 
 @dataclass(frozen=True)
@@ -185,7 +189,7 @@ def _tickets(events: Sequence[Mapping[str, object]]) -> tuple[tuple[TicketState,
         elif kind == "skip":
             found[ticket] = TicketState(ticket, SKIPPED, _text(event.get("reason")), bool(event.get("blockers")))
         elif kind == "unskip":
-            found[ticket] = TicketState(ticket)  # rule 2
+            found[ticket] = TicketState(ticket, unskipped=True)  # rule 2
         else:
             found[ticket] = replace(before, retrying=True)
     return tuple(found.get(ticket, TicketState(ticket)) for ticket in _plan(events)), open_ticket
