@@ -44,7 +44,8 @@ def run_events(repo: Path, capsys) -> list[dict[str, object]]:
 
 
 def only_directory(root: Path) -> Path:
-    (directory,) = root.iterdir()
+    """The one state directory of a repository under the state root `root`. `index`, the run index of the machine (#323), is not one."""
+    (directory,) = [path for path in root.iterdir() if path.name != "index"]
     return directory
 
 

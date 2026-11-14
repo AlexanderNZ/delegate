@@ -34,7 +34,7 @@ class SshShim:
     """The `ssh` of the case: a command shim on `PATH` that stands for the other hosts of the run index (#318).
 
     It writes each call, with its arguments, to `calls`. A host with `serves` prints its document and exits 0. A host with `exits` prints nothing and exits with
-    that status. A host with `hangs` waits 30 seconds. A host with `delays` waits some seconds, then prints its document. Any other host exits 255, as `ssh` does when it cannot reach a host.
+    that status. A host with `says` writes that text on standard error. A host with `hangs` waits 30 seconds. A host with `delays` waits some seconds, then prints its document. Any other host exits 255, as `ssh` does when it cannot reach a host.
     """
 
     def __init__(self, directory: Path) -> None:
@@ -52,6 +52,7 @@ class SshShim:
             '  printf "end %s\\n" "$host" >> "$dir/order"\n'
             "fi\n"
             '[ -f "$dir/$host.hang" ] && sleep 30\n'
+            '[ -f "$dir/$host.err" ] && cat "$dir/$host.err" >&2\n'
             '[ -f "$dir/$host.code" ] && exit "$(cat "$dir/$host.code")"\n'
             '[ -f "$dir/$host.out" ] || exit 255\n'
             'cat "$dir/$host.out"\n'
@@ -73,6 +74,10 @@ class SshShim:
     def exits(self, host: str, code: int) -> None:
         """`ssh <host> ...` exits with `code`, whatever it printed."""
         (self.directory / f"{host}.code").write_text(str(code))
+
+    def says(self, host: str, text: str) -> None:
+        """`ssh <host> ...` writes `text` on standard error."""
+        (self.directory / f"{host}.err").write_text(text)
 
     def hangs(self, host: str) -> None:
         """`ssh <host> ...` waits 30 seconds."""

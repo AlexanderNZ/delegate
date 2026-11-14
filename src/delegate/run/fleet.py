@@ -43,7 +43,7 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from itertools import groupby
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -52,6 +52,7 @@ from ..ports.hosts import HostReader, Unreachable
 from ..ports.index import RunIndex, RunIndexError, RunRecord
 from . import clock, domain, fleet_rules, output, run_state
 from .journal import ABANDONED, JournalError, read_new_events
+from .last_answers import LastAnswers
 from .runs import RunsError, all_journals, failed_starts, machine_states
 from .live import IDLE_WARNING_MINUTES
 from .status import (
@@ -112,8 +113,11 @@ FOOTER: str = "detail  delegate watch <run>; on another host, ssh <host> delegat
 # The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`engine.state_directory`).
 KEY = re.compile(r"-[0-9a-f]{12}$")
 
-# The line over the table while no run index exists (copy deck W8.noIndex).
-NO_INDEX: str = "no run index is set up: these are the runs of this machine"
+# The first version of `delegate` that has `delegate runs --local --json` (#317, #318). A host with an earlier version is unreachable.
+RUNS_VERSION: str = "1.22.0"
+
+# The words of the header line for the index of this machine only, with no shared directory (#323).
+OWN_INDEX: str = "the index of this machine only"
 
 
 @dataclass(frozen=True)
@@ -191,23 +195,50 @@ class RunRow:
 
 
 @dataclass(frozen=True)
+class ViewSettings:
+    """The settings that the header line of `delegate runs` names (#323): the configuration file that the command read, or None when there is none;
+    the directory of a shared run index, or None for the index of this machine only; and the hosts of the key `hosts`, which the command reads too.
+    """
+
+    config: Path | None = None
+    shared_index: Path | None = None
+    hosts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LostHost:
+    """A host that the command could not read (#318, #323): its name, the reason, and the time it was last heard from, or None when it never was.
+
+    The time is the time of its last answer in the store of last answers, or of its newest record in the run index.
+    """
+
+    name: str
+    reason: str
+    heard: datetime | None
+
+
+@dataclass(frozen=True)
 class Fleet:
     """The runs of this machine and of the other hosts of the run index: the name of this machine, the time of the command, the listed runs
     in the order of the table, and each journal that the listing skipped with the reason.
 
     The runs of this machine come first, then the runs of each other host, in the order of the names of the hosts (`RunRow.unreachable`).
-    `indexed` is True when a run index is set up, and then the line of the missing index does not show. `host_count` is this machine and
-    each other host that the index has a record of, whether the record is listed or not. `index_problem` is the reason that the index
-    could not be read, or None.
+    `view` is what the header line names (#323). `host_count` is this machine and each other host that the command read: a host that the index
+    has a record of, whether the record is listed or not, and a host of the key `hosts`. `index_problem` is the reason that the index
+    could not be read or written, or None. `read` is the name of each other host that the command read, in order, and `lost` is each of them
+    that it could not read. `others_read` is False for `--local` and `--json`, which read no other host.
     """
 
     host: str
     time: datetime
     runs: tuple[RunRow, ...]
     unreadable: tuple[tuple[Path, str], ...] = ()
-    indexed: bool = False
+    view: ViewSettings = field(default_factory=lambda: ViewSettings())
     host_count: int = 1
     index_problem: str | None = None
+    read: tuple[str, ...] = ()
+    lost: tuple[LostHost, ...] = ()
+    others_read: bool = True
 
     def unreadable_lines(self, command: str) -> list[str]:
         """One line for each journal that the listing skipped, and one for an index that could not be read, for stderr."""
@@ -215,8 +246,19 @@ class Fleet:
         return lines + ([f"{command}: {self.index_problem}"] if self.index_problem else [])
 
     def hosts(self) -> list[tuple[str, tuple[RunRow, ...]]]:
-        """The host groups of the table: this machine first, then each other host with a listed run, with the rows of each."""
-        return [(host, tuple(rows)) for host, rows in groupby(self.runs, key=lambda row: row.host)]
+        """The host groups of the table: this machine first, then each other host with a listed run or that could not be read, with the rows of each.
+
+        A host that could not be read and that has no last-known run has no rows (#323).
+        """
+        groups = [(host, tuple(rows)) for host, rows in groupby(self.runs, key=lambda row: row.host)]
+        mine = [group for group in groups if group[0] == self.host]
+        present = {name for name, _ in groups}
+        others = [group for group in groups if group[0] != self.host] + [(lost.name, ()) for lost in self.lost if lost.name not in present]
+        return mine + sorted(others, key=lambda group: group[0])
+
+    def lost_host(self, name: str) -> LostHost | None:
+        """The host `name` when the command could not read it, else None."""
+        return next((lost for lost in self.lost if lost.name == name), None)
 
     def to_json(self) -> dict[str, object]:
         """The object of `delegate runs --json`. The reference page of the command documents it: a new field comes last."""
@@ -303,11 +345,13 @@ class HostReads:
     all its redraws, so it reads the other hosts at most each `interval` seconds. The time is the monotonic time of the clock of the process.
     """
 
-    def __init__(self, reader: HostReader, interval: float | None = None) -> None:
+    def __init__(self, reader: HostReader, interval: float | None = None, store: LastAnswers | None = None) -> None:
         self._reader = reader
         self._interval = HOST_READ_INTERVAL_SECONDS if interval is None else interval
         self._answers: dict[str, dict[str, object] | Unreachable] = {}
         self._read_at: float | None = None
+        self._store = store
+        self._fresh: set[str] = set()  # the hosts of the newest read whose answer the store has not kept yet
 
     def _ask(self, host: str) -> dict[str, object] | Unreachable:
         try:
@@ -325,7 +369,19 @@ class HostReads:
                 self._answers.update(zip(wanted, pool.map(self._ask, wanted)))
             if stale:
                 self._read_at = now
+            self._fresh.update(wanted)
         return {host: self._answers[host] for host in hosts}
+
+    def keep(self, host: str, document: dict[str, object], heard: datetime) -> None:
+        """Keep the document of `host` in the store of last answers (#323), once for each read of the host. With no store, do nothing."""
+        if self._store is not None and host in self._fresh:
+            self._store.keep(host, heard, document)
+        self._fresh.discard(host)
+
+    def last(self, host: str) -> tuple[datetime, dict[str, object]] | None:
+        """The time and the document of the last answer of `host` in the store, or None."""
+        found = None if self._store is None else self._store.last(host)
+        return None if found is None else (found.heard, found.document)
 
 
 # The alert of a run in a document (copy deck W8.alert.*): `⚠ idle 6m40s` or `fix-up 1/2`. The duration is `format_duration`: `45s`, `12m05s`, `2h03m` or `3d04h`.
@@ -390,58 +446,153 @@ def _live_run(item: object, host: str, taken: datetime) -> RunRow:
     )
 
 
-def _live(answer: dict[str, object] | Unreachable, host: str) -> list[RunRow] | None:
-    """The live runs that the document of `host` holds (#318), or None when the host is unreachable.
+def older_reason(host: str) -> str:
+    """The reason of a host whose `delegate` has no `delegate runs`, or gives a `format` before `FORMAT` (#323)."""
+    return f"delegate on {host} is older than {RUNS_VERSION}"
+
+
+def _live(answer: dict[str, object] | Unreachable, host: str) -> list[RunRow] | Unreachable:
+    """The live runs that the document of `host` holds (#318), or `Unreachable` with the reason (#323).
 
     The host is unreachable when the answer is `Unreachable`, when the `format` of the document is not `FORMAT`, and when the document is not made as
-    `Fleet.to_json` makes it. The view does not say which.
+    `Fleet.to_json` makes it. A document with no `format`, or an earlier one, is of a `delegate` older than `RUNS_VERSION`.
     """
     if isinstance(answer, Unreachable):
-        return None
+        return answer
+    found = answer.get("format")
+    if type(found) is not int or found < FORMAT:
+        return Unreachable(older_reason(host))
+    if found > FORMAT:
+        return Unreachable(f"delegate on {host} is newer than this one (format {found}); update delegate on this machine")
     try:
-        if type(answer.get("format")) is not int or answer["format"] != FORMAT:
-            return None
         taken = _moment(answer["time"])
         items = answer["runs"]
         if not isinstance(items, list):
-            return None
+            raise TypeError("runs is not a list")
         return [_live_run(item, host, taken) for item in items]
     except (KeyError, TypeError, ValueError):
-        return None
+        return Unreachable(f"{host} gave a document that this version of delegate cannot read")
 
 
-def _others(index: RunIndex, host: str, now: datetime, hosts: HostReads | None) -> tuple[list[RunRow], int]:
-    """The rows of the runs of the other hosts of the index, and the number of those hosts. Raise RunIndexError when the index cannot be read.
+def _last_known(name: str, records: Sequence[RunRecord], hosts: HostReads | None, now: datetime) -> tuple[list[RunRow], datetime | None]:
+    """The last-known runs of the host `name` that the command could not read, and the time it was last heard from, or None.
 
-    The records of `host`, this machine, are left out. A host that `hosts` reads gives the runs of its document (#318). Any other host is unreachable: its runs are
-    the last-known values of its records (#317); with no `hosts`, no host is read. The rows are in the order of the table within each host: the runs
-    with no `run-end`, newest start first, then the runs that ended, newest end first. The hosts are in the order of their names.
+    They are the runs of its last answer in the store of last answers (#323), or the runs of its records in the index (#317): the newer of the two.
+    Each run is unreachable: dim, with no ETA, no tokens, no trend, no alert and no command. A run that ended before the window is not listed.
     """
-    records = [record for record in index.list_records() if record.host != host]
-    names = sorted({record.host for record in records})
+    own = [record for record in records if record.host == name]
+    heard_times = []
+    for record in own:
+        try:
+            heard_times.append(datetime.fromisoformat(record.heard))
+        except ValueError:
+            continue
+    recorded = max(heard_times, default=None)
+    last = None if hosts is None else hosts.last(name)
+    if last is not None and (recorded is None or last[0] >= recorded):
+        heard, document = last
+        answered = _live(document, name)
+        if not isinstance(answered, Unreachable):
+            rows = [
+                replace(
+                    row, eta=None, tokens_new=None, tokens_cache=None, idle_seconds=None, fixup=None, trend=(0,) * fleet_rules.TREND_HOURS,
+                    slip_seconds=None, built=(), last_event=heard, unreachable=True, heard=heard,
+                )
+                for row in answered if row.ended is None or _in_window(row.ended, now)
+            ]
+            return rows, heard
+    return [row for row in (_remote(record, now) for record in own) if row is not None], recorded
+
+
+def _others(
+    records: Sequence[RunRecord], host: str, now: datetime, hosts: HostReads | None, named: Sequence[str],
+) -> tuple[list[RunRow], list[str], list[LostHost]]:
+    """The rows of the runs of the other hosts, the name of each other host, and each of them that could not be read.
+
+    The other hosts are the hosts of the records of the index and the hosts of the key `hosts` (#323), each one time; `host`, this machine, is not
+    one of them. A host that `hosts` reads gives the runs of its document (#318), and the store of last answers keeps the document. Any other host
+    is unreachable, with the reason: its runs are its last-known runs (`_last_known`); with no `hosts`, no host is read. The rows are in the order of
+    the table within each host: the runs with no `run-end`, newest start first, then the runs that ended, newest end first. The hosts are in the order of their names.
+    """
+    names = sorted({record.host for record in records if record.host != host} | {name for name in named if name != host})
     answers = {} if hosts is None else hosts.read(names)
     ordered: list[RunRow] = []
+    lost: list[LostHost] = []
     for name in names:
-        live = _live(answers[name], name) if name in answers else None
-        if live is None:
-            rows = [row for row in (_remote(record, now) for record in records if record.host == name) if row is not None]
+        answer = answers.get(name, Unreachable("not read"))
+        live = _live(answer, name)
+        if isinstance(live, Unreachable):
+            rows, heard = _last_known(name, records, hosts, now)
+            lost.append(LostHost(name, live.reason, heard))
         else:
             rows = live
+            if hosts is not None and isinstance(answer, dict):
+                hosts.keep(name, answer, now)
         ordered += sorted((row for row in rows if row.ended is None), key=lambda row: row.started, reverse=True)
         ordered += sorted((row for row in rows if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
-    return ordered, len(names)
+    return ordered, names, lost
+
+
+def _record_of_row(row: RunRow, host: str, now: datetime) -> RunRecord:
+    """The record of a run of this machine, from its row: the snapshot of its journal at `now` (ADR 0008)."""
+    return RunRecord(
+        run_id=row.run_id, host=host, repo=row.repo, started=row.started.isoformat(), state=row.state, tickets_ended=row.tickets_ended,
+        tickets_total=row.tickets_total, eta=row.eta.isoformat() if row.eta else None, heard=now.isoformat(),
+    )
+
+
+def _is_older(record: RunRecord, row: RunRow, host: str) -> bool:
+    """True when `record` is older than the journal of its run: it was written before the newest event, or its values are not the values of the row."""
+    try:
+        heard = datetime.fromisoformat(record.heard)
+    except ValueError:
+        return True
+    if row.last_event is not None and heard < row.last_event:
+        return True
+    return (record.host, record.state, record.tickets_ended, record.tickets_total) != (host, row.state, row.tickets_ended, row.tickets_total)
+
+
+def _record_unrecorded(index: RunIndex, host: str, now: datetime, rows: Sequence[RunRow]) -> str | None:
+    """Write the record of each run of `rows` that has no record in `index`, or an older one (#323). Return the reason of the first failure, or None.
+
+    The rows are the listed runs of this machine. A run that failed at start has no journal, so it gets no record. A run of an earlier version, or a run
+    that started with no index, so gets its record. The record is the snapshot of the journal, so the write is safe at any time (ADR 0008).
+    """
+    try:
+        recorded = {record.run_id: record for record in index.list_records()}
+        for row in rows:
+            if row.failed_start:
+                continue
+            old = recorded.get(row.run_id)
+            if old is None or _is_older(old, row, host):
+                index.record(_record_of_row(row, host, now))
+    except RunIndexError as error:
+        return str(error)
+    return None
+
+
+def record_runs(root: Path, host: str, now: datetime, index: RunIndex) -> str | None:
+    """Write the record of each run of the state root `root` that `delegate runs` lists and that has no record, or an older one (#323).
+
+    `delegate run` and `delegate run --resume` call it before the run starts. It reads no stream. Return the reason of the first
+    failure of the index, or None. Raise RunsError when a lock file cannot be read.
+    """
+    return fleet_of(root, host, now, lambda adapter: None, index=index, read_index=False).index_problem
 
 
 def fleet_of(
     root: Path, host: str, now: datetime, reader_of: ReaderOf, reads: JournalReads | None = None, index: RunIndex | None = None,
-    read_index: bool = True, hosts: HostReads | None = None,
+    read_index: bool = True, hosts: HostReads | None = None, view: ViewSettings | None = None,
 ) -> Fleet:
     """The runs of the machine under the state root `root`. `host` is the name of the machine, and `now` is the time of the clock, in UTC.
 
     `reads` holds what an earlier call read (`JournalReads`); with None, each journal is read from the start. `index` is the run index, or
     None when none is set up; the runs of the other hosts of the index follow the runs of this machine (#317). With `read_index` False
-    the index is not read (`delegate runs --local`), but it still counts as set up. `hosts` reads the other hosts of the index (#318); with None, each
-    of them is unreachable, as in #317.
+    the index is not read (`delegate runs --local`), and no other host is read. `hosts` reads the other hosts (#318); with None, each
+    of them is unreachable, as in #317. `view` is what the header line names (#323); its `hosts` are other hosts to read, also with no record in the index.
+
+    With an index, the call writes the record of each listed run of this machine that has no record, or an older one (#323, `_record_unrecorded`),
+    also with `read_index` False. A write that fails is in `Fleet.index_problem`, and the call goes on.
 
     The order is the order of the table: the runs with no `run-end`, newest start first, then the runs that ended,
     newest end first. Raise RunsError when a lock file cannot be read.
@@ -483,14 +634,24 @@ def fleet_of(
     reads.keep_only(listed)
     working = sorted((row for row in rows if row.ended is None), key=lambda row: row.started, reverse=True)
     ended = sorted((row for row in rows if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
+    view = ViewSettings() if view is None else view
     others: list[RunRow] = []
-    count, problem = 0, None
-    if index is not None and read_index:
-        try:
-            others, count = _others(index, host, now, hosts)
-        except RunIndexError as error:
-            problem = str(error)
-    return Fleet(host, now, tuple(working + ended + others), tuple(unreadable), index is not None, 1 + count, problem)
+    names: list[str] = []
+    lost: list[LostHost] = []
+    problem = None
+    if index is not None:
+        problem = _record_unrecorded(index, host, now, rows)
+    if read_index:
+        records: list[RunRecord] = []
+        if index is not None:
+            try:
+                records = index.list_records()
+            except RunIndexError as error:
+                problem = problem or str(error)
+        others, names, lost = _others(records, host, now, hosts, view.hosts)
+    return Fleet(
+        host, now, tuple(working + ended + others), tuple(unreadable), view, 1 + len(names), problem, tuple(names), tuple(lost), read_index,
+    )
 
 
 # The role of the state word in the table (components.md, C25). A state that has no entry has no role.
@@ -683,31 +844,43 @@ class _Ended:
 
 
 @dataclass(frozen=True)
+class _Reason:
+    """The row under the row of an unreachable host that says why the command could not read it (#323). Its text starts in the column `state`."""
+
+    reason: str
+
+    def text(self, glyph: output.Glyphs) -> str:
+        return output.styled("warn", self.reason)
+
+
+@dataclass(frozen=True)
 class _Section:
     """One group of the table: its name, the runs under its row (for its row), and the items that show under its row.
 
     A host group (#322) holds the runs that its totals count, and the runs of an unreachable host. The group `ended` (`ended_group`) holds the runs
-    that ended in the window, each with its host in the place of the rail, and it has a header and no totals.
+    that ended in the window, each with its host in the place of the rail, and it has a header and no totals. `lost` is the host when the command could
+    not read it (#323): its first item is the row of the reason.
     """
 
     host: str
     runs: tuple[RunRow, ...]
-    items: tuple[RunRow | _Ended, ...]
+    items: tuple[RunRow | _Ended | _Reason, ...]
     ended_group: bool = False
+    lost: LostHost | None = None
 
     @property
     def unreachable(self) -> bool:
-        return any(row.unreachable for row in self.runs)
+        return self.lost is not None
 
     def cells(self, now: datetime) -> list[str]:
-        """The cells of the row of the group: the header `ended`, the totals of the host (`_totals`), or for an unreachable host `unreachable`, `heard <duration> ago` and `check host` (C25, #317)."""
+        """The cells of the row of the group: the header `ended`, the totals of the host (`_totals`), or for an unreachable host `unreachable`,
+        `heard <duration> ago` when it was heard from, and `check host` (C25, #317)."""
         if self.ended_group:
             return [output.styled("dim", ENDED_GROUP), *[""] * (len(COLUMNS) - 1)]
-        if not self.unreachable:
+        if self.lost is None:
             return _totals(self.host, self.runs)
-        heard = max(row.heard for row in self.runs if row.heard is not None)
-        cells = [self.host, "", "", output.styled("warn", UNREACHABLE), *[""] * 6, output.styled("warn", heard_text(heard, now)), fleet_rules.CHECK_HOST]
-        return cells
+        heard = "" if self.lost.heard is None else output.styled("warn", heard_text(self.lost.heard, now))
+        return [self.host, "", "", output.styled("warn", UNREACHABLE), *[""] * 6, heard, fleet_rules.CHECK_HOST]
 
 
 def _candidates(fleet: Fleet) -> list[list[_Section]]:
@@ -723,8 +896,14 @@ def _candidates(fleet: Fleet) -> list[list[_Section]]:
         done = tuple(row for row in rows if not (row.unreachable or row.ended is None))
         groups.append((host, under, done, bool(under) and not any(row.unreachable or row.alert() or row.do() for row in under)))
 
+    def section(host: str, under: tuple[RunRow, ...], quiet: bool, fold_quiet: bool) -> _Section:
+        lost = fleet.lost_host(host)
+        if lost is not None:
+            return _Section(host, under, (_Reason(lost.reason), *under), lost=lost)
+        return _Section(host, under, () if fold_quiet and quiet else under)
+
     def build(fold_ended: bool, fold_quiet: bool) -> list[_Section]:
-        sections = [_Section(host, under, () if fold_quiet and quiet else under) for host, under, _, quiet in groups if under]
+        sections = [section(host, under, quiet, fold_quiet) for host, under, _, quiet in groups if under or fleet.lost_host(host)]
         items: list[RunRow | _Ended] = []
         for host, _, done, quiet in groups:
             if done and not (fold_quiet and quiet):
@@ -744,7 +923,7 @@ def _table(sections: Sequence[_Section], now: datetime, dropped: frozenset[str],
     right = {place for place, index in enumerate(keep) if index in NUMBERS}
     rail = output.styled("plan", glyph.rail)
     rows = [[output.styled("dim", COLUMNS[index]) for index in keep]]
-    folds: dict[int, _Ended] = {}
+    folds: dict[int, _Ended | _Reason] = {}
     for number, section in enumerate(sections):
         if number:
             rows.append([""] * len(keep))
@@ -758,13 +937,14 @@ def _table(sections: Sequence[_Section], now: datetime, dropped: frozenset[str],
                 rows.append([found[index] for index in keep])
             else:
                 folds[len(rows)] = item
-                rows.append([item.host, *[""] * (len(keep) - 1)])
+                rows.append([rail if isinstance(item, _Reason) else item.host, *[""] * (len(keep) - 1)])
     lines = [line.rstrip(" ") for line in output.columns(rows, right=right)]
     widths = [max(output.width(row[place]) for row in rows) for place in range(len(keep))]
     state = keep.index(COLUMNS.index("state"))
     start = sum(widths[:state]) + len(output.GAP) * state
     for place, item in folds.items():
-        lines[place] = item.host + " " * (start - output.width(item.host)) + item.text(glyph)
+        lead = rail if isinstance(item, _Reason) else item.host
+        lines[place] = lead + " " * (start - output.width(lead)) + item.text(glyph)
     return lines, max(output.width(line) for place, line in enumerate(lines) if place not in folds)
 
 
@@ -842,7 +1022,8 @@ def _timeline(fleet: Fleet, width: int, glyph: output.Glyphs) -> list[str]:
             found[3], found[10] = output.styled("warn", UNREACHABLE), output.styled("warn", heard_text(row.heard, fleet.time))
         return found
 
-    groups = [[(row, cells_of(row)) for row in rows] for _, rows in fleet.hosts()]
+    shown = [(host, rows) for host, rows in fleet.hosts() if rows]  # a host that could not be read and has no last-known run has no lane
+    groups = [[(row, cells_of(row)) for row in rows] for _, rows in shown]
     blank = [""] * (1 if compact else 3)
     label_rows = [[ALL] if compact else [ALL, "", ""]]
     lane_rows = [[_all_lane(fleet, minutes, projection, glyph), *tail(summary[4], summary[5], "", "")]]
@@ -865,31 +1046,49 @@ def _timeline(fleet: Fleet, width: int, glyph: output.Glyphs) -> list[str]:
         placed = [lanes[0]]
         taken = 1
         for number, group in enumerate(groups):
-            placed += [*([""] if number else []), fleet.hosts()[number][0], *lanes[taken:taken + len(group)]]
+            placed += [*([""] if number else []), shown[number][0], *lanes[taken:taken + len(group)]]
             taken += len(group)
         return [top, "", *placed]
     return [top, "", *lanes, "", FOOTER]
 
 
+def settings_line(fleet: Fleet, glyph: output.Glyphs) -> str:
+    """The header line of `delegate runs` (#323): the configuration file that the command read, the run index, and the other hosts that it read.
+
+    `no configuration file` when there is none, `the index of this machine only` when no shared directory is set, and `no other host` when the command
+    read none. With `--local`, the command reads no other host, and the line says so.
+    """
+    view = fleet.view
+    config = "no configuration file" if view.config is None else f"config {view.config}"
+    index = OWN_INDEX if view.shared_index is None else f"index {view.shared_index}"
+    if not fleet.others_read:
+        hosts = "--local: no other host is read"
+    else:
+        hosts = f"hosts {', '.join(fleet.read)}" if fleet.read else "no other host"
+    return output.styled("dim", f" {glyph.pending} ".join([config, index, hosts]))
+
+
 def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = None, timeline: bool = False) -> list[str]:
-    """The lines of `delegate runs`: the line of the missing index, the two fleet lines, a blank line, the table, and the legend.
+    """The lines of `delegate runs`: the header line of the settings, the two fleet lines, a blank line, the table, and the legend.
 
     `width` and `height` are the size of the terminal. The bar of the first fleet line and the legend need `BAR_COLUMNS`. When a
     line of the table is wider than `width`, the columns drop in the order of `FIT_STEPS`. Each line is cut to `width`. When the
     lines are more than the lines of `height`, less one for the prompt, the rows fold (`_candidates`). With no `height`, no row folds.
     The table has the header, the row of the host with its totals, and one row for each listed run, with the rail under the name
     of the host. The legend has a blank line over it, and no line when the table has no command. With no listed run, there are no
-    fleet lines, and the rest is the two lines of an empty machine (copy deck W8.empty and W8.empty.ended).
+    fleet lines, and the rest is the two lines of an empty machine (copy deck W8.empty and W8.empty.ended); under them is the table of each host that
+    could not be read, when there is one (#323).
 
     With `timeline` (#314), the table and the legend are the lanes of `_timeline`; the empty machine has the same lines, and no row folds.
     """
-    index_line = [] if fleet.indexed else [NO_INDEX]
-    if not fleet.runs:
-        return [output.cut(line, max(width, 1)) for line in (
-            *index_line, f"runs  0 of {fleet.host_count} hosts have an active run", f"no run ended in the last {window_label()}",
-        )]
     glyph = output.glyphs()
-    head = [line for line in (*index_line, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph, timeline)) if line is not None]
+    index_line = [settings_line(fleet, glyph)]
+    if not fleet.runs:
+        head = [*index_line, f"runs  0 of {fleet.host_count} hosts have an active run", f"no run ended in the last {window_label()}"]
+        if not fleet.lost or timeline:
+            return [output.cut(line, max(width, 1)) for line in head]
+    else:
+        head = [line for line in (*index_line, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph, timeline)) if line is not None]
     if timeline:
         return [output.cut(line.rstrip(" "), max(width, 1)) for line in [*head, "", *_timeline(fleet, width, glyph)]]
     largest = max((cell for row in fleet.runs for cell in row.trend), default=0)

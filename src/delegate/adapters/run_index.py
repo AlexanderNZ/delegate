@@ -1,6 +1,8 @@
-"""The shared-directory backend of the run index port (`delegate.ports.index`, ADR 0008).
+"""The directory backend of the run index port (`delegate.ports.index`, ADR 0008).
 
-`DELEGATE_INDEX` names the directory. The backend keeps one JSON file for each run, named `<run id>.json`. It writes the
+`chosen_index` gives the directory (#323): `DELEGATE_INDEX` when it is set and not empty, else the key `index` of the
+configuration file of the user (`delegate.run.user_config`), else `index/` in the state root of this machine. So the index
+is always on, and each run registers itself with no setting. The backend keeps one JSON file for each run, named `<run id>.json`. It writes the
 record to a temporary file in the same directory and renames it, so a reader never sees half a file. The backend reads
 and writes files only.
 """
@@ -10,12 +12,21 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ..ports.index import RunIndexError, RunRecord
+from ..run.user_config import UserConfig
 
 INDEX_VARIABLE: str = "DELEGATE_INDEX"
+
+# The name of the default index directory in the state root of this machine.
+DEFAULT_NAME: str = "index"
+
+# Where the index directory comes from, as the dry run and the header line of `delegate runs` name it.
+FROM_VARIABLE: str = INDEX_VARIABLE
+FROM_FILE: str = "the configuration file"
+FROM_DEFAULT: str = "the default of the state root"
 
 # The suffix of the file of a record. A temporary file starts with a dot, and a reader skips it.
 SUFFIX: str = ".json"
@@ -66,7 +77,28 @@ class DirectoryRunIndex:
             raise RunIndexError(f"run index {self.directory}: cannot forget run {run_id}: {error}") from None
 
 
-def index_from_environment(environment: Mapping[str, str]) -> DirectoryRunIndex | None:
-    """The backend that `DELEGATE_INDEX` names, or None when the variable is not set or is empty: the run then writes no index."""
+@dataclass(frozen=True)
+class IndexChoice:
+    """The run index of this process, and where its directory comes from: `FROM_VARIABLE`, `FROM_FILE` or `FROM_DEFAULT`."""
+
+    index: DirectoryRunIndex
+    source: str
+
+    @property
+    def directory(self) -> Path:
+        return self.index.directory
+
+    @property
+    def shared(self) -> bool:
+        """True when a setting names the directory, so other hosts can share it; False for the index of this machine only."""
+        return self.source != FROM_DEFAULT
+
+
+def chosen_index(environment: Mapping[str, str], config: UserConfig, state_root: Path) -> IndexChoice:
+    """The run index of a process: `DELEGATE_INDEX` when it is set and not empty, else the key `index` of `config`, else `index/` in `state_root`."""
     named = environment.get(INDEX_VARIABLE)
-    return DirectoryRunIndex(Path(named).expanduser()) if named else None
+    if named:
+        return IndexChoice(DirectoryRunIndex(Path(named).expanduser()), FROM_VARIABLE)
+    if config.index is not None:
+        return IndexChoice(DirectoryRunIndex(config.index), FROM_FILE)
+    return IndexChoice(DirectoryRunIndex(state_root / DEFAULT_NAME), FROM_DEFAULT)

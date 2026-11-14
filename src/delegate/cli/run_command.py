@@ -60,9 +60,8 @@ from pathlib import Path
 
 from .. import adapters
 from ..adapters.git import GitVersionControl
-from ..adapters.run_index import index_from_environment
 from ..adapters.shell import ShellGateRunner
-from ..run import status
+from ..run import fleet, status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import (
@@ -70,14 +69,17 @@ from ..run.engine import (
     project_config_paths, retry_hints, review_plan_change, run_workflow, state_directory,
     workflow_of_run,
 )
+from ..run.host import host_name
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
 from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
+from ..run.user_config import UserConfigError, config_path
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .epilog import RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
+from .machine_settings import MachineSettings, index_check, machine_settings
 from .setup_check import check_setup
 from .stop_signals import stop_signals_as_ctrl_c
 from .status import stream_reader_of, utc_now
@@ -296,6 +298,24 @@ def _print_review(review: PlanReview) -> int:
     return 1 if problems else 0
 
 
+def _print_index_check(settings: MachineSettings | None, problem: str | None) -> int:
+    """Print the part of the setup check for the run index (#323): the configuration file, the index directory, and the write probe.
+
+    `problem` is the error of the settings when `settings` is None: a configuration file or a state root that cannot be used.
+    Each problem goes to stderr. Return 1 with a problem, else 0.
+    """
+    if settings is None:
+        print(f"config: {config_path(os.environ)}")
+        print(f"delegate run: {problem}", file=sys.stderr)
+        return 1
+    lines, problems = index_check(settings)
+    for line in lines:
+        print(line)
+    for found in problems:
+        print(f"delegate run: {found}", file=sys.stderr)
+    return 1 if problems else 0
+
+
 def _retry_problem(review: PlanReview) -> list[str]:
     """The refusal of the retry of `--retry` as a problem of the dry run (#261), or none when the engine accepts the retry."""
     return [] if review.retry_refusal is None else [review.retry_refusal]
@@ -371,6 +391,17 @@ def main(argv: list[str] | None = None) -> int:
     reviewed = tuple(ticket.strip() for value in args.reviewed or [] for ticket in value.split(",") if ticket.strip())
     if args.detach and args.dry_run:
         parser.error("--detach and --dry-run cannot go together")
+    # The configuration file and the run index of this machine (#323). A run, a detached run and a resume with an error of the
+    # configuration start nothing; the dry run reports the error as a problem of its setup check.
+    settings: MachineSettings | None = None
+    settings_problem: str | None = None
+    try:
+        settings = machine_settings()
+    except (UserConfigError, RunsError) as error:
+        settings_problem = str(error)
+    if settings is None and not args.dry_run:
+        print(f"delegate run: {settings_problem}", file=sys.stderr)
+        return 1
     # A resume looks up the repository and its state directories here, one time, and passes them on (#239). A new run
     # looks them up in its checks of the start.
     location: StateLocation | None = None
@@ -411,8 +442,9 @@ def main(argv: list[str] | None = None) -> int:
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
             return 1
-        return _print_review(review)
+        return max(_print_review(review), _print_index_check(settings, settings_problem))
     if not args.dry_run:
+        assert settings is not None  # a run with no settings returned above
         # The composition point: the workflow names the adapter, and this driver picks it for the engine.
         try:
             adapter = adapters.get(workflow.adapter)
@@ -437,6 +469,12 @@ def main(argv: list[str] | None = None) -> int:
         for check in quality_checks(workflow):
             if check.warns:
                 print(f"delegate run: {check.line()}", file=sys.stderr)
+        # The records of the runs of this machine that have none, or an older one (#323). A failure here changes no run: the run
+        # adds `index-warning` to its own journal when its own write fails.
+        try:
+            fleet.record_runs(settings.root, host_name(), utc_now(), settings.index.index)
+        except Exception:  # noqa: BLE001 - nothing that the records of the other runs do may change this run
+            pass
         title = Title(sys.stdout)
         started: list[str] = []
 
@@ -451,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                     workflow, args.workflow, args.repo, tiers, adapter, vcs, ShellGateRunner(), resume=args.resume, retry=args.retry,
                     break_lock=args.break_lock, on_start=on_start, run_id=args.detached_run_id, reviewed=reviewed,
                     agents_changed=args.agents_changed, coordinator_commit=args.coordinator_commit, location=location,
-                    stack_changed=args.stack_changed, index=index_from_environment(os.environ),
+                    stack_changed=args.stack_changed, index=settings.index.index,
                 )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -541,4 +579,5 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
     for problem in setup.problems:
         print(f"delegate run: {problem}", file=sys.stderr)
-    return 1 if setup.problems else 0
+    index_code = _print_index_check(settings, settings_problem)
+    return 1 if setup.problems or index_code else 0

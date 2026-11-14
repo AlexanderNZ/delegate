@@ -10,32 +10,38 @@ journal only from its last position (`fleet.JournalReads`). The command ends wit
 does: the cursor shows again, and `delegate` prints `delegate: interrupted` and exits with 130. A journal that cannot be read goes on stderr
 once, before the first frame when the first read finds it, and else after the last frame, so no line of stderr breaks a frame.
 
-With `DELEGATE_INDEX` set (#317), the view also has a group for each other host of the run index (`delegate.run.fleet`). `--local` limits the view to this
-machine and reads no index, and `--json` describes this machine only and reads no index.
+The run index is always on (#323): `DELEGATE_INDEX`, else the key `index` of the configuration file of the user, else `index/` in the state root
+(`delegate.cli.machine_settings`). Each form of the command writes the record of each listed run of this machine that has none, or an older one.
+A configuration file that cannot be used stops the command with exit 2 and one line.
 
-With `DELEGATE_INDEX` set, the command also reads each other host of the index over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a
-`fleet.HostReads` with the ssh backend. `--watch` keeps one `HostReads` for all its redraws, so it reads the other hosts at most each 30 seconds.
+The view also has a group for each other host (#317): each host of the records of the index and each host of the key `hosts` of the configuration
+file. `--local` limits the view to this machine and reads no other host, and `--json` describes this machine only and reads no other host.
+
+The command reads each other host over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a `fleet.HostReads` with the ssh backend and
+the store of last answers (`delegate.run.last_answers`) in the state root. `--watch` keeps one `HostReads` for all its redraws, so it reads the other
+hosts at most each 30 seconds.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import sys
 
-from ..adapters.run_index import index_from_environment
 from ..adapters.ssh_hosts import SshHostReader
 from ..run import clock, fleet
 from ..run.host import host_name
-from ..run.runs import RunsError, state_root
+from ..run.last_answers import LAST_ANSWERS_NAME, LastAnswers
+from ..run.runs import RunsError
+from ..run.user_config import UserConfigError
+from .machine_settings import MachineSettings, machine_settings
 from .epilog import RUNS_PAGE, HelpFormatter, epilog
 from .screen import Screen
 from .status import stream_reader_of, utc_now
 from .stop_signals import stop_signals_as_ctrl_c
 
-# The exit status of a state root that cannot be used, or of a lock file that cannot be read.
+# The exit status of a state root or a configuration file that cannot be used, or of a lock file that cannot be read.
 EXIT_ERROR: int = 2
 
 # The seconds between two redraws of `--watch`: the poll rate of `delegate watch`.
@@ -47,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="delegate runs",
         description=(
             "List the runs of this machine in one table, across each repository: the runs that have not ended, and the runs that ended in the last 6 hours. "
-            "With DELEGATE_INDEX set, list the runs of the other hosts of the run index too."
+            "List the runs of the other hosts of the run index and of the key hosts of the configuration file too."
         ),
         epilog=epilog(RUNS_PAGE),
         formatter_class=HelpFormatter,
@@ -63,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--local", action="store_true",
-        help="show only the runs of this machine and read no run index; with DELEGATE_INDEX set, the view lists the runs of the other hosts of the index",
+        help="show only the runs of this machine and read no other host; it still writes the records of the runs of this machine that have none",
     )
     parser.add_argument(
         "--timeline", action="store_true",
@@ -72,13 +78,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _watch(timeline: bool, local: bool) -> int:
+def _settings() -> MachineSettings | None:
+    """The settings of this machine, or None after one line on stderr when the configuration file or the state root cannot be used."""
+    try:
+        return machine_settings()
+    except (UserConfigError, RunsError) as error:
+        print(f"delegate runs: {error}", file=sys.stderr)
+        return None
+
+
+def _view(settings: MachineSettings, local: bool) -> fleet.ViewSettings:
+    """What the header line names, and the hosts of the key `hosts` to read; `--local` reads none of them."""
+    return fleet.ViewSettings(
+        config=settings.config.path, shared_index=settings.index.directory if settings.index.shared else None,
+        hosts=() if local else settings.config.hosts,
+    )
+
+
+def _host_reads(settings: MachineSettings) -> fleet.HostReads:
+    """The reads of the other hosts over ssh, with the store of last answers in the state root."""
+    return fleet.HostReads(SshHostReader(), store=LastAnswers(settings.root / LAST_ANSWERS_NAME))
+
+
+def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
     """Redraw the table in place until Ctrl-C. Return 2 with no terminal, or when the state root cannot be used."""
     if not sys.stdout.isatty():
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
         return EXIT_ERROR
     the_clock = clock.current()
-    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), fleet.HostReads(SshHostReader())
+    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), _host_reads(settings)
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -86,7 +114,9 @@ def _watch(timeline: bool, local: bool) -> int:
         try:
             with stop_signals_as_ctrl_c():
                 while True:
-                    found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of, reads, index_from_environment(os.environ), not local, hosts)
+                    found = fleet.fleet_of(
+                        settings.root, host_name(), utc_now(), stream_reader_of, reads, settings.index.index, not local, hosts, _view(settings, local),
+                    )
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
                     reported.update(new)
                     if first:
@@ -112,12 +142,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.timeline and args.json:
         parser.error("--timeline cannot be used with --json")
+    settings = _settings()
+    if settings is None:
+        return EXIT_ERROR
     if args.watch:
-        return _watch(args.timeline, args.local)
+        return _watch(settings, args.timeline, args.local)
+    local = args.local or args.json
     try:
         found = fleet.fleet_of(
-            state_root(), host_name(), utc_now(), stream_reader_of, index=index_from_environment(os.environ), read_index=not (args.local or args.json),
-            hosts=fleet.HostReads(SshHostReader()),
+            settings.root, host_name(), utc_now(), stream_reader_of, index=settings.index.index, read_index=not local,
+            hosts=_host_reads(settings), view=_view(settings, local),
         )
     except RunsError as error:
         print(f"delegate runs: {error}", file=sys.stderr)

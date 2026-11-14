@@ -83,8 +83,8 @@ def test_each_number_of_a_totals_row_is_the_sum_of_the_rows_under_it_and_the_fle
         totals.append(ended_cells(group[0]))
         assert totals[-1] == (sum(first for first, _ in under), sum(second for _, second in under))
     assert totals == [(2, 6), (5, 10)]  # laptop: 1/2 + 1/2 + 0/2; build-host: 3/6 + 2/4
-    assert f"{sum(first for first, _ in totals)}/{sum(second for _, second in totals)} ended" in out.splitlines()[0]
-    assert "7/16 ended" in out.splitlines()[0]
+    assert f"{sum(first for first, _ in totals)}/{sum(second for _, second in totals)} ended" in out.splitlines()[1]
+    assert "7/16 ended" in out.splitlines()[1]
     assert [line.split()[2] for line in hosts[0][1:]] == ["aaaa", "pppp", "ssss"]  # the rows under `laptop` are its three runs with no `run-end`, newest start first
     assert [line.split()[2] for line in hosts[1][1:]] == ["a41e", "5d02"]
 
@@ -97,7 +97,7 @@ def test_the_tokens_of_a_totals_row_are_the_sums_of_the_tokens_of_the_rows_under
     hosts = {group[0].split()[0]: group for group in groups_of(out)}
     assert hosts["laptop"][0].split()[-2:] == ["12k", "340k"]  # only the run that works has tokens
     assert hosts["build-host"][0].split()[-2:] == ["21k", "502k"]  # 20k + 1k new, 500k + 2k cache
-    assert "33k new · 842k cache" in out.splitlines()[0]
+    assert "33k new · 842k cache" in out.splitlines()[1]
 
 
 def test_the_runs_that_ended_are_in_the_group_ended_after_the_hosts_with_their_host_on_each_row_and_no_totals_row(machine, index, ssh, capsys):
@@ -151,5 +151,5 @@ def test_the_count_in_trouble_is_the_number_of_rows_with_an_alert_of_trouble_and
         assert words in row[short], short
     for short in ("aaaa", "pppp", "a41e", "bbbb", "ffff", "e2b1"):
         assert not re.search(r"stopped|halted|failed at start|idle", row[short].replace("failed ", "")), short
-    assert "⚠ 5 in trouble" in out.splitlines()[1]
+    assert "⚠ 5 in trouble" in out.splitlines()[2]
     assert row["ssss"].split()[-2:] == ["stopped", "resume"] and row["hhhh"].split()[-2:] == ["halted", "resume"]  # the word `do` is not `watch`

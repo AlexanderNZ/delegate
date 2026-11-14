@@ -98,6 +98,18 @@ def isolated_state_home(tmp_path_factory, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def isolated_config_home(tmp_path_factory, monkeypatch) -> Path:
+    """Keep the configuration file of the user of the machine out of each test (#323).
+
+    Each `delegate` process reads `$XDG_CONFIG_HOME/delegate/config.toml`. Each test gets its own empty value, so the
+    `index` and the `hosts` of the machine take no part in a test. A test that needs a configuration file writes it here.
+    """
+    path = tmp_path_factory.mktemp("config-home")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(path))
+    return path
+
+
 def _kit_paths() -> tuple[Path, Path] | None:
     """The top level and the git common directory of the repository that holds this tree, or None when the tree is no repository.
 

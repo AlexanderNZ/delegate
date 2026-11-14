@@ -146,7 +146,7 @@ def test_with_no_run_the_timeline_has_the_two_lines_of_an_empty_machine_at_80_co
 
     assert (code, err) == (0, "")
     assert out.splitlines() == [
-        "no run index is set up: these are the runs of this machine", "runs  0 of 1 hosts have an active run", "no run ended in the last 6h",
+        "no configuration file · the index of this machine only · no other host", "runs  0 of 1 hosts have an active run", "no run ended in the last 6h",
     ]
 
 

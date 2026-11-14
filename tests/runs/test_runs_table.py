@@ -57,7 +57,7 @@ def test_the_table_lists_the_running_run_then_the_run_that_ended_in_the_window_a
 
     assert (code, err) == (0, "")
     assert out.splitlines() == [
-        "no run index is set up: these are the runs of this machine",
+        "no configuration file · the index of this machine only · no other host",
         "runs  1 of 1 reachable  50%  1/2 ended  ETA - · 1 with no ETA  12k new · 340k cache",
         "13:40–14:20  trend: tickets ended an hour, last 6h · all      ▇ speeding up",
         "",

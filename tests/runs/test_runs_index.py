@@ -110,16 +110,20 @@ def test_a_directory_that_cannot_be_written_gives_the_same_result_and_one_index_
     assert [n for n in event_names(events) if n != "index-warning"] == event_names(plain_events)
 
 
-def test_with_no_delegate_index_the_run_writes_no_file_and_no_event(tmp_path, capsys, monkeypatch, scripted):
+def test_with_no_delegate_index_and_no_configuration_file_the_run_writes_its_record_in_the_index_of_the_state_root(tmp_path, capsys, scripted, machine):
+    """#323: the index is always on. With no setting, it is `index/` in the state root of this machine (`machine`, which `DELEGATE_STATE_ROOT` names)."""
     repo = make_repo(tmp_path, TWO_TICKETS)
-    monkeypatch.chdir(tmp_path)  # a backend that wrote to the current directory would write here
 
     code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
 
     assert (code, err) == (0, "")
-    assert "index-warning" not in event_names(read_journal(out))
-    run_id = read_journal(out)[0]["run_id"]
-    assert [path for path in tmp_path.rglob(f"{run_id}*") if path.suffix == ".json"] == []
+    events = read_journal(out)
+    assert "index-warning" not in event_names(events)
+    run_id = events[0]["run_id"]
+    index = machine / "index"
+    assert [path.name for path in index.iterdir()] == [f"{run_id}.json"]
+    record = json.loads((index / f"{run_id}.json").read_text())
+    assert (record["run_id"], record["repo"], record["state"], record["tickets_ended"], record["tickets_total"]) == (run_id, "repo", "built", 2, 2)
 
 
 def test_the_directory_backend_records_lists_and_forgets_a_run(tmp_path):

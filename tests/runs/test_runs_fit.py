@@ -19,7 +19,8 @@ from ..support import Terminal
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
 from .test_runs_alert import agent_idle
 
-NO_INDEX = "no run index is set up: these are the runs of this machine"
+# The header line of a machine with no configuration file (#323): it names the settings in use.
+HEADER = "no configuration file · the index of this machine only · no other host"
 
 
 def at_size(monkeypatch, columns: int, lines: int = 1000) -> None:
@@ -113,7 +114,7 @@ def test_a_frame_of_80_by_24_has_the_columns_of_e15_and_folds_the_ended_runs_int
     lines = out.splitlines()
     assert (code, err) == (0, "")
     assert len(lines) == 23  # 6 lines, 14 rows, a blank line, the header `ended` and the row of the ended runs: the 23 lines of the screen are enough
-    assert lines[:2] == [NO_INDEX, "runs  14 of 14 reachable  0%  0/28 ended  ETA - · 14 with no ETA"]  # no bar
+    assert lines[:2] == [HEADER, "runs  14 of 14 reachable  0%  0/28 ended  ETA - · 14 with no ETA"]  # no bar
     assert lines[4:8] == [
         "host    run   state    ended  ETA  alert          do",  # `new`, `cache`, `trend`, `slip` and `repo` are not there
         "laptop                 0/28",
@@ -205,19 +206,19 @@ def test_each_line_is_cut_to_the_width_of_the_terminal(machine, monkeypatch, cap
     assert max(len(line) for line in out.splitlines()) == 30
 
 
-def test_a_machine_with_no_run_prints_the_line_of_the_index_and_the_two_empty_lines_of_the_copy_deck(machine, capsys):
+def test_a_machine_with_no_run_prints_the_header_line_and_the_two_empty_lines_of_the_copy_deck(machine, capsys):
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines() == [NO_INDEX, "runs  0 of 1 hosts have an active run", "no run ended in the last 6h"]
+    assert out.splitlines() == [HEADER, "runs  0 of 1 hosts have an active run", "no run ended in the last 6h"]
 
 
-def test_the_line_of_the_missing_index_is_the_first_line_of_a_table_with_runs(machine, capsys):
+def test_the_header_line_of_the_settings_is_the_first_line_of_a_table_with_runs(machine, capsys):
     four_kinds(machine)
 
     _, out, _ = runs(capsys)
 
-    assert out.splitlines()[0] == NO_INDEX
+    assert out.splitlines()[0] == HEADER
     assert out.splitlines()[1].startswith("runs  3 of 3 reachable")
 
 

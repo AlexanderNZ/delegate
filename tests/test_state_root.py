@@ -26,6 +26,11 @@ from .support import ScriptedAdapter, WORKFLOW, make_repo, read_journal
 ROOT_VARIABLE: str = "DELEGATE_STATE_ROOT"
 
 
+
+def state_directories(root: Path) -> list[Path]:
+    """The state directories of the repositories under the state root `root`: each entry but `index`, the run index of the machine (#323)."""
+    return [path for path in root.iterdir() if path.name != "index"]
+
 def run_in(tmp_path: Path, capsys, repo: Path) -> list[dict[str, object]]:
     """Build `workflow.toml` of `repo` with a scripted adapter, and give the events of its journal."""
     adapters.register("scripted", ScriptedAdapter())
@@ -135,7 +140,7 @@ def test_a_linked_worktree_of_the_repository_finds_the_same_state_directory(tmp_
 
     assert code == 0, err
     assert json.loads(out)["state"] == "built"
-    assert len(list(root.iterdir())) == 1  # one directory for the repository
+    assert len(state_directories(root)) == 1  # one directory for the repository
 
 
 def test_a_clone_with_a_separate_git_directory_names_its_directory_after_the_git_directory(tmp_path, capsys, git_identity, monkeypatch):
@@ -150,7 +155,7 @@ def test_a_clone_with_a_separate_git_directory_names_its_directory_after_the_git
 
     run_id = str(run_in(tmp_path, capsys, work)[0]["run_id"])
 
-    (directory,) = root.iterdir()
+    (directory,) = state_directories(root)
     assert directory.name.startswith("proj-")
     assert (directory / "runs" / run_id / "journal.jsonl").is_file()
     assert not (gitdir / "delegate" / "runs").exists()
@@ -173,7 +178,7 @@ with run_lock(Path(sys.argv[1]), sys.argv[2], sys.argv[3]):
 
 
 def state_of(root: Path) -> Path:
-    (state,) = root.iterdir()
+    (state,) = state_directories(root)
     return state
 
 

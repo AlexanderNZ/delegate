@@ -1,20 +1,23 @@
 """The `delegate clean` command: parse the arguments, build the git backend, and clean the runs.
 
 The use case lives in `delegate.run.clean`, which never imports an adapter. This module is the composition point of
-the command: it makes the git backend of the version-control port and the run index that `DELEGATE_INDEX` names (#317), and hands them to the use case.
+the command: it makes the git backend of the version-control port and the run index of this machine (#317, #323: `DELEGATE_INDEX`, the key `index` of the
+configuration file, or `index/` in the state root), and hands them to the use case. A configuration file that cannot be used stops the command with exit 1.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
-from ..adapters.run_index import index_from_environment
+from ..ports.index import RunIndex
 from ..run import clean
+from ..run.runs import RunsError
+from ..run.user_config import UserConfigError
 from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
+from .machine_settings import machine_settings
 
 # The exit status of an error: an unknown run, a journal that cannot be read, or a removal that failed.
 EXIT_ERROR: int = 1
@@ -49,6 +52,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _index() -> RunIndex | None:
+    """The run index of this machine, or None after one line on stderr when the configuration file or the state root cannot be used."""
+    try:
+        return machine_settings().index.index
+    except (UserConfigError, RunsError) as error:
+        print(f"delegate clean: {error}", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -60,8 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(sys.stderr)
         print("delegate clean: error: give a run id, or --ended for every run that ended built", file=sys.stderr)
         return EXIT_USAGE
+    index = _index()
+    if index is None:
+        return EXIT_ERROR
     try:
-        result = clean.clean(args.repo, args.run_id, args.ended, args.merged, args.dry_run, GitVersionControl(), index_from_environment(os.environ))
+        result = clean.clean(args.repo, args.run_id, args.ended, args.merged, args.dry_run, GitVersionControl(), index)
     except clean.CleanError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR
@@ -78,10 +93,11 @@ def _abandon(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         parser.error("--abandon needs --reason with the reason, which goes to the journal of the run")
     if args.run_id or args.ended or args.merged or args.dry_run:
         parser.error("--abandon takes one run and no run id, --ended, --merged or --dry-run")
+    index = _index()
+    if index is None:
+        return EXIT_ERROR
     try:
-        result = clean.abandon(
-            args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, GitVersionControl(), index_from_environment(os.environ)
-        )
+        result = clean.abandon(args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, GitVersionControl(), index)
     except clean.AbandonError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR
