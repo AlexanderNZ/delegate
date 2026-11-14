@@ -32,7 +32,8 @@ gives the reason (#323), and its runs are the last-known values, dim, with no ET
 answers (`delegate.run.last_answers`), or of its records, the newer of the two. A run that ended before the window is not listed. An unreachable run is in no
 sum of the fleet lines, and the first line counts it in the total of `N of M reachable`. `--json` describes this machine only.
 
-With a host reader (#318, `delegate.ports.hosts`), `fleet_of` reads each other host, at the same time, with a time limit (`HOST_READ_SECONDS`). A host that
+With a host reader (#318, `delegate.ports.hosts`), `fleet_of` reads each other host, at the same time, with a time limit (`HOST_READ_SECONDS`). For
+`delegate runs --watch`, the reads go on in the background (#328, `HostReads`): a redraw does not wait for a slow host, and shows its last answer until the new one comes. A host that
 gives the document of `delegate runs --local --json` with a `format` that this version knows shows its runs as live runs: they are in the sums, with the alert and the
 `do` word that the host worked out, and the store of last answers keeps the document. A host whose read fails, times out, or gives another `format` is unreachable,
 as before. `HostReads` keeps the answers, so `delegate runs --watch` reads the other hosts at most each `HOST_READ_INTERVAL_SECONDS`.
@@ -44,9 +45,10 @@ of an earlier version, or a run that started with no index, gets its record. The
 from __future__ import annotations
 
 import re
+import threading
 from collections import Counter
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from itertools import groupby
 from datetime import datetime, timedelta
@@ -98,6 +100,10 @@ OTHER_HOST: str = "on another host, put ssh <host> in front of each command"
 # The seconds that the read of one other host may take (#318), and the seconds between two reads of the same hosts in `delegate runs --watch`.
 HOST_READ_SECONDS: float = 10.0
 HOST_READ_INTERVAL_SECONDS: float = 30.0
+
+# The seconds that a redraw of `delegate runs --watch` waits for the reads that it starts (#328). A host that answers in this time is in the frame;
+# for a slower host, the frame shows its last answer, and a later redraw shows the new one.
+HOST_WAIT_SECONDS: float = 0.3
 
 # The header of the group of the runs that ended (copy deck W8.group.ended).
 ENDED_GROUP: str = "ended"
@@ -350,22 +356,42 @@ def _remote(record: RunRecord, now: datetime) -> RunRow | None:
 class HostReads:
     """The answers of the host reader (`delegate.ports.hosts`) for the other hosts of the index (#318).
 
-    `read` asks the reader for the hosts at the same time, each with the time limit `HOST_READ_SECONDS`. It keeps the answers: a call
+    `read` asks the reader for the hosts at the same time, each in a thread of its own, with the time limit `HOST_READ_SECONDS`. It keeps the answers: a call
     less than `interval` seconds after the last read of all hosts asks only for a host it has no answer for. `delegate runs --watch` uses one `HostReads` for
-    all its redraws, so it reads the other hosts at most each `interval` seconds. The time is the monotonic time of the clock of the process.
+    all its redraws, so it reads the other hosts at most each `interval` seconds. The time is the monotonic time of the clock of the process. A host is never
+    read twice at the same time.
+
+    With `background` False, `read` waits for each read that it needs. With `background` True (#328, `delegate runs --watch`), `read` waits at most
+    `HOST_WAIT_SECONDS` for the reads that it starts, and the reads go on after it returns: a host whose read has not ended gives its answer of the read
+    before, and a host with no answer yet gives `Unreachable` with the reason `no answer from <host> yet`, so the view shows its last-known runs with their age.
+    A later call collects the answers that came.
+
+    `close` ends each read that runs at once: the reader ends the processes that it started (Ctrl-C), and `close` returns when the reads have ended.
+    Use `HostReads` as a context manager, or call `close` when the command ends.
     """
 
-    def __init__(self, reader: HostReader, interval: float | None = None, store: LastAnswers | None = None) -> None:
+    def __init__(
+        self, reader: HostReader, interval: float | None = None, store: LastAnswers | None = None, background: bool = False,
+    ) -> None:
         self._reader = reader
         self._interval = HOST_READ_INTERVAL_SECONDS if interval is None else interval
         self._answers: dict[str, dict[str, object] | Unreachable] = {}
         self._read_at: float | None = None
         self._store = store
         self._fresh: set[str] = set()  # the hosts of the newest read whose answer the store has not kept yet
+        self._background = background
+        self._running: dict[str, Future[dict[str, object] | Unreachable]] = {}
+        self._stop = threading.Event()
+
+    def __enter__(self) -> HostReads:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     def _ask(self, host: str) -> dict[str, object] | Unreachable:
         try:
-            return self._reader.read_runs(host, HOST_READ_SECONDS)
+            return self._reader.read_runs(host, HOST_READ_SECONDS, self._stop)
         except Exception as error:  # noqa: BLE001 - a host that cannot be read is unreachable, whatever the reason
             return Unreachable(str(error) or type(error).__name__)
 
@@ -373,14 +399,28 @@ class HostReads:
         """The answer for each host of `hosts`."""
         now = clock.current().monotonic()
         stale = self._read_at is None or now - self._read_at >= self._interval
-        wanted = list(hosts) if stale else [host for host in hosts if host not in self._answers]
+        wanted = [host for host in hosts if (stale or host not in self._answers) and host not in self._running]
         if wanted:
-            with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
-                self._answers.update(zip(wanted, pool.map(self._ask, wanted)))
+            pool = ThreadPoolExecutor(max_workers=len(wanted))
+            self._running.update((host, pool.submit(self._ask, host)) for host in wanted)
+            pool.shutdown(wait=False)  # the threads end when their reads end
             if stale:
                 self._read_at = now
-            self._fresh.update(wanted)
-        return {host: self._answers[host] for host in hosts}
+        running = [self._running[host] for host in hosts if host in self._running]
+        if running:
+            wait(running, timeout=(HOST_WAIT_SECONDS if wanted else 0) if self._background else None)
+        for host, future in list(self._running.items()):
+            if future.done():
+                del self._running[host]
+                self._answers[host] = future.result()
+                self._fresh.add(host)
+        return {host: self._answers.get(host, Unreachable(f"no answer from {host} yet")) for host in hosts}
+
+    def close(self) -> None:
+        """End each read that runs, and wait until the reads have ended."""
+        self._stop.set()
+        wait(list(self._running.values()))
+        self._running.clear()
 
     def keep(self, host: str, document: dict[str, object], heard: datetime) -> None:
         """Keep the document of `host` in the store of last answers (#323), once for each read of the host. With no store, do nothing."""

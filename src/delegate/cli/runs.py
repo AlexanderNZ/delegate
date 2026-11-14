@@ -19,7 +19,8 @@ file. `--local` limits the view to this machine and reads no other host, and `--
 
 The command reads each other host over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a `fleet.HostReads` with the ssh backend and
 the store of last answers (`delegate.run.last_answers`) in the state root. `--watch` keeps one `HostReads` for all its redraws, so it reads the other
-hosts at most each 30 seconds.
+hosts at most each 30 seconds. Its reads go on in the background (#328): a redraw does not wait for a slow host, and shows its last answer until the
+new one comes. Ctrl-C ends each `ssh` of a read at once, with and without `--watch`.
 """
 
 from __future__ import annotations
@@ -95,9 +96,9 @@ def _view(settings: MachineSettings, local: bool) -> fleet.ViewSettings:
     )
 
 
-def _host_reads(settings: MachineSettings) -> fleet.HostReads:
-    """The reads of the other hosts over ssh, with the store of last answers in the state root."""
-    return fleet.HostReads(SshHostReader(), store=LastAnswers(settings.root / LAST_ANSWERS_NAME))
+def _host_reads(settings: MachineSettings, background: bool = False) -> fleet.HostReads:
+    """The reads of the other hosts over ssh, with the store of last answers in the state root. With `background`, a redraw does not wait for them (#328)."""
+    return fleet.HostReads(SshHostReader(), store=LastAnswers(settings.root / LAST_ANSWERS_NAME), background=background)
 
 
 def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
@@ -106,7 +107,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
         return EXIT_ERROR
     the_clock = clock.current()
-    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), _host_reads(settings)
+    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), _host_reads(settings, background=True)
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -130,6 +131,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
                     the_clock.sleep(POLL_SECONDS)
         finally:
             screen.restore()  # on each end, before the last lines
+            hosts.close()  # Ctrl-C ends each read that runs at once (#328)
             for line in late:
                 print(line, file=sys.stderr)
     except RunsError as error:
@@ -149,10 +151,11 @@ def main(argv: list[str] | None = None) -> int:
         return _watch(settings, args.timeline, args.local)
     local = args.local or args.json
     try:
-        found = fleet.fleet_of(
-            settings.root, host_name(), utc_now(), stream_reader_of, index=settings.index.index, read_index=not local,
-            hosts=_host_reads(settings), view=_view(settings, local),
-        )
+        with _host_reads(settings) as hosts:  # Ctrl-C during a read ends the reads at once (#328)
+            found = fleet.fleet_of(
+                settings.root, host_name(), utc_now(), stream_reader_of, index=settings.index.index, read_index=not local,
+                hosts=hosts, view=_view(settings, local),
+            )
     except RunsError as error:
         print(f"delegate runs: {error}", file=sys.stderr)
         return EXIT_ERROR

@@ -33,7 +33,7 @@ def machine(tmp_path, monkeypatch, clock) -> Path:
 class SshShim:
     """The `ssh` of the case: a command shim on `PATH` that stands for the other hosts of the run index (#318).
 
-    It writes each call, with its arguments, to `calls`. A host with `serves` prints its document and exits 0. A host with `exits` prints nothing and exits with
+    It writes each call, with its arguments, to `calls`, and its process id, which is the id of its process group, to `pids`. A host with `serves` prints its document and exits 0. A host with `exits` prints nothing and exits with
     that status. A host with `says` writes that text on standard error. A host with `hangs` waits 30 seconds. A host with `delays` waits some seconds, then prints its document. Any other host exits 255, as `ssh` does when it cannot reach a host.
     """
 
@@ -46,6 +46,7 @@ class SshShim:
             f'dir="{directory}"\n'
             'host="$5"\n'
             'printf "%s\\n" "$*" >> "$dir/calls"\n'
+            'printf "%s\\n" "$$" >> "$dir/pids"\n'
             'if [ -f "$dir/$host.delay" ]; then\n'
             '  printf "start %s\\n" "$host" >> "$dir/order"\n'
             '  sleep "$(cat "$dir/$host.delay")"\n'
@@ -75,9 +76,9 @@ class SshShim:
         """`ssh <host> ...` exits with `code`, whatever it printed."""
         (self.directory / f"{host}.code").write_text(str(code))
 
-    def says(self, host: str, text: str) -> None:
-        """`ssh <host> ...` writes `text` on standard error."""
-        (self.directory / f"{host}.err").write_text(text)
+    def says(self, host: str, text: str | bytes) -> None:
+        """`ssh <host> ...` writes `text` on standard error: UTF-8 text, or the bytes as they are."""
+        (self.directory / f"{host}.err").write_bytes(text if isinstance(text, bytes) else text.encode())
 
     def hangs(self, host: str) -> None:
         """`ssh <host> ...` waits 30 seconds."""
@@ -92,6 +93,12 @@ class SshShim:
         """The arguments of each call of the shim, in the order of the calls."""
         path = self.directory / "calls"
         return [line.split() for line in path.read_text().splitlines()] if path.exists() else []
+
+    @property
+    def pids(self) -> list[int]:
+        """The process id of each call of the shim. The read starts `ssh` in a session of its own, so each id is also the id of a process group."""
+        path = self.directory / "pids"
+        return [int(line) for line in path.read_text().split()] if path.exists() else []
 
     @property
     def order(self) -> list[str]:

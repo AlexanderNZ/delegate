@@ -139,7 +139,7 @@ For example, a host `build-host` with one run `a41e` that was `running` at 3 of 
 
 In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`. A host with no last-known run has no lane.
 
-`--local` limits the view to this machine and reads no other host, and starts no `ssh`. `--json` always describes this machine only, reads no other host, and starts no `ssh`: this is the document that another host gives. With `--watch`, the command reads the other hosts at most each 30 seconds, and redraws with the last answers between two reads.
+`--local` limits the view to this machine and reads no other host, and starts no `ssh`. `--json` always describes this machine only, reads no other host, and starts no `ssh`: this is the document that another host gives. With `--watch`, the command reads the other hosts at most each 30 seconds, and redraws with the last answers between two reads. The reads of `--watch` go on in the background: a redraw waits for them at most 0.3 seconds, so a slow or unreachable host does not stop the view. Until the first answer of a host comes, its row is `unreachable` with its last-known runs and `heard <duration> ago`, and the row under it says `no answer from <host> yet`. Until a new answer comes, the view shows the answer before. Without `--watch`, the command waits for each read, up to its time limit. Ctrl-C ends each `ssh` of a read at once, with and without `--watch`.
 
 [`delegate clean`](commands.md) forgets the record of each run that it cleans or abandons, so the other hosts list it no more.
 

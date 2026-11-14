@@ -7,6 +7,7 @@ reach a host: a backend in `delegate.adapters` implements the interface, and the
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -25,10 +26,13 @@ class Unreachable:
 class HostReader(Protocol):
     """Reads the runs of one host."""
 
-    def read_runs(self, host: str, timeout_seconds: float) -> dict[str, object] | Unreachable:
+    def read_runs(self, host: str, timeout_seconds: float, stop: threading.Event | None = None) -> dict[str, object] | Unreachable:
         """The document of `delegate runs --local --json` of `host` as a mapping, or `Unreachable`.
 
         The read ends after `timeout_seconds` at the latest. A failure, a time limit, and an answer that is not a JSON object give
         `Unreachable`; this method raises nothing for an answer of the host. The format of the document is the business of the caller.
+
+        The caller reads in a thread of its own. When another thread sets `stop` (#328: Ctrl-C), the read ends at once: the backend ends each
+        process that it started, before it returns `Unreachable`.
         """
         ...

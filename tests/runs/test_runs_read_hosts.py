@@ -9,13 +9,17 @@ directory of the directory backend. The clock is `NOW`, 14:20.
 
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import sys
 import time
 
 import pytest
 
 from delegate.run import fleet
 
-from ..support import fake_clock, frames
+from ..support import Terminal, fake_clock, frames
 from .journals import NOW, clock_time, runs
 from .test_runs_hosts import index, record, this_machine, two_other_hosts
 from .test_runs_watch import ctrl_c, watching
@@ -36,6 +40,25 @@ def reason_of(lines: list[str], host: str) -> str:
     """The text of the row under the row of `host`, after its rail: the reason that the command could not read the host (#323)."""
     row = next(number for number, line in enumerate(lines) if line.startswith(f"{host} "))
     return lines[row + 1].removeprefix("│").strip()
+
+
+def group_is_gone(group: int, seconds: float = 1.0) -> bool:
+    """True when no process of the process group `group` is alive. A process that a signal ended can stay a zombie until its parent, or init, collects it,
+    so the check waits up to `seconds` for that. A group that holds only zombies gives PermissionError on macOS."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            os.killpg(group, 0)
+        except (ProcessLookupError, PermissionError):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+
+
+def row_of(lines: list[str], start: str) -> list[str]:
+    """The cells of the first line that starts with `start`, or that holds it as a cell."""
+    return next(line for line in lines if line.startswith(start) or f" {start} " in line).split()
 
 
 def run_of(
@@ -286,6 +309,7 @@ def test_watch_reads_the_other_hosts_at_most_each_30_seconds(machine, index, ssh
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
+    monkeypatch.setattr(fleet, "HOST_WAIT_SECONDS", 10.0)  # each read is in the frame that starts it, also on a busy machine (#328)
     waits: list[float] = []
     seen: list[int] = []
 
@@ -307,9 +331,114 @@ def test_watch_shows_a_host_that_was_read_in_the_frame(machine, index, ssh, monk
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
+    monkeypatch.setattr(fleet, "HOST_WAIT_SECONDS", 10.0)  # the read is in the first frame, also on a busy machine (#328)
     fake_clock().on_sleep = lambda seconds: ctrl_c()
 
     _, out, _ = watching(monkeypatch, capsys, columns=120)
 
     (frame,) = frames(out)
     assert frame[1].startswith("runs  2 of 2 reachable")
+
+
+def test_a_byte_that_is_not_utf_8_on_the_stderr_of_ssh_gives_the_reason_with_a_replacement_character(machine, index, ssh, capsys, monkeypatch):
+    """#328: a banner of `ssh` with the byte 0xff made the reason a decode error of Python, not `ssh cannot reach <host>: ...`."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    ssh.says("build-host", b"\xff banner of build-host\n")
+    ssh.exits("build-host", 255)
+
+    code, out, err = runs(capsys)
+
+    assert (code, err) == (0, "")
+    assert reason_of(out.splitlines(), "build-host") == "ssh cannot reach build-host: \ufffd banner of build-host"
+
+
+def test_watch_draws_the_first_frame_at_once_with_the_last_answer_of_a_host_whose_read_hangs(machine, index, ssh, capsys, monkeypatch, clock):
+    """#328: the view waited for the slowest host before it drew. The host answered 3 of 6 two minutes ago, and its index record says 1 of 6.
+
+    Now its read hangs. The first frame comes in less than one second, with the last answer and its age. Ctrl-C after the frame ends the `ssh` of the read.
+    """
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
+    runs(capsys)  # the store of last answers keeps the answer
+    ssh.hangs("build-host")
+    clock.at += 120
+    drawn: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        drawn.append(time.monotonic())
+        ctrl_c()
+
+    fake_clock().on_sleep = sleep
+    started = time.monotonic()
+
+    code, out, err = watching(monkeypatch, capsys, columns=120)
+
+    assert drawn[0] - started < 1  # the shim waits 30 seconds, and the time limit of a read is 10 seconds
+    (frame,) = frames(out)
+    assert row_of(frame, "build-host") == ["build-host", "unreachable", "heard", "2m", "ago", "check", "host"]
+    assert reason_of(frame, "build-host") == "no answer from build-host yet"
+    assert row_of(frame, "a41e") == ["│", "docs-site", "a41e", "running", "3/6"]
+    assert (code, err) == (130, "delegate: interrupted\n")
+    assert len(ssh.pids) == 2 and group_is_gone(ssh.pids[1])
+
+
+def test_watch_draws_the_last_answer_until_the_new_answer_comes_and_then_the_new_answer(machine, index, ssh, capsys, monkeypatch):
+    """The host answers after 1.5 seconds. The first frames have its last-known run from the index (1 of 6); a later frame has its answer (3 of 6), live."""
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
+    ssh.delays("build-host", 1.5)
+    terminal = Terminal()
+    deadline = time.monotonic() + 10
+
+    def sleep(seconds: float) -> None:
+        if "2 of 2 reachable" in terminal.getvalue() or time.monotonic() > deadline:
+            ctrl_c()
+        time.sleep(0.1)  # a real wait: the read of the host goes on in the background
+
+    fake_clock().on_sleep = sleep
+
+    watching(monkeypatch, capsys, columns=120, out=terminal)
+
+    shown = frames(terminal.getvalue())
+    assert row_of(shown[0], "build-host")[:2] == ["build-host", "unreachable"]
+    assert row_of(shown[0], "a41e") == ["│", "docs-site", "a41e", "running", "1/6"]
+    assert shown[-1][1].startswith("runs  2 of 2 reachable")
+    assert row_of(shown[-1], "a41e")[:6] == ["│", "docs-site", "a41e", "running", "3/6", "16:05"]
+    assert len(ssh.calls) == 1
+
+
+# Run `delegate runs` as a terminal runs it: Ctrl-C raises KeyboardInterrupt, also when the process that starts it ignores SIGINT.
+ON_A_TERMINAL = (
+    "import signal, sys\n"
+    "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
+    "from delegate.cli.delegate import main\n"
+    "sys.exit(main(sys.argv[1:]))\n"
+)
+
+
+def test_sigint_during_a_read_that_hangs_exits_130_in_less_than_one_second_and_no_ssh_of_the_read_stays_alive(machine, index, ssh):
+    """#328: the main thread waited for each read until its time limit: `delegate runs` exited 130 nine seconds after SIGINT."""
+    this_machine(machine)
+    record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
+    ssh.hangs("build-host")
+    process = subprocess.Popen(
+        [sys.executable, "-c", ON_A_TERMINAL, "runs"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 20
+    while not ssh.pids and time.monotonic() < deadline and process.poll() is None:
+        time.sleep(0.02)
+    assert ssh.pids, "the read of build-host did not start"
+    time.sleep(0.2)  # the shim waits in `sleep 30`
+
+    sent = time.monotonic()
+    process.send_signal(signal.SIGINT)
+    _, err = process.communicate(timeout=30)
+    took = time.monotonic() - sent
+
+    assert (process.returncode, err.decode()) == (130, "delegate: interrupted\n")
+    assert took < 1
+    assert group_is_gone(ssh.pids[0])
