@@ -74,7 +74,7 @@ def test_the_eta_is_the_latest_the_runs_with_no_eta_are_counted_and_an_ended_run
     assert (code, err) == (0, "")
     assert out.splitlines()[1:3] == [
         "runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/9 ended  ETA 15:10 · 2 with no ETA  34k new · 126k cache",
-        "13:00–14:20",
+        "13:00–14:20  trend: tickets ended an hour, last 6h · all      ▇ speeding up",
     ]
 
 
@@ -98,7 +98,7 @@ def test_the_trouble_count_holds_a_stopped_run_and_a_run_with_an_idle_agent_and_
 
     _, out, _ = runs(capsys)
 
-    assert out.splitlines()[2] == "13:00–14:20  ⚠ 2 in trouble"
+    assert out.splitlines()[2] == "13:00–14:20  ⚠ 2 in trouble  trend: tickets ended an hour, last 6h · all      ▇ speeding up"
 
 
 def test_a_run_that_failed_at_start_in_the_window_is_in_trouble_and_out_of_each_sum(machine, capsys):
@@ -112,7 +112,7 @@ def test_a_run_that_failed_at_start_in_the_window_is_in_trouble_and_out_of_each_
 
     _, out, _ = runs(capsys)
 
-    assert out.splitlines()[1:3] == ["runs  1 of 1 reachable  ░░░░░░░░░░░░░░░░ 0%  0/2 ended  ETA - · 1 with no ETA", "13:00–14:20  ⚠ 1 in trouble"]
+    assert out.splitlines()[1:3] == ["runs  1 of 1 reachable  ░░░░░░░░░░░░░░░░ 0%  0/2 ended  ETA - · 1 with no ETA", "13:00–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all"]
 
 
 def test_no_trouble_leaves_the_phrase_out_of_the_second_line(machine, capsys):
@@ -120,7 +120,7 @@ def test_no_trouble_leaves_the_phrase_out_of_the_second_line(machine, capsys):
 
     _, out, _ = runs(capsys)
 
-    assert out.splitlines()[2] == "13:00–14:20"
+    assert out.splitlines()[2] == "13:00–14:20  trend: tickets ended an hour, last 6h · all     ▇  speeding up"  # the ticket ended at 13:10: cell 4
 
 
 def test_the_first_row_of_the_host_holds_the_ended_count_summed_the_latest_eta_and_the_tokens_summed_without_an_ended_run(machine, capsys):
@@ -149,7 +149,7 @@ def test_the_ascii_locale_draws_the_bar_and_the_separators_with_ascii_glyphs(mac
 
     assert out.splitlines()[1:3] == [
         "runs  4 of 4 reachable  #####........... 33%  3/9 ended  ETA 15:10 . 2 with no ETA  34k new . 126k cache",
-        "13:00-14:20",
+        "13:00-14:20  trend: tickets ended an hour, last 6h . all      # speeding up",
     ]
 
 
@@ -163,4 +163,4 @@ def test_with_only_an_ended_run_the_fleet_line_says_no_run_is_reachable_and_the_
     lines = out.splitlines()
     assert lines[1] == "runs  0 of 0 reachable"
     assert lines[2] == ""
-    assert lines[-3].split() == ["│", "omega", "eeee", "built", "1/1", "merge"]
+    assert lines[-3].split() == ["│", "omega", "eeee", "built", "1/1", "▇", "merge"]

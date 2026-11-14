@@ -64,7 +64,7 @@ def test_each_run_shows_its_alert_and_the_next_command_and_a_run_with_nothing_wr
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[4].split()[-3:] == ["cache", "alert", "do"]
+    assert out.splitlines()[4].split()[-4:] == ["cache", "trend", "alert", "do"]
     assert cells_of(row_of(out, "iiii"))[-2:] == [IDLE_ONLY, "watch"]
     assert cells_of(row_of(out, "ffff"))[-2:] == ["fix-up 1/2", "watch"]
     assert cells_of(row_of(out, "pppp"))[-2:] == ["0/2", "resume"]  # the ETA, the new and the cache cells are blank, and so is the alert

@@ -43,7 +43,7 @@ The two fleet lines sum the runs that have no `run-end`. A run that ended is out
 
 ```
 runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/9 ended  ETA 15:10 · 2 with no ETA  34k new · 126k cache
-13:00–14:20  ⚠ 2 in trouble
+13:00–14:20  ⚠ 2 in trouble  trend: tickets ended an hour, last 6h · all      ▇ speeding up
 ```
 
 | Part | Meaning |
@@ -55,8 +55,9 @@ runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/
 | `new` and `cache` | Two sums of the tokens. They are never added together, and the line shows no cost. They are left out when no run has a count. |
 | `HH:MM–HH:MM` | The local clock time of the earliest start of the runs in the sums, and the local clock time of now. It is not the sum of the times of the runs. |
 | `⚠ N in trouble` | The runs with an agent that is idle for 5 minutes or more (the idle time of `delegate watch`), the runs that are `stopped` or `halted`, and the runs that failed at start in the window. A paused run is not in trouble. It is left out when N is 0. |
+| `trend: tickets ended an hour, last 6h · all` | The sparkline of the tickets that ended in each hour of the window, summed over the runs in the sums, and then the trend word. See [The trend](#the-trend). |
 
-With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, and the second line is not there. The trend part of the second line comes in a later version.
+With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, and the second line is not there.
 
 | Column | Meaning |
 |---|---|
@@ -68,6 +69,7 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 | `ETA` | The local clock time `HH:MM` of the end that the run is estimated to reach. It is `-` while the run runs and has no estimate. It is blank when the run is paused, halted, stopped or ended. |
 | `new` | The new tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `cache` | The cache tokens of the run. It is blank when the command cannot read the streams of the run. |
+| `trend` | The sparkline of the tickets of the run that ended in each hour of the window, in `dim`. See [The trend](#the-trend). The row of the machine has none. |
 | `alert` | What is wrong, at most one value, in `warn`. `⚠ idle <time>` when an agent of the run is idle for the stall time of `delegate watch` (5 minutes) or more. Else `fix-up <round>/<limit>` when a [**fix-up**](../glossary.md#fix-up) round of a ticket or of a [**chain**](../glossary.md#chain) runs. It is blank otherwise. A run that is not `running` or `pausing` has no alert. |
 | `do` | The next command. `watch` when the run has an alert. Else `resume` when the run is `paused`, `stopped` or `halted`, `retry` when the run ended `failed`, and `merge` when the run ended `built`. It is blank otherwise. A run that failed at start has none: it has no journal to resume. |
 
@@ -75,7 +77,19 @@ The order of the rows is fixed. The runs that have no `run-end` come first, the 
 
 When no run is listed, the table is the line `no run ended in the last 6h`. The command exits 0.
 
-Later versions add the columns `slip` and `trend`.
+A later version adds the column `slip`.
+
+### The trend
+
+A ticket counts one time, at the time of its first `step-end` with the state `built`. A ticket that a `retry` revived has a later `step-end` with the state `built`, and that one does not count again.
+
+The trend of a run is 6 cells, one for each hour of the window, oldest first. The last cell is the hour that ends now. Each cell is the number of tickets that ended built in that hour. A ticket that ended before the window is in no cell.
+
+Each cell is one glyph, in `dim`. The glyphs are `▁▂▃▄▅▆▇`, from the lowest level to the highest. The level is scaled to the largest cell of all the runs in the table, so one scale serves each run: a cell of the same size has the same glyph in two runs. A cell with no ticket is a space. When the locale is not UTF-8, the glyphs are `.:-=+*#`, and each takes the same cell.
+
+The `all` sparkline of the second fleet line is the sum of the cells of the runs that have no `run-end`. Its scale is its own largest cell, because the sum can be larger than each cell of one run.
+
+The trend word compares the tickets of the last 2 hours with the tickets of the 2 hours before them. More than 1.25 times as many is `speeding up`. Fewer than 0.75 times as many is `slowing`. Otherwise it is `steady`. When both counts are 0, there is no word.
 
 ### The legend
 
@@ -114,7 +128,8 @@ Each command works from any directory of this machine: `delegate watch` and `del
       "tokens_new": 12000,
       "tokens_cache": 340000,
       "alert": null,
-      "do": null
+      "do": null,
+      "trend": [0, 0, 0, 0, 0, 1]
     }
   ]
 }
@@ -140,6 +155,7 @@ Each command works from any directory of this machine: `delegate watch` and `del
 | `tokens_cache` | The cache tokens of the run, or `null` when the command cannot read its streams. |
 | `alert` | The text of the column `alert`, or `null`. The glyph of `⚠ idle` is always `⚠`, also in a terminal that is not UTF-8. |
 | `do` | The word of the column `do`, or `null`. |
+| `trend` | The 6 counts of the trend of the run: the tickets that ended built in each hour of the window, oldest first. |
 
 ## Exit codes
 

@@ -53,12 +53,12 @@ def test_the_table_lists_the_running_run_then_the_run_that_ended_in_the_window_a
     assert out.splitlines() == [
         "no run index is set up: these are the runs of this machine",
         "runs  1 of 1 reachable  50%  1/2 ended  ETA - · 1 with no ETA  12k new · 340k cache",
-        "13:40–14:20",
+        "13:40–14:20  trend: tickets ended an hour, last 6h · all      ▇ speeding up",
         "",
-        "host    repo   run   state    ended  ETA  new  cache  alert  do",
+        "host    repo   run   state    ended  ETA  new  cache  trend   alert  do",
         "laptop                        1/2         12k   340k",
-        "│       alpha  aaaa  running  1/2    -    12k   340k",
-        "│       beta   bbbb  built    1/1          2k    50k         merge",
+        "│       alpha  aaaa  running  1/2    -    12k   340k       ▇",
+        "│       beta   bbbb  built    1/1          2k    50k      ▇          merge",
     ]
 
 
@@ -77,18 +77,19 @@ def test_the_json_object_has_the_format_the_host_the_window_and_each_listed_run_
             {
                 "run_id": "20261114T134000Z-aaaa", "repo": "alpha", "host": "laptop", "state": "running",
                 "started": "2026-11-14T13:40:00+00:00", "ended": None, "tickets_ended": 1, "tickets_total": 2, "eta": None,
-                "tokens_new": 12000, "tokens_cache": 340000, "alert": None, "do": None,
+                "tokens_new": 12000, "tokens_cache": 340000, "alert": None, "do": None, "trend": [0, 0, 0, 0, 0, 1],
             },
             {
                 "run_id": "20261114T125000Z-bbbb", "repo": "beta", "host": "laptop", "state": "built",
                 "started": "2026-11-14T12:50:00+00:00", "ended": "2026-11-14T13:20:00+00:00", "tickets_ended": 1,
                 "tickets_total": 1, "eta": None, "tokens_new": 2000, "tokens_cache": 50000, "alert": None, "do": "merge",
+                "trend": [0, 0, 0, 0, 1, 0],  # the ticket ended at 13:20: 1 hour ago, so the hour 12:20–13:20
             },
         ],
     }
     assert list(json.loads(out)) == ["format", "host", "time", "window_seconds", "runs"]
     assert list(json.loads(out)["runs"][0]) == [
-        "run_id", "repo", "host", "state", "started", "ended", "tickets_ended", "tickets_total", "eta", "tokens_new", "tokens_cache", "alert", "do",
+        "run_id", "repo", "host", "state", "started", "ended", "tickets_ended", "tickets_total", "eta", "tokens_new", "tokens_cache", "alert", "do", "trend",
     ]
 
 
@@ -111,10 +112,10 @@ def test_the_eta_cell_is_a_clock_time_while_a_run_runs_and_is_blank_for_a_paused
 
     assert (code, err) == (0, "")
     assert out.splitlines()[4:] == [
-        "host    repo   run   state    ended  ETA    new  cache  alert  do",
+        "host    repo   run   state    ended  ETA    new  cache  trend   alert  do",
         "laptop                        2/5    15:10",
-        "│       gamma  pppp  paused   1/2                              resume",
-        "│       gamma  gggg  running  1/3    15:10",
+        "│       gamma  pppp  paused   1/2                            ▇         resume",
+        "│       gamma  gggg  running  1/3    15:10                   ▇",
     ]
     code, out, _ = runs(capsys, "--json")
     assert [(run["state"], run["eta"], run["tokens_new"]) for run in json.loads(out)["runs"]] == [
@@ -185,7 +186,7 @@ def test_the_eta_is_the_local_clock_time_of_the_zone_of_the_machine(machine, mon
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[-1].split() == ["│", "gamma", "gggg", "running", "1/3", "04:10"]
+    assert out.splitlines()[-1].split() == ["│", "gamma", "gggg", "running", "1/3", "04:10", "▇"]
 
 
 def test_a_terminal_with_no_utf8_locale_gets_the_ascii_rail(machine, monkeypatch, capsys):

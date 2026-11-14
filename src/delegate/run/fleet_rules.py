@@ -4,6 +4,8 @@ The spec is `design/docs/components.md`, C24 and C25. This module imports nothin
 (`tests/test_architecture.py` checks it), so a rule never reads a journal, a clock or a terminal. The use case
 (`fleet.py`) turns each listed run into a `RunFacts`, calls the rules, and writes the words and the glyphs.
 
+The trend rules (#310) are here too: the cells of a run, the level of a cell, and the word of the trend.
+
 The runs of the sums are the runs that have no `run-end`. A run that ended, and a run that failed at start, are out of
 each sum. The sums are over the runs that the caller gives, so a host total gives the runs of one host, and the fleet
 line gives the runs of the machine.
@@ -14,6 +16,22 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+
+# The window of the trend, in hours, and so the cells of a trend: one cell for each hour, oldest first.
+TREND_HOURS: int = 6
+
+# The levels of a sparkline glyph: a cell with a ticket has a level from 1 to this number. A cell with no ticket has level 0.
+SPARK_LEVELS: int = 7
+
+# The trend word compares the tickets of the last `TREND_SPAN` cells with the tickets of the `TREND_SPAN` cells before them.
+TREND_SPAN: int = 2
+
+# More than this many times as many tickets is `speeding up`, and fewer than this many times is `slowing` (copy deck W8.fleet.trend).
+SPEEDING_RATIO: float = 1.25
+SLOWING_RATIO: float = 0.75
+SPEEDING_UP: str = "speeding up"
+SLOWING: str = "slowing"
+STEADY: str = "steady"
 
 # The states of a run that are trouble by themselves: a run that stopped with no `run-end`, and a run that halted.
 TROUBLE_STATES: frozenset[str] = frozenset({"stopped", "halted"})
@@ -39,6 +57,7 @@ class RunFacts:
     run that has no estimate and for a run that does not run. `idle_seconds` is the longest time that an agent of the
     run is idle, or None when no agent runs or the run has no reader of its streams. The two token counts are None
     when the run has none. `fixup` is the round and the limit of a fix-up round of a ticket or of a chain that runs now (#309), or None.
+    `trend` is the tickets that ended built in each hour of the window, oldest first (`trend_cells`, #310).
     """
 
     state: str
@@ -52,6 +71,7 @@ class RunFacts:
     tokens_cache: int | None
     idle_seconds: int | None
     fixup: tuple[int, int] | None = None
+    trend: tuple[int, ...] = (0,) * TREND_HOURS
 
 
 @dataclass(frozen=True)
@@ -163,3 +183,60 @@ def next_command(run: RunFacts, alerted: bool) -> str | None:
     if run.state == "built":
         return MERGE
     return None
+
+
+def built_times(events: Sequence[dict[str, object]]) -> list[datetime]:
+    """The time of each ticket that ended built (#310): the time of its first `step-end` with the state `built`.
+
+    A ticket counts once. A ticket that a `retry` revived has a later `step-end` built, and that one is not counted.
+    """
+    first: dict[object, datetime] = {}
+    for event in events:
+        if event.get("event") == "step-end" and event.get("state") == "built" and event.get("ticket") not in first:
+            first[event.get("ticket")] = datetime.fromisoformat(str(event["time"]))
+    return list(first.values())
+
+
+def trend_cells(times: Sequence[datetime], now: datetime) -> tuple[int, ...]:
+    """The trend of a run (#310): `TREND_HOURS` cells, oldest first, each the number of the tickets that ended in one hour.
+
+    The last cell is the hour that ends at `now`. A ticket that ended before the window is in no cell. A ticket with a
+    time after `now` is in the last cell.
+    """
+    cells = [0] * TREND_HOURS
+    for time in times:
+        hours_ago = max(0.0, (now - time).total_seconds() / 3600)
+        if hours_ago < TREND_HOURS:
+            cells[TREND_HOURS - 1 - int(hours_ago)] += 1
+    return tuple(cells)
+
+
+def trend_sum(runs: Sequence[RunFacts]) -> tuple[int, ...]:
+    """The trend of all runs (#310): the sum of the cells of the runs with no `run-end`."""
+    active = counted(runs)
+    return tuple(sum(run.trend[index] for run in active) for index in range(TREND_HOURS))
+
+
+def spark_level(count: int, largest: int) -> int:
+    """The level of a cell of `count` tickets on a scale whose largest cell has `largest` tickets: 0 for no ticket, else 1 to `SPARK_LEVELS`.
+
+    A cell with a ticket never has level 0, and the largest cell has the top level.
+    """
+    return 0 if count <= 0 or largest <= 0 else -(-min(count, largest) * SPARK_LEVELS // largest)
+
+
+def trend_word(cells: Sequence[int]) -> str | None:
+    """The trend word of the cells (copy deck W8.fleet.trend): the tickets of the last `TREND_SPAN` cells against those of the `TREND_SPAN` cells before.
+
+    More than `SPEEDING_RATIO` times as many is `speeding up`. Fewer than `SLOWING_RATIO` times as many is `slowing`.
+    Else `steady`. None when both counts are 0.
+    """
+    recent = sum(cells[len(cells) - TREND_SPAN:])
+    before = sum(cells[len(cells) - 2 * TREND_SPAN:len(cells) - TREND_SPAN])
+    if not recent and not before:
+        return None
+    if recent > SPEEDING_RATIO * before:
+        return SPEEDING_UP
+    if recent < SLOWING_RATIO * before:
+        return SLOWING
+    return STEADY
