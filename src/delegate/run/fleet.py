@@ -8,6 +8,7 @@ line are the sparklines of the tickets that ended in each hour of the window (#3
 
 With `timeline` (`delegate runs --timeline`, #314), `fleet_lines` has the same two fleet lines and then one lane for each run instead of the table (C26, frame W9): the
 life of the run, the tickets that ended built, its end or its projection to the ETA, and the column of now, over the window and on to the latest ETA (`fleet_rules.lane`).
+The first lane is `all` (#315): the sparkline of the tickets that ended in each cell, over the runs with no `run-end`. Under `BAR_COLUMNS` the label is the run id, the host is a line over its lanes, and `ETA` and the footer drop.
 
 A run is listed when it has no `run-end` (running, pausing, paused, halted or stopped), or when its `run-end` is
 in the window, the last `WINDOW_SECONDS`. A run that failed at start (`runs.FailedStart`) and whose log last changed
@@ -72,6 +73,10 @@ COMMANDS: dict[str, str] = {
 
 # The header of the columns after the lane in the timeline (copy deck W9.table.header).
 W9_HEADER: tuple[str, ...] = ("ended", "ETA", "state", "alert")
+
+# The label of the first lane of the timeline (copy deck W9.lane.all), and the line under the lanes (copy deck W9.footer). The placeholders stay as the copy deck writes them.
+ALL: str = "all"
+FOOTER: str = "detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>"
 
 # The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`engine.state_directory`).
 KEY = re.compile(r"-[0-9a-f]{12}$")
@@ -491,28 +496,58 @@ def _lane_text(row: RunRow, fleet: Fleet, minutes: int, length: int, glyph: outp
     return "".join(output.styled(marks[kind][0], marks[kind][1] * len(list(group))) for kind, group in groupby(kinds))
 
 
+def _all_lane(fleet: Fleet, minutes: int, projection: int, glyph: output.Glyphs) -> str:
+    """The lane of `all` (C26, #315): the sparkline of the tickets that ended built in each cell of the window, over the runs with no `run-end`,
+    on a scale whose largest cell has the top level; then the column of now, and `░` to the latest ETA (`projection` cells).
+    """
+    times = [time for row in fleet.runs if row.ended is None for time in row.built]
+    cells = fleet_rules.ticket_cells(times, fleet.time, minutes)
+    return (
+        output.styled("dim", sparkline(cells, max(cells), glyph)) + output.styled("now", glyph.now)
+        + output.styled("dim", glyph.empty * projection)
+    )
+
+
 def _timeline(fleet: Fleet, width: int, glyph: output.Glyphs) -> list[str]:
-    """The lines under the fleet lines of the timeline (C26, #314): the header with the axis label, a blank line, and one lane for each run.
+    """The lines under the fleet lines of the timeline (C26, #314, #315): the header, a blank line, the lane of `all`, one lane for each run, and the footer.
 
     A line is the label of the run (`host repo run`, with the host on the first row and the rail under it), the lane, and
     `ended ETA state alert` as in the table. The lane is as long as the window, the column of now, and the projection to the latest ETA of the runs.
+    The first lane is `all` (`_all_lane`), with the ended count and the latest ETA of the runs with no `run-end`.
+
+    Under `BAR_COLUMNS` the label is the run id only, the host is a line over its lanes, the column `ETA` and the axis label drop, and so does the footer
+    (`W9.footer`), as the legend of the table does.
     """
+    compact = width < BAR_COLUMNS
     minutes = fleet_rules.cell_minutes(width)
     latest = fleet_rules.totals([row.facts() for row in fleet.runs]).eta
-    length = fleet_rules.window_cells(minutes) + 1 + fleet_rules.projection_cells(latest, fleet.time, minutes)
+    projection = fleet_rules.projection_cells(latest, fleet.time, minutes)
+    length = fleet_rules.window_cells(minutes) + 1 + projection
     rail = output.styled("plan", glyph.rail)
     cells = [_cells(row, glyph, 0) for row in fleet.runs]
-    labels = output.columns([[fleet.host if index == 0 else rail, found[1], found[2]] for index, found in enumerate(cells)])
-    label_width = max((output.width(label) for label in labels), default=0)
+    summary = _totals(fleet)
+
+    def tail(ended: str, eta: str, state: str, alert: str) -> list[str]:
+        return [ended, state, alert] if compact else [ended, eta, state, alert]
+
+    labels = output.columns(
+        [[ALL], *[[found[2]] for found in cells]] if compact
+        else [[ALL, "", ""], *[[fleet.host if index == 0 else rail, found[1], found[2]] for index, found in enumerate(cells)]]
+    )
+    label_width = max(output.width(label) for label in labels)
+    header = [name for name in W9_HEADER if not compact or name != "ETA"]
     body = output.columns([
-        [output.styled("dim", name) for name in ("", *W9_HEADER)],
-        *[[_lane_text(row, fleet, minutes, length, glyph), found[4], found[5], found[3], found[10]] for row, found in zip(fleet.runs, cells)],
+        ["", *[output.styled("dim", name) for name in header]],
+        [_all_lane(fleet, minutes, projection, glyph), *tail(summary[4], summary[5], "", "")],
+        *[[_lane_text(row, fleet, minutes, length, glyph), *tail(found[4], found[5], found[3], found[10])] for row, found in zip(fleet.runs, cells)],
     ])
-    axis = output.styled("dim", f"last {window_label()}, to the latest ETA")
+    lead = "" if compact else output.styled("dim", f"last {window_label()}, to the latest ETA")
     lane_end = label_width + len(output.GAP) + length
-    right = body[0][length:]  # the header row from the gap before `ended`
-    header = axis + " " * (lane_end - output.width(axis)) + right
-    return [header, "", *[label + " " * (label_width - output.width(label)) + output.GAP + line for label, line in zip(labels, body[1:])]]
+    top = lead + " " * (lane_end - output.width(lead)) + body[0][length:]  # the header row from the gap before `ended`
+    lanes = [label + " " * (label_width - output.width(label)) + output.GAP + line for label, line in zip(labels, body[1:])]
+    if compact:
+        return [top, "", lanes[0], fleet.host, *lanes[1:]]
+    return [top, "", *lanes, "", FOOTER]
 
 
 def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = None, timeline: bool = False) -> list[str]:

@@ -295,6 +295,17 @@ def cell_of(time: datetime, now: datetime, minutes: int) -> int:
     return min(max(int(seconds // (minutes * 60)), 0), window_cells(minutes) - 1)
 
 
+def ticket_cells(times: Sequence[datetime], now: datetime, minutes: int) -> list[int]:
+    """The tickets in each cell of the window when one cell is `minutes` minutes (#315): `window_cells(minutes)` counts, oldest cell first.
+
+    A time is in the cell that holds it (`cell_of`).
+    """
+    cells = [0] * window_cells(minutes)
+    for time in times:
+        cells[cell_of(time, now, minutes)] += 1
+    return cells
+
+
 def projection_cells(eta: datetime | None, now: datetime, minutes: int) -> int:
     """The whole cells from `now` to `eta`; 0 with no ETA, and for an ETA that is not after `now`."""
     return 0 if eta is None else max(int((eta - now).total_seconds() // (minutes * 60)), 0)

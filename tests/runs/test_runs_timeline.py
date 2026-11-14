@@ -30,8 +30,8 @@ def wide(monkeypatch):
 
 def lane_of(out: str, short: str) -> str:
     """The cells of the lane of the run `short`: the 42 characters of the lane column of its row (36 cells of the window, now, and the projection)."""
-    row = next(line for line in out.splitlines() if f"  {short}  " in line)
-    start = row.index(f"  {short}  ") + len(f"  {short}  ")
+    row = next(line for line in out.splitlines() if f"{short}  " in line)
+    start = row.index(f"{short}  ") + len(f"{short}  ")
     return row[start:]
 
 
@@ -49,7 +49,7 @@ def test_a_run_that_started_3_hours_ago_has_its_life_its_tickets_now_and_the_pro
     assert (code, err) == (0, "")
     expected = " " * 18 + LIFE * 3 + TICKET + LIFE * 3 + TICKET + LIFE * 5 + TICKET + LIFE * 4 + "▶" + PROJECTION * 5
     assert len(expected) == 42
-    assert out.splitlines()[-1] == f"laptop  gamma  gggg  {expected}  3/5    15:10  running"
+    assert next(line for line in out.splitlines() if " gggg " in line) == f"laptop  gamma  gggg  {expected}  3/5    15:10  running"
 
 
 def test_a_run_that_ended_ends_its_lane_with_a_check_in_the_cell_of_its_end_and_a_failed_run_with_a_cross(machine, capsys):

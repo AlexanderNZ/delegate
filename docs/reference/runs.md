@@ -138,7 +138,11 @@ A host with an alert or a command does not fold to its totals row. When the line
 
 `delegate runs --timeline` shows the same two fleet lines, and then one lane for each run in place of the table. A lane shows the time of a run across the window, the last 6 hours, and on to the latest ETA of the runs. It shows the same runs in the same order as the table. `--timeline` can be used with `--watch`, and it cannot be used with `--json`.
 
-The legend is the end of the second fleet line, after the trend word. Under 100 columns it is only `one cell is 12m`. The header under the blank line holds the label `last 6h, to the latest ETA` and the headers `ended`, `ETA`, `state` and `alert`. Each lane row has the label `host repo run` (the host on the first row, the rail `│` under it), the lane, and then `ended`, `ETA`, `state` and `alert` as in the table.
+The legend is the end of the second fleet line, after the trend word. Under 100 columns it is only `one cell is 12m`. The header under the blank line holds the label `last 6h, to the latest ETA` and the headers `ended`, `ETA`, `state` and `alert`. The first lane is `all` (see below). Each lane row after it has the label `host repo run` (the host on the first row, the rail `│` under it), the lane, and then `ended`, `ETA`, `state` and `alert` as in the table. Under the lanes, after a blank line, is the footer `detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>`.
+
+The lane `all` is the sparkline of the tickets that ended built in each cell of the window, over all the runs that have no `run-end`, on a scale whose largest cell has the top level; then the column of now `┊`, and `░` to the latest ETA. Its `ended` and `ETA` are the totals of those runs, as on the row of the host in the table. A run that ended is out of the lane `all`.
+
+**Under 100 columns** the label of a lane is the run id only, and the host is a line over its lanes, under the lane `all`. The column `ETA`, the label `last 6h, to the latest ETA` and the footer drop, as the bar and the legend of the table drop.
 
 One cell is 10 minutes on a terminal of 120 columns or more, and 12 minutes on a narrower one. Cell 0 starts at the start of the window, now minus 6 hours. The window has 36 cells of 10 minutes, or 30 cells of 12 minutes. The cell after them is the column of now, and the cells after that are the projection. The lane ends at the latest ETA of the runs, or at the column of now when no run has an ETA. A time is in the cell that holds it. A time before the window is in cell 0, and a time after now is in the last cell of the window.
 
@@ -151,7 +155,7 @@ One cell is 10 minutes on a terminal of 120 columns or more, and 12 minutes on a
 | `░` | `.` | `dim` | The projection of a run that runs, from now to its ETA. |
 | `┊` | `:` | `now` | The present, for each run that does not run. It is in the same column in each lane. |
 
-The command fits the lanes to the width of the terminal only as far as the cell size. The folds of the rows to the height of the terminal do not apply to `--timeline`.
+The command fits the lanes to the width of the terminal only as far as the cell size and the columns that drop under 100 columns. The folds of the rows to the height of the terminal do not apply to `--timeline`.
 
 ## The option `--watch`
 
