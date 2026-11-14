@@ -49,8 +49,8 @@ import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
-from ..run import clock, live, status, watch
-from ..run.journal import JournalError
+from ..run import clock, live, run_state, status, watch
+from ..run.journal import JournalError, setup_problem_note
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
@@ -155,12 +155,8 @@ class _Titled:
         self._events.append(event)
         if event["event"] == "run-end":
             self._result = str(event["result"])
-        elif event["event"] == "paused":
-            self._result = "paused"
-        elif event["event"] == "halted":
-            self._result = "halted"
-        elif event["event"] == "crashed":
-            self._result = "crashed"
+        elif event["event"] in run_state.STOP_EVENTS:
+            self._result = "stopped" if event["event"] == run_state.SETUP_PROBLEM else str(event["event"])
         elif problem is not None:
             self._result = "problem"
         self._sink.event(event, reported, problem)
@@ -328,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     except (RunsError, JournalError) as error:
         _error(str(error), args.raw)
         return watch.EXIT_ERROR
+    if result.stop is not None and result.stop["event"] == run_state.SETUP_PROBLEM:
+        _error(setup_problem_note(result.stop, journal.parent.name), args.raw)  # the line of a stopped run: the exit code is 2
     if result.code == watch.EXIT_INTERRUPTED:
         run_id = journal.parent.name
         print(

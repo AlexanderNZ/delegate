@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import domain, output, status
+from . import domain, output, run_state, status
 from .clock import Clock, utc_now
 from .events import JOURNAL_CHANGED
 from .journal import JournalError, crash_where
@@ -390,7 +390,7 @@ class LiveView:
         elif kind == "step-end":
             for key in [key for key in self._agents if key[0] == ticket]:
                 del self._agents[key]  # a crash ends the step with no result event
-        elif kind in ("run-end", "paused", "halted", "crashed"):
+        elif kind in run_state.STOP_EVENTS:
             self._agents.clear()
         # A problem has the warning line in the place of the line of its event, which the warning says again. The result of
         # an agent is the exception: its line ends the agent that ran, and the warning comes below it.

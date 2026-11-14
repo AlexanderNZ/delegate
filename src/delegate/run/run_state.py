@@ -47,6 +47,9 @@ _STATE_OF_EVENT: tuple[tuple[str, str], ...] = (
     ("run-end", ENDED), ("paused", PAUSED), ("halted", HALTED), ("crashed", CRASHED), ("setup-problem", SETUP_PROBLEM),
 )
 
+# The events that stop a run, in the order of their strength. A view that follows a journal ends at one of them.
+STOP_EVENTS: tuple[str, ...] = tuple(name for name, _ in _STATE_OF_EVENT)
+
 # The `phase` of a `retry` that goes on with the verification of a chain. The domain module holds the same value
 # (`domain.RETRY_CHAIN_FIXUP`): a pure module imports no other module, and a test checks that the two are equal.
 RETRY_CHAIN_FIXUP: str = "chain-fixup"

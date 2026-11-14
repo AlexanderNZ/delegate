@@ -398,6 +398,7 @@ When `watch` gets no run id and no `--from`, no run is active, and the newest ev
 - When the run is paused, the line goes to stdout, and `watch` exits 7. A run is paused when its newest `paused` event comes after its newest `resume`, as for `status`.
 - When the run is halted, the line goes to stdout, and `watch` exits 8. A run is halted when its newest `halted` event comes after its newest `resume`. The line gives the message of the failure of the harness.
 - When a crash stopped the run, the line goes to stdout, and `watch` exits 8, the code of a halt. A run crashed when its newest `crashed` event comes after its newest `resume`. The line gives the text of the crash, as the note of `status` gives it.
+- When the check of the setup stopped the run, the line goes to stderr, and `watch` exits 2. The line gives the problems, and the command that goes on once the setup is right. A run is stopped so when its newest `setup-problem` event comes after its newest `resume`. A `watch` that follows the run ends at that event, with the same code, and prints the same line on stderr.
 - When the run stopped in a different way, for example after a kill, the line goes to stderr, and `watch` exits 2: there is no run to follow.
 
 ```
@@ -684,7 +685,7 @@ delegate watch --json --until verdict | jq -r '[.seq // "-", .event] | @tsv'
 |---|---|---|
 | 0 | run succeeded | The journal holds `run-end` with the result `built`. |
 | 1 | run failed | The journal holds `run-end` with the result `failed` or `abandoned`, or, with no run id, [the newest run failed at start](#the-newest-run-that-failed-at-start) when no run is active. |
-| 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active, or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, or no answer at the prompt. |
+| 2 | error | A usage error, a repository with no run, an unknown run id, a journal that is not valid, a `--from` position beyond the end of the journal, the journal holds `setup-problem`: the check of the setup stopped the run, or, with no run id, [a newest run that stopped](#the-newest-run-that-stopped) when no run is active, or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, or no answer at the prompt. |
 | 3 | problem | An event is a problem, in the raw lines and the JSON lines, and with no `--follow`. The live view never ends at a problem. See [the problem events](#the-problem-events). |
 | 4 | verdict | `--until verdict` is set and the journal holds a `verdict` event. |
 | 5 | stall | `--stall-minutes` is set and nothing changed for that time. |

@@ -24,7 +24,7 @@ from typing import Protocol
 from . import output, run_state
 from .clock import Clock
 from .journal import (
-    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, last_change, read_new_events,
+    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, last_change, read_new_events, setup_problem_note,
 )
 
 # A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
@@ -65,7 +65,7 @@ EXIT_CODE_CONDITIONS: dict[int, str] = {
     ),
     EXIT_ERROR: (
         "A usage error, a repository with no run, an unknown run id, a journal that is not valid, "
-        "a `--from` position beyond the end of the journal, or, with no run id, "
+        "a `--from` position beyond the end of the journal, the journal holds `setup-problem`: the check of the setup stopped the run, or, with no run id, "
         "[a newest run that stopped](#the-newest-run-that-stopped) when no run is active, "
         "or [more than one active run](#the-run-picker) when standard input or standard output is not a terminal, "
         "or no answer at the prompt."
@@ -118,7 +118,7 @@ class WatchOptions:
     """How to follow a run. `from_position` is the `seq` of the last event that an earlier watch reported.
 
     `through_problems` makes a problem no reason to end the watch (#222): the live view and `--follow` set it. The
-    sink still gets the problem. Then only the end of the run (`RUN_STOPS`) and the limits of the person end the watch.
+    sink still gets the problem. Then only the end of the run (`run_state.STOP_EVENTS`) and the limits of the person end the watch.
     """
 
     until: str | None = None
@@ -131,10 +131,12 @@ class WatchOptions:
 
 @dataclass(frozen=True)
 class WatchResult:
-    """Why the watch ended (`code`, one of `EXIT_CODES`) and the `seq` of the last event that it reported."""
+    """Why the watch ended (`code`, one of `EXIT_CODES`), the `seq` of the last event that it reported, and `stop`, the
+    event of `run_state.STOP_EVENTS` that ended it, or None when the watch ended for another reason."""
 
     code: int
     position: int
+    stop: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -178,17 +180,19 @@ class EndedRun:
 
 
 def ended_run(journal: Path) -> EndedRun | None:
-    """The run of `journal` when the newest event of its journal is `run-end`, or None when the run goes on.
+    """The run of `journal` when the run state says that the run ended (`run_state.fold`), or None when the run goes on.
 
-    A retry continues a run that ended: it appends `retry`, then a new `step-end` and a new `run-end`. So a run whose
-    journal holds an event after its newest `run-end` goes on, and the result and the time come from the newest
-    `run-end`. The first problem is the first problem that a later event does not supersede (see `_superseded`). The run
+    The run state decides the end, as `delegate status` does: a `run-end` that no `resume` follows. An event that is no
+    stop event after it, as `journal-repaired`, `cleanup` or `lock-broken`, changes nothing (#325). A retry of a run that
+    ended appends `resume`, so its new `run-end` is the end. The result and the time come from the `run-end` that the run
+    state gives. The first problem is the first problem that a later event does not supersede (see `_superseded`). The run
     id is the name of the directory of the journal. Raise JournalError when the journal is not valid.
     """
-    # A `cleanup` that `delegate clean` wrote after the `run-end` does not continue the run (`AFTER_END`).
-    events = before_after_end(read_new_events(journal, 0, 1)[0])
-    if not events or events[-1]["event"] != "run-end":
+    everything = read_new_events(journal, 0, 1)[0]
+    end = run_state.fold(everything).run_end
+    if end is None:
         return None
+    events = [event for event in everything if event["seq"] <= end["seq"]]  # type: ignore[operator]
     superseded = _superseded(events)
     tracker = _Tracker()
     problem: str | None = None
@@ -196,7 +200,6 @@ def ended_run(journal: Path) -> EndedRun | None:
         reason = tracker.problem(event)  # the tracker reads every event, because a gate result counts for a later step end
         if problem is None and reason is not None and event["seq"] not in superseded:
             problem = f"ticket {event.get('ticket')}: {reason}"
-    end = events[-1]
     reason = str(end["reason"]) if end.get("reason") else None
     return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem, reason)
 
@@ -206,13 +209,15 @@ class StoppedRun:
     """A run with no `run-end` and no live process: its id, the time of the newest event of its journal, and whether it
     is paused. A pause, a halt, a crash, a kill and Ctrl-C stop a run so. `delegate run --resume` goes on with it.
     `halted` is the message of the `halted` event of a run that a failure of the harness stopped, or None. `crashed` is
-    the text of the `crashed` event of a run that a crash stopped (`journal.crash_note`), or None (#281)."""
+    the text of the `crashed` event of a run that a crash stopped (`journal.crash_note`), or None (#281). `setup_problem`
+    is the note of a run that the check of the setup stopped (`journal.setup_problem_note`), or None (#325)."""
 
     run_id: str
     stopped: datetime
     paused: bool
     halted: str | None = None
     crashed: str | None = None
+    setup_problem: str | None = None
 
     @property
     def code(self) -> int:
@@ -244,6 +249,8 @@ class StoppedRun:
         if self.crashed is not None:
             # The note of the crash ends with the command that goes on.
             return [("", f"no run is active; the newest run {self.run_id} stopped at "), ("dim", at), ("", ": "), ("bad", self.crashed)]
+        if self.setup_problem is not None:
+            return [("", f"no run is active; the newest run {self.run_id} stopped at "), ("dim", at), ("", ": "), ("bad", self.setup_problem)]
         if self.paused:
             return [("", f"no run is active; the newest run {self.run_id} "), ("warn", "paused"), ("", " at "), ("dim", at), ("", f"; {resume}")]
         return [("", f"no run is active; the newest run {self.run_id} stopped at {at} with no run-end, and no process works on it; {resume}")]
@@ -263,10 +270,11 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
     if not events:
         raise JournalError(f"journal {journal} holds no event")
     found = run_state.fold(events).status
-    halt, crash = (found.event if found.kind == kind else None for kind in (run_state.HALTED, run_state.CRASHED))
+    halt, crash, setup = (found.event if found.kind == kind else None for kind in (run_state.HALTED, run_state.CRASHED, run_state.SETUP_PROBLEM))
     return StoppedRun(
         journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), found.kind == run_state.PAUSED,
         None if halt is None else str(halt["message"]), None if crash is None else crash_note(dict(crash), journal.parent.name),
+        None if setup is None else setup_problem_note(dict(setup), journal.parent.name),
     )
 
 
@@ -284,7 +292,7 @@ def _superseded(events: list[dict[str, object]]) -> set[object]:
     for index in range(len(events) - 1, -1, -1):
         event = events[index]
         kind, ticket = event["event"], event.get("ticket")
-        if (kind in RUN_STOPS and index < last) or (ticket is not None and str(ticket) in retried):
+        if (kind in run_state.STOP_EVENTS and index < last) or (ticket is not None and str(ticket) in retried):
             superseded.add(event["seq"])
         if kind == "retry":
             retried.add(str(ticket))
@@ -302,7 +310,7 @@ def _gone_past(replay: list[dict[str, object]]) -> set[object]:
     event of the journal is gone past by no event, so it still ends the watch.
     """
     replay = before_after_end(replay)
-    if replay and replay[-1]["event"] in RUN_STOPS:
+    if replay and replay[-1]["event"] in run_state.STOP_EVENTS:
         replay = replay[:-1]
     return {event["seq"] for event in replay[:-1]}
 
@@ -312,16 +320,14 @@ def _result_code(result: object) -> int:
     return EXIT_SUCCEEDED if result == "built" else EXIT_FAILED
 
 
-# The events that stop the run process, and so end a watch: the end of the run, a pause at a step boundary, a halt
-# (a failure of the harness), and a crash (#281).
-RUN_STOPS: tuple[str, ...] = ("run-end", "paused", "halted", "crashed")
-
-
 def _stop_code(event: dict[str, object]) -> int:
-    """The exit code of an event of `RUN_STOPS`."""
-    if event["event"] in ("halted", "crashed"):
+    """The exit code of an event of `run_state.STOP_EVENTS`: the code of a stopped run for the stop by the setup check (#325)."""
+    kind = event["event"]
+    if kind in (run_state.HALTED, run_state.CRASHED):
         return EXIT_HALTED
-    return EXIT_PAUSED if event["event"] == "paused" else _result_code(event["result"])
+    if kind == run_state.PAUSED:
+        return EXIT_PAUSED
+    return EXIT_ERROR if kind == run_state.SETUP_PROBLEM else _result_code(event["result"])
 
 
 def format_event(event: dict[str, object]) -> str:
@@ -604,11 +610,11 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink, clock: Clock) -> W
                 # problem: a verdict or a stop there keeps its rule.
                 if history or (seq in past and not options.through_problems):
                     problem = None
-                ends = event["event"] in RUN_STOPS and not history
+                ends = event["event"] in run_state.STOP_EVENTS and not history
                 if seq <= options.from_position:
                     sink.event(event, False, None)
                     if ends:
-                        return WatchResult(_stop_code(event), position)
+                        return WatchResult(_stop_code(event), position, event)
                     continue
                 sink.event(event, True, problem)
                 position = seq  # after the sink reported the event, so Ctrl-C during the report does not skip it
@@ -618,7 +624,7 @@ def _follow(options: WatchOptions, journal: Path, sink: Sink, clock: Clock) -> W
                     sink.verdict(event)
                     return WatchResult(EXIT_VERDICT, position)
                 if ends:
-                    return WatchResult(_stop_code(event), position)
+                    return WatchResult(_stop_code(event), position, event)
             if options.stall_minutes is not None and clock.now() - last_change(journal, files) >= options.stall_minutes * 60:
                 sink.stall(options.stall_minutes, last_event)
                 return WatchResult(EXIT_STALL, position)
