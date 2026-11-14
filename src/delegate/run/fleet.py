@@ -2,7 +2,8 @@
 
 The command reads each state directory under the state root of the machine (`runs.machine_states`), so it shows each
 run of each repository in one table. The spec is `design/docs/components.md`, the table C25 (frames W8 and E15–E18).
-This slice has the table of one host and the columns `host repo run state ended ETA new cache`.
+This slice has the table of one host and the columns `host repo run state ended ETA new cache`. Above the table are the
+two fleet lines (C24, #308): the sums of the runs with no `run-end`, from the rules of `fleet_rules`.
 
 A run is listed when it has no `run-end` (running, pausing, paused, halted or stopped), or when its `run-end` is
 in the window, the last `WINDOW_SECONDS`. A run that failed at start (`runs.FailedStart`) and whose log last changed
@@ -20,10 +21,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import output
+from . import fleet_rules, output
 from .journal import ABANDONED, JournalError, newest_run_end, read_new_events
 from .runs import RunsError, all_journals, failed_starts, machine_states
-from .status import BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, ReaderOf, format_tokens, snapshot_of
+from .live import IDLE_WARNING_MINUTES
+from .status import (
+    BAR_CELLS, BAR_COLUMNS, BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, ReaderOf, format_tokens, snapshot_of,
+)
 
 # The window of the runs that ended: the last 6 hours.
 WINDOW_SECONDS: int = 6 * 3600
@@ -50,6 +54,9 @@ class RunRow:
     `ended` is None for a run with no `run-end`. A run that failed at start has no `run-start`: its `started` and its
     `ended` are the time of the last change of its log, and it has 0 of 0 tickets. `eta` is set only while the run
     runs. The two token counts are None when the command has no reader for the streams of the run.
+
+    The last two fields are for the fleet lines, and `to_json` leaves them out. `failed_start` is True for a run that
+    failed at start. `idle_seconds` is the longest time that an agent of the run is idle, or None when no agent runs.
     """
 
     run_id: str
@@ -63,6 +70,15 @@ class RunRow:
     eta: datetime | None
     tokens_new: int | None
     tokens_cache: int | None
+    failed_start: bool = False
+    idle_seconds: int | None = None
+
+    def facts(self) -> fleet_rules.RunFacts:
+        """The run as the rules of the fleet read it."""
+        return fleet_rules.RunFacts(
+            self.state, self.started, self.ended is not None, self.failed_start, self.tickets_ended, self.tickets_total, self.eta,
+            self.tokens_new, self.tokens_cache, self.idle_seconds,
+        )
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -128,13 +144,15 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf) -> Fleet
             except (JournalError, RunsError) as error:
                 unreadable.append((journal, str(error)))
                 continue
+            idle = [ticket.idle_seconds for ticket in snap.tickets if ticket.idle_seconds is not None]
             rows.append(RunRow(
                 snap.run_id, repo, host, snap.state, _time(events[0]), None if end is None else _time(end), snap.tickets_ended,
                 snap.tickets_total, snap.eta if snap.state in (RUNNING, PAUSING) else None, snap.tokens_new, snap.tokens_cache,
+                idle_seconds=max(idle) if idle else None,
             ))
         for start in failed_starts([state]):
             if _in_window(start.changed, now):
-                rows.append(RunRow(start.run_id, repo, host, FAILED, start.changed, start.changed, 0, 0, None, None, None))
+                rows.append(RunRow(start.run_id, repo, host, FAILED, start.changed, start.changed, 0, 0, None, None, None, failed_start=True))
     working = sorted((row for row in rows if row.ended is None), key=lambda row: row.started, reverse=True)
     ended = sorted((row for row in rows if row.ended is not None), key=lambda row: row.ended or row.started, reverse=True)
     return Fleet(host, now, tuple(working + ended), tuple(unreadable))
@@ -169,19 +187,16 @@ def _cells(row: RunRow, rail: str) -> list[str]:
 
 
 def _totals(fleet: Fleet) -> list[str]:
-    """The cells of the first row of the host group: its name, and the totals of its runs with no `run-end`.
+    """The cells of the first row of the host group: its name, and the totals of its runs with no `run-end` (`fleet_rules.totals`).
 
     The totals are the ended count summed, the latest ETA, and the tokens summed. A run that ended is out of every total.
     """
-    active = [row for row in fleet.runs if row.ended is None]
-    etas = [row.eta for row in active if row.eta is not None and row.state in (RUNNING, PAUSING)]
-    new = [row.tokens_new for row in active if row.tokens_new is not None]
-    cache = [row.tokens_cache for row in active if row.tokens_cache is not None]
+    total = fleet_rules.totals([row.facts() for row in fleet.runs])
+    has_runs = any(row.ended is None for row in fleet.runs)
     return [
-        fleet.host, "", "", "",
-        f"{sum(row.tickets_ended for row in active)}/{sum(row.tickets_total for row in active)}" if active else "",
-        _clock(max(etas)) if etas else "",
-        output.styled("dim", format_tokens(sum(new))) if new else "", output.styled("dim", format_tokens(sum(cache))) if cache else "",
+        fleet.host, "", "", "", f"{total.tickets_ended}/{total.tickets_total}" if has_runs else "", _clock(total.eta) if total.eta else "",
+        "" if total.tokens_new is None else output.styled("dim", format_tokens(total.tokens_new)),
+        "" if total.tokens_cache is None else output.styled("dim", format_tokens(total.tokens_cache)),
     ]
 
 
@@ -190,15 +205,58 @@ def window_label() -> str:
     return f"{WINDOW_SECONDS // 3600}h"
 
 
-def fleet_lines(fleet: Fleet) -> list[str]:
-    """The lines of the table of `delegate runs`: the line of the missing index, a blank line, then the table.
+def _fleet_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str:
+    """The first fleet line (C24): the runs that are reachable, the bar, the percentage, the tickets that ended, the latest ETA, and the tokens.
 
-    The table has the header, the row of the host with its totals, and one row for each listed run, with the rail
-    under the name of the host. With no listed run, the second part is the line `no run ended in the last 6h`.
+    The bar is the bar of the run line of `delegate watch`: 16 cells, and only on a terminal of `BAR_COLUMNS` or more. The
+    ETA is `-` when no run has one, and the runs with no ETA are counted after it, when there is one. The tokens are
+    two sums, `new` and `cache`, and no cost.
     """
-    head = [NO_INDEX, ""]
+    runs = [row.facts() for row in fleet.runs]
+    total = fleet_rules.totals(runs)
+    count, listed = fleet_rules.reachable(runs)
+    head = f"runs  {count} of {listed} reachable"
+    if not count:
+        return head
+    percent = fleet_rules.percent(total)
+    progress = f"{percent}%"
+    if width >= BAR_COLUMNS:
+        filled = percent * BAR_CELLS // 100
+        progress = output.styled("ok", glyph.fill * filled) + output.styled("dim", glyph.empty * (BAR_CELLS - filled)) + " " + progress
+    dot = f" {glyph.pending} "
+    eta = f"ETA {_clock(total.eta) if total.eta else '-'}" + (f"{dot}{total.without_eta} with no ETA" if total.without_eta else "")
+    parts = [head, progress, f"{total.tickets_ended}/{total.tickets_total} ended", eta]
+    if total.tokens_new is not None and total.tokens_cache is not None:
+        parts.append(output.styled("dim", f"{format_tokens(total.tokens_new)} new{dot}{format_tokens(total.tokens_cache)} cache"))
+    return output.GAP.join(parts)
+
+
+def _span_line(fleet: Fleet, glyph: output.Glyphs) -> str | None:
+    """The second fleet line (C24): the earliest start of the runs of the sums to now, and the runs in trouble. None with no run in the sums.
+
+    The trend of the line comes in a later ticket. The limit of idle time is the stall limit of `delegate watch`.
+    """
+    runs = [row.facts() for row in fleet.runs]
+    start = fleet_rules.earliest_start(runs)
+    if start is None:
+        return None
+    parts = [output.styled("dim", f"{_clock(start)}{glyph.dash}{_clock(fleet.time)}")]
+    trouble = fleet_rules.in_trouble(runs, int(IDLE_WARNING_MINUTES * 60))
+    if trouble:
+        parts.append(output.styled("warn", f"{glyph.idle} {trouble} in trouble"))
+    return output.GAP.join(parts)
+
+
+def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS) -> list[str]:
+    """The lines of `delegate runs`: the line of the missing index, the two fleet lines, a blank line, then the table.
+
+    `width` is the width of the terminal: the bar of the first fleet line needs `BAR_COLUMNS`. The table has the header,
+    the row of the host with its totals, and one row for each listed run, with the rail under the name of the host. With
+    no listed run, there are no fleet lines, and the rest is the line `no run ended in the last 6h`.
+    """
     if not fleet.runs:
-        return [*head, f"no run ended in the last {window_label()}"]
+        return [NO_INDEX, "", f"no run ended in the last {window_label()}"]
     glyph = output.glyphs()
+    head = [NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, glyph)]
     rows = [[output.styled("dim", name) for name in COLUMNS], _totals(fleet), *(_cells(row, glyph.rail) for row in fleet.runs)]
-    return [*head, *(line.rstrip(" ") for line in output.columns(rows, right=NUMBERS))]
+    return [*(line for line in head if line is not None), "", *(line.rstrip(" ") for line in output.columns(rows, right=NUMBERS))]

@@ -18,74 +18,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from ..support import hold_lock
-
-NOW = datetime(2026, 11, 14, 14, 20, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture(autouse=True)
-def machine(tmp_path, monkeypatch, clock) -> Path:
-    """The state root of the case, the name of the machine, the zone UTC, the UTF-8 locale and the clock at `NOW`. Return the state root."""
-    root = tmp_path / "state-root"
-    root.mkdir()
-    monkeypatch.setenv("DELEGATE_STATE_ROOT", str(root))
-    monkeypatch.setenv("DELEGATE_HOST", "laptop")
-    monkeypatch.setenv("TZ", "UTC")
-    monkeypatch.setenv("LC_ALL", "C.UTF-8")
-    time.tzset()
-    clock.at = NOW.timestamp()
-    yield root
-    monkeypatch.undo()
-    time.tzset()
-
-
-def clock_time(hours: int, minutes: int, days_back: int = 0) -> datetime:
-    return (NOW - timedelta(days=days_back)).replace(hour=hours, minute=minutes)
-
-
-def write_run(
-    root: Path, repo: str, short: str, started: datetime, events: list[tuple[datetime, str, dict[str, object]]],
-    tickets: tuple[str, ...] = ("1", "2"), adapter: str = "scripted", lock: bool = False,
-) -> Path:
-    """Write the journal of the run `<started>-<short>` in the state directory `<root>/<repo>-<key>`, and return its path."""
-    run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{short}"
-    path = root / f"{repo}-0123456789ab" / "runs" / run_id / "journal.jsonl"
-    path.parent.mkdir(parents=True)
-    start = {
-        "run_id": run_id, "workflow": "/w/workflow.toml", "mode": "assure", "adapter": adapter, "base_branch": "main",
-        "run_branch": "run/demo", "tickets": list(tickets),
-    }
-    lines = []
-    for seq, (at, name, fields) in enumerate([(started, "run-start", start), *events], start=1):
-        lines.append(json.dumps({"seq": seq, "time": at.isoformat(), "event": name, **fields}))
-    path.write_text("\n".join(lines) + "\n")
-    if lock:
-        hold_lock(path)
-    return path
-
-
-def built(ticket: str, start: datetime, end: datetime, tokens: tuple[int, int] | None = None) -> list[tuple[datetime, str, dict[str, object]]]:
-    """The events of a ticket that ran from `start` to `end` and ended built; `tokens` is the totals of its specialist."""
-    events: list[tuple[datetime, str, dict[str, object]]] = [(start, "step-start", {
-        "ticket": ticket, "stack": "python", "branch": f"run/demo-{ticket}", "worktree": f"/w/{ticket}", "base_commit": "0" * 40,
-        "agent": "python-specialist", "tier": "strong", "model": "m",
-    })]
-    if tokens is not None:
-        events.append((end, "adapter-result", {
-            "ticket": ticket, "event_stream": f"/s/{ticket}", "tokens_new": tokens[0], "tokens_cache": tokens[1],
-        }))
-    events.append((end, "step-end", {"ticket": ticket, "state": "built", "reason": None}))
-    return events
-
-
-def run_end(at: datetime) -> tuple[datetime, str, dict[str, object]]:
-    return at, "run-end", {"result": "built", "built": ["1"], "failed": [], "skipped": []}
-
-
-def runs(capsys, *argv: str) -> tuple[int, str, str]:
-    code = delegate.main(["runs", *argv])
-    out, err = capsys.readouterr()
-    return code, out, err
+from .journals import NOW, built, clock_time, run_end, runs, write_run
 
 
 def two_repositories(root: Path) -> None:
@@ -119,6 +52,8 @@ def test_the_table_lists_the_running_run_then_the_run_that_ended_in_the_window_a
     assert (code, err) == (0, "")
     assert out.splitlines() == [
         "no run index is set up: these are the runs of this machine",
+        "runs  1 of 1 reachable  50%  1/2 ended  ETA - · 1 with no ETA  12k new · 340k cache",
+        "13:40–14:20",
         "",
         "host    repo   run   state    ended  ETA  new  cache",
         "laptop                        1/2         12k   340k",
@@ -175,7 +110,7 @@ def test_the_eta_cell_is_a_clock_time_while_a_run_runs_and_is_blank_for_a_paused
     code, out, err = runs(capsys)
 
     assert (code, err) == (0, "")
-    assert out.splitlines()[2:] == [
+    assert out.splitlines()[4:] == [
         "host    repo   run   state    ended  ETA    new  cache",
         "laptop                        2/5    15:10",
         "│       gamma  pppp  paused   1/2",

@@ -35,7 +35,28 @@ A journal that cannot be read is skipped. The command names it on stderr, as `de
 
 ## The table
 
-The first line is `no run index is set up: these are the runs of this machine`. It is followed by a blank line and the table. The table has one group for this machine. The first row of the group holds the name of the machine, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run has a row, and the rail `│` stands in the column `host`.
+The first line is `no run index is set up: these are the runs of this machine`. It is followed by the two fleet lines, a blank line and the table. The table has one group for this machine. The first row of the group holds the name of the machine, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run has a row, and the rail `│` stands in the column `host`.
+
+### The fleet lines
+
+The two fleet lines sum the runs that have no `run-end`. A run that ended is out of each sum, and so is a run that failed at start.
+
+```
+runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/9 ended  ETA 15:10 · 2 with no ETA  34k new · 126k cache
+13:00–14:20  ⚠ 2 in trouble
+```
+
+| Part | Meaning |
+|---|---|
+| `N of N reachable` | The runs that have no `run-end`. Each run of this machine is reachable, so the two numbers are the same. |
+| The bar and `N%` | The tickets that ended over the tickets of the plan, summed over the runs, and rounded down. It is never the mean of the percentages of the runs. The bar has the 16 cells of the run line of `delegate watch`, and it shows only on a terminal of 100 columns or more. |
+| `X/Y ended` | The two sums of the tickets that ended and the tickets of the plan. |
+| `ETA` | The latest ETA of the runs that have one, or `-` when no run has one. `· N with no ETA` counts the runs with no ETA, for example a run that is paused or stopped. It is left out when N is 0. |
+| `new` and `cache` | Two sums of the tokens. They are never added together, and the line shows no cost. They are left out when no run has a count. |
+| `HH:MM–HH:MM` | The local clock time of the earliest start of the runs in the sums, and the local clock time of now. It is not the sum of the times of the runs. |
+| `⚠ N in trouble` | The runs with an agent that is idle for 5 minutes or more (the idle time of `delegate watch`), the runs that are `stopped` or `halted`, and the runs that failed at start in the window. A paused run is not in trouble. It is left out when N is 0. |
+
+With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, and the second line is not there. The trend part of the second line comes in a later version.
 
 | Column | Meaning |
 |---|---|

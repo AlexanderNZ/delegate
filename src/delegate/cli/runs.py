@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 
 from ..run import fleet
@@ -47,5 +48,5 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(found.to_json(), indent=2))
         return 0
-    print("\n".join(fleet.fleet_lines(found)))
+    print("\n".join(fleet.fleet_lines(found, shutil.get_terminal_size().columns)))
     return 0
