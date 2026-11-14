@@ -738,6 +738,27 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     """The snapshot of a run from its journal events. `now` is the time of the clock, in UTC.
 
     The reader of the streams comes from `reader_of` once. When it gives None, the snapshot has no tokens and no activity.
+    The two facts that the journal does not hold come from the disk: a live process that holds the lock of the run, and a
+    pause request that waits. `snapshot_at` is the same snapshot with the two facts given. The lock is read only when its
+    answer decides the state (`asks`): the run has no `run-end`, no pause, no halt, no crash and no stop by the check of the setup.
+    """
+    asks = (
+        newest_run_end(events) is None and not is_paused(events) and halt_of(events) is None and crash_of(events) is None
+        and setup_problem_of(events) is None
+    )
+    return snapshot_at(
+        events, journal, reader_of, now, live_process=asks and _has_live_process(journal), pause_request=pause_requested(journal),
+    )
+
+
+def snapshot_at(
+    events: list[dict[str, object]], journal: Path, reader_of: ReaderOf, now: datetime, *, live_process: bool, pause_request: bool,
+) -> Snapshot:
+    """The snapshot of a run, a function of its journal events, the time `now`, and two facts (#311). It reads no lock and no pause request.
+
+    `live_process` is True when a process holds the lock of the run. `pause_request` is True when a pause request waits.
+    `journal` only names the run and its files. The snapshot of a run at an earlier time t is the events up to t, the time
+    t, a live process, and no pause request.
     """
     if not events or events[0]["event"] != "run-start":
         raise JournalError(f"journal {journal}: the first event is not 'run-start'")
@@ -749,7 +770,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     crash = crash_of(events) if end is None and not paused and halt is None else None
     # A stop by the check of the setup ends the run process too (#296).
     setup = setup_problem_of(events) if end is None and not paused and halt is None and crash is None else None
-    live = end is not None or paused or halt is not None or (crash is None and setup is None and _has_live_process(journal))
+    live = end is not None or paused or halt is not None or (crash is None and setup is None and live_process)
     if end is not None:
         now = _time(end)  # the clock of a run that ended stops at its end
     elif paused:
@@ -782,7 +803,7 @@ def snapshot_of(events: list[dict[str, object]], journal: Path, reader_of: Reade
     # A unit that still runs never ends the estimate: the ETA is `-` and not 0 seconds (#196).
     unit_runs = bool(running) or chain_phase is not None
     chains = _chains(events, plan_ids(events), stacks, activity, now, stopped, end is not None) if chain else []
-    state, note = _state(end, paused, journal, halt, live, crash, setup)
+    state, note = _state(end, paused, journal, halt, live, crash, setup, pause_request)
     pause = next((e for e in reversed(events) if e["event"] == "paused"), None) if paused else None
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
@@ -807,17 +828,16 @@ def _has_live_process(journal: Path) -> bool:
 
 def _state(
     end: dict[str, object] | None, paused: bool, journal: Path, halt: dict[str, object] | None = None, live: bool = True,
-    crash: dict[str, object] | None = None, setup: dict[str, object] | None = None,
+    crash: dict[str, object] | None = None, setup: dict[str, object] | None = None, requested: bool = False,
 ) -> tuple[str, str | None]:
     """The state of a run and its note.
 
     The state is the result of its `run-end`, `paused`, `halted` (`halt` is its `halted` event), `pausing` while a pause
-    request waits and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
+    request waits (`requested`) and the run has a live process (`live`), `stopped` when the run has no `run-end`, no pause, no halt
     and no live process, or `running`. The note of a halted run is `halt_note`. The note of a stopped run is
     `stopped_note`, or `journal.crash_note` when a crash (`crash`, its `crashed` event) stopped it (#281). The note of an abandoned run is `journal.abandon_note`: the state and the reason (#201). Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request waits and the run has no live process,
     and None otherwise.
     """
-    requested = pause_requested(journal)
     if halt is not None:
         return HALTED, halt_note(halt)
     if end is None and not paused and requested and live:

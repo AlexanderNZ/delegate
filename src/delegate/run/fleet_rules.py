@@ -33,6 +33,11 @@ SPEEDING_UP: str = "speeding up"
 SLOWING: str = "slowing"
 STEADY: str = "steady"
 
+# The slip of a run (#311) is how much later its ETA is now than it was `SLIP_WINDOW_SECONDS` ago (2 hours). It shows from
+# `SLIP_LIMIT_SECONDS` (30 minutes, a provisional threshold of the design) and not before.
+SLIP_WINDOW_SECONDS: int = 2 * 3600
+SLIP_LIMIT_SECONDS: int = 30 * 60
+
 # The states of a run that are trouble by themselves: a run that stopped with no `run-end`, and a run that halted.
 TROUBLE_STATES: frozenset[str] = frozenset({"stopped", "halted"})
 
@@ -183,6 +188,18 @@ def next_command(run: RunFacts, alerted: bool) -> str | None:
     if run.state == "built":
         return MERGE
     return None
+
+
+def slip_seconds(eta: datetime | None, eta_then: datetime | None, started: datetime, now: datetime) -> int | None:
+    """The slip of a run (#311): the ETA now minus the ETA of `SLIP_WINDOW_SECONDS` ago, in whole seconds, or None when it does not show.
+
+    `eta_then` is the ETA that the run had at `now` minus `SLIP_WINDOW_SECONDS`. There is no slip when one of the two ETAs is
+    missing, when the run started less than `SLIP_WINDOW_SECONDS` ago, and when the slip is less than `SLIP_LIMIT_SECONDS`.
+    """
+    if eta is None or eta_then is None or (now - started).total_seconds() < SLIP_WINDOW_SECONDS:
+        return None
+    slip = int((eta - eta_then).total_seconds())
+    return slip if slip >= SLIP_LIMIT_SECONDS else None
 
 
 def built_times(events: Sequence[dict[str, object]]) -> list[datetime]:

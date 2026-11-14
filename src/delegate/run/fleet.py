@@ -2,7 +2,7 @@
 
 The command reads each state directory under the state root of the machine (`runs.machine_states`), so it shows each
 run of each repository in one table. The spec is `design/docs/components.md`, the table C25 (frames W8 and E15–E18).
-This slice has the table of one host and the columns `host repo run state ended ETA new cache trend alert do`, and under it the legend (C27, #309). Above the table are the
+This slice has the table of one host and the columns `host repo run state ended ETA slip new cache trend alert do`, and under it the legend (C27, #309). Above the table are the
 two fleet lines (C24, #308): the sums of the runs with no `run-end`, from the rules of `fleet_rules`. The column `trend` and the end of the second
 line are the sparklines of the tickets that ended in each hour of the window (#310).
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import domain, fleet_rules, output
@@ -29,7 +29,7 @@ from .runs import RunsError, all_journals, failed_starts, machine_states
 from .live import IDLE_WARNING_MINUTES
 from .status import (
     BAR_CELLS, BAR_COLUMNS, BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, ReaderOf, format_duration, format_tokens,
-    snapshot_of,
+    snapshot_at, snapshot_of,
 )
 
 # The window of the runs that ended: the last 6 hours.
@@ -41,9 +41,9 @@ IDLE_LIMIT_SECONDS: int = int(IDLE_WARNING_MINUTES * 60)
 # The version of the contract of `--json`. A new field does not change it; a change to a field needs a new version.
 FORMAT: int = 1
 
-# The columns of the table, in order. `new` and `cache` are numbers and align right. A later ticket adds `slip`.
-COLUMNS: tuple[str, ...] = ("host", "repo", "run", "state", "ended", "ETA", "new", "cache", "trend", "alert", "do")
-NUMBERS: frozenset[int] = frozenset({6, 7})
+# The columns of the table, in order. `new` and `cache` are numbers and align right.
+COLUMNS: tuple[str, ...] = ("host", "repo", "run", "state", "ended", "ETA", "slip", "new", "cache", "trend", "alert", "do")
+NUMBERS: frozenset[int] = frozenset({7, 8})
 
 # The command of each word of the column `do`, for the legend (copy deck W8.do.*). The placeholders stay as the copy deck writes them.
 COMMANDS: dict[str, str] = {
@@ -66,10 +66,11 @@ class RunRow:
     `ended` are the time of the last change of its log, and it has 0 of 0 tickets. `eta` is set only while the run
     runs. The two token counts are None when the command has no reader for the streams of the run.
 
-    The last three fields are for the fleet lines and the two last columns, and `to_json` leaves them out. `failed_start`
+    The last four fields are for the fleet lines and the two last columns, and `to_json` leaves them out. `failed_start`
     is True for a run that failed at start. `idle_seconds` is the longest time that an agent of the run is idle, or None
     when no agent runs. `fixup` is the round and the limit of a fix-up round that runs now, or None. `trend` is the
-    tickets that ended built in each hour of the window, oldest first (`fleet_rules.trend_cells`); `to_json` has it.
+    tickets that ended built in each hour of the window, oldest first (`fleet_rules.trend_cells`); `to_json` has it. `slip_seconds` is
+    the slip of the ETA, or None when it does not show (`fleet_rules.slip_seconds`, #311); `to_json` has it too.
     """
 
     run_id: str
@@ -87,6 +88,7 @@ class RunRow:
     idle_seconds: int | None = None
     fixup: tuple[int, int] | None = None
     trend: tuple[int, ...] = (0,) * fleet_rules.TREND_HOURS
+    slip_seconds: int | None = None
 
     def facts(self) -> fleet_rules.RunFacts:
         """The run as the rules of the fleet read it."""
@@ -111,6 +113,7 @@ class RunRow:
             "tickets_ended": self.tickets_ended, "tickets_total": self.tickets_total,
             "eta": self.eta.isoformat() if self.eta else None, "tokens_new": self.tokens_new, "tokens_cache": self.tokens_cache,
             "alert": None if found is None else alert_text(found, output.UNICODE.idle), "do": self.do(), "trend": list(self.trend),
+            "slip_seconds": self.slip_seconds,
         }
 
 
@@ -145,6 +148,19 @@ def _time(event: dict[str, object]) -> datetime:
     return datetime.fromisoformat(str(event["time"]))
 
 
+def _eta_then(events: list[dict[str, object]], journal: Path, now: datetime) -> datetime | None:
+    """The ETA that the run had `fleet_rules.SLIP_WINDOW_SECONDS` before `now` (#311), worked out from its journal.
+
+    The engine records no ETA. The snapshot of that time is the events up to it, that time, a live process and no pause
+    request, with no reader of the streams: the ETA comes from the events alone. None when the run had not started then.
+    """
+    then = now - timedelta(seconds=fleet_rules.SLIP_WINDOW_SECONDS)
+    until = [event for event in events if _time(event) <= then]
+    if not until:
+        return None
+    return snapshot_at(until, journal, lambda adapter: None, then, live_process=True, pause_request=False).eta
+
+
 def _in_window(ended: datetime, now: datetime) -> bool:
     return (now - ended).total_seconds() <= WINDOW_SECONDS
 
@@ -166,6 +182,8 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf) -> Fleet
                 if end is not None and not _in_window(_time(end), now):
                     continue  # an older run that ended is not listed, and its streams are not read
                 snap = snapshot_of(events, journal, reader_of, now)
+                eta = snap.eta if snap.state in (RUNNING, PAUSING) else None
+                slip = fleet_rules.slip_seconds(eta, None if eta is None else _eta_then(events, journal, now), _time(events[0]), now)
             except (JournalError, RunsError) as error:
                 unreadable.append((journal, str(error)))
                 continue
@@ -176,9 +194,9 @@ def fleet_of(root: Path, host: str, now: datetime, reader_of: ReaderOf) -> Fleet
             fixup = (max(rounds), domain.fixup_round_limit(snap.mode)) if rounds else None
             rows.append(RunRow(
                 snap.run_id, repo, host, snap.state, _time(events[0]), None if end is None else _time(end), snap.tickets_ended,
-                snap.tickets_total, snap.eta if snap.state in (RUNNING, PAUSING) else None, snap.tokens_new, snap.tokens_cache,
+                snap.tickets_total, eta, snap.tokens_new, snap.tokens_cache,
                 idle_seconds=max(idle) if idle else None, fixup=fixup,
-                trend=fleet_rules.trend_cells(fleet_rules.built_times(events), now),
+                trend=fleet_rules.trend_cells(fleet_rules.built_times(events), now), slip_seconds=slip,
             ))
         for start in failed_starts([state]):
             if _in_window(start.changed, now):
@@ -207,6 +225,12 @@ def _clock(eta: datetime) -> str:
     return eta.astimezone().strftime("%H:%M")
 
 
+def slip_text(seconds: int) -> str:
+    """The slip as the copy deck writes it (W8.slip): `+55m`, whole minutes, or `+1h05m` from an hour."""
+    minutes = seconds // 60
+    return "+" + (f"{minutes}m" if minutes < 60 else format_duration(minutes * 60))
+
+
 def sparkline(cells: Sequence[int], largest: int, glyph: output.Glyphs) -> str:
     """The sparkline of the cells (tokens.md): one glyph for each cell, scaled to `largest`, and a space for a cell with no ticket."""
     return "".join(" " if not level else glyph.spark[level - 1] for level in (fleet_rules.spark_level(cell, largest) for cell in cells))
@@ -219,11 +243,12 @@ def _cells(row: RunRow, glyph: output.Glyphs, largest: int) -> list[str]:
     halted, stopped or ended. The ended count is dim for a run that ended. `trend` is dim, on the scale `largest`. `alert` is in `warn`, and `do` is plain.
     """
     eta = "" if row.state not in (RUNNING, PAUSING) else _clock(row.eta) if row.eta else "-"
+    slip = "" if row.slip_seconds is None else output.styled("warn", slip_text(row.slip_seconds))
     counted = f"{row.tickets_ended}/{row.tickets_total}"
     found = row.alert()
     return [
         output.styled("plan", glyph.rail), row.repo, output.styled("bold", output.short_run_id(row.run_id)),
-        output.styled(STATE_ROLES.get(row.state, ""), row.state), output.styled("dim", counted) if row.ended else counted, eta,
+        output.styled(STATE_ROLES.get(row.state, ""), row.state), output.styled("dim", counted) if row.ended else counted, eta, slip,
         "" if row.tokens_new is None else output.styled("dim", format_tokens(row.tokens_new)),
         "" if row.tokens_cache is None else output.styled("dim", format_tokens(row.tokens_cache)),
         output.styled("dim", sparkline(row.trend, largest, glyph)),
@@ -239,7 +264,7 @@ def _totals(fleet: Fleet) -> list[str]:
     total = fleet_rules.totals([row.facts() for row in fleet.runs])
     has_runs = any(row.ended is None for row in fleet.runs)
     return [
-        fleet.host, "", "", "", f"{total.tickets_ended}/{total.tickets_total}" if has_runs else "", _clock(total.eta) if total.eta else "",
+        fleet.host, "", "", "", f"{total.tickets_ended}/{total.tickets_total}" if has_runs else "", _clock(total.eta) if total.eta else "", "",
         "" if total.tokens_new is None else output.styled("dim", format_tokens(total.tokens_new)),
         "" if total.tokens_cache is None else output.styled("dim", format_tokens(total.tokens_cache)), "", "", "",
     ]

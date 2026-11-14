@@ -67,6 +67,7 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 | `state` | The state of the run, as `delegate status` gives it. A run that failed at start is `failed`. |
 | `ended` | The tickets that ended, over the tickets of the plan, as `X/Y`. It is dim for a run that ended. |
 | `ETA` | The local clock time `HH:MM` of the end that the run is estimated to reach. It is `-` while the run runs and has no estimate. It is blank when the run is paused, halted, stopped or ended. |
+| `slip` | How much later the ETA of the run is now than it was 2 hours ago, as `+55m`, in `warn`. See [The slip](#the-slip). It is blank otherwise. |
 | `new` | The new tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `cache` | The cache tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `trend` | The sparkline of the tickets of the run that ended in each hour of the window, in `dim`. See [The trend](#the-trend). The row of the machine has none. |
@@ -77,7 +78,11 @@ The order of the rows is fixed. The runs that have no `run-end` come first, the 
 
 When no run is listed, the table is the line `no run ended in the last 6h`. The command exits 0.
 
-A later version adds the column `slip`.
+### The slip
+
+The journal holds no ETA, so the command works out the ETA of 2 hours ago from the events of the journal. The snapshot of the run at that time is the events up to that time, that time, a live process, and no [**pause**](../glossary.md#pause) request. The slip is the ETA now minus the ETA of that snapshot.
+
+It shows as `+<duration>` when it is 30 minutes or more: `+55m`, or `+1h05m` from an hour. It is blank when one of the two ETAs is missing (the run does not run now, or it had no ETA 2 hours ago), when the run started less than 2 hours ago, and when the slip is less than 30 minutes.
 
 ### The trend
 
@@ -129,7 +134,8 @@ Each command works from any directory of this machine: `delegate watch` and `del
       "tokens_cache": 340000,
       "alert": null,
       "do": null,
-      "trend": [0, 0, 0, 0, 0, 1]
+      "trend": [0, 0, 0, 0, 0, 1],
+      "slip_seconds": null
     }
   ]
 }
@@ -156,6 +162,7 @@ Each command works from any directory of this machine: `delegate watch` and `del
 | `alert` | The text of the column `alert`, or `null`. The glyph of `⚠ idle` is always `⚠`, also in a terminal that is not UTF-8. |
 | `do` | The word of the column `do`, or `null`. |
 | `trend` | The 6 counts of the trend of the run: the tickets that ended built in each hour of the window, oldest first. |
+| `slip_seconds` | The slip of the ETA in seconds, or `null` when the column `slip` is blank. |
 
 ## Exit codes
 
