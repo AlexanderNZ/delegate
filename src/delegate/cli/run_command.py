@@ -272,7 +272,7 @@ def _print_review(review: PlanReview) -> int:
         _print_stack_changes(review)
         _print_skipped(review)
         _print_retry(review)
-        problems = [*review.problems(), *_retry_problem(review)]
+        problems = [*review.problems(), *_engine_problems(review)]
         for problem in problems:
             print(f"delegate run: {problem}", file=sys.stderr)
         return 1 if problems else 0
@@ -292,7 +292,7 @@ def _print_review(review: PlanReview) -> int:
                 print(f"  {line}" if line else "")
     _print_skipped(review)
     _print_retry(review)
-    problems = [*review.problems(), *_retry_problem(review)]
+    problems = [*review.problems(), *_engine_problems(review)]
     for problem in problems:
         print(f"delegate run: {problem}", file=sys.stderr)
     return 1 if problems else 0
@@ -316,9 +316,10 @@ def _print_index_check(settings: MachineSettings | None, problem: str | None) ->
     return 1 if problems else 0
 
 
-def _retry_problem(review: PlanReview) -> list[str]:
-    """The refusal of the retry of `--retry` as a problem of the dry run (#261), or none when the engine accepts the retry."""
-    return [] if review.retry_refusal is None else [review.retry_refusal]
+def _engine_problems(review: PlanReview) -> list[str]:
+    """The refusals of the engine that are not a rule of the plan, as problems of the dry run: the refusal of the retry of
+    `--retry` (#261), and the refusal of another check of the resume (#357). None when the engine accepts the resume."""
+    return [message for message in (review.retry_refusal, review.resume_refusal) if message is not None]
 
 
 def _print_retry(review: PlanReview) -> None:

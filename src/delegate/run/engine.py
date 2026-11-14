@@ -1074,6 +1074,10 @@ class PlanReview:
     retry_outlook: str | None = None
     # The changes of stacks that `--stack-changed` lets the resume record (#290), one for each stack. Empty without the flag.
     stack_changes: tuple[StackChange, ...] = ()
+    # The message with which another check of the resume (`_resume_checks`) refuses the resume, or None (#357): the run ended,
+    # the run branch moved or is gone, the start of the chain, the hotspots of the chain. Only `review_plan_change` sets it, and
+    # only when the rules of the plan and the rules of the retry accept: their refusals have their own fields.
+    resume_refusal: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -1216,6 +1220,17 @@ def _failed_chain(workflow: Workflow, events: list[dict[str, object]], run_id: s
     ]
 
 
+def _resume_events(state_dir: Path, run_id: str) -> list[dict[str, object]]:
+    """Read the journal of the run `run_id` for a resume, one time. Raise EngineError when it cannot be read or does not start with `run-start`."""
+    try:
+        events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
+    except JournalError as error:
+        raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
+    if not events or events[0]["event"] != "run-start":
+        raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
+    return events
+
+
 def review_plan_change(
     workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
     retry: str | None = None, *, location: StateLocation | None = None, coordinator_commit: str | None = None,
@@ -1235,15 +1250,32 @@ def review_plan_change(
     the commit that the resume makes (`_coordinator_commit`), and a refusal has the text of the refusal of the resume
     (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too. `stack_changed` is
     `--stack-changed` (#290): a changed stack does not refuse the review, and the result holds each change.
+
+    When the rules of the plan and of the retry accept, the review also makes each other check of the resume that needs no
+    write (`_resume_checks`), and `resume_refusal` of the result holds the message of the resume when one refuses (#357).
     """
     location = location or locate_state(repo, vcs)
-    top, state_dir = location.top, location.state_directory(run_id)
+    events = _resume_events(location.state_directory(run_id), run_id)
+    review = _plan_review(
+        workflow, workflow_path, location.top, run_id, vcs, events, reviewed, retry, coordinator_commit, config_paths, stack_changed
+    )
+    if review.problems() or review.retry_refusal is not None:
+        return review
     try:
-        events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
-    except JournalError as error:
-        raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
-    if not events or events[0]["event"] != "run-start":
-        raise EngineError(f"run {run_id!r} cannot be resumed: its journal does not start with run-start")
+        _resume_checks(
+            workflow, workflow_path, plan_order(workflow), vcs, location.top, run_id, events, reviewed, retry, coordinator_commit,
+            None, config_paths, stack_changed,
+        )
+    except EngineError as error:
+        return replace(review, skipped=(), retry_outlook=None, resume_refusal=str(error))
+    return review
+
+
+def _plan_review(
+    workflow: Workflow, workflow_path: Path, top: Path, run_id: str, vcs: VersionControl, events: list[dict[str, object]],
+    reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None, config_paths: Sequence[str], stack_changed: bool,
+) -> PlanReview:
+    """The review of the plan of `review_plan_change` from the events of the journal, with the outlook of the skipped tickets and of the retry."""
     with _vcs_errors():
         review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry, stack_changed)
     refusal, outlook = _retry_outcome(workflow, events, run_id, review, retry, coordinator_commit, vcs, top, config_paths)
@@ -2012,15 +2044,15 @@ def check_start(
     except LockError as error:
         raise EngineError(str(error)) from None
     if resume:
-        review = review_plan_change(workflow, workflow_path, repo, run_id, vcs, reviewed, retry, location=location, stack_changed=stack_changed)
+        # One read of the journal serves the review and, with `detach`, the other checks of the resume.
+        events = _resume_events(location.state_directory(run_id), run_id)
+        review = _plan_review(workflow, workflow_path, repo, run_id, vcs, events, reviewed, retry, None, (), stack_changed)
         _refuse_plan_change(review, workflow_path, run_id)
         if detach:
-            state_dir = location.state_directory(run_id)
-            try:
-                events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
-            except JournalError as error:
-                raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
-            _resume_checks(workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None, project_config_paths(adapter), stack_changed)
+            _resume_checks(
+                workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None,
+                project_config_paths(adapter), stack_changed,
+            )
     else:
         _check_branches(workflow, repo, vcs)
     return location
