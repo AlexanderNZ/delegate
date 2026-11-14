@@ -12,6 +12,9 @@ once, before the first frame when the first read finds it, and else after the la
 
 With `DELEGATE_INDEX` set (#317), the view also has a group for each other host of the run index (`delegate.run.fleet`). `--local` limits the view to this
 machine and reads no index, and `--json` describes this machine only and reads no index.
+
+With `DELEGATE_INDEX` set, the command also reads each other host of the index over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a
+`fleet.HostReads` with the ssh backend. `--watch` keeps one `HostReads` for all its redraws, so it reads the other hosts at most each 30 seconds.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import shutil
 import sys
 
 from ..adapters.run_index import index_from_environment
+from ..adapters.ssh_hosts import SshHostReader
 from ..run import clock, fleet
 from ..run.host import host_name
 from ..run.runs import RunsError, state_root
@@ -74,7 +78,7 @@ def _watch(timeline: bool, local: bool) -> int:
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
         return EXIT_ERROR
     the_clock = clock.current()
-    screen, reads = Screen(sys.stdout), fleet.JournalReads()
+    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), fleet.HostReads(SshHostReader())
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -82,7 +86,7 @@ def _watch(timeline: bool, local: bool) -> int:
         try:
             with stop_signals_as_ctrl_c():
                 while True:
-                    found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of, reads, index_from_environment(os.environ), not local)
+                    found = fleet.fleet_of(state_root(), host_name(), utc_now(), stream_reader_of, reads, index_from_environment(os.environ), not local, hosts)
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
                     reported.update(new)
                     if first:
@@ -113,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         found = fleet.fleet_of(
             state_root(), host_name(), utc_now(), stream_reader_of, index=index_from_environment(os.environ), read_index=not (args.local or args.json),
+            hosts=fleet.HostReads(SshHostReader()),
         )
     except RunsError as error:
         print(f"delegate runs: {error}", file=sys.stderr)

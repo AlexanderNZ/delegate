@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from pathlib import Path
 
@@ -26,3 +28,76 @@ def machine(tmp_path, monkeypatch, clock) -> Path:
     yield root
     monkeypatch.undo()
     time.tzset()
+
+
+class SshShim:
+    """The `ssh` of the case: a command shim on `PATH` that stands for the other hosts of the run index (#318).
+
+    It writes each call, with its arguments, to `calls`. A host with `serves` prints its document and exits 0. A host with `exits` prints nothing and exits with
+    that status. A host with `hangs` waits 30 seconds. A host with `delays` waits some seconds, then prints its document. Any other host exits 255, as `ssh` does when it cannot reach a host.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        script = directory / "bin" / "ssh"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "#!/bin/sh\n"
+            f'dir="{directory}"\n'
+            'host="$5"\n'
+            'printf "%s\\n" "$*" >> "$dir/calls"\n'
+            'if [ -f "$dir/$host.delay" ]; then\n'
+            '  printf "start %s\\n" "$host" >> "$dir/order"\n'
+            '  sleep "$(cat "$dir/$host.delay")"\n'
+            '  printf "end %s\\n" "$host" >> "$dir/order"\n'
+            "fi\n"
+            '[ -f "$dir/$host.hang" ] && sleep 30\n'
+            '[ -f "$dir/$host.code" ] && exit "$(cat "$dir/$host.code")"\n'
+            '[ -f "$dir/$host.out" ] || exit 255\n'
+            'cat "$dir/$host.out"\n'
+        )
+        script.chmod(0o755)
+
+    @property
+    def bin(self) -> Path:
+        return self.directory / "bin"
+
+    def serves(self, host: str, document: object) -> None:
+        """`ssh <host> ...` prints `document` as JSON."""
+        (self.directory / f"{host}.out").write_text(json.dumps(document))
+
+    def prints(self, host: str, text: str) -> None:
+        """`ssh <host> ...` prints `text` as it is."""
+        (self.directory / f"{host}.out").write_text(text)
+
+    def exits(self, host: str, code: int) -> None:
+        """`ssh <host> ...` exits with `code`, whatever it printed."""
+        (self.directory / f"{host}.code").write_text(str(code))
+
+    def hangs(self, host: str) -> None:
+        """`ssh <host> ...` waits 30 seconds."""
+        (self.directory / f"{host}.hang").write_text("")
+
+    def delays(self, host: str, seconds: float) -> None:
+        """`ssh <host> ...` waits `seconds`, then prints its document."""
+        (self.directory / f"{host}.delay").write_text(str(seconds))
+
+    @property
+    def calls(self) -> list[list[str]]:
+        """The arguments of each call of the shim, in the order of the calls."""
+        path = self.directory / "calls"
+        return [line.split() for line in path.read_text().splitlines()] if path.exists() else []
+
+    @property
+    def order(self) -> list[str]:
+        """`start <host>` and `end <host>` for each call of a host with `delays`, in the order that they happened."""
+        path = self.directory / "order"
+        return path.read_text().splitlines() if path.exists() else []
+
+
+@pytest.fixture(autouse=True)
+def ssh(tmp_path, monkeypatch) -> SshShim:
+    """The `ssh` of the case, first on `PATH`. A host that a case does not serve is unreachable, as with no network: no case starts the real `ssh`."""
+    shim = SshShim(tmp_path / "ssh-shim")
+    monkeypatch.setenv("PATH", f"{shim.bin}{os.pathsep}{os.environ['PATH']}")
+    return shim

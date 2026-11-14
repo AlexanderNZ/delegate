@@ -337,11 +337,13 @@ def test_the_ports_and_the_adapters_are_inside_the_layers_that_the_rule_covers()
         "delegate.ports.vcs",
         "delegate.ports.gates",
         "delegate.ports.index",
+        "delegate.ports.hosts",
         "delegate.adapters.claude_code",
         "delegate.adapters.opencode",
         "delegate.adapters.git",
         "delegate.adapters.shell",
         "delegate.adapters.run_index",
+        "delegate.adapters.ssh_hosts",
     } <= covered
 
 

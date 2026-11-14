@@ -93,9 +93,13 @@ The number of hosts is this machine and each other host that the [**run index**]
 
 ### The other hosts
 
-With `DELEGATE_INDEX` set (see [the run index](run.md#the-run-index)), the table has one more group for each other host of the index, after the group of this machine, in the order of the names of the hosts, with a blank line between two groups. The runs of this machine come from its journals, as before: its own records in the index are not used. The runs of another host come from their records.
+With `DELEGATE_INDEX` set (see [the run index](run.md#the-run-index)), the table has one more group for each other host of the index, after the group of this machine, in the order of the names of the hosts, with a blank line between two groups. The runs of this machine come from its journals, as before: its own records in the index are not used.
 
-Until a later release reads the other hosts, each such host is `unreachable`. This machine shows the last-known values of its records, and nothing else.
+The command reads each other host. For each host it runs `ssh -o BatchMode=yes -o ConnectTimeout=5 <host> delegate runs --local --json`, and `<host>` is the name of the host in the index. So `ssh` must reach each host with no password, and `delegate` must be on the `PATH` of the login shell of that host. The hosts are read at the same time, and the read of one host ends after 10 seconds at the latest. This is the only process that `delegate runs` starts.
+
+A host that gives its document of `format` 1 shows its runs as live runs, as the runs of this machine show. They have the ETA, the `slip`, the tokens, the trend, the `alert` and the `do` word that the host worked out, and they are in the sums of the fleet lines and in `⚠ N in trouble`. The rows of the group of the host are not dim, and the row of the host has its totals. The records of that host in the index are not used. In `--timeline`, such a lane has the life of the run and the projection to the ETA, but not the `●` marks of the tickets, because the document holds the number of the tickets that ended in each hour, not their times.
+
+A host is `unreachable` when its read fails (`ssh` exits with a status other than 0, or cannot start), when the read takes more than 10 seconds, and when the host gives a document that this version cannot read: a `format` other than 1, or text that is not the document. The view does not say which. This machine then shows the last-known values of the records of that host, and nothing else.
 
 For example, a host `build-host` with one run `a41e` that was `running` at 3 of 6 tickets, last heard 47 minutes ago, has these two rows. The first row has `unreachable` in `state`, `heard 47m ago` in `alert` and `check host` in `do`. The second row has `│` in `host`, `docs-site` in `repo`, `a41e` in `run`, `running` in `state` and `3/6` in `ended`, and nothing else.
 
@@ -106,7 +110,7 @@ For example, a host `build-host` with one run `a41e` that was `running` at 3 of 
 
 In `--timeline`, each lane of such a run is dim from the start of the run to the time that its host was heard from. Its `state` is `unreachable` and its `alert` is `heard <duration> ago`.
 
-`--local` limits the view to this machine and reads no index. `--json` always describes this machine only, and reads no index.
+`--local` limits the view to this machine and reads no index, and starts no `ssh`. `--json` always describes this machine only, reads no index, and starts no `ssh`: this is the document that another host gives. With `--watch`, the command reads the other hosts at most each 30 seconds, and redraws with the last answers between two reads.
 
 [`delegate clean`](commands.md) forgets the record of each run that it cleans or abandons, so the other hosts list it no more.
 
@@ -138,7 +142,9 @@ Under the table is a blank line and the legend: one line for each word of the co
 | `resume` | `delegate run --resume <run>` |
 | `retry` | `delegate run --resume <run> --retry <ticket>` |
 | `merge` | `git merge --ff-only <run branch>` |
-| `check host` | `ssh <host>; on another host, put ssh <host> in front of each command` |
+| `check host` | `ssh <host>` |
+
+When a host other than this machine has a `do` word in the table, the last line of the legend ends with `; on another host, put ssh <host> in front of each command`. An unreachable host has the word `check host`, so the legend has it then.
 
 Each command works from any directory of this machine: `delegate watch` and `delegate run --resume` find the run by its id, and the journal records the repository of the run. Put the short id of the run in `<run>`.
 
