@@ -12,7 +12,7 @@ from .journals import NOW
 
 @pytest.fixture(autouse=True)
 def machine(tmp_path, monkeypatch, clock) -> Path:
-    """The state root of the case, the name of the machine, the zone UTC, the UTF-8 locale and the clock at `NOW`. Return the state root."""
+    """The state root of the case, the name of the machine, the zone UTC, the UTF-8 locale, a terminal of 80 columns and 1000 lines, and the clock at `NOW`. Return the state root."""
     root = tmp_path / "state-root"
     root.mkdir()
     monkeypatch.setenv("DELEGATE_STATE_ROOT", str(root))
@@ -20,6 +20,7 @@ def machine(tmp_path, monkeypatch, clock) -> Path:
     monkeypatch.setenv("TZ", "UTC")
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
     monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setenv("LINES", "1000")
     time.tzset()
     clock.at = NOW.timestamp()
     yield root

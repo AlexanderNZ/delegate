@@ -10,6 +10,9 @@ A run is listed when it has no `run-end` (running, pausing, paused, halted or st
 in the window, the last `WINDOW_SECONDS`. A run that failed at start (`runs.FailedStart`) and whose log last changed
 in the window is listed with the state `failed`. An older run that ended is not listed.
 
+The table fits the terminal (C25, #312): `fleet_lines` drops the columns of `FIT_STEPS` until the table fits the width, and folds the
+rows of the ended runs, then a host with no alert and no command, until the lines fit the height.
+
 `fleet_of` reads the journals and gives the `Fleet`. `Fleet.to_json` is the contract of `delegate runs --json`, and
 `fleet_lines` is the table. A journal that cannot be read is skipped, and `Fleet.unreadable` names it with the reason,
 as `delegate status` does.
@@ -18,6 +21,7 @@ as `delegate status` does.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -45,6 +49,16 @@ FORMAT: int = 1
 COLUMNS: tuple[str, ...] = ("host", "repo", "run", "state", "ended", "ETA", "slip", "new", "cache", "trend", "alert", "do")
 NUMBERS: frozenset[int] = frozenset({7, 8})
 
+# The steps of the fit to the width (components.md, C25), in order: the columns that drop at each step. The bar and the legend
+# drop first, by `BAR_COLUMNS`. Then `new` and `cache` drop, then `trend`, then `slip`, then `repo`.
+FIT_STEPS: tuple[frozenset[str], ...] = (
+    frozenset(), frozenset({"new", "cache"}), frozenset({"new", "cache", "trend"}), frozenset({"new", "cache", "trend", "slip"}),
+    frozenset({"new", "cache", "trend", "slip", "repo"}),
+)
+
+# The hosts in the line of a machine with no run (copy deck W8.empty): this machine is the one host, as no run index exists.
+HOSTS: int = 1
+
 # The command of each word of the column `do`, for the legend (copy deck W8.do.*). The placeholders stay as the copy deck writes them.
 COMMANDS: dict[str, str] = {
     fleet_rules.WATCH: "delegate watch <run>", fleet_rules.RESUME: "delegate run --resume <run>",
@@ -54,7 +68,7 @@ COMMANDS: dict[str, str] = {
 # The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`engine.state_directory`).
 KEY = re.compile(r"-[0-9a-f]{12}$")
 
-# The line over the table while no run index exists (copy deck W8.noIndex), and the line of a table with no row (W8.empty.ended).
+# The line over the table while no run index exists (copy deck W8.noIndex).
 NO_INDEX: str = "no run index is set up: these are the runs of this machine"
 
 
@@ -280,7 +294,8 @@ def _fleet_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str:
 
     The bar is the bar of the run line of `delegate watch`: 16 cells, and only on a terminal of `BAR_COLUMNS` or more. The
     ETA is `-` when no run has one, and the runs with no ETA are counted after it, when there is one. The tokens are
-    two sums, `new` and `cache`, and no cost.
+    two sums, `new` and `cache`, and no cost. They drop when the line is wider than `width` (#312), as the columns
+    `new` and `cache` of the table do.
     """
     runs = [row.facts() for row in fleet.runs]
     total = fleet_rules.totals(runs)
@@ -296,16 +311,20 @@ def _fleet_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str:
     dot = f" {glyph.pending} "
     eta = f"ETA {_clock(total.eta) if total.eta else '-'}" + (f"{dot}{total.without_eta} with no ETA" if total.without_eta else "")
     parts = [head, progress, f"{total.tickets_ended}/{total.tickets_total} ended", eta]
+    line = output.GAP.join(parts)
     if total.tokens_new is not None and total.tokens_cache is not None:
-        parts.append(output.styled("dim", f"{format_tokens(total.tokens_new)} new{dot}{format_tokens(total.tokens_cache)} cache"))
-    return output.GAP.join(parts)
+        tokens = output.styled("dim", f"{format_tokens(total.tokens_new)} new{dot}{format_tokens(total.tokens_cache)} cache")
+        if output.width(line + output.GAP + tokens) <= width:
+            line += output.GAP + tokens
+    return line
 
 
-def _span_line(fleet: Fleet, glyph: output.Glyphs) -> str | None:
+def _span_line(fleet: Fleet, width: int, glyph: output.Glyphs) -> str | None:
     """The second fleet line (C24): the earliest start of the runs of the sums to now, and the runs in trouble. None with no run in the sums.
 
     The line ends with the trend (#310): the words `trend: tickets ended an hour, last 6h`, the sparkline of all the runs of the
     sums on a scale of its own largest cell, and the trend word when there is one. The limit of idle time is the stall limit of `delegate watch`.
+    When the line is wider than `width`, the words and the sparkline drop and the trend word stays (#312), as the column `trend` of the table drops.
     """
     runs = [row.facts() for row in fleet.runs]
     start = fleet_rules.earliest_start(runs)
@@ -318,30 +337,95 @@ def _span_line(fleet: Fleet, glyph: output.Glyphs) -> str | None:
     cells = fleet_rules.trend_sum(runs)
     word = fleet_rules.trend_word(cells)
     trend = f"trend: tickets ended an hour, last {window_label()} {glyph.pending} all {sparkline(cells, max(cells), glyph)}" + (f" {word}" if word else "")
-    parts.append(output.styled("dim", trend.rstrip(" ")))
-    return output.GAP.join(parts)
+    line = output.GAP.join([*parts, output.styled("dim", trend.rstrip(" "))])
+    if output.width(line) > width:
+        line = output.GAP.join([*parts, *([output.styled("dim", word)] if word else [])])
+    return line
 
 
-def legend_lines(fleet: Fleet) -> list[str]:
-    """The legend (C27): one line for each word of the column `do` that the table holds, once, with its command (copy deck W8.do.*)."""
-    present = {row.do() for row in fleet.runs}
+def legend_lines(runs: Sequence[RunRow]) -> list[str]:
+    """The legend (C27): one line for each word of the column `do` that the rows hold, once, with its command (copy deck W8.do.*)."""
+    present = {row.do() for row in runs}
     return [line.rstrip(" ") for line in output.columns([[word, COMMANDS[word]] for word in fleet_rules.DO_WORDS if word in present])]
 
 
-def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS) -> list[str]:
+@dataclass(frozen=True)
+class _Ended:
+    """The one row that holds the runs that ended, when the lines do not fit the height (C25): `✓ 1 built`, `✗ 1 failed`."""
+
+    runs: tuple[RunRow, ...]
+
+    def text(self, glyph: output.Glyphs) -> str:
+        """The glyph of the first state and the count of each state, as the fold row of `delegate watch` writes them: `✓ 1 built, 1 failed`.
+
+        `built` comes first, then `failed`, then each other state by name. The glyph is `ok` for built and `bad` for failed.
+        """
+        counts = Counter(row.state for row in self.runs)
+        order = [state for state in (BUILT, FAILED) if counts[state]] + sorted(state for state in counts if state not in (BUILT, FAILED))
+        role, mark = {BUILT: ("ok", glyph.built), FAILED: ("bad", glyph.failed)}.get(order[0], ("dim", glyph.skipped))
+        return output.styled(role, mark) + output.styled("dim", " " + ", ".join(f"{counts[state]} {state}" for state in order))
+
+
+def _candidates(fleet: Fleet) -> list[list[RunRow | _Ended]]:
+    """The rows of the table for each step of the fit to the height (C25), from the most to the fewest.
+
+    First each run has its row. Then the runs that ended fold into one row. Then, when the runs that remain have no alert and
+    no command, the host folds to its totals row: no run row.
+    """
+    working = [row for row in fleet.runs if row.ended is None]
+    ended = [row for row in fleet.runs if row.ended is not None]
+    folded: list[RunRow | _Ended] = [*working, *([_Ended(tuple(ended))] if ended else [])]
+    quiet = bool(working) and not any(row.alert() or row.do() for row in working)
+    return [[*working, *ended], folded, [] if quiet else folded]
+
+
+def _table(fleet: Fleet, items: Sequence[RunRow | _Ended], dropped: frozenset[str], glyph: output.Glyphs, largest: int) -> tuple[list[str], int]:
+    """The lines of the table without the columns of `dropped`, and the width of the widest line that is not the row of the ended runs.
+
+    The row of the ended runs has its text from the column `state`, over the cells that are blank on it.
+    """
+    keep = [index for index, name in enumerate(COLUMNS) if name not in dropped]
+    right = {place for place, index in enumerate(keep) if index in NUMBERS}
+    rows = [[output.styled("dim", COLUMNS[index]) for index in keep], [_totals(fleet)[index] for index in keep]]
+    rail = output.styled("plan", glyph.rail)
+    rows += [[_cells(item, glyph, largest)[index] for index in keep] if isinstance(item, RunRow) else [rail, *[""] * (len(keep) - 1)] for item in items]
+    lines = [line.rstrip(" ") for line in output.columns(rows, right=right)]
+    widths = [max(output.width(row[place]) for row in rows) for place in range(len(keep))]
+    state = keep.index(COLUMNS.index("state"))
+    start = sum(widths[:state]) + len(output.GAP) * state
+    measured = 0
+    for place, item in enumerate(items, start=2):
+        if isinstance(item, _Ended):
+            lines[place] = rail + " " * (start - output.width(rail)) + item.text(glyph)
+        else:
+            measured = max(measured, output.width(lines[place]))
+    return lines, max(measured, *(output.width(line) for line in lines[:2]))
+
+
+def fleet_lines(fleet: Fleet, width: int = BAR_COLUMNS, height: int | None = None) -> list[str]:
     """The lines of `delegate runs`: the line of the missing index, the two fleet lines, a blank line, the table, and the legend.
 
-    `width` is the width of the terminal: the bar of the first fleet line and the legend need `BAR_COLUMNS`. The table
-    has the header, the row of the host with its totals, and one row for each listed run, with the rail under the name
-    of the host. The legend has a blank line over it, and no line when the table has no command. With no listed run,
-    there are no fleet lines, and the rest is the line `no run ended in the last 6h`.
+    `width` and `height` are the size of the terminal. The bar of the first fleet line and the legend need `BAR_COLUMNS`. When a
+    line of the table is wider than `width`, the columns drop in the order of `FIT_STEPS`. Each line is cut to `width`. When the
+    lines are more than the lines of `height`, less one for the prompt, the rows fold (`_candidates`). With no `height`, no row folds.
+    The table has the header, the row of the host with its totals, and one row for each listed run, with the rail under the name
+    of the host. The legend has a blank line over it, and no line when the table has no command. With no listed run, there are no
+    fleet lines, and the rest is the two lines of an empty machine (copy deck W8.empty and W8.empty.ended).
     """
     if not fleet.runs:
-        return [NO_INDEX, "", f"no run ended in the last {window_label()}"]
+        return [output.cut(line, max(width, 1)) for line in (
+            NO_INDEX, f"runs  0 of {HOSTS} hosts have an active run", f"no run ended in the last {window_label()}",
+        )]
     glyph = output.glyphs()
-    head = [NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, glyph)]
+    head = [line for line in (NO_INDEX, _fleet_line(fleet, width, glyph), _span_line(fleet, width, glyph)) if line is not None]
     largest = max((cell for row in fleet.runs for cell in row.trend), default=0)
-    rows = [[output.styled("dim", name) for name in COLUMNS], _totals(fleet), *(_cells(row, glyph, largest) for row in fleet.runs)]
-    table = [line.rstrip(" ") for line in output.columns(rows, right=NUMBERS)]
-    legend = legend_lines(fleet) if width >= BAR_COLUMNS else []
-    return [*(line for line in head if line is not None), "", *table, *([""] if legend else []), *legend]
+    candidates = _candidates(fleet)
+    for items in candidates:
+        legend = legend_lines([item for item in items if isinstance(item, RunRow)]) if width >= BAR_COLUMNS else []
+        if height is None or len(head) + 1 + 2 + len(items) + (1 + len(legend) if legend else 0) <= height - 1:
+            break
+    for dropped in FIT_STEPS:
+        table, measured = _table(fleet, items, dropped, glyph, largest)
+        if measured <= width:
+            break
+    return [output.cut(line, max(width, 1)) for line in [*head, "", *table, *([""] if legend else []), *legend]]

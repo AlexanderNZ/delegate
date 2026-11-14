@@ -48,5 +48,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(found.to_json(), indent=2))
         return 0
-    print("\n".join(fleet.fleet_lines(found, shutil.get_terminal_size().columns)))
+    size = shutil.get_terminal_size(fallback=(80, 0))  # a terminal that gives no height: the lines are 0, and no row folds
+    print("\n".join(fleet.fleet_lines(found, size.columns, size.lines or None)))
     return 0

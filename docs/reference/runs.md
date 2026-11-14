@@ -76,7 +76,15 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 
 The order of the rows is fixed. The runs that have no `run-end` come first, the newest start first. The runs that ended follow, the newest end first.
 
-When no run is listed, the table is the line `no run ended in the last 6h`. The command exits 0.
+When no run is listed, there is no table. The command prints three lines and exits 0:
+
+```
+no run index is set up: these are the runs of this machine
+runs  0 of 1 hosts have an active run
+no run ended in the last 6h
+```
+
+This machine is the one host, because no run index exists.
 
 ### The slip
 
@@ -108,6 +116,21 @@ Under the table is a blank line and the legend: one line for each word of the co
 | `merge` | `git merge --ff-only <run branch>` |
 
 Each command works from any directory of this machine: `delegate watch` and `delegate run --resume` find the run by its id, and the journal records the repository of the run. Put the short id of the run in `<run>`.
+
+## Fit to the terminal
+
+The command reads the size of the terminal: `COLUMNS` and `LINES`, else the size of the terminal that is standard output. When the terminal gives no width, the width is 80. When it gives no height, no row folds.
+
+**Width.** Under 100 columns, the bar and the legend drop. Then, while the widest line of the table is wider than the terminal, the columns drop in this order: `new` and `cache`, then `trend`, then `slip`, then `repo`. The first fleet line drops its token sums when it is wider than the terminal, and the second fleet line drops the words and the sparkline of the trend when it is wider than the terminal. The trend word stays. Each line is then cut to the width.
+
+**Height.** When the lines are more than the lines of the terminal, less one line for the prompt, the rows fold in two stages. The command goes to the next stage only when the lines still do not fit:
+
+1. The runs that ended fold into one row, with the glyph of the first state and the count of each state, for example `✓ 1 built` or `✗ 1 failed`. The text starts in the column `state`. A run that ended is out of the totals, so the totals do not change. The legend then holds only the words of the rows that show.
+2. When the runs that have no `run-end` have no alert and no command, the host folds to its totals row: no run row shows.
+
+A host with an alert or a command does not fold to its totals row. When the lines still do not fit, the command prints them all.
+
+**Colour and glyphs.** With `NO_COLOR` set and not empty, or when standard output is not a terminal, the output has no colour code. When the locale is not UTF-8, each glyph is its ASCII glyph, and each ASCII glyph has the width of the Unicode glyph, so the columns are in the same positions. The title of the terminal is not a colour code: `DELEGATE_NO_TITLE=1` turns it off.
 
 ## The JSON object
 

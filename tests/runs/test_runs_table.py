@@ -3,7 +3,7 @@
 A case writes the journals of runs in state directories under a state root of its own, with the time of each event, and
 calls `main(argv)` of the `delegate` command. The commands read the time from the fake clock (the `clock` fixture), and
 the zone of the process is UTC, so a clock time in a cell is the same on each machine. No case needs a git repository:
-the command reads the state root and no repository.
+the command reads the state root and no repository. The terminal has 99 columns (the empty form is in `test_runs_fit`).
 """
 
 from __future__ import annotations
@@ -19,6 +19,12 @@ import pytest
 from delegate.cli import delegate
 
 from .journals import NOW, built, clock_time, run_end, runs, write_run
+
+
+@pytest.fixture(autouse=True)
+def table_width(monkeypatch) -> None:
+    """99 columns: the table and the fleet lines of these cases fit with each column, and the bar and the legend, which need 100, are not there."""
+    monkeypatch.setenv("COLUMNS", "99")
 
 
 def two_repositories(root: Path) -> None:
@@ -163,13 +169,6 @@ def test_a_journal_that_cannot_be_read_is_skipped_and_named_on_stderr_and_the_ot
     assert code == 0
     assert err.startswith(f"delegate runs: skipped the journal {broken}: ")
     assert "aaaa" in out and "bbbb" in out and "xxxx" not in out
-
-
-def test_no_run_in_the_window_prints_one_line_and_exits_0(machine, capsys):
-    code, out, err = runs(capsys)
-
-    assert (code, err) == (0, "")
-    assert out.splitlines() == ["no run index is set up: these are the runs of this machine", "", "no run ended in the last 6h"]
 
 
 def test_the_eta_is_the_local_clock_time_of_the_zone_of_the_machine(machine, monkeypatch, capsys):
