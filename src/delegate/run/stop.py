@@ -24,6 +24,7 @@ from . import run_state
 from .journal import JournalError, read_new_events
 from .lock import LockError, LockHolder, live_holder
 from .runs import RunsError, journal_of, locate
+from .state_location import StateLocation
 
 # The seconds between two looks at the lock while the stop waits.
 POLL_SECONDS: float = 0.1
@@ -42,15 +43,18 @@ class StopOutcome:
     released: bool
 
 
-def stop_run(repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float) -> StopOutcome:
+def stop_run(
+    repo: Path, run_id: str, vcs: VersionControl, wait_seconds: float, *, location: StateLocation | None = None
+) -> StopOutcome:
     """Send SIGTERM to the process that holds the lock of the run `run_id` of the repository, and wait up to `wait_seconds` for the lock to be free.
 
-    `run_id` is a full run id, or the short id of one run (`runs.run_id_of`). Raise StopError, and send no signal,
+    `run_id` is a full run id, or the short id of one run (`runs.run_id_of`). `location` is the location that the command looked up
+    (see `runs.locate`), or None to look it up here. Raise StopError, and send no signal,
     when the run is unknown, its journal is not valid, it ended, it is paused, or no live process works on it.
     The outcome has `released` false when the process still holds the lock at the end of the wait.
     """
     try:
-        location = locate(repo, vcs)  # one lookup for the command (#239)
+        location = location or locate(repo, vcs)  # one lookup for the command (#239)
         journal = journal_of(repo, run_id, vcs, location=location)
         events, _ = read_new_events(journal, 0, 1)
     except (RunsError, JournalError) as error:

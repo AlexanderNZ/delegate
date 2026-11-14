@@ -25,11 +25,11 @@ from datetime import datetime
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
-from .engine import PAUSE_REQUEST_NAME
 from . import run_state
 from .journal import JournalError, read_new_events
 from .lock import LockError, live_holder
 from .runs import RunsError, journal_of, locate
+from .state_location import PAUSE_REQUEST_NAME, StateLocation
 
 
 class PauseError(Exception):
@@ -41,16 +41,17 @@ def pause_requested(journal: Path) -> bool:
     return (journal.parent / PAUSE_REQUEST_NAME).is_file()
 
 
-def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime) -> Path:
+def request_pause(repo: Path, run_id: str, vcs: VersionControl, now: datetime, *, location: StateLocation | None = None) -> Path:
     """Write the pause request of the run `run_id` of the repository, and return its path. `now` is the time of the request.
 
-    `run_id` is a full run id, or the short id of one run (`runs.run_id_of`).
+    `run_id` is a full run id, or the short id of one run (`runs.run_id_of`). `location` is the location that the command looked up
+    (see `runs.locate`), or None to look it up here.
 
     A second request before the engine reads the first one writes the file again. Raise PauseError, and write
     nothing, when the run is unknown, its journal is not valid, it ended, it is paused, or no live process works on it.
     """
     try:
-        location = locate(repo, vcs)  # one lookup for the command (#239)
+        location = location or locate(repo, vcs)  # one lookup for the command (#239)
         journal = journal_of(repo, run_id, vcs, location=location)
         events, _ = read_new_events(journal, 0, 1)
     except (RunsError, JournalError) as error:

@@ -636,3 +636,39 @@ def test_an_ordinary_import_passes_the_reexport_rule(tmp_path):
     copy = planted_copy(tmp_path, "run/fine.py", "from .domain import MODES\nprint(MODES)  # noqa: T201\n")
 
     assert reexports(copy) == []
+
+
+# The modules of the views of the run context: they read the journal and the state of a run, and they never drive a run. They find the
+# state of a run through `run/state_location.py`, so a view does not load the engine (#331).
+VIEW_MODULES = ("status", "runs", "fleet", "watch", "live", "clean", "pause")
+
+
+def engine_imports(package_dir: Path, modules: tuple[str, ...] = VIEW_MODULES) -> list[str]:
+    """Every import of `run.engine` in a view module of the run context, as `file:line: view imports run.engine`."""
+    found = []
+    for module in modules:
+        path = package_dir / "run" / f"{module}.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        package = ("delegate", "run")
+        for node in ast.walk(tree):
+            for target in targets(node, package, "delegate"):
+                if target[:3] == ("delegate", "run", "engine"):
+                    found.append(f"run/{module}.py:{node.lineno}: view imports run.engine")
+    return sorted(set(found))
+
+
+def test_no_view_module_of_the_run_context_imports_the_engine():
+    assert engine_imports(PACKAGE) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["from .engine import PAUSE_REQUEST_NAME\n", "from . import engine\n", "from delegate.run import engine\n", "import delegate.run.engine\n"],
+)
+def test_a_planted_engine_import_in_a_view_module_fails_the_rule(tmp_path, source):
+    (tmp_path / "run").mkdir()
+    for module in VIEW_MODULES:
+        (tmp_path / "run" / f"{module}.py").write_text("")
+    (tmp_path / "run" / "status.py").write_text(source)
+
+    assert engine_imports(tmp_path) == ["run/status.py:1: view imports run.engine"]

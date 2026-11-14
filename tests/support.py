@@ -640,7 +640,7 @@ def write_journal_in_state_root(repo: Path, run_id: str, *events: tuple[str, dic
     the run there. Return the path of the journal file.
     """
     from delegate.adapters.git import GitVersionControl
-    from delegate.run.engine import state_directory
+    from delegate.run.state_location import state_directory
     from delegate.run.journal import Journal
 
     _, state = state_directory(repo, GitVersionControl())

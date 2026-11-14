@@ -54,6 +54,7 @@ from ..run.journal import JournalError, setup_problem_note
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
+from .location import report_location
 from .screen import Screen
 from .status import stream_reader_of, utc_now
 from .stop_signals import stop_signals_as_ctrl_c
@@ -263,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         if args.run_id is None:
-            runs = runs_of(repo, GitVersionControl())
+            vcs = GitVersionControl()
+            runs = runs_of(repo, vcs, location=report_location(repo, vcs))
             for line in runs.unreadable_lines("delegate watch"):
                 print(line, file=sys.stderr)
             if runs.chosen is None:
@@ -299,9 +301,12 @@ def main(argv: list[str] | None = None) -> int:
                 # The one active run, or, with `--from` and no active run, the newest run from the position.
                 journal = runs.chosen
         elif args.repo is None:
-            journal = journal_of_run(args.run_id, GitVersionControl())  # the repository of the current directory, then the state root (#305)
+            vcs = GitVersionControl()
+            # The repository of the current directory, then the state root (#305).
+            journal = journal_of_run(args.run_id, vcs, here=report_location(Path("."), vcs))
         else:
-            journal = journal_of(args.repo, args.run_id, GitVersionControl())
+            vcs = GitVersionControl()
+            journal = journal_of(args.repo, args.run_id, vcs, location=report_location(args.repo, vcs))
         the_clock = clock.current()
         sink: watch.Sink = watch.RawSink(_emit, the_clock)
         json_sink = watch.JsonSink(_emit, the_clock)

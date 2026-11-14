@@ -13,6 +13,7 @@ from pathlib import Path
 from ..adapters.git import GitVersionControl
 from ..run import pause
 from .epilog import RUN_PAGE, HelpFormatter, epilog
+from .location import report_location
 from .status import utc_now
 
 # The exit status of a run that cannot be paused: an unknown run, a run that ended or is paused, or a run with no live process.
@@ -34,7 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        path = pause.request_pause(args.repo, args.run_id, GitVersionControl(), utc_now())
+        vcs = GitVersionControl()
+        path = pause.request_pause(args.repo, args.run_id, vcs, utc_now(), location=report_location(args.repo, vcs))
     except pause.PauseError as error:
         print(f"delegate pause: {error}", file=sys.stderr)
         return EXIT_REFUSED

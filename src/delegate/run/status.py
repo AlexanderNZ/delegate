@@ -50,12 +50,12 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output, run_state
-from .engine import StateLocation
 from .journal import (
     ABANDONED, JournalError, abandon_note, activity_files, crash_note, last_change, plan_ids, read_new_events, setup_problem_note,
 )
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
+from .state_location import StateLocation
 
 # The states that a ticket shows. A ticket with no event is pending, a ticket
 # with `step-start` and no `step-end` is running, and the rest follow `step-end`

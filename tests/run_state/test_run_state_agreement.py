@@ -18,7 +18,8 @@ from pathlib import Path
 import pytest
 
 from delegate.run import run_state, status
-from delegate.run.engine import EngineError, restore_progress
+from delegate.run.errors import EngineError
+from delegate.run.progress import restore_progress
 
 from .journals import built, ev, failed, journal, plan_change, skipped, started
 

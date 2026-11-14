@@ -17,6 +17,7 @@ from ..run import clean
 from ..run.runs import RunsError
 from ..run.user_config import UserConfigError
 from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
+from .location import report_location
 from .machine_settings import machine_settings
 
 # The exit status of an error: an unknown run, a journal that cannot be read, or a removal that failed.
@@ -76,7 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     if index is None:
         return EXIT_ERROR
     try:
-        result = clean.clean(args.repo, args.run_id, args.ended, args.merged, args.dry_run, GitVersionControl(), index)
+        vcs = GitVersionControl()
+        result = clean.clean(
+            args.repo, args.run_id, args.ended, args.merged, args.dry_run, vcs, index, location=report_location(args.repo, vcs),
+        )
     except clean.CleanError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR
@@ -97,7 +101,10 @@ def _abandon(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if index is None:
         return EXIT_ERROR
     try:
-        result = clean.abandon(args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, GitVersionControl(), index)
+        vcs = GitVersionControl()
+        result = clean.abandon(
+            args.repo, args.abandon, args.reason.strip(), args.delete_run_branch, vcs, index, location=report_location(args.repo, vcs),
+        )
     except clean.AbandonError as error:
         print(f"delegate clean: {error}", file=sys.stderr)
         return EXIT_ERROR

@@ -56,14 +56,16 @@ from ..ports.index import RunIndex, RunIndexError
 from ..ports.vcs import VcsError, VersionControl
 from .index import cleaned
 from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
-from .engine import (
-    CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, EngineError, locate_state, restore_progress,
-)
 from . import run_state
+from .errors import EngineError
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
+from .progress import restore_progress
 from .runs import JOURNAL_NAME, RunsError, journal_of
+from .state_location import (
+    CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, StateLocation, locate_state,
+)
 
 BUILT: str = "built"
 
@@ -137,6 +139,7 @@ class CleanResult:
 
 def clean(
     repo: Path, run_ids: Iterable[str], ended: bool, merged: bool, dry_run: bool, vcs: VersionControl, index: RunIndex | None = None,
+    *, location: StateLocation | None = None,
 ) -> CleanResult:
     """Clean each run that `run_ids` names, and with `ended` each run of the repository. Return the outcome of each run.
 
@@ -146,9 +149,10 @@ def clean(
     CleanError when `repo` is not a git repository. Before the runs and at the
     end, the port prunes the records of the worktrees whose directory is gone,
     except with `dry_run`. `index` is the run index, or None when none is set up: the record of each run that was cleaned is forgotten (#317).
+    `location` is the location that the command looked up (see `state_location.locate_state`), or None to look it up here.
     """
     try:
-        location = locate_state(repo, vcs)  # one lookup for the command and each run id of it (#239)
+        location = location or locate_state(repo, vcs)  # one lookup for the command and each run id of it (#239)
     except EngineError as error:
         raise CleanError(f"{repo} is not a git repository: {error}") from None
     top, states = location.top, location.run_directories()
@@ -476,6 +480,7 @@ class Abandoned:
 
 def abandon(
     repo: Path, run_id: str, reason: str, delete_run_branch: bool, vcs: VersionControl, index: RunIndex | None = None,
+    *, location: StateLocation | None = None,
 ) -> Abandoned:
     """End the run `run_id` for good (#201): write `run-end` with the result `abandoned` and the reason, then remove what the run left.
 
@@ -488,10 +493,11 @@ def abandon(
     Raise AbandonError, and change nothing, when the run is unknown, its journal cannot be read, a live process works on
     it (the message names `delegate stop`), or it ended `built` (the message names `delegate clean`). A failure of the
     port while it removes is an error of the result, and the other items are still removed. The command forgets the record of the
-    run in the run `index` (#317); with None, none is set up.
+    run in the run `index` (#317); with None, none is set up. `location` is the location that the command looked up
+    (see `state_location.locate_state`), or None to look it up here.
     """
     try:
-        location = locate_state(repo, vcs)  # one lookup for the command (#239)
+        location = location or locate_state(repo, vcs)  # one lookup for the command (#239)
         journal = journal_of(location.top, run_id, vcs, location=location)
     except EngineError as error:
         raise AbandonError(f"{repo} is not a git repository: {error}") from None

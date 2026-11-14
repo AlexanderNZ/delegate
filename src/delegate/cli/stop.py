@@ -13,6 +13,7 @@ from pathlib import Path
 from ..adapters.git import GitVersionControl
 from ..run import stop
 from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
+from .location import report_location
 
 # The seconds that the command waits for the lock of the run to be free, after it sent the signal.
 WAIT_SECONDS: float = 30.0
@@ -36,7 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        outcome = stop.stop_run(args.repo, args.run_id, GitVersionControl(), WAIT_SECONDS)
+        vcs = GitVersionControl()
+        outcome = stop.stop_run(args.repo, args.run_id, vcs, WAIT_SECONDS, location=report_location(args.repo, vcs))
     except stop.StopError as error:
         print(f"delegate stop: {error}", file=sys.stderr)
         return EXIT_REFUSED

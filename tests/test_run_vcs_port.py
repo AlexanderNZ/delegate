@@ -14,7 +14,8 @@ from delegate import adapters
 from delegate.adapters.git import GitVersionControl
 from delegate.adapters.shell import ShellGateRunner
 from delegate.ports.vcs import VcsError
-from delegate.run.engine import EngineError, run_workflow
+from delegate.run.engine import run_workflow
+from delegate.run.errors import EngineError
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 

@@ -29,6 +29,7 @@ from ..run import clock, status
 from ..run.journal import JournalError
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, locate, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
+from .location import report_location
 
 # The exit status of an input that cannot be read: no run, an unknown run id, or a journal that is not valid. With
 # `--json` and no run id, it is also the exit status when more than one run is active, or when the newest run failed at start.
@@ -83,9 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         journal: Path | None = None
         location = None
         if args.run_id is not None and args.repo is None:
-            journal = journal_of_run(args.run_id, vcs)  # the repository of the current directory, then the state root (#305)
+            # The repository of the current directory, then the state root (#305).
+            journal = journal_of_run(args.run_id, vcs, here=report_location(Path("."), vcs))
         else:
-            location = locate(repo, vcs)  # one lookup for the command (#239)
+            location = report_location(repo, vcs) or locate(repo, vcs)  # one lookup for the command (#239)
         run_id = args.run_id
         if run_id is None:
             runs = runs_of(repo, vcs, location=location)

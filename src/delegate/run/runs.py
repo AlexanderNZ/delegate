@@ -31,10 +31,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .engine import EngineError, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from . import run_state
+from .errors import EngineError
 from .journal import JournalError, read_events, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
+from .state_location import STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from ..ports.vcs import VersionControl
 
 JOURNAL_NAME: str = "journal.jsonl"
@@ -60,7 +61,7 @@ def _start_time(journal: Path) -> datetime:
 
 
 def locate(repo: Path, vcs: VersionControl) -> StateLocation:
-    """The location of the repository and of its state directories (see `engine.locate_state`), for a command that looks it up one time (#239).
+    """The location of the repository and of its state directories (see `state_location.locate_state`), for a command that looks it up one time (#239).
 
     Raise RunsError when `repo` is not a git repository, or when the state root is not valid.
     """
@@ -193,7 +194,7 @@ def journal_of(repo: Path, run_id: str | None, vcs: VersionControl, *, location:
 
 
 def state_root() -> Path:
-    """The state root of this machine: `DELEGATE_STATE_ROOT`, or else the default root (`engine.default_state_root`).
+    """The state root of this machine: `DELEGATE_STATE_ROOT`, or else the default root (`state_location.default_state_root`).
 
     Raise RunsError when `DELEGATE_STATE_ROOT` is not an absolute path.
     """
@@ -213,7 +214,7 @@ def machine_states(root: Path) -> list[Path]:
     return sorted(path for path in root.glob("*") if (path / "runs").is_dir()) if root.is_dir() else []
 
 
-def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
+def journal_of_run(run_id: str, vcs: VersionControl, *, here: StateLocation | None = None) -> Path:
     """The journal file of the run `run_id`, for a command that got no `--repo` (#305).
 
     `run_id` is a full run id, or the short id of one run. The command looks first in the state directories of the
@@ -221,11 +222,10 @@ def journal_of_run(run_id: str, vcs: VersionControl) -> Path:
     run is not in that repository, it looks in each state directory under the state root of this machine (`state_root`),
     where each repository has one. Raise RunsError when more than one run has the short id, in the repository or under
     the state root; the message names each full run id. Raise RunsError when no run has the id; the message names the
-    state root.
+    state root. `here` is the location of the current directory that the command looked up (see `locate`), or None to look it up here.
     """
-    here = Path(".")
     try:
-        states = _states(here, vcs)
+        states = _states(Path("."), vcs, here)
     except RunsError:
         states = []  # not in a repository, or no valid state root: the search under the state root gives its own error
     if states:

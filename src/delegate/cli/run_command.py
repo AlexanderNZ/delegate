@@ -64,19 +64,18 @@ from ..adapters.shell import ShellGateRunner
 from ..run import fleet, status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
-from ..run.engine import (
-    EngineError, PlanReview, RetryHint, RunInterrupted, StateLocation, StateRootError, check_start, new_run_id, record_state_root,
-    project_config_paths, retry_hints, review_plan_change, run_workflow, state_directory,
-    workflow_of_run,
-)
+from ..run.engine import PlanReview, RetryHint, RunInterrupted, check_start, new_run_id, project_config_paths, retry_hints, review_plan_change, run_workflow
+from ..run.errors import EngineError
 from ..run.host import host_name
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
 from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
+from ..run.state_location import StateLocation, StateRootError, locate_state, record_state_root, workflow_of_run
 from ..run.user_config import UserConfigError, config_path
 from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
+from .location import report_location
 from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .epilog import RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .machine_settings import MachineSettings, index_check, machine_settings
@@ -410,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.repo is None:
                 args.repo = repository_of_run(args.resume, vcs)  # the current directory, else the repository that `run-start` records (#306)
-            location = locate(args.repo, vcs)
+            location = report_location(args.repo, vcs) or locate(args.repo, vcs)
             args.resume = run_id_of(args.repo, args.resume, vcs, location=location)  # a short id names its run by the full id from here on
         except RunsError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -433,6 +432,8 @@ def main(argv: list[str] | None = None) -> int:
         for problem in error.problems:
             print(f"delegate run: {args.workflow}: {problem}", file=sys.stderr)
         return 1
+    if location is None:
+        location = report_location(args.repo, vcs)  # prints the note of the lookup; None when it fails, and the checks say so
     if args.dry_run and args.resume is not None:
         try:
             review = review_plan_change(
@@ -542,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.ok else 1
     state: Path | None = None
     try:
-        _, state = state_directory(args.repo, vcs)
+        state = (location or locate_state(args.repo, vcs)).state_directory()
     except StateRootError as error:
         print(f"delegate run: {error}", file=sys.stderr)
         return 1

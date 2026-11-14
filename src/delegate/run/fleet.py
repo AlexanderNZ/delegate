@@ -121,7 +121,7 @@ W9_HEADER: tuple[str, ...] = ("ended", "ETA", "state", "alert")
 ALL: str = "all"
 FOOTER: str = "detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>"
 
-# The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`engine.state_directory`).
+# The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`state_location.state_directory`).
 KEY = re.compile(r"-[0-9a-f]{12}$")
 
 # The first version of `delegate` that has `delegate runs --local --json` (#317, #318). A host with an earlier version is unreachable.
