@@ -26,6 +26,7 @@ import pytest
 import delegate
 from delegate import adapters
 from delegate.cli import brief
+from delegate.run import engine as run_engine
 
 from ..support import (
     WORKFLOW, ScriptedAdapter, commit_head, committed_repo, git, make_repo, resume_main, run_main, state_dir, ticket_of, valid_report,
@@ -47,11 +48,16 @@ def fixed_places(git_identity, tmp_path, monkeypatch):
     """Each commit of a case has a committer, and the temporary directory of the engine is one that the case names.
 
     The scratch directory of a verifier is made in the temporary directory of the host, so a prompt names a path that
-    depends on the machine unless the case sets it.
+    depends on the machine unless the case sets it. The place of the verifier copy also depends on the machine: it is in
+    the temporary directory of the host when that directory starts with a fixed temp prefix (`/tmp/`, `/var/folders/`),
+    and in the scratch directory of the session when it does not (#166). The pytest temporary directory is under a fixed
+    prefix on CI and on macOS, and outside them in a session whose `TMPDIR` is its scratch directory. The case sets no
+    fixed prefix, so each brief names the copy in the scratch directory of the session on each machine.
     """
     temporary = tmp_path / "temporary"
     temporary.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(temporary))
+    monkeypatch.setattr(run_engine, "GUARD_TEMP_PREFIXES", ())
 
 
 @pytest.fixture
