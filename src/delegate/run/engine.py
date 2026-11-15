@@ -2259,8 +2259,11 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     try:
         while True:
             # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves
-            # the gates text, the brief and the verifier (#239).
-            verified = step.known_tree.take() or branch_tip(step.run.vcs, step.run.repo, step.branch)
+            # the gates text, the brief and the verifier (#239). The verifier copy is made from the ticket branch, so the
+            # accepted commit is its tip, not the HEAD of the worktree that the gates gave: a specialist can leave the
+            # worktree on another branch. That HEAD is dropped, so no later phase takes it.
+            step.known_tree.take()
+            verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
             gates_text = _engine_gates_text(step, verified)
             fixup_body = (
                 None if findings_text is None
@@ -2530,7 +2533,7 @@ def _verify_round(
             try:
                 with vcs_errors():
                     step.run.vcs.make_verifier_copy(
-                        step.run.repo, copy, step.branch, step.run.workflow.run_branch, earlier=earlier,
+                        step.run.repo, copy, step.branch, step.run.workflow.run_branch, earlier=earlier, tip=verified,
                     )
             finally:
                 place.drop_earlier(step.run.vcs)

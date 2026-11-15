@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -21,7 +22,7 @@ import pytest
 from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate
 
-from ..support import WORKFLOW, ScriptedAdapter, commit_head, git, make_repo, read_journal
+from ..support import WORKFLOW, ScriptedAdapter, commit_head, committed_repo, git, make_repo, read_journal
 
 
 @pytest.fixture
@@ -282,3 +283,99 @@ def test_a_copy_that_the_update_cannot_reset_is_made_again_from_the_start(tmp_pa
     assert not (copy / ".git" / "index.lock").exists()
     assert "loose.txt" not in files_of(copy)
     assert git(copy, "status", "--porcelain", "--ignored").strip() == ""
+
+
+# The copy lives across the rounds, also while the fix-up specialist works. A writer in the copy between two rounds must
+# not make it show a commit that the repository does not hold (review of #349).
+
+
+@pytest.mark.parametrize("storage", ["loose", "packed"])
+def test_a_replace_ref_that_a_writer_left_in_the_copy_does_not_change_what_the_next_round_reads(tmp_path, vcs, storage):
+    repo = repo_with_ticket_branch(tmp_path)
+    copy = tmp_path / "copy"
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+    lie = tmp_path / "lie.txt"
+    lie.write_text("not what the repository holds\n")
+    git(copy, "replace", git(copy, "rev-parse", "HEAD:seed.txt").strip(), git(copy, "hash-object", "-w", str(lie)).strip())
+    if storage == "packed":
+        git(copy, "pack-refs", "--all")
+    fixup = add_fixup(repo)
+
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+
+    assert git(copy, "for-each-ref", "refs/replace/") == ""
+    assert git(copy, "show", "HEAD:seed.txt") == "seed\n"
+    assert (copy / "seed.txt").read_text() == "seed\n"
+    assert git(copy, "rev-parse", "HEAD").strip() == fixup
+
+
+def test_a_copy_that_a_writer_sent_to_other_objects_is_made_again_from_the_start(tmp_path, vcs):
+    repo = repo_with_ticket_branch(tmp_path)
+    other = committed_repo(tmp_path / "other", {"other.txt": "other\n"})
+    copy = tmp_path / "copy"
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+    (copy / ".git" / "objects" / "info" / "alternates").write_text(f"{other / '.git' / 'objects'}\n")
+    other_commit = git(other, "rev-parse", "HEAD").strip()
+    fixup = add_fixup(repo)
+
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+
+    assert not (copy / ".git" / "objects" / "info" / "alternates").exists()
+    assert subprocess.run(["git", "-C", str(copy), "cat-file", "-e", other_commit], capture_output=True).returncode != 0
+    assert git(copy, "rev-parse", "HEAD").strip() == fixup
+
+
+@pytest.mark.parametrize("name", ["info/grafts", "shallow"])
+def test_a_copy_with_a_file_that_cuts_the_history_is_made_again_from_the_start(tmp_path, vcs, name):
+    repo = repo_with_ticket_branch(tmp_path)
+    copy = tmp_path / "copy"
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+    # Each file makes git show the tip of the ticket branch with no parent, so the history of the copy is not that of the repository.
+    (copy / ".git" / name).write_text(git(copy, "rev-parse", "HEAD"))
+    fixup = add_fixup(repo)
+
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+
+    assert not (copy / ".git" / name).exists()
+    assert git(copy, "rev-list", "HEAD") == git(repo, "rev-list", "run/demo-a")
+    assert git(copy, "rev-parse", "HEAD").strip() == fixup
+
+
+def test_a_tracked_file_that_a_writer_hid_from_the_status_is_as_the_commit_has_it_in_the_next_round(tmp_path, vcs):
+    repo = repo_with_ticket_branch(tmp_path)
+    copy = tmp_path / "copy"
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+    git(copy, "update-index", "--skip-worktree", "seed.txt")
+    (copy / "seed.txt").write_text("not what the repository holds\n")
+    add_fixup(repo)
+
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+
+    assert (copy / "seed.txt").read_text() == "seed\n"
+    assert git(copy, "ls-files", "-t", "seed.txt") == "H seed.txt\n"
+
+
+@pytest.mark.parametrize("round_of_copy", ["new copy", "updated copy"])
+def test_the_copy_holds_the_tip_that_the_caller_read_also_when_the_branch_moved_after_the_read(tmp_path, vcs, round_of_copy):
+    repo = repo_with_ticket_branch(tmp_path)
+    copy = tmp_path / "copy"
+    if round_of_copy == "updated copy":
+        vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo")
+    read = add_fixup(repo)
+    moved = add_fixup_again(repo)
+
+    vcs.make_verifier_copy(repo, copy, "run/demo-a", "run/demo", tip=read)
+
+    assert git(copy, "rev-parse", "HEAD").strip() == read != moved
+    assert git(copy, "rev-parse", "--abbrev-ref", "HEAD").strip() == "run/demo-a"
+    assert git(copy, "status", "--porcelain", "--ignored").strip() == ""
+
+
+def add_fixup_again(repo: Path) -> str:
+    """Add a second fix-up commit to `run/demo-a` and give its id."""
+    git(repo, "checkout", "-q", "run/demo-a")
+    (repo / "fixup-2.txt").write_text("fix 2\n")
+    git(repo, "add", "fixup-2.txt")
+    head = commit_head(repo, "-m", "second fix-up")[0]
+    git(repo, "checkout", "-q", "main")
+    return head
