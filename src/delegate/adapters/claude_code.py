@@ -79,7 +79,7 @@ from ..shared import yamlio
 from .environment import process_environment
 from .process import run_harness
 from .skill_text import Skill, with_skills
-from .streams import read_events
+from .streams import StreamFold, read_events
 
 # The command that starts the harness.
 COMMAND: str = "claude"
@@ -193,6 +193,31 @@ def _tokens_of(usage: dict[str, object]) -> tuple[int, int]:
         return sum(int(usage.get(name) or 0) for name in fields)  # type: ignore[call-overload]
 
     return count(NEW_FIELDS), count(CACHE_FIELDS)
+
+
+@dataclasses.dataclass
+class _StreamTotals:
+    """What the events of a stream add up to: the tokens of the finished sessions, and the turns after the last `result` event."""
+
+    new: int = 0
+    cache: int = 0
+    usage_of: dict[str, dict[str, object]] = dataclasses.field(default_factory=dict)  # the turns after the last `result` event
+    last: datetime | None = None  # the time of the newest event that has one
+    ends_in_work: bool = False  # the newest event has no time and is work that goes on (a heartbeat)
+
+
+def _add_event(totals: _StreamTotals, event: dict[str, object], stream: Path) -> None:
+    """Add one event of a stream to its totals."""
+    if "timestamp" in event:
+        totals.last = datetime.fromisoformat(str(event["timestamp"]))
+    totals.ends_in_work = "timestamp" not in event and _is_work_with_no_time(event)
+    message = event.get("message")
+    if event.get("type") == "result" and isinstance(event.get("usage"), dict):
+        more, read = _tokens_of(event["usage"])  # type: ignore[arg-type]
+        totals.new, totals.cache = totals.new + more, totals.cache + read
+        totals.usage_of = {}
+    elif event.get("type") == "assistant" and isinstance(message, dict) and isinstance(message.get("usage"), dict):
+        totals.usage_of[str(message.get("id"))] = message["usage"]
 
 
 def _host_permissions() -> list[str]:
@@ -343,6 +368,9 @@ class ClaudeCodeAdapter:
     supports_resume: bool = True
     # Claude Code starts with `--setting-sources user` and `--strict-mcp-config`, so it loads no project configuration (#273).
     project_config_paths: tuple[str, ...] = ()
+
+    def __init__(self) -> None:
+        self._reads = StreamFold(_StreamTotals, _add_event)
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         sealed = request.sealed
@@ -498,23 +526,13 @@ class ClaudeCodeAdapter:
         return None
 
     def activity(self, stream: Path) -> Activity:
-        new = cache = 0
-        usage_of: dict[str, dict[str, object]] = {}  # the turns of the session after the last `result` event
-        last: datetime | None = None
-        events = read_events(stream)
-        for event in events:
-            if "timestamp" in event:
-                last = datetime.fromisoformat(str(event["timestamp"]))
-            message = event.get("message")
-            if event.get("type") == "result" and isinstance(event.get("usage"), dict):
-                more, read = _tokens_of(event["usage"])  # type: ignore[arg-type]
-                new, cache = new + more, cache + read
-                usage_of = {}
-            elif event.get("type") == "assistant" and isinstance(message, dict) and isinstance(message.get("usage"), dict):
-                usage_of[str(message.get("id"))] = message["usage"]
-        if events and "timestamp" not in events[-1] and _is_work_with_no_time(events[-1]):
+        """The totals and the time of the last activity of the stream. The adapter parses only the bytes that came after its last read of the stream (#352)."""
+        state = self._reads(stream)
+        new, cache = state.new, state.cache
+        last = state.last
+        if state.ends_in_work:
             last = datetime.fromtimestamp(stream.stat().st_mtime, timezone.utc)
-        for usage in usage_of.values():
+        for usage in state.usage_of.values():
             more, read = _tokens_of(usage)
             new, cache = new + more, cache + read
         return Activity(new, cache, last)

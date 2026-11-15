@@ -68,7 +68,7 @@ from ..ports.harness import (
 from .environment import process_environment
 from .process import run_harness
 from .skill_text import Skill, with_skills
-from .streams import read_events
+from .streams import StreamFold, read_events
 
 # The command that starts the harness.
 COMMAND: str = "opencode"
@@ -211,6 +211,24 @@ def _tokens_of(event: dict[str, object], stream: Path) -> tuple[int, int]:
     return new, int(cache.get("read") or 0)
 
 
+@dataclasses.dataclass
+class _StreamTotals:
+    """What the events of a stream add up to: the new tokens, the cache reads, and the time of the newest event that has one."""
+
+    new: int = 0
+    cache: int = 0
+    last: datetime | None = None
+
+
+def _add_event(totals: _StreamTotals, event: dict[str, object], stream: Path) -> None:
+    """Add one event of a stream to its totals."""
+    if "timestamp" in event:
+        totals.last = datetime.fromtimestamp(int(event["timestamp"]) / 1000, timezone.utc)  # type: ignore[call-overload]
+    if event.get("type") == "step_finish":
+        more, read = _tokens_of(event, stream)
+        totals.new, totals.cache = totals.new + more, totals.cache + read
+
+
 def _end_state(events: list[dict[str, object]], stream: Path) -> str:
     """The end state of a stream.
 
@@ -259,6 +277,9 @@ class OpenCodeAdapter:
     # OpenCode starts with `--dir <copy>` and loads the project configuration of that copy (#273): `opencode.json`,
     # `opencode.jsonc` and the directory `.opencode/` (plugins, commands, tools).
     project_config_paths: tuple[str, ...] = (".opencode/", "opencode.json", "opencode.jsonc")
+
+    def __init__(self) -> None:
+        self._reads = StreamFold(_StreamTotals, _add_event)
 
     def run(self, request: AdapterRequest) -> AdapterResult:
         _warn_of_host_settings()
@@ -369,12 +390,6 @@ class OpenCodeAdapter:
         return None
 
     def activity(self, stream: Path) -> Activity:
-        new = cache = 0
-        last = None
-        for event in read_events(stream):
-            if "timestamp" in event:
-                last = datetime.fromtimestamp(int(event["timestamp"]) / 1000, timezone.utc)  # type: ignore[call-overload]
-            if event.get("type") == "step_finish":
-                more, read = _tokens_of(event, stream)
-                new, cache = new + more, cache + read
-        return Activity(new, cache, last)
+        """The totals and the time of the last activity of the stream. The adapter parses only the bytes that came after its last read of the stream (#352)."""
+        totals = self._reads(stream)
+        return Activity(totals.new, totals.cache, totals.last)
