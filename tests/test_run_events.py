@@ -99,9 +99,9 @@ def test_the_journal_of_a_new_run_names_the_schema_version_in_run_start(tmp_path
 
     run_start = read_journal_file(repo, run_id)[0]
     assert run_start["event"] == schema.RUN_START
-    assert run_start["schema"] == schema.SCHEMA_VERSION
-    assert isinstance(schema.SCHEMA_VERSION, int) and schema.SCHEMA_VERSION >= 1
-    assert schema.schema_version(read_journal_file(repo, run_id)) == schema.SCHEMA_VERSION
+    assert run_start["schema"] == schema.JOURNAL_SCHEMA_VERSION
+    assert isinstance(schema.JOURNAL_SCHEMA_VERSION, int) and schema.JOURNAL_SCHEMA_VERSION >= 1
+    assert schema.schema_version(read_journal_file(repo, run_id)) == schema.JOURNAL_SCHEMA_VERSION
 
 
 def test_the_schema_version_of_a_journal_with_no_schema_is_0():
@@ -162,7 +162,7 @@ def without_schema(repo, run_id) -> None:
     path = journal_path(repo, run_id)
     lines = path.read_text().splitlines(keepends=True)
     first = json.loads(lines[0])
-    assert first.pop("schema") == schema.SCHEMA_VERSION
+    assert first.pop("schema") == schema.JOURNAL_SCHEMA_VERSION
     lines[0] = json.dumps(first) + "\n"
     path.write_text("".join(lines))
 

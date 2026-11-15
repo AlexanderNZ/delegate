@@ -203,7 +203,7 @@ from .brief import (
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .errors import EngineError, Rejected, StepFailed
 from .events import (
-    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE, UNSKIP,
+    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RUN_START, JOURNAL_SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE, UNSKIP,
     ROLE_SPECIALIST, ROLE_FIXUP, ROLE_VERIFIER,
     GATE_PHASE_BUILD, GATE_PHASE_REBASE, GATE_PHASE_FIXUP,
     TREE_WORKTREE, TREE_VERIFY_COPY, TREE_SEAL,
@@ -961,7 +961,7 @@ def _execute(
         journal.append(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
-            plan=plan_record(plan_of(workflow)), schema=SCHEMA_VERSION,
+            plan=plan_record(plan_of(workflow)), schema=JOURNAL_SCHEMA_VERSION,
             agents=sealed, configuration=configuration_record(workflow), repo=str(repo.resolve()), host=host_name(),
         )
         progress = Progress()

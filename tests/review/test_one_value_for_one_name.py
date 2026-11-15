@@ -1,8 +1,8 @@
-"""A constant name has one value in the run context, and the journal values have one home (#361).
+"""A constant name has one value in `src/delegate`, and the journal values have one home (#361).
 
-The scan reads every module of `src/delegate/run` with the `ast` module. It looks at the constants at the top level of a module: a name in
-capital letters with a literal value. The other packages (`cli`, `adapters`, `definitions`) keep their own local constants, such as an exit
-code, and a name there can differ from a name in `run` on purpose.
+The scan reads every module of `src/delegate` with the `ast` module. It looks at the constants at the top level of a module: a name in
+capital letters with a literal value. A name with two values is a defect, except for an entry of `TWO_VALUES_ON_PURPOSE` (the ruling of
+the coordinator on #361): the exit codes of each command are part of the interface of that command, and its reference documents them.
 """
 
 from __future__ import annotations
@@ -14,13 +14,19 @@ import delegate
 from delegate.run import domain, events
 
 SOURCE = Path(delegate.__file__).parent
-RUN = SOURCE / "run"
+
+#: Each name that has two values on purpose, with the reason. The test fails when an entry no longer has two values.
+TWO_VALUES_ON_PURPOSE: dict[str, str] = {
+    "EXIT_ERROR": "an exit code of a command: `delegate clean` exits 1 on an error, and `runs`, `status` and `watch` exit 2",
+    "EXIT_HALTED": "an exit code of a command: `delegate run` exits 4 after a halt, and `delegate watch` exits 8",
+    "EXIT_PAUSED": "an exit code of a command: `delegate run` exits 3 after a pause, and `delegate watch` exits 7",
+}
 
 
 def _constants() -> dict[str, dict[str, set[str]]]:
-    """Name -> repr of its value -> the files that give it that value, for each literal constant at the top level of a module of `run`."""
+    """Name -> repr of its value -> the files that give it that value, for each literal constant at the top level of a module."""
     found: dict[str, dict[str, set[str]]] = {}
-    for path in sorted(RUN.rglob("*.py")):
+    for path in sorted(SOURCE.rglob("*.py")):
         for node in ast.parse(path.read_text()).body:
             if isinstance(node, ast.AnnAssign) and node.value is not None:
                 targets = [node.target]
@@ -35,7 +41,7 @@ def _constants() -> dict[str, dict[str, set[str]]]:
                     value = ast.literal_eval(node.value)
                 except ValueError:
                     continue
-                found.setdefault(target.id, {}).setdefault(repr(value), set()).add(path.name)
+                found.setdefault(target.id, {}).setdefault(repr(value), set()).add(str(path.relative_to(SOURCE)))
     return found
 
 
@@ -46,10 +52,17 @@ def _files_with(text: str) -> list[str]:
     ]
 
 
-def test_no_two_constants_of_the_run_context_have_the_same_name_and_different_values():
+def test_no_two_constants_of_the_package_have_the_same_name_and_different_values():
     clashes = {name: values for name, values in _constants().items() if len(values) > 1}
 
-    assert clashes == {}
+    assert "EXIT_HALTED" in clashes  # the scan reads the modules of `cli` and of `run`
+    assert {name: values for name, values in clashes.items() if name not in TWO_VALUES_ON_PURPOSE} == {}
+
+
+def test_each_name_of_the_allow_list_still_has_two_values():
+    constants = _constants()
+
+    assert [name for name in TWO_VALUES_ON_PURPOSE if len(constants.get(name, {})) < 2] == []
 
 
 def test_the_phase_of_a_gate_of_a_fix_up_is_not_the_phase_that_a_view_shows():

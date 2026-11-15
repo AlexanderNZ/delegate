@@ -71,10 +71,10 @@ from .skill_text import Skill, with_skills
 from .streams import StreamFold, read_events
 
 # The command that starts the harness.
-COMMAND: str = "opencode"
+OPENCODE_COMMAND: str = "opencode"
 
 # The column of the tier table that holds the OpenCode models.
-TIER_COLUMN: str = "opencode"
+OPENCODE_TIER_COLUMN: str = "opencode"
 
 # The directories of the agent files: in the project, and in the user directory.
 PROJECT_AGENT_DIRECTORY: Path = Path(".opencode") / "agents"
@@ -89,7 +89,7 @@ STEP_REASON_END_STATE: dict[str, str] = {"stop": FINISHED, "length": CAPPED}
 CONFIG_VARIABLE: str = "OPENCODE_CONFIG_CONTENT"
 
 # The fields of `part.tokens` of a `step_finish` event that the count of new tokens adds. Each step has them.
-NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
+OPENCODE_NEW_FIELDS: tuple[str, ...] = ("input", "output", "reasoning")
 
 
 # The sentence of a rendered OpenCode agent that lists its skills (the templates `opencode-specialist.md` and
@@ -203,11 +203,11 @@ def _environment(servers: tuple[McpServer, ...], sealed: SealedAgent | None = No
 def _tokens_of(event: dict[str, object], stream: Path) -> tuple[int, int]:
     """The two token counts of a `step_finish` event: the new tokens, and the cache reads."""
     tokens = event.get("part", {}).get("tokens")  # type: ignore[union-attr]
-    missing = [name for name in NEW_FIELDS if not isinstance(tokens, dict) or name not in tokens]
+    missing = [name for name in OPENCODE_NEW_FIELDS if not isinstance(tokens, dict) or name not in tokens]
     if missing:
         raise AdapterError(f"{stream}: a step_finish event has no part.tokens.{missing[0]} field")
     cache = tokens.get("cache") or {}  # type: ignore[union-attr]
-    new = sum(int(tokens[name]) for name in NEW_FIELDS) + int(cache.get("write") or 0)  # type: ignore[index]
+    new = sum(int(tokens[name]) for name in OPENCODE_NEW_FIELDS) + int(cache.get("write") or 0)  # type: ignore[index]
     return new, int(cache.get("read") or 0)
 
 
@@ -268,7 +268,7 @@ def _warn_of_host_settings() -> None:
 class OpenCodeAdapter:
     """Run one agent through `opencode run`."""
 
-    tier_column: str = TIER_COLUMN
+    tier_column: str = OPENCODE_TIER_COLUMN
     checks_setup: bool = True
     # The guard probe needs a session whose model runs a command that the guard must deny. Nobody measured the
     # enforcement of the permission map of a sealed agent in a live session (#213, owner decision D-e), so there is no probe.
@@ -287,7 +287,7 @@ class OpenCodeAdapter:
         # The harness gets the sealed agent in the inline configuration, and its handle on the command. A request with no
         # seal runs the agent that the harness finds by the name: the engine seals each agent that has a file.
         handle = request.agent if sealed is None else sealed.handle
-        command = [COMMAND, "run", "--format", "json", "--model", request.model, "--agent", handle, "--dir", str(request.cwd)]
+        command = [OPENCODE_COMMAND, "run", "--format", "json", "--model", request.model, "--agent", handle, "--dir", str(request.cwd)]
         if request.resume_session is not None:
             command += ["--session", request.resume_session]
         stream = request.event_stream
@@ -300,13 +300,13 @@ class OpenCodeAdapter:
         # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
         if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
-                f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
+                f"{OPENCODE_COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
         # An agent that the harness does not find is not an error to the harness: it warns on standard error,
         # runs its default agent, and exits 0. The rules of the pair would then not apply, so the adapter stops.
         if f'agent "{request.agent}" not found' in process.stderr:
             raise AdapterError(
-                f"{COMMAND} did not find agent {request.agent!r} and ran its default agent instead: {process.stderr.strip()}"
+                f"{OPENCODE_COMMAND} did not find agent {request.agent!r} and ran its default agent instead: {process.stderr.strip()}"
             )
         events = read_events(stream)
         # A subagent is refused for `opencode run` in the same way, and the harness exits 0 and runs its default agent. The
@@ -316,8 +316,8 @@ class OpenCodeAdapter:
             return AdapterResult(
                 process.returncode, FAILED, None, stream, process.ended_idle, ended_timeout=process.ended_timeout,
                 reason=(
-                    f"{COMMAND} did not run agent {fallen['name']!r} and ran its default agent instead: "
-                    f"{fallen.group(0)}; an agent for `{COMMAND} run` needs `mode: all`"
+                    f"{OPENCODE_COMMAND} did not run agent {fallen['name']!r} and ran its default agent instead: "
+                    f"{fallen.group(0)}; an agent for `{OPENCODE_COMMAND} run` needs `mode: all`"
                 ),
             )
         session_id = next((event["sessionID"] for event in events if "sessionID" in event), None)

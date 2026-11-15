@@ -82,10 +82,10 @@ from .skill_text import Skill, with_skills
 from .streams import StreamFold, read_events
 
 # The command that starts the harness.
-COMMAND: str = "claude"
+CLAUDE_COMMAND: str = "claude"
 
 # The column of the tier table that holds the Claude Code models.
-TIER_COLUMN: str = "claude-code"
+CLAUDE_TIER_COLUMN: str = "claude-code"
 
 # The time that one run of a hook can take.
 HOOK_TIMEOUT: float = 30.0
@@ -156,7 +156,7 @@ HARNESS_TEXT = re.compile(r"^(API Error\b|You've hit your (\w+ )?limit\b)")
 REASON_LENGTH: int = 200
 
 # The fields of a `usage` object that its count of new tokens adds: the input, the cache writes, and the output.
-NEW_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
+CLAUDE_NEW_FIELDS: tuple[str, ...] = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
 
 # The fields of a `usage` object that its count of cache tokens adds: the cache reads.
 CACHE_FIELDS: tuple[str, ...] = ("cache_read_input_tokens",)
@@ -192,7 +192,7 @@ def _tokens_of(usage: dict[str, object]) -> tuple[int, int]:
     def count(fields: tuple[str, ...]) -> int:
         return sum(int(usage.get(name) or 0) for name in fields)  # type: ignore[call-overload]
 
-    return count(NEW_FIELDS), count(CACHE_FIELDS)
+    return count(CLAUDE_NEW_FIELDS), count(CACHE_FIELDS)
 
 
 @dataclasses.dataclass
@@ -362,7 +362,7 @@ def _one_line(text: str) -> str | None:
 class ClaudeCodeAdapter:
     """Run one agent through `claude --print`."""
 
-    tier_column: str = TIER_COLUMN
+    tier_column: str = CLAUDE_TIER_COLUMN
     checks_setup: bool = True
     probes_guard: bool = True
     supports_resume: bool = True
@@ -381,7 +381,7 @@ class ClaudeCodeAdapter:
         # `--setting-sources user` makes the session ignore the project settings, agents and skills of its tree. A resumed
         # session gets the same options.
         command = [
-            COMMAND, "--print", "--output-format", "stream-json", "--verbose",
+            CLAUDE_COMMAND, "--print", "--output-format", "stream-json", "--verbose",
             "--model", request.model, "--setting-sources", "user", "--plugin-dir", str(sealed.directory),
             "--agent", sealed.handle, "--strict-mcp-config", *_host_permissions(),
         ]
@@ -405,7 +405,7 @@ class ClaudeCodeAdapter:
         # A session that the adapter ended at the agent timeout can have written no event: that is no failure to start.
         if not process.ended_timeout and not stream.read_text().strip():
             raise AdapterError(
-                f"{COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
+                f"{CLAUDE_COMMAND} exited with status {process.returncode} and wrote no event for agent {request.agent!r}: {process.stderr.strip()}"
             )
         end_state, session_id, final_text = FAILED, None, None
         last_result: dict[str, object] | None = None
@@ -429,7 +429,7 @@ class ClaudeCodeAdapter:
             # The harness failed, not the work: the same cause stops each later agent and each continuation (#271).
             status = last_result.get("api_error_status")
             raise AdapterError(
-                f"{COMMAND} ended the session of agent {request.agent!r} with an error of the harness"
+                f"{CLAUDE_COMMAND} ended the session of agent {request.agent!r} with an error of the harness"
                 f"{f' (API status {status})' if isinstance(status, int) else ''}: {_result_text(last_result).strip()}"
             )
         reason = _one_line(_result_text(last_result)) if end_state == FAILED and last_result is not None else None
@@ -699,12 +699,12 @@ def _version() -> tuple[int, int, int] | None:
     asks again.
     """
     environment = process_environment()
-    executable = shutil.which(COMMAND, path=environment.get("PATH"))
+    executable = shutil.which(CLAUDE_COMMAND, path=environment.get("PATH"))
     identity = _identity(executable)
     if identity is not None and identity in _VERSIONS:
         return _VERSIONS[identity]
     try:
-        done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=environment)
+        done = subprocess.run([CLAUDE_COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=environment)
     except (OSError, subprocess.TimeoutExpired):
         return None
     match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)

@@ -17,7 +17,7 @@ KNOWN_KEYS = {
 
 #: The version of the format of `declaration_schema`. Increase it when a field
 #: changes its meaning or goes away. A new field does not change the version.
-SCHEMA_VERSION = 1
+DECLARATION_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ def declaration_schema() -> dict:
         if key.values is not None:
             entry["values"] = list(key.values)
         keys[key.name] = entry
-    return {"version": SCHEMA_VERSION, "keys": keys}
+    return {"version": DECLARATION_SCHEMA_VERSION, "keys": keys}
 
 #: The languages an agent can be told to write its report in. "none" adds no
 #: language rule. "ste" adds the ASD-STE100 Simplified Technical English rule.

@@ -7,7 +7,7 @@ each event and its fields. `docs/reference/run.md` holds the same names in its j
 Every line of a journal also has `seq`, `time` and `event`. The `TypedDict` of an event holds only its other fields.
 A field with `NotRequired` is not in every line of the event: the reference says when it is.
 
-`SCHEMA_VERSION` is the version of the schema. `run-start` writes it as `schema`. A new optional field does not change
+`JOURNAL_SCHEMA_VERSION` is the version of the schema. `run-start` writes it as `schema`. A new optional field does not change
 it. A field that is removed or changed does. A journal with no `schema` in `run-start` is version 0. Version 2 changes the
 field `agents` of `run-start` (#217): the record of a seal replaces the record of an agent file.
 
@@ -20,7 +20,7 @@ from typing import NotRequired, TypedDict
 
 from . import domain
 
-SCHEMA_VERSION: int = 2
+JOURNAL_SCHEMA_VERSION: int = 2
 
 # The version of a journal with no `schema` in `run-start`: a journal that an earlier version of the kit wrote.
 UNVERSIONED: int = 0

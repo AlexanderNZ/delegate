@@ -5,7 +5,7 @@ command: it gives the use case the name of the machine, the time of the clock, a
 adapter that each run names (`delegate.cli.status.stream_reader_of`, as `delegate status` and `delegate watch` use it).
 
 With `--watch` (#313), the command redraws the view in place on the terminal, as `delegate watch` redraws its frame (`delegate.cli.screen`):
-once for each `POLL_SECONDS`, no alternate screen, no spinner, and the size of the terminal read again at each redraw. Each redraw reads each
+once for each `WATCH_POLL_SECONDS`, no alternate screen, no spinner, and the size of the terminal read again at each redraw. Each redraw reads each
 journal only from its last position (`JournalReads`), opens no journal that did not change (#350), lists the run index again only when its directory changed, and keeps the ETA of 2 hours ago of
 each run for a minute (`EtaMemory`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
 does: the cursor shows again, and `delegate` prints `delegate: interrupted` and exits with 130. A journal that cannot be read goes on stderr
@@ -52,7 +52,7 @@ from .stop_signals import stop_signals_as_ctrl_c
 EXIT_ERROR: int = 2
 
 # The seconds between two redraws of `--watch`: the poll rate of `delegate watch`.
-POLL_SECONDS: float = 1.0
+WATCH_POLL_SECONDS: float = 1.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,7 +135,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
                     width, height = screen.size()
                     screen.draw(fleet_lines(found, width, height or None, timeline))
                     first = False
-                    the_clock.sleep(POLL_SECONDS)
+                    the_clock.sleep(WATCH_POLL_SECONDS)
         finally:
             screen.restore()  # on each end, before the last lines
             hosts.close()  # Ctrl-C ends each read that runs at once (#328)

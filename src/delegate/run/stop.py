@@ -27,7 +27,7 @@ from .runs import RunsError, journal_of, locate
 from .state_location import StateLocation
 
 # The seconds between two looks at the lock while the stop waits.
-POLL_SECONDS: float = 0.1
+LOCK_POLL_SECONDS: float = 0.1
 
 
 class StopError(Exception):
@@ -98,4 +98,4 @@ def _wait_for_release(state_dir: Path, run_branch: str, holder: LockHolder, wait
             return True
         if time.monotonic() >= deadline:
             return False
-        time.sleep(POLL_SECONDS)
+        time.sleep(LOCK_POLL_SECONDS)

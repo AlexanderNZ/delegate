@@ -44,7 +44,7 @@ TERMINATE_GRACE_SECONDS: float = 10.0
 LEFTOVER_GRACE_SECONDS: float = 2.0
 
 # The longest time between two looks at the stream while the process runs.
-POLL_SECONDS: float = 1.0
+STREAM_POLL_SECONDS: float = 1.0
 
 
 def _signal_group(process: subprocess.Popen, signum: int) -> None:
@@ -143,7 +143,7 @@ def _wait(process: subprocess.Popen[str], request: AdapterRequest) -> tuple[bool
         process.wait()
         return False, False
     started = time.monotonic()
-    poll = POLL_SECONDS
+    poll = STREAM_POLL_SECONDS
     if idle:
         poll = min(poll, request.idle_timeout / 5)  # type: ignore[operator]
     if request.agent_timeout is not None:

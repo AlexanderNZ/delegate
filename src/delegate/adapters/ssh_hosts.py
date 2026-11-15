@@ -40,7 +40,7 @@ _STDERR_LIMIT: int = 64 * 1024
 STOP_POLL_SECONDS: float = 0.05
 
 # The seconds that a process that ignores SIGTERM has before SIGKILL at the time limit.
-TERMINATE_GRACE_SECONDS: float = 1.0
+READ_TERMINATE_GRACE_SECONDS: float = 1.0
 
 
 class SshHostReader:
@@ -60,10 +60,10 @@ class SshHostReader:
             try:
                 ended = _wait(process, timeout_seconds, stop)
             except BaseException:
-                end_group(process, TERMINATE_GRACE_SECONDS)  # an interrupt: no process of the read stays alive
+                end_group(process, READ_TERMINATE_GRACE_SECONDS)  # an interrupt: no process of the read stays alive
                 raise
             if not ended:
-                end_group(process, TERMINATE_GRACE_SECONDS)
+                end_group(process, READ_TERMINATE_GRACE_SECONDS)
                 if stop is not None and stop.is_set():
                     return Unreachable(f"the read of {host} stopped")
                 return Unreachable(f"no answer from {host} in {timeout_seconds:g} seconds")
