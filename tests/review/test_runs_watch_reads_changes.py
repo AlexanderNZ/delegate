@@ -13,11 +13,11 @@ from datetime import timedelta
 
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.ports.index import RunRecord
-from delegate.run import fleet_rules, status
+from delegate.run import fleet_rules, run_state, status
 from delegate.run.fleet import EtaMemory, fleet_of
 from delegate.run.journal import JournalReads
 
-from ..runs.journals import NOW, built, clock_time, working, write_run
+from ..runs.journals import NOW, built, clock_time, run_end, working, write_run
 
 
 def record(run_id: str, state: str = "running") -> RunRecord:
@@ -108,3 +108,38 @@ def test_the_eta_of_2_hours_ago_of_a_run_is_worked_out_again_after_a_minute_and_
 
     asks(60)
     assert [t for t in times if t < NOW] == [NOW - slip, NOW + timedelta(seconds=60) - slip]
+
+
+def folds_of_whole_journals(monkeypatch) -> list[str]:
+    """The `run_id` of each fold of the events of a whole journal (`run_state.fold`), in order. A fold of a part of a journal (the ETA of 2 hours ago) is not in it."""
+    found: list[str] = []
+    original = run_state.fold
+
+    def counted(events, *args, **kwargs):
+        if events and events[-1].get("whole"):
+            found.append(str(events[0]["run_id"]))
+        return original(events, *args, **kwargs)
+
+    for module in [module for name, module in sys.modules.items() if name.startswith("delegate.run")]:
+        if getattr(module, "fold", None) is original:  # `run_state` and each module that imported the name
+            monkeypatch.setattr(module, "fold", counted)
+    return found
+
+
+def test_one_build_of_the_view_with_an_index_folds_each_listed_run_once_and_makes_one_snapshot_of_it(tmp_path, monkeypatch):
+    # #334: the backfill of the index takes the fold and the snapshot that the row of the run made; it reads the lock and the pause request no second time.
+    root = tmp_path / "state"
+    last = {"whole": True}
+    write_run(root, "alpha", "aaaa", clock_time(10, 0), [*built("1", clock_time(10, 0), clock_time(11, 0)), (clock_time(13, 50), "step-start", {"ticket": "2", **last})], lock=True)
+    write_run(root, "beta", "bbbb", clock_time(9, 0), [*built("1", clock_time(9, 0), clock_time(9, 30)), (clock_time(9, 40), "step-start", {"ticket": "2", **last})])
+    write_run(root, "gamma", "cccc", clock_time(8, 0), [*built("1", clock_time(8, 0), clock_time(8, 30)), (clock_time(8, 40), run_end(clock_time(8, 40))[1], {**run_end(clock_time(8, 40))[2], **last})])
+    index = DirectoryRunIndex(tmp_path / "index")
+    times, folds = snapshot_times(monkeypatch), folds_of_whole_journals(monkeypatch)
+
+    fleet = fleet_of(root, "laptop", NOW, lambda adapter: None, JournalReads(), index)
+
+    listed = sorted(row.run_id.rsplit("-", 1)[1] for row in fleet.runs)
+    assert listed == ["aaaa", "bbbb", "cccc"]
+    assert sorted(r.run_id.rsplit("-", 1)[1] for r in index.list_records()) == listed  # the backfill wrote a record of each run
+    assert sorted(run_id.rsplit("-", 1)[1] for run_id in folds) == listed
+    assert [t for t in times if t == NOW] == [NOW] * len(listed)
