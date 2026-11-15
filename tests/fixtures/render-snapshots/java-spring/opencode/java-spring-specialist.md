@@ -8,6 +8,10 @@ permission:
     '*': allow
     git push*: deny
     git -* push*: deny
+    git send-pack*: deny
+    git -* send-pack*: deny
+    git http-push*: deny
+    git -* http-push*: deny
     git *-c *core.hooksPath*: deny
     git *-c *core.hookspath*: deny
     git *--config-env*: deny

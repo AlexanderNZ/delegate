@@ -5,6 +5,11 @@ A `-c` on the command line wins over each configuration file, so `git -c core.ho
 `pre-push` hook. The text guard of each harness is the layer that sees the command. Each case renders the example
 declaration with `agent-definitions render`, and runs the guard of the rendered file: the Claude Code hook as a bash
 process, and the OpenCode bash map through the model of the OpenCode rules in the validator.
+
+A review of the first guard of #359 found that a substitution or a variable before the subcommand hid the push from
+the reader of words (`git -C $(pwd) -c core.hooksPath=/dev/null push`), and that the new guard allowed forms that the
+guard before #359 refused. The guard now refuses a git command with a substitution, a variable or a backtick before its
+subcommand when its text names a push, and it keeps the pattern of the guard before #359 as a floor.
 """
 
 from __future__ import annotations
@@ -70,6 +75,166 @@ STILL_PASS = (
     "git config --get core.hooksPath",
     'git commit -m "Refuse a push after the options of git"',
     "grep -rn hooksPath src",
+)
+
+#: A substitution, a variable or a backtick before the subcommand. The reader of words did not see the options or the
+#: push after it, and each form pushed past the `pre-push` hook to a bare remote in the review of #359.
+DYNAMIC_BEFORE_THE_SUBCOMMAND = (
+    "git -C $(pwd) -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen",
+    "git -c x=$(echo y) -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen",
+    "git -C x$(true) -c core.hooksPath=/dev/null push",
+    "git -C <(true) -c core.hooksPath=/dev/null push",
+    "git -C $(pwd) push",
+    "git -C x$(true) push",
+    "git -C <(true) push",
+    "git -C `pwd` push",
+    "git $(echo) push",
+    "git push$NOPE origin HEAD",
+    'git push"$NOPE" origin HEAD',
+    "git push${NOPE} origin",
+    "echo `git push`",
+    "echo `git -C x push`",
+)
+
+#: The other git commands that push: they run no `pre-push` hook.
+OTHER_PUSH_COMMANDS = (
+    "git send-pack origin main",
+    "git -C /repo/worktree send-pack origin HEAD",
+    "git http-push https://example.org/repo.git main",
+    "git -c x=y http-push https://example.org/repo.git main",
+)
+
+#: A substitution or a variable before the subcommand of a read: the text names no push, so the read passes.
+DYNAMIC_READS_PASS = (
+    'git -C "$REPO" log --oneline -5',
+    "git -C $(pwd) status",
+    "git log --format=%H $(cat ref.txt)",
+)
+
+#: The push guard of the specialist before #359 (commit 9a973b2), as text. The guard of today never allows a command
+#: that this guard refuses.
+GUARD_BEFORE_359 = (
+    r'''python3 -c 'import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"]; '''
+    r'''sys.exit(3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b", c) else 0)' 2>/dev/null; '''
+    "case $? in 0) exit 0 ;; "
+    "3) echo 'git push is blocked for specialist agents. Report the branch to the coordinator.' >&2; exit 2 ;; "
+    "*) echo 'specialist push guard: no command text, or python3 is absent. The guard fails closed.' >&2; exit 2 ;; esac"
+)
+
+#: The commands of the never-weaker check: each probe of the review of #359, and each form of the cases of this file.
+PROBES = (
+    'echo `git push`',
+    'x=`git push origin HEAD`',
+    'echo `git -C x push`',
+    'git -C $(pwd) push',
+    'git -C $(pwd) push origin HEAD:refs/heads/x',
+    'git -C "$(pwd)" push',
+    'git -C `pwd` push',
+    'git -c x=$(echo y) push',
+    'git -c core.hooksPath=$(echo /dev/null) push',
+    'git -C x$(true) push',
+    'git push$NOPE origin HEAD',
+    'git push"$NOPE" origin HEAD',
+    'git push${NOPE} origin',
+    'git -C <(true) push',
+    'git push',
+    'git -C x push',
+    'my-git push',
+    'git $(echo) push',
+    'git -C $(pwd) -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen',
+    'git -c x=$(echo y) -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen',
+    'echo `git -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen`',
+    'git -C x$(true) -c core.hooksPath=/dev/null push',
+    'git -C <(true) -c core.hooksPath=/dev/null push',
+    'git -c core.hooksPath=/dev/null push$NOPE origin HEAD:refs/heads/stolen',
+    'git -c core.hooksPath=/dev/null push""',
+    'git -C . -c core.hooksPath=/dev/null push',
+    'git -c core.hooksPath=/dev/null push',
+    "git -C 'a b' push",
+    'git --no-pager -C x push',
+    'git -c x=y -c core.hookspath=z push',
+    'git -c x=y -c core.hooksPath=z push',
+    'env git push',
+    'command git push',
+    '/usr/bin/git push',
+    'ls; git push',
+    'ls && git push',
+    'ls | git push',
+    'ls\ngit push',
+    'echo $(git push)',
+    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git push',
+    'git \\\npush',
+    'git -C x \\\n push origin main',
+    'git push --no-verify',
+    'git -ccore.hooksPath=/dev/null push',
+    'git -c core.hooksPath= push',
+    'git -c "core.hooksPath=/dev/null" push',
+    'git -c core."hooksPath"=/dev/null push',
+    'git -c c"ore.hooksPath"=/dev/null status',
+    'git --config-env=core.hooksPath=H push',
+    "git -c x=y -C 'a b' --no-pager push origin main",
+    'git\tpush',
+    'git -C\tx\tpush',
+    'git -C x\tpush',
+    '(git push)',
+    '{ git push; }',
+    'x=1 git push',
+    'sudo git push',
+    'time git push',
+    'nohup git push',
+    'exec git push',
+    'git p\\ush',
+    "git pu''sh",
+    'git "push"',
+    'git -c alias.p=push p',
+    'git -c core.hooksPath=/dev/null -C x status',
+    'git -C x -c core.hooksPath=/dev/null log',
+    'git -p push',
+    'git --paginate push',
+    'git --exec-path=/x push',
+    'git --exec-path /x push',
+    'git --git-dir x push',
+    'git --work-tree x push',
+    'git --namespace x push',
+    'git -C x -C y push',
+    'git --bare push',
+    'git --literal-pathspecs push',
+    'git --no-replace-objects push',
+    'git -C x push-something',
+    'git send-pack origin main',
+    'git -C x send-pack origin HEAD',
+    'git -C ~/repo push',
+    'git -C $HOME push',
+    'git -C "$X" push',
+    'git -C ${X} push',
+    'git -C a\\ b push',
+    'if true; then git push; fi',
+    "git -c 'a b=c' push",
+    'git -c x="y z" push',
+    'git --config-env core.hooksPath=H push',
+    'xgit push',
+    'git.exe push',
+    'git-push',
+    'git -C x status; git -c x=y push',
+    'GIT_DIR=/x git push',
+    'git  push',
+    'git push2',
+    'git -c x=y push2',
+    'git -C /repo/worktree log',
+    'git -C /repo/worktree log --oneline -5',
+    'git -c color.ui=never diff',
+    'git log --grep push',
+    'git -C x log --grep push',
+    'git -c color.ui=never diff HEAD -- push.txt',
+    'git status',
+    'git config --get core.hooksPath',
+    'git commit -m "git push later"',
+    "git commit -m 'do not git -c x=y push'",
+    "grep -rn 'git push' docs",
+    'echo git push',
+    'git show HEAD:docs/push.md',
+    'git -C x commit -m push',
+    'git -C x diff -- push',
 )
 
 
@@ -150,10 +315,17 @@ def test_the_claude_code_guard_passes_a_read_command_that_names_a_push(claude_co
     assert (r.returncode, r.stderr) == (0, "")
 
 
+@pytest.mark.parametrize(
+    "push",
+    [
+        "git -c core.hooksPath=/dev/null push origin HEAD:refs/heads/{ref}",
+        "git -C $(pwd) -c core.hooksPath=/dev/null push origin HEAD:refs/heads/{ref}",
+    ],
+)
 def test_a_push_with_the_hooks_off_from_a_real_worktree_is_refused_by_the_rendered_guard(
-    tmp_path, git_identity, claude_code_hook
+    tmp_path, git_identity, claude_code_hook, push
 ):
-    """The push that the review made: without the text guard it reaches the bare remote; with the guard it does not."""
+    """The pushes that the reviews made: without the text guard they reach the bare remote; with the guard they do not."""
     vcs = GitVersionControl()
     repo = make_repo(tmp_path)
     remote = tmp_path / "remote.git"
@@ -174,12 +346,12 @@ def test_a_push_with_the_hooks_off_from_a_real_worktree_is_refused_by_the_render
     def remote_branches() -> list[str]:
         return git(remote, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
 
-    # The control: the pre-push hook refuses a plain push, and the -c form goes past it.
+    # The control: the pre-push hook refuses a plain push, and the form under test goes past it.
     assert "delegate: push refused" in shell("git push origin HEAD:refs/heads/plain").stderr
-    assert shell("git -c core.hooksPath=/dev/null push origin HEAD:refs/heads/control").returncode == 0
+    assert shell(push.format(ref="control")).returncode == 0
     assert remote_branches() == ["control"]
 
-    command = "git -c core.hooksPath=/dev/null push origin HEAD:refs/heads/stolen"
+    command = push.format(ref="stolen")
     guard = run_hook(claude_code_hook, command, cwd=worktree)
     if guard.returncode == 0:
         shell(command)
@@ -187,3 +359,54 @@ def test_a_push_with_the_hooks_off_from_a_real_worktree_is_refused_by_the_render
     assert guard.returncode == 2, (guard.stdout, guard.stderr)
     assert "core.hooksPath" in guard.stderr
     assert remote_branches() == ["control"]
+
+
+def refuses(hook: str, command: str) -> bool:
+    return run_hook(hook, command).returncode == 2
+
+
+def test_the_claude_code_guard_never_allows_a_command_that_the_guard_before_359_refused(claude_code_hook):
+    commands = (*PROBES, *PUSH_AFTER_OPTIONS, *HOOKS_OFF, *CLAUDE_CODE_ONLY, *DYNAMIC_BEFORE_THE_SUBCOMMAND, *OTHER_PUSH_COMMANDS)
+    refused_before = [command for command in commands if refuses(GUARD_BEFORE_359, command)]
+
+    assert "git -C $(pwd) push" in refused_before and "echo `git push`" in refused_before  # the check compares something
+    assert [command for command in refused_before if not refuses(claude_code_hook, command)] == []
+
+
+@pytest.mark.parametrize("command", DYNAMIC_BEFORE_THE_SUBCOMMAND)
+def test_the_claude_code_guard_refuses_a_push_after_a_substitution_or_a_variable(claude_code_hook, command):
+    r = run_hook(claude_code_hook, command)
+
+    assert r.returncode == 2, (r.stdout, r.stderr)
+    assert "blocked for specialist agents" in r.stderr
+
+
+@pytest.mark.parametrize("command", OTHER_PUSH_COMMANDS)
+def test_the_guard_of_each_harness_refuses_send_pack_and_http_push(claude_code_hook, opencode_permission, command):
+    r = run_hook(claude_code_hook, command)
+
+    assert r.returncode == 2, (r.stdout, r.stderr)
+    assert "git push is blocked for specialist agents" in r.stderr
+    assert opencode_bash_action(opencode_permission, command) == "deny"
+
+
+@pytest.mark.parametrize("command", [c for c in DYNAMIC_BEFORE_THE_SUBCOMMAND if c.startswith(("git -", "git push"))])
+def test_the_opencode_guard_refuses_a_push_after_a_substitution_or_a_variable_in_the_options(opencode_permission, command):
+    assert opencode_bash_action(opencode_permission, command) == "deny"
+
+
+@pytest.mark.parametrize("command", ["git $(echo) push", "echo `git push`", "echo `git -C x push`"])
+def test_the_opencode_guard_allows_a_push_that_does_not_start_the_command_with_git_and_an_option(
+    claude_code_hook, opencode_permission, command
+):
+    # A recorded difference, as for a compound command (ADR 0002): each OpenCode pattern is anchored at "git", and the
+    # map adds no wider pattern. The limits page names these forms. The Claude Code hook refuses them.
+    assert refuses(claude_code_hook, command)
+    assert opencode_bash_action(opencode_permission, command) == "allow"
+
+
+@pytest.mark.parametrize("command", DYNAMIC_READS_PASS)
+def test_the_claude_code_guard_passes_a_read_with_a_substitution_or_a_variable_that_names_no_push(claude_code_hook, command):
+    r = run_hook(claude_code_hook, command)
+
+    assert (r.returncode, r.stderr) == (0, "")

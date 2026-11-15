@@ -1693,27 +1693,42 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 # word ("--git-dir <path>"), and each other word that starts with "-". The
 # first word after the options is the subcommand (#359).
 #
+# A git command is unknown when a word up to its subcommand holds "$" or a
+# backtick, or when its words stop at "(" or "<(" before a subcommand: the
+# shell gives the value of that word, so the reader cannot tell the options
+# from the subcommand ("git -C $(pwd) -c core.hooksPath=/dev/null push").
+#
 # - Exit 4: an option is "-c core.hooksPath..." (in any case) or
 #   "--config-env". A setting on the command line wins over each
 #   configuration file, so it can turn off the pre-push hook of the engine.
-# - Exit 3: the subcommand is push.
+# - Exit 3: the subcommand is push, send-pack or http-push, or the raw text
+#   matches the pattern of the guard before #359, which is a floor: the guard
+#   never allows a command that the earlier guard refused.
+# - Exit 5: an unknown git command, and the text from that git to the end
+#   names push, send-pack, core.hooksPath or --config-env.
 # - Exit 0: any other command, also a read that names a push as an argument
-#   ("git log --grep push").
+#   ("git log --grep push"), and an unknown git command that names none of them.
 #
 # Any other status ends at exit 2: the input holds no command text, or
 # python3 is absent (status 127). The hook fails closed.
 GIT_PUSH_HOOK = (
-    r'''python3 -c 'import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"].replace("\\\n",""); '''
+    r'''python3 -c 'import json,re,sys; r=json.load(sys.stdin)["tool_input"]["command"]; c=r.replace("\\\n",""); '''
     r'''W=r"(?:\x27[^\x27]*\x27|\x22(?:\\.|[^\x22\\])*\x22|\\.|[^\s\x27\x22\\;&|<>()])+"; '''
     r'''O=r"(?:(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source))\x00[^\x00]*\x00|-[^\x00]*\x00)"; '''
-    r'''S=["\x00".join(re.sub(r"[\x27\x22\\]","",t) for t in re.findall(W,m.group(1)))+"\x00" '''
+    r'''G=[("\x00".join(re.sub(r"[\x27\x22\\]","",t) for t in re.findall(W,m.group(1)))+"\x00",c[m.end():],c[m.start():]) '''
     r'''for m in re.finditer(r"(?<![\w.-])git(?![\w.-])((?:[ \t]+"+W+r")*)",c)]; '''
-    r'''sys.exit(4 if any(re.match(O+r"*?(?:-c\x00(?i:core\.hookspath)|--config-env[=\x00])",s) for s in S) '''
-    r'''else 3 if any(re.match(O+r"*push\x00",s) for s in S) else 0)' 2>/dev/null; '''
+    r'''M=lambda s:re.match(O+r"*[^\x00-][^\x00]*\x00",s); '''
+    r'''U=lambda s,a:bool(re.search(r"[$\x60]",M(s).group(0)) if M(s) else re.search(r"[$\x60]",s) or re.match(r"[ \t]*<?\(",a)); '''
+    r'''P=r"(?:push|send-pack|http-push)"; '''
+    r'''sys.exit(4 if any(re.match(O+r"*?(?:-c\x00(?i:core\.hookspath)|--config-env[=\x00])",s) for s,a,t in G) '''
+    r'''else 3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b",r) or any(re.match(O+r"*"+P+r"\x00",s) for s,a,t in G) '''
+    r'''else 5 if any(U(s,a) and re.search(r"push|send-pack|(?i:hookspath)|config-env",t) for s,a,t in G) else 0)' 2>/dev/null; '''
     "case $? in 0) exit 0 ;; "
-    "3) echo 'git push is blocked for specialist agents. Report the branch to the coordinator.' >&2; exit 2 ;; "
+    "3) echo 'git push is blocked for specialist agents (also send-pack and http-push). Report the branch to the coordinator.' >&2; exit 2 ;; "
     "4) echo 'A git command that sets core.hooksPath or uses --config-env is blocked for specialist agents. "
     "The pre-push hook must run.' >&2; exit 2 ;; "
+    "5) echo 'A git command with a substitution, a variable or a backtick before its subcommand is blocked for specialist agents "
+    "when its text names push, send-pack, core.hooksPath or --config-env. Write the path or the value as text.' >&2; exit 2 ;; "
     "*) echo 'specialist push guard: no command text, or python3 is absent. The guard fails closed.' >&2; exit 2 ;; esac"
 )
 
@@ -1723,14 +1738,22 @@ GIT_PUSH_HOOK = (
 #: (ADR 0002): "git push*" becomes "^git push.*$". "git -* push*" covers a
 #: push after the global options of git ("git -C <path> push",
 #: "git -c x=y push", "git --no-pager push"), and also denies a read with
-#: options before it that names a push as an argument. The last three denies
-#: stop a git command that turns off the pre-push hook of the engine (#359).
-#: The glob is case-sensitive, so the map names the two usual spellings of
-#: the key. The map does not add a wider "*git push*" pattern (ADR 0002).
+#: options before it that names a push as an argument. The send-pack and
+#: http-push denies stop the two other git commands that push, with no
+#: pre-push hook. The last three denies stop a git command that turns off the
+#: pre-push hook of the engine (#359). The glob is case-sensitive, so the map
+#: names the two usual spellings of the key. The map does not add a wider
+#: "*git push*" pattern (ADR 0002), so a push in a substitution of another
+#: command, or after a substitution as the first word ("git $(echo) push"),
+#: passes OpenCode.
 SPECIALIST_OPENCODE_BASH: dict[str, str] = {
     "*": "allow",
     "git push*": "deny",
     "git -* push*": "deny",
+    "git send-pack*": "deny",
+    "git -* send-pack*": "deny",
+    "git http-push*": "deny",
+    "git -* http-push*": "deny",
     "git *-c *core.hooksPath*": "deny",
     "git *-c *core.hookspath*": "deny",
     "git *--config-env*": "deny",
