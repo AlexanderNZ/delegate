@@ -61,13 +61,13 @@ from pathlib import Path
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
-from ..run import fleet, status
+from ..run import status
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import PlanReview, RetryHint, RunInterrupted, check_start, new_run_id, project_config_paths, retry_hints, review_plan_change, run_workflow
 from ..run.errors import EngineError
 from ..run.host import host_name
-from ..run.index import index_observers
+from ..run.index import index_observers, record_runs
 from ..run.output import glyphs, short_run_id, styled
 from ..run.quality import quality_checks
 from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
@@ -475,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         # The records of the runs of this machine that have none, or an older one (#323). A failure here changes no run: the run
         # adds `index-warning` to its own journal when its own write fails.
         try:
-            fleet.record_runs(settings.root, host_name(), utc_now(), settings.index.index)
+            record_runs(settings.root, host_name(), utc_now(), settings.index.index)
         except Exception:  # noqa: BLE001 - nothing that the records of the other runs do may change this run
             pass
         title = Title(sys.stdout)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +40,14 @@ VERIFIER_SCRATCH_PREFIX: str = "delegate-verifier-"
 
 # The file in the directory of a run that asks the run to pause at its next step boundary (see `delegate.run.pause`).
 PAUSE_REQUEST_NAME: str = "pause-request"
+
+# The state directory of a repository is `<name>-<key>`, with a key of 12 hex digits (`_repository_directory`).
+KEY = re.compile(r"-[0-9a-f]{12}$")
+
+
+def repository_name(state: Path) -> str:
+    """The name of the repository of a state directory: its `<name>`, the directory name without the `-<key>` at its end."""
+    return KEY.sub("", state.name)
 
 
 class StateRootError(EngineError):

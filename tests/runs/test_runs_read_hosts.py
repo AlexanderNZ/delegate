@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-from delegate.run import fleet
+from delegate.run import fleet_hosts
 
 from ..support import Terminal, fake_clock, frames
 from .journals import NOW, clock_time, runs
@@ -160,7 +160,7 @@ def test_a_host_that_waits_past_the_limit_is_unreachable_with_its_last_known_run
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
     ssh.hangs("build-host")
-    monkeypatch.setattr(fleet, "HOST_READ_SECONDS", 1.0)
+    monkeypatch.setattr(fleet_hosts, "HOST_READ_SECONDS", 1.0)
     started = time.monotonic()
 
     code, out, err = runs(capsys)
@@ -314,7 +314,7 @@ def test_watch_reads_the_other_hosts_at_most_each_30_seconds(machine, index, ssh
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
-    monkeypatch.setattr(fleet, "HOST_WAIT_SECONDS", 10.0)  # each read is in the frame that starts it, also on a busy machine (#328)
+    monkeypatch.setattr(fleet_hosts, "HOST_WAIT_SECONDS", 10.0)  # each read is in the frame that starts it, also on a busy machine (#328)
     waits: list[float] = []
     seen: list[int] = []
 
@@ -336,7 +336,7 @@ def test_watch_shows_a_host_that_was_read_in_the_frame(machine, index, ssh, monk
     this_machine(machine)
     record(index, "build-host", "docs-site", "a41e", "running", 1, 6, 47)
     ssh.serves("build-host", document("build-host", run_of("build-host", "docs-site", "a41e", "running", 3, 6)))
-    monkeypatch.setattr(fleet, "HOST_WAIT_SECONDS", 10.0)  # the read is in the first frame, also on a busy machine (#328)
+    monkeypatch.setattr(fleet_hosts, "HOST_WAIT_SECONDS", 10.0)  # the read is in the first frame, also on a busy machine (#328)
     fake_clock().on_sleep = lambda seconds: ctrl_c()
 
     _, out, _ = watching(monkeypatch, capsys, columns=120)

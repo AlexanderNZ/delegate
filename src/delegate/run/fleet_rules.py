@@ -33,6 +33,15 @@ SPEEDING_UP: str = "speeding up"
 SLOWING: str = "slowing"
 STEADY: str = "steady"
 
+# The window of the runs that ended: the last 6 hours. A run with a `run-end` before the window is not listed (#307).
+WINDOW_SECONDS: int = 6 * 3600
+
+
+def in_window(ended: datetime, now: datetime) -> bool:
+    """True when a run that ended at `ended` is in the window that ends at `now`."""
+    return (now - ended).total_seconds() <= WINDOW_SECONDS
+
+
 # The slip of a run (#311) is how much later its ETA is now than it was `SLIP_WINDOW_SECONDS` ago (2 hours). It shows from
 # `SLIP_LIMIT_SECONDS` (30 minutes, a provisional threshold of the design) and not before.
 SLIP_WINDOW_SECONDS: int = 2 * 3600

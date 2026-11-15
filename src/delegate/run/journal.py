@@ -116,6 +116,35 @@ def read_new_events(path: Path, offset: int, next_seq: int) -> tuple[list[dict[s
     return events, offset + consumed
 
 
+def event_time(event: dict[str, object]) -> datetime:
+    """The time of an event, as the journal wrote it."""
+    return datetime.fromisoformat(str(event["time"]))
+
+
+class JournalReads:
+    """The events that a caller read from each journal so far, and the byte position after the last of them (#313).
+
+    A new call of `events` for a journal reads only the bytes after that position, and adds the new events to the old ones. A journal
+    that cannot be read keeps its old position, so the next call reads from it again, not from the start.
+    """
+
+    def __init__(self) -> None:
+        self._seen: dict[Path, tuple[list[dict[str, object]], int]] = {}
+
+    def events(self, journal: Path) -> list[dict[str, object]]:
+        """All the events of the journal. Raise JournalError as `read_new_events` does."""
+        events, offset = self._seen.get(journal, ([], 0))
+        new, offset = read_new_events(journal, offset, len(events) + 1)
+        events.extend(new)
+        self._seen[journal] = (events, offset)
+        return events
+
+    def keep_only(self, journals: set[Path]) -> None:
+        """Forget each journal that is not in `journals`: a run that was cleaned away."""
+        for journal in set(self._seen) - journals:
+            del self._seen[journal]
+
+
 def plan_ids(events: list[dict[str, object]]) -> list[str]:
     """The ticket ids of the newest plan of a run, in plan order, from its events.
 

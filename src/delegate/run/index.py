@@ -7,18 +7,28 @@ the journal events give. The journal stays the record of the run, and the index 
 A write of the index never changes the run. A write that fails adds one `index-warning` event with the reason, and the
 run goes on. A run with no index writes nothing and adds no event. The command-line driver always gives an index (#323): with
 no setting, the index is `index/` in the state root of the machine.
+
+The backfill (`record_runs`, #323, #334) writes the record of each run of the state root of the machine that has none, or an older one, so a run of an earlier
+version, or a run that started with no index, gets its record. It reads the fold of each journal and one snapshot, and no more: it builds no view (no ETA of
+two hours ago, no trend). `delegate runs` and `delegate run` call it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..ports.index import RunIndex, RunRecord
+from ..ports.index import RunIndex, RunIndexError, RunRecord
 from .events import CLEANUP, CRASHED, HALTED, INDEX_WARNING, INTERRUPTED, PAUSED, RESUME, RUN_END, RUN_START, SETUP_PROBLEM, STEP_END
+from . import run_state
+from .fleet_rules import in_window
 from .host import host_name
-from .journal import EventObserver, Journal
-from .status import Snapshot, snapshot_at
+from .journal import EventObserver, Journal, JournalError, JournalReads, event_time
+from .runs import RunsError, all_journals, machine_states
+from .state_location import repository_name
+from .status import Snapshot, snapshot_at, snapshot_of
 
 # The events after which the engine writes the record of the run.
 INDEXED: frozenset[str] = frozenset({RUN_START, RESUME, STEP_END, PAUSED, HALTED, CRASHED, INTERRUPTED, SETUP_PROBLEM, RUN_END})
@@ -86,3 +96,59 @@ def index_observers(index: RunIndex | None, repo: Path) -> tuple[EventObserver, 
             journal.append(INDEX_WARNING, reason=str(error) or type(error).__name__)
 
     return (write,)
+
+
+def _is_older(record: RunRecord, made: RunRecord, last_event: datetime) -> bool:
+    """True when `record` is older than the journal of its run: it was written before the newest event, or it differs from the record `made` now.
+
+    The ETA and the time of the write are not compared: they change with the clock (#326).
+    """
+    try:
+        heard = datetime.fromisoformat(record.heard)
+    except ValueError:
+        return True
+    if heard < last_event:
+        return True
+    return replace(record, eta=None, heard="") != replace(made, eta=None, heard="")
+
+
+def _unrecorded(
+    journals: Sequence[Path], repo: str, host: str, now: datetime, reads: JournalReads, recorded: dict[str, RunRecord],
+) -> list[RunRecord]:
+    """The records to write for the journals of one repository: of each run that is listed, not cleaned, and has no record or an older one.
+
+    A run that ended before the window is not listed (`fleet_rules.in_window`). A journal that cannot be read is skipped: `delegate runs` names it.
+    """
+    found = []
+    for journal in journals:
+        try:
+            events = reads.events(journal)
+            folded = run_state.fold(events)
+            end = folded.run_end
+            if end is not None and not in_window(event_time(end), now):
+                continue
+            made = record_of(events, journal, Path(repo), now, host=host, snapshot=snapshot_of(events, journal, lambda adapter: None, now, folded=folded))
+        except (JournalError, RunsError):
+            continue
+        old = recorded.get(made.run_id)
+        if not cleaned(events) and (old is None or _is_older(old, made, event_time(events[-1]))):
+            found.append(made)
+    return found
+
+
+def record_runs(root: Path, host: str, now: datetime, index: RunIndex, reads: JournalReads | None = None) -> str | None:
+    """Write the record of each run of the state root `root` that `delegate runs` lists and that has no record, or an older one (#323). Return the reason of the first failure of the index, or None.
+
+    `delegate run` and `delegate run --resume` call it before the run starts, and `delegate runs` calls it for each frame (`reads` is then the reads of the frame, so the journals are read once). It reads no
+    stream and builds no view: each record is the one that `record_of` makes from the fold of the journal, so the write is safe at any time (ADR 0008). A run that failed at start has no journal, so it gets no
+    record. A run that `delegate clean` cleaned gets none: the command forgot its record (#327). A lock file that cannot be read stops no record (#330).
+    """
+    reads = JournalReads() if reads is None else reads
+    try:
+        recorded = {record.run_id: record for record in index.list_records()}
+        for state in machine_states(root):
+            for record in _unrecorded(all_journals([state]), repository_name(state), host, now, reads, recorded):
+                index.record(record)
+    except RunIndexError as error:
+        return str(error)
+    return None

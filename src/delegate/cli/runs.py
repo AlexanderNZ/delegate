@@ -6,7 +6,7 @@ adapter that each run names (`delegate.cli.status.stream_reader_of`, as `delegat
 
 With `--watch` (#313), the command redraws the view in place on the terminal, as `delegate watch` redraws its frame (`delegate.cli.screen`):
 once for each `POLL_SECONDS`, no alternate screen, no spinner, and the size of the terminal read again at each redraw. Each redraw reads each
-journal only from its last position (`fleet.JournalReads`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
+journal only from its last position (`JournalReads`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
 does: the cursor shows again, and `delegate` prints `delegate: interrupted` and exits with 130. A journal that cannot be read goes on stderr
 once, before the first frame when the first read finds it, and else after the last frame, so no line of stderr breaks a frame.
 
@@ -17,7 +17,7 @@ A configuration file that cannot be used stops the command with exit 2 and one l
 The view also has a group for each other host (#317): each host of the records of the index and each host of the key `hosts` of the configuration
 file. `--local` limits the view to this machine and reads no other host, and `--json` describes this machine only and reads no other host.
 
-The command reads each other host over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a `fleet.HostReads` with the ssh backend and
+The command reads each other host over ssh (#318, `delegate.adapters.ssh_hosts`): it gives the use case a `HostReads` with the ssh backend and
 the store of last answers (`delegate.run.last_answers`) in the state root. `--watch` keeps one `HostReads` for all its redraws, so it reads the other
 hosts at most each 30 seconds. Its reads go on in the background (#328): a redraw does not wait for a slow host, and shows its last answer until the
 new one comes. Ctrl-C ends each `ssh` of a read at once, with and without `--watch`.
@@ -31,7 +31,12 @@ import shutil
 import sys
 
 from ..adapters.ssh_hosts import SshHostReader
-from ..run import clock, fleet
+from ..run import clock
+from ..run.fleet import fleet_of
+from ..run.fleet_hosts import HostReads
+from ..run.fleet_model import ViewSettings
+from ..run.fleet_view import fleet_lines
+from ..run.journal import JournalReads
 from ..run.host import host_name
 from ..run.last_answers import LAST_ANSWERS_NAME, LastAnswers
 from ..run.runs import RunsError
@@ -88,17 +93,17 @@ def _settings() -> MachineSettings | None:
         return None
 
 
-def _view(settings: MachineSettings, local: bool) -> fleet.ViewSettings:
+def _view(settings: MachineSettings, local: bool) -> ViewSettings:
     """What the header line names, and the hosts of the key `hosts` to read; `--local` reads none of them."""
-    return fleet.ViewSettings(
+    return ViewSettings(
         config=settings.config.path, shared_index=settings.index.directory if settings.index.shared else None,
         hosts=() if local else settings.config.hosts,
     )
 
 
-def _host_reads(settings: MachineSettings, background: bool = False) -> fleet.HostReads:
+def _host_reads(settings: MachineSettings, background: bool = False) -> HostReads:
     """The reads of the other hosts over ssh, with the store of last answers in the state root. With `background`, a redraw does not wait for them (#328)."""
-    return fleet.HostReads(SshHostReader(), store=LastAnswers(settings.root / LAST_ANSWERS_NAME), background=background)
+    return HostReads(SshHostReader(), store=LastAnswers(settings.root / LAST_ANSWERS_NAME), background=background)
 
 
 def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
@@ -107,7 +112,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
         print("delegate runs: --watch needs a terminal", file=sys.stderr)
         return EXIT_ERROR
     the_clock = clock.current()
-    screen, reads, hosts = Screen(sys.stdout), fleet.JournalReads(), _host_reads(settings, background=True)
+    screen, reads, hosts = Screen(sys.stdout), JournalReads(), _host_reads(settings, background=True)
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -115,7 +120,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
         try:
             with stop_signals_as_ctrl_c():
                 while True:
-                    found = fleet.fleet_of(
+                    found = fleet_of(
                         settings.root, host_name(), utc_now(), stream_reader_of, reads, settings.index.index, not local, hosts, _view(settings, local),
                     )
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
@@ -126,7 +131,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
                     else:
                         late += new
                     width, height = screen.size()
-                    screen.draw(fleet.fleet_lines(found, width, height or None, timeline))
+                    screen.draw(fleet_lines(found, width, height or None, timeline))
                     first = False
                     the_clock.sleep(POLL_SECONDS)
         finally:
@@ -152,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     local = args.local or args.json
     try:
         with _host_reads(settings) as hosts:  # Ctrl-C during a read ends the reads at once (#328)
-            found = fleet.fleet_of(
+            found = fleet_of(
                 settings.root, host_name(), utc_now(), stream_reader_of, index=settings.index.index, read_index=not local,
                 hosts=hosts, view=_view(settings, local),
             )
@@ -165,5 +170,5 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(found.to_json(), indent=2))
         return 0
     size = shutil.get_terminal_size(fallback=(80, 0))  # a terminal that gives no height: the lines are 0, and no row folds
-    print("\n".join(fleet.fleet_lines(found, size.columns, size.lines or None, args.timeline)))
+    print("\n".join(fleet_lines(found, size.columns, size.lines or None, args.timeline)))
     return 0
