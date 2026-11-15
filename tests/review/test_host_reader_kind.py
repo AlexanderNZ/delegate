@@ -6,12 +6,14 @@ sentence for it. The `ssh` of a case is a shim on `PATH`. The expected values co
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
+import delegate
 from delegate.adapters.ssh_hosts import SshHostReader
-from delegate.ports.hosts import OLDER_VERSION, Unreachable
+from delegate.ports.hosts import FORMAT, OLDER_VERSION, RUNS_VERSION, Unreachable
 
 
 def ssh_that_says(directory: Path, text: str, status: int) -> Path:
@@ -39,3 +41,19 @@ def test_a_host_that_ssh_cannot_reach_has_no_kind_and_a_reason_from_the_backend(
     answer = SshHostReader().read_runs("far", 5)
 
     assert answer == Unreachable("ssh cannot reach far: Connection refused")
+
+
+def test_the_version_of_the_format_and_the_first_version_with_runs_are_beside_the_port_and_nowhere_else():
+    # #333: the format of the document that a host gives is the contract of the port, so the port module holds its version.
+    source = Path(delegate.__file__).parent
+    homes = sorted(
+        f"{path.relative_to(source)}:{target.id}"
+        for path in source.rglob("*.py")
+        for node in ast.parse(path.read_text()).body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name) and target.id in ("FORMAT", "RUNS_VERSION")
+    )
+
+    assert homes == ["ports/hosts.py:FORMAT", "ports/hosts.py:RUNS_VERSION"]
+    assert (FORMAT, RUNS_VERSION) == (1, "1.22.0")

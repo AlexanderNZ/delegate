@@ -19,10 +19,10 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from datetime import datetime
 
-from ..ports.hosts import OLDER_VERSION, HostReader, Unreachable
+from ..ports.hosts import FORMAT, OLDER_VERSION, RUNS_VERSION, HostReader, Unreachable
 from ..ports.index import RunRecord
 from . import clock, fleet_rules
-from .fleet_model import FORMAT, LostHost, RunRow
+from .fleet_model import LostHost, RunRow
 from .fleet_rules import in_window
 from .last_answers import LastAnswers
 from .status_model import HALTED, PAUSED, PAUSING, RUNNING, STOPPED
@@ -38,8 +38,6 @@ HOST_WAIT_SECONDS: float = 0.3
 # The states of a run that has no `run-end`. The state of a record of the index that is not one of them is the result of a `run-end`.
 OPEN_STATES: frozenset[str] = frozenset({RUNNING, PAUSING, PAUSED, HALTED, STOPPED})
 
-# The first version of `delegate` that has `delegate runs --local --json` (#317, #318). A host with an earlier version is unreachable.
-RUNS_VERSION: str = "1.22.0"
 
 
 def _remote(record: RunRecord, now: datetime) -> RunRow | None:

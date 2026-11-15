@@ -16,6 +16,13 @@ from typing import Protocol, runtime_checkable
 # document of an earlier format. The use case makes the sentence for it, with the version that it knows (#333).
 OLDER_VERSION: str = "older-version"
 
+# The version of the format of the document that a host gives: the contract of `delegate runs --json` and `--local --json` (#329). A new field does
+# not change it; a change to a field needs a new version. The use case checks the `format` of each answer of this port against it (#333).
+FORMAT: int = 1
+
+# The first version of `delegate` that has `delegate runs --local --json` (#317, #318). A host with an earlier version is unreachable (`OLDER_VERSION`).
+RUNS_VERSION: str = "1.22.0"
+
 
 @dataclass(frozen=True)
 class Unreachable:

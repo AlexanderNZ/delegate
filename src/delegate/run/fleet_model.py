@@ -11,6 +11,7 @@ from datetime import datetime
 from itertools import groupby
 from pathlib import Path
 
+from ..ports.hosts import FORMAT
 from . import fleet_rules, output
 from .live import IDLE_WARNING_MINUTES
 from .status_model import format_duration
@@ -18,8 +19,6 @@ from .status_model import format_duration
 # The stall limit of `delegate watch`, in seconds: an agent idle for this time or more is an alert.
 IDLE_LIMIT_SECONDS: int = int(IDLE_WARNING_MINUTES * 60)
 
-# The version of the contract of `--json`. A new field does not change it; a change to a field needs a new version.
-FORMAT: int = 1
 
 
 @dataclass(frozen=True)
