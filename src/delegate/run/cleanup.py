@@ -99,14 +99,19 @@ def clean_tickets(
     """
     result = Cleanup()
     # One read of all branches serves each check of a ticket branch, and one read for each holder says which branches it holds (#347).
+    # When that read fails, no branch is known: each ticket branch stays, with the failure as its reason.
+    unread: str | None = None
     try:
         tips = vcs.branch_tips(repo)
         holders = _holders(tips, [Holder(holder, holder_name), *also])
     except VcsError as failure:
-        tips, holders, result.errors = {}, [], [f"branch {holder}: {failure}"]
+        tips, holders, result.errors, unread = {}, [], [f"branch {holder}: {failure}"], str(failure)
     held = _Held(vcs, repo, [h for h, exists in holders if exists])
     pending: list[str] = []  # the branches to delete, in the order of the tickets
     for tree in trees:
+        if unread is not None and tree.failed:
+            result.keep_branch(tree.branch, unread, error=True)
+            continue
         if tree.failed:
             if tree.branch not in tips:
                 continue
@@ -134,6 +139,9 @@ def clean_tickets(
                     result.errors.append(f"worktree {tree.worktree}: {kept}")
                 if not dry_run:
                     vcs.stop_file_watcher(tree.worktree)
+        if unread is not None:
+            result.keep_branch(tree.branch, unread, error=True)
+            continue
         if tree.branch not in tips:
             continue
         if kept is not None:

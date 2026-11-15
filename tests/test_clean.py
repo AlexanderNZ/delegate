@@ -13,6 +13,7 @@ the files and the journal.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -520,3 +521,31 @@ def test_a_dry_run_clean_with_a_stale_lock_records_no_lock_broken_and_leaves_the
     assert (code, err) == (0, "")
     assert journal_path(repo, run_id).read_text() == before
     assert len(list((state_dir(repo) / "locks").glob("*.lock"))) == 1
+
+
+def test_a_clean_that_cannot_read_the_branches_keeps_each_ticket_branch_with_a_line_that_gives_the_reason(
+    tmp_path, capsys, scripted, monkeypatch
+):
+    # Review of #347: the one read of all branches fails. Each ticket branch stays, and the line of the run names each one.
+    repo = make_repo(tmp_path)
+    code, run_id = run(repo, workflow_on(tmp_path, "run/built"), capsys)
+    assert code == 0
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    real = shutil.which("git")
+    (shim / "git").write_text(
+        f"#!{shutil.which('sh')}\n"
+        'case "$*" in *"for-each-ref --format=%(objectname) %(refname) refs/heads/"*)\n'
+        '  echo "fatal: the refs cannot be read" >&2; exit 128;;\n'
+        "esac\n"
+        f'exec "{real}" "$@"\n'
+    )
+    (shim / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}:{os.environ['PATH']}")
+
+    code, out, _ = clean(repo, capsys, run_id)
+
+    monkeypatch.undo()
+    assert code == 1
+    assert "branch run/built-a: " in line_of(out, run_id) and "the refs cannot be read" in line_of(out, run_id)
+    assert "run/built-a" in branches(repo)
