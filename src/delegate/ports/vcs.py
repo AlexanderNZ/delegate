@@ -315,12 +315,19 @@ class VersionControl(Protocol):
         """
         ...
 
-    def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str) -> None:
+    def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str, *, earlier: Path | None = None) -> None:
         """Make a self-contained copy of the repository at `copy`, with `branch` checked out and `base` at its place.
 
         The copy has its own data and no link to `repo`, so that its user can
         break it and cannot reach `repo` through it. The copy starts no
         background watcher of the file system.
+
+        A later round of the same ticket uses the copy again (#349). When `copy`, or `earlier`, is a copy that an earlier
+        call of this port made, the port moves it from `earlier` to `copy` and updates it from `repo` in place of a new
+        copy: the two branches as `repo` has them, `branch` checked out, and no file that is not in its commit, also no
+        ignored file. When the user of the copy changed its settings, or when the update fails or leaves the copy not
+        clean, the port removes the copy and makes it again from the start. The port runs no program that the user of
+        the copy wrote there. Any other `copy` is absent when it is called.
         """
         ...
 

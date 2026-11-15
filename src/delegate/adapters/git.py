@@ -4,8 +4,8 @@ Each method runs git through `subprocess`, with the path of the repository or
 worktree as the working directory of the command (`git -C`). A command that
 fails raises `VcsError` with the command and the message of git. Each command reads no stdin, asks for no
 credential on a terminal (`GIT_TERMINAL_PROMPT=0`), and has a time limit: 10 minutes, and 30 minutes for the clone of
-a verifier copy. A command that reaches its limit raises `VcsError` with "timed out after N seconds" (#295). The command
-that stops the fsmonitor daemon has its own limit.
+a verifier copy and for the fetch, the checkout and the clean that update it (#349). A command that reaches its limit
+raises `VcsError` with "timed out after N seconds" (#295). The command that stops the fsmonitor daemon has its own limit.
 
 Every worktree and every copy that this backend makes runs with
 `core.fsmonitor=false`, whatever the user sets. With the setting on, git starts a
@@ -359,8 +359,56 @@ def _rebase_in_progress(worktree: Path) -> bool:
     return any((worktree / path).exists() for path in paths)
 
 
+# The settings in the git directory of a verifier copy that can make git start a program or work in another repository:
+# the configuration, the names of the hooks, the files of `info` (attributes can name a filter of the configuration),
+# and whether a `commondir` file sends git to another git directory. None when they cannot be read.
+_CopySettings = tuple[bytes, tuple[str, ...], tuple[tuple[str, bytes], ...], bool] | None
+
+# The hooks of the git commands that update a verifier copy: a path with no hook in it, so no hook of the copy runs.
+_NO_HOOKS: tuple[str, str] = ("-c", "core.hooksPath=/dev/null")
+
+
+def _settings_of_copy(copy: Path) -> _CopySettings:
+    """The settings in the git directory of the verifier copy `copy`, read with no git process."""
+    git_dir = copy / ".git"
+    try:
+        hooks = tuple(sorted(entry.name for entry in (git_dir / "hooks").iterdir())) if (git_dir / "hooks").is_dir() else ()
+        info = git_dir / "info"
+        files = tuple(sorted((entry.name, entry.read_bytes()) for entry in info.iterdir())) if info.is_dir() else ()
+        return (git_dir / "config").read_bytes(), hooks, files, (git_dir / "commondir").exists()
+    except OSError:
+        return None
+
+
+def _reset_verifier_copy(repo: Path, copy: Path, branch: str, base: str) -> bool:
+    """Bring the verifier copy `copy` to the branches `branch` and `base` of `repo`, with no file that a verifier left (#349).
+
+    The copy fetches the two branches from `repo` by force, checks out `branch` by force, and removes each untracked
+    and ignored file. Return True when the copy is then clean and on `branch`, and False when a step failed or the
+    copy is not clean: the caller then makes the copy again.
+    """
+    steps = (
+        (
+            "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-auto-maintenance", "--update-head-ok", str(repo),
+            f"+refs/heads/{branch}:refs/heads/{branch}", f"+refs/heads/{base}:refs/heads/{base}",
+        ),
+        ("checkout", "-q", "-f", "-B", branch, f"refs/heads/{branch}"),
+        ("clean", "-q", "-ffdx"),
+    )
+    for args in steps:
+        if _run(copy, *_NO_HOOKS, *args, timeout=_CLONE_TIMEOUT).returncode != 0:
+            return False
+    status = _run(copy, *_NO_HOOKS, "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=all")
+    lines = status.stdout.splitlines()
+    return status.returncode == 0 and f"# branch.head {branch}" in lines and all(line.startswith("# ") for line in lines)
+
+
 class GitVersionControl:
     """The version-control port, kept by git."""
+
+    def __init__(self) -> None:
+        # The settings in the git directory of each verifier copy that this backend made, by the path of the copy (#349).
+        self._copy_settings: dict[Path, _CopySettings] = {}
 
     def repository_root(self, path: Path) -> Path:
         return Path(_git(path, "rev-parse", "--show-toplevel"))
@@ -587,10 +635,28 @@ class GitVersionControl:
         _git(repo, "update-ref", f"refs/heads/{branch}", f"{to_commit}^{{commit}}", tip)
         return True
 
-    def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str) -> None:
+    def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str, *, earlier: Path | None = None) -> None:
+        copy = copy.absolute()
+        source = copy if earlier is None else earlier.absolute()
+        made = self._copy_settings.pop(source, None)
+        if made is not None and source.is_dir():
+            moved = source == copy
+            if not moved:
+                try:
+                    source.rename(copy)
+                    moved = True
+                except OSError:
+                    pass  # the copy stays where it is, and the caller removes it
+            # The update starts git in a directory that a verifier could change, so it goes on only while the settings
+            # in the git directory are those that the copy had when it was made (#349).
+            if moved and _settings_of_copy(copy) == made and _reset_verifier_copy(repo, copy, branch, base):
+                self._copy_settings[copy] = made
+                return
+            if moved:
+                self.stop_file_watcher(copy)
+                shutil.rmtree(copy, ignore_errors=True)
         # The clone starts on the branch that the HEAD of the repository names, and that branch can be `base`.
         # So the clone checks out `branch` first, which frees the other names, and then sets `base` by force.
-        copy = copy.absolute()
         existed = copy.exists()
         try:
             _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy), timeout=_CLONE_TIMEOUT)
@@ -603,6 +669,7 @@ class GitVersionControl:
                 self.stop_file_watcher(copy)
                 shutil.rmtree(copy, ignore_errors=True)
             raise
+        self._copy_settings[copy] = _settings_of_copy(copy)
 
     def make_scratch_repository(self, path: Path) -> None:
         path = path.absolute()
