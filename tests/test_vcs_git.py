@@ -1078,6 +1078,69 @@ def test_uncommitted_changes_of_a_directory_that_is_no_checkout_is_an_error(tmp_
         vcs.uncommitted_changes(outside)
 
 
+def test_worktree_state_gives_the_head_and_each_changed_path_from_one_read(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    (repo / "seed.txt").write_text("changed\n")
+    (repo / "kept.txt").write_text("kept\n")
+    (repo / "both.txt").write_text("one\n")
+    git(repo, "add", "kept.txt", "both.txt")
+    (repo / "both.txt").write_text("two\n")
+    (repo / "new dir").mkdir()
+    (repo / "new dir" / "n\u00e4me.txt").write_text("inner\n")
+
+    state = vcs.worktree_state(repo)
+
+    assert state.head == head
+    assert sorted(state.changes, key=lambda change: change.path) == [
+        PathChange("AM", "both.txt"),
+        PathChange("A ", "kept.txt"),
+        PathChange("??", "new dir/n\u00e4me.txt"),
+        PathChange(" M", "seed.txt"),
+    ]
+
+
+def test_worktree_state_of_a_clean_checkout_has_no_change_and_the_head_of_its_branch(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    tip = commit(repo, "more.txt", "more\n", "more")
+
+    state = vcs.worktree_state(repo)
+
+    assert (state.head, state.changes) == (tip, [])
+
+
+def test_worktree_state_names_a_path_that_both_sides_of_a_merge_changed(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    commit(repo, "clash.txt", "base\n", "clash base")
+    git(repo, "checkout", "-q", "-b", "side")
+    (repo / "clash.txt").write_text("side\n")
+    git(repo, "commit", "-q", "-am", "side")
+    git(repo, "checkout", "-q", "main")
+    (repo / "clash.txt").write_text("main\n")
+    git(repo, "commit", "-q", "-am", "main")
+    assert git_status(repo, "merge", "side").returncode != 0
+
+    assert vcs.worktree_state(repo).changes == [PathChange("UU", "clash.txt")]
+
+
+def test_worktree_state_of_a_checkout_with_no_commit_is_an_error(tmp_path, vcs):
+    repo = tmp_path / "empty"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+
+    with pytest.raises(VcsError):
+        vcs.worktree_state(repo)
+
+
+def test_worktree_state_of_a_directory_that_is_no_checkout_is_an_error(tmp_path, vcs, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(VcsError):
+        vcs.worktree_state(outside)
+
+
 # The hooks of a worktree.
 
 

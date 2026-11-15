@@ -152,10 +152,10 @@ def hotspot_matches(paths: Sequence[str], patterns: Sequence[str]) -> list[Hotsp
 
 
 def snapshot_worktree(vcs: VersionControl, worktree: Path) -> WorktreeSnapshot:
-    """Record the HEAD and the changed paths of `worktree`. Raise GuardError when the version-control port fails."""
+    """Record the HEAD and the changed paths of `worktree`, from one read (#348). Raise GuardError when the version-control port fails."""
     with _vcs_errors():
-        head = vcs.head_commit(worktree)
-        changes = vcs.uncommitted_changes(worktree)
+        state = vcs.worktree_state(worktree)
+    head, changes = state.head, state.changes
     paths: dict[str, str] = {}
     for change in changes:
         file = worktree / change.path
@@ -172,8 +172,8 @@ def _change(name: str, before: str | None, after: str | None) -> str:
     return f"{name}: status {code_before} -> {code_after}"
 
 
-def check_worktree_unchanged(vcs: VersionControl, before: WorktreeSnapshot) -> None:
-    """Raise InvariantViolation, which names each change, when the worktree differs from the snapshot `before`."""
+def check_worktree_unchanged(vcs: VersionControl, before: WorktreeSnapshot) -> WorktreeSnapshot:
+    """Raise InvariantViolation, which names each change, when the worktree differs from the snapshot `before`. Else return the new snapshot."""
     after = snapshot_worktree(vcs, before.worktree)
     changes = [
         _change(name, before.paths.get(name), after.paths.get(name))
@@ -181,7 +181,7 @@ def check_worktree_unchanged(vcs: VersionControl, before: WorktreeSnapshot) -> N
         if before.paths.get(name) != after.paths.get(name)
     ]
     if after.head == before.head and not changes:
-        return
+        return after
     parts = list(changes)
     if after.head != before.head:
         with _vcs_errors():

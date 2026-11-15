@@ -40,6 +40,7 @@ class GateRun(NamedTuple):
     `label` is the name of the gate, or its command when it has no name, and a gate that the runner ended at its time limit has `(timed out)` after it.
     `log` is the log file of the gate run, with its full output, or None for a gate that did not run again (see `gate-skip`).
     `commit` is the commit that the result is for: the HEAD of the worktree before the gate.
+    `head_after` is the HEAD of the worktree that the check after the gate read, or None for a gate that did not run again (#348).
     """
 
     command: str
@@ -48,6 +49,7 @@ class GateRun(NamedTuple):
     label: str
     log: Path | None = None
     commit: str | None = None
+    head_after: str | None = None
 
 
 class GateStep(Protocol):
@@ -71,16 +73,28 @@ def gate_outcomes(step: GateStep, round_number: int, phase: str, head: str) -> l
     """Run each gate of the stack of the step as `run_gate_with_output` does, in order, and return their outcomes.
 
     `head` is the HEAD of the worktree, which the caller read after the last step that can move it. The first gate uses
-    it. A gate that ran is a step that can move HEAD, so the gate after it reads HEAD again. A gate that the journal
-    let skip ran nothing, so the gate after it uses the same commit (#239).
+    it. A gate that ran is a step that can move HEAD, so the gate after it uses the HEAD that the check after the gate read
+    (#348). A gate that the journal let skip ran nothing, so the gate after it uses the same commit (#239).
     """
     outcomes: list[GateRun] = []
     commit: str | None = head
     for gate in step.stack.gates:
         outcome = run_gate_with_output(step, gate, round_number, phase, commit=commit)
         outcomes.append(outcome)
-        commit = outcome.commit if outcome.log is None else None
+        commit = outcome.commit if outcome.log is None else outcome.head_after
     return outcomes
+
+
+def tip_after(outcomes: Sequence[GateRun], head: str) -> str:
+    """The HEAD of the worktree after the gates of `outcomes`, which started on `head` (#348).
+
+    A gate that ran has the HEAD that the check after it read. A gate that the journal let skip ran nothing, so its commit
+    is the HEAD. With no gate, the HEAD is `head`.
+    """
+    if not outcomes:
+        return head
+    last = outcomes[-1]
+    return (last.head_after if last.log is not None else last.commit) or head
 
 
 def run_gate_with_output(step: GateStep, command: str, round_number: int, phase: str, *, commit: str | None = None) -> GateRun:
@@ -143,7 +157,7 @@ def run_gate_with_output(step: GateStep, command: str, round_number: int, phase:
     if result.timed_out:
         output += f"\n[delegate: the gate ran past the gate-timeout of {minutes_text(gate_timeout)} minutes, and the engine ended it]\n"
         labels.append("timed out")
-    changed = changed_by_gate(vcs, worktree)
+    changed, head_after = changed_by_gate(vcs, worktree)
     if changed:
         paths = ", ".join(f"`{path}`" for path in changed)
         output += f"\n[delegate: {GATE_CHANGED_TRACKED_FILES}: {paths}; the engine put them back to the commit]\n"
@@ -154,11 +168,14 @@ def run_gate_with_output(step: GateStep, command: str, round_number: int, phase:
         exit_status=result.exit_status, green=green, timed_out=result.timed_out, output_tail=output, clean=not changed,
         **({"changed": changed} if changed else {}), **named,
     )
-    return GateRun(command, green, output, f"{shown} ({'; '.join(labels)})" if labels else shown, log, commit)
+    return GateRun(command, green, output, f"{shown} ({'; '.join(labels)})" if labels else shown, log, commit, head_after)
 
 
-def changed_by_gate(vcs: VersionControl, worktree: Path) -> list[str]:
-    """Check the worktree after a gate, and give the tracked paths that the gate changed, in the order of the paths.
+def changed_by_gate(vcs: VersionControl, worktree: Path) -> tuple[list[str], str]:
+    """Check the worktree after a gate, and give the tracked paths that the gate changed, in the order of the paths, and the HEAD.
+
+    The one read of the state of the worktree gives both, so the gate after this one needs no read of its own (#348).
+    A restore of the tracked files does not move HEAD.
 
     A gate result is a fact about the commit that it names (#176), so a gate must leave the tracked files as the
     commit holds them (#276). The check is the check before the gates (see `_uncommitted_before_gates`), with no path
@@ -168,10 +185,11 @@ def changed_by_gate(vcs: VersionControl, worktree: Path) -> list[str]:
     each gate, and a rebase needs a clean tree.
     """
     with vcs_errors():
-        changed = [change.path for change in vcs.uncommitted_changes(worktree) if change.code != "??"]
+        state = vcs.worktree_state(worktree)
+        changed = [change.path for change in state.changes if change.code != "??"]
         if changed:
             vcs.restore_tracked(worktree)
-    return changed
+    return changed, state.head
 
 
 def copy_gate_logs(red: Sequence[GateRun], scratch: Path) -> list[GateLogCopy]:

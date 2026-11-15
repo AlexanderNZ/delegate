@@ -15,7 +15,8 @@ which no other directory shares.
 
 A worktree gets its settings (`core.fsmonitor=false`, and the `core.hooksPath`
 of the push guard) in a file of its own, `delegate.config` in the git directory
-of the worktree (`.git/worktrees/<name>/`). The backend writes no `includeIf`
+of the worktree (`.git/worktrees/<name>/`). The backend writes the file itself, in one step and with no git process (#348), and
+it asks git to write a file that it did not write. The backend writes no `includeIf`
 section to the configuration of the repository: Claude Code refuses each
 worktree-isolated agent spawn in a repository whose configuration holds one
 (#221). `worktree_environment` gives the environment entries instead
@@ -51,12 +52,13 @@ setting of their own stays.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError
+from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError, WorktreeState
 
 # The limit, in seconds, for the command that stops the fsmonitor daemon of a directory.
 _FSMONITOR_STOP_TIMEOUT: int = 30
@@ -98,12 +100,17 @@ def _run(directory: Path, *args: str, timeout: int | None = None) -> subprocess.
         ) from None
 
 
+def _failure(directory: Path, args: Sequence[str], exit_code: int, stderr: str) -> VcsError:
+    """The `VcsError` for a git command that ended with `exit_code`, not 0, and wrote `stderr`."""
+    operation, cause = f"git {' '.join(args)}", stderr.strip() or str(exit_code)
+    return VcsError(f"{operation} failed: {cause}", operation=operation, directory=directory, cause=cause)
+
+
 def _git_raw(directory: Path, *args: str, timeout: int | None = None) -> str:
     """Run git in `directory` and return its output as it is. Raise VcsError when git fails."""
     result = _run(directory, *args, timeout=timeout)
     if result.returncode != 0:
-        operation, cause = f"git {' '.join(args)}", result.stderr.strip() or str(result.returncode)
-        raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=directory, cause=cause)
+        raise _failure(directory, args, result.returncode, result.stderr)
     return result.stdout
 
 
@@ -159,9 +166,90 @@ def _worktree_git_dir(worktree: Path) -> Path:
     return Path(_git(worktree, "rev-parse", "--absolute-git-dir")).resolve()
 
 
+# The settings that the backend writes to the include file, in the order of the file, with the name that the file shows.
+_SETTING_NAMES: dict[str, str] = {"core.fsmonitor": "fsmonitor", "core.hookspath": "hooksPath"}
+
+# A value that needs no quotes in a git configuration file.
+_PLAIN_VALUE = re.compile(r"[A-Za-z0-9_./:@+-]+")
+
+_ESCAPES: dict[str, str] = {"\\": "\\", '"': '"', "n": "\n", "t": "\t"}
+
+
+def _quote_value(value: str) -> str:
+    """The value as the line `key = value` of a git configuration file holds it: quoted, with escapes, unless it is plain."""
+    if _PLAIN_VALUE.fullmatch(value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+    return f'"{escaped}"'
+
+
+def _unquote_value(text: str) -> str | None:
+    """The value that `_quote_value` wrote as `text`, or None when `text` is not in the form that it writes."""
+    if _PLAIN_VALUE.fullmatch(text):
+        return text
+    if len(text) < 2 or text[0] != '"' or text[-1] != '"':
+        return None
+    out: list[str] = []
+    chars = iter(text[1:-1])
+    for char in chars:
+        if char == '"':
+            return None
+        if char == "\\":
+            escape = _ESCAPES.get(next(chars, ""))
+            if escape is None:
+                return None
+            char = escape
+        out.append(char)
+    return "".join(out)
+
+
+def _read_settings(file: Path) -> dict[str, str] | None:
+    """The settings of an include file that the backend wrote, as (lower-case key, value). None when the file holds anything else.
+
+    A missing file holds no setting. A file that a person changed, with a comment or a key of another kind, is not read:
+    the caller then lets git write the setting and keep the rest.
+    """
+    try:
+        text = file.read_text() if file.exists() else ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    settings: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.lower() == "[core]":
+            continue
+        name, equals, raw = line.partition(" = ")
+        key, value = f"core.{name.lower()}", _unquote_value(raw)
+        if not equals or key not in _SETTING_NAMES or value is None:
+            return None
+        settings[key] = value
+    return settings
+
+
+def _write_settings(repo: Path, git_dir: Path, settings: dict[str, str]) -> None:
+    """Set each of `settings` (key in the form `core.hooksPath`) in the include file of the checkout of `git_dir`, with no git process.
+
+    The configuration of the repository stays as it was. The file is replaced in one step, so a git process that
+    reads it never sees half of it. A file that the backend did not write is changed with `git config`, which keeps the rest of it.
+    """
+    file = git_dir / _INCLUDE_NAME
+    found = _read_settings(file)
+    if found is None:
+        for key, value in settings.items():
+            _git(repo, "config", "--file", str(file), key, value)
+        return
+    wanted = {**found, **{key.lower(): value for key, value in settings.items()}}
+    if wanted == found and file.exists():
+        return
+    lines = ["[core]"] + [f"\t{name} = {_quote_value(wanted[key])}" for key, name in _SETTING_NAMES.items() if key in wanted]
+    temporary = file.with_name(f"{file.name}.{os.getpid()}")
+    temporary.write_text("\n".join(lines) + "\n")
+    os.replace(temporary, file)
+
+
 def _set_worktree_setting(repo: Path, git_dir: Path, key: str, value: str) -> None:
     """Set `key` in the include file of the checkout of `git_dir`. The configuration of the repository stays as it was."""
-    _git(repo, "config", "--file", str(git_dir / _INCLUDE_NAME), key, value)
+    _write_settings(repo, git_dir, {key: value})
 
 
 def _entries(file: Path) -> list[tuple[str, str]]:
@@ -170,12 +258,32 @@ def _entries(file: Path) -> list[tuple[str, str]]:
     return [(key, value) for key, _, value in (entry.partition("\n") for entry in out.split("\0") if entry)]
 
 
+def _may_set(common: Path, word: str) -> bool:
+    """Tell whether the configuration file of the repository can hold a setting with `word` in its name, or include a file that can.
+
+    A file with no `word` and no `include` cannot hold the setting, so the caller asks git nothing. When the file cannot be
+    read, the answer is yes, and git gives the answer.
+    """
+    try:
+        text = (common / "config").read_text().lower()
+    except (OSError, UnicodeDecodeError):
+        return True
+    return word in text or "include" in text
+
+
+def _may_include(common: Path) -> bool:
+    """Tell whether the configuration file of the repository can hold an `includeIf` section. See `_may_set`."""
+    return _may_set(common, "include")
+
+
 def _drop_includes(repo: Path, common: Path, *, only_missing: bool) -> None:
     """Remove each `includeIf` section that an earlier version of this backend wrote to the configuration of the repository.
 
     Such a section has the value `<git common dir>/worktrees/<name>/delegate.config`. With `only_missing`, a section
     stays when its file exists. Each other section stays, also one with a file of that name elsewhere.
     """
+    if not _may_include(common):
+        return
     out = _run(repo, "config", "--local", "--null", "--get-regexp", r"^includeif\..*\.path$").stdout
     for entry in filter(None, out.split("\0")):
         key, _, value = entry.partition("\n")
@@ -194,6 +302,8 @@ def _retire_worktree_extension(repo: Path, common: Path) -> None:
     the include file of the worktree, and the file goes. A file with any other
     setting stays, and so does the extension.
     """
+    if not _may_set(common, "worktreeconfig"):
+        return
     if _run(repo, "config", "--local", "--type=bool", "--get", "extensions.worktreeConfig").stdout.strip() != "true":
         return
     hooks_root = common / "delegate" / "hooks"
@@ -220,6 +330,27 @@ def _retire_worktree_extension(repo: Path, common: Path) -> None:
         moved = True
     if not needed and (moved or hooks_root.is_dir()):
         _git(repo, "config", "--local", "--unset", "extensions.worktreeConfig")
+
+
+def _nothing_to_prune(repo: Path) -> bool:
+    """Tell whether `git worktree prune` has nothing to do: each record of a worktree names a directory that exists.
+
+    Only a main checkout whose `.git` is a directory is read. For any other `repo`, and for a record in a form that this
+    function does not know, the answer is no, and git decides.
+    """
+    records = repo / ".git" / "worktrees"
+    if not (repo / ".git").is_dir():
+        return False
+    if not records.is_dir():
+        return True
+    for record in records.iterdir():
+        try:
+            target = (record / "gitdir").read_text().strip()
+        except (OSError, UnicodeDecodeError):
+            return False
+        if not target or not Path(target).exists():
+            return False
+    return True
 
 
 def _rebase_in_progress(worktree: Path) -> bool:
@@ -296,15 +427,29 @@ class GitVersionControl:
             if current != branch:
                 raise VcsError(f"worktree {worktree} holds {current!r}, not the branch {branch!r} of its ticket")
         else:
-            _git(repo, "worktree", "prune")
-            if self.branch_exists(repo, branch):
-                _git(repo, "worktree", "add", "-q", str(worktree), branch)
-            else:
-                _git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), start)
-        _set_worktree_setting(repo, _worktree_git_dir(worktree), "core.fsmonitor", "false")
-        common = self.shared_data_directory(repo)
+            self._add_worktree(repo, worktree, branch, start)
+        git_dir = _worktree_git_dir(worktree)
+        _set_worktree_setting(repo, git_dir, "core.fsmonitor", "false")
+        # `.git/worktrees/<name>` of a linked worktree is below the shared data directory, so no process gives it (#348).
+        common = git_dir.parent.parent if git_dir.parent.name == "worktrees" else self.shared_data_directory(repo)
         _retire_worktree_extension(repo, common)
         _drop_includes(repo, common, only_missing=False)
+
+    def _add_worktree(self, repo: Path, worktree: Path, branch: str, start: str) -> None:
+        """Make the worktree on `branch`, which starts at `start` when it does not exist.
+
+        The first try makes the branch. It fails when the branch exists, and then the worktree checks it out. The
+        common case, a branch that is new, so starts one process for the check and the add together (#348).
+        """
+        if not _nothing_to_prune(repo):
+            _git(repo, "worktree", "prune")
+        made = _run(repo, "worktree", "add", "-q", "-b", branch, str(worktree), start)
+        if made.returncode == 0:
+            return
+        if self.branch_exists(repo, branch):
+            _git(repo, "worktree", "add", "-q", str(worktree), branch)
+            return
+        raise _failure(repo, ("worktree", "add", "-q", "-b", branch, str(worktree), start), made.returncode, made.stderr)
 
     def remove_worktree(self, repo: Path, worktree: Path) -> None:
         worktree = worktree.absolute()
@@ -376,6 +521,29 @@ class GitVersionControl:
         # The state code starts with a space for a change that is not staged, so the output must not be stripped.
         out = _git_raw(worktree, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames")
         return [PathChange(entry[:2], entry[3:]) for entry in out.split("\0") if entry]
+
+    def worktree_state(self, worktree: Path) -> WorktreeState:
+        # Version 2 of the status gives the commit in its `# branch.oid` header, so one process serves both reads (#348).
+        # The state code of version 2 shows an unchanged side as `.`, and of version 1 as a space.
+        out = _git_raw(worktree, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--no-renames")
+        head, changes = "", []
+        for entry in filter(None, out.split("\0")):
+            kind, _, rest = entry.partition(" ")
+            if kind == "#":
+                name, _, value = rest.partition(" ")
+                head = value if name == "branch.oid" else head
+            elif kind == "?":
+                changes.append(PathChange("??", rest))
+            elif kind == "1":  # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`
+                fields = rest.split(" ", 7)
+                changes.append(PathChange(fields[0].replace(".", " "), fields[7]))
+            elif kind == "u":  # `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`
+                fields = rest.split(" ", 9)
+                changes.append(PathChange(fields[0].replace(".", " "), fields[9]))
+        if not re.fullmatch(r"[0-9a-f]{40,64}", head):  # a checkout with no commit has `(initial)`
+            operation = "git status --porcelain=v2 --branch"
+            raise VcsError(f"{operation} failed: {worktree} has no commit", operation=operation, directory=worktree, cause="no commit")
+        return WorktreeState(head, changes)
 
     def restore_tracked(self, worktree: Path) -> None:
         _git(worktree, "reset", "--hard", "--quiet", "HEAD")

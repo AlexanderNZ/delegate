@@ -66,6 +66,14 @@ class PathChange:
 
 
 @dataclass(frozen=True)
+class WorktreeState:
+    """The commit that a worktree has checked out, and each path that differs from it, read at one moment (#348)."""
+
+    head: str
+    changes: list[PathChange]
+
+
+@dataclass(frozen=True)
 class RebaseResult:
     """What a rebase gave back. `status` is one of REBASE_STATUSES.
 
@@ -248,6 +256,14 @@ class VersionControl(Protocol):
         A new file in a new directory is listed as a file. A path that the
         repository ignores is not listed. A rename is two entries. The order is
         the order of the paths.
+        """
+        ...
+
+    def worktree_state(self, worktree: Path) -> WorktreeState:
+        """The id of the commit that the worktree has checked out, and its uncommitted changes, from one read (#348).
+
+        The two values are those of `head_commit` and `uncommitted_changes`. A caller that needs both asks here, and a
+        backend that starts a process for each read starts one. Raise VcsError when the worktree has no commit.
         """
         ...
 

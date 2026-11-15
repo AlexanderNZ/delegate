@@ -366,3 +366,60 @@ def test_a_run_in_a_repository_with_a_worktree_of_an_earlier_version_removes_its
     assert include_sections(repo) == []
     refused = run_git(old, "push", "origin", "HEAD:refs/heads/stolen", environment=vcs.worktree_environment(old))
     assert PUSH_REFUSED in refused.stderr
+
+
+# The settings file is written with no git process (#348).
+
+
+def settings_of(worktree: Path) -> dict[str, str]:
+    """The settings of `delegate.config` of the worktree, as git reads them: key to value."""
+    git_dir = Path(git(worktree, "rev-parse", "--absolute-git-dir").strip())
+    out = run_git(worktree, "config", "--file", str(git_dir / "delegate.config"), "--null", "--list").stdout
+    return dict(entry.split("\n", 1) for entry in out.split("\0") if entry)
+
+
+@pytest.mark.parametrize(
+    "name", ["plain", "with space", "hash # and ; semicolon", 'quote " inside', "back\\slash", "ends with space ", "tab\there", "ünïcode"]
+)
+def test_the_hooks_path_that_the_port_keeps_for_a_worktree_is_the_path_that_git_reads_back(tmp_path, vcs, name):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    hooks = tmp_path / name
+
+    vcs.use_hooks_directory(repo, worktree, hooks)
+
+    assert settings_of(worktree) == {"core.fsmonitor": "false", "core.hookspath": str(hooks)}
+
+
+def test_a_second_hooks_directory_replaces_the_first_and_keeps_the_fsmonitor_setting(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    vcs.use_hooks_directory(repo, worktree, tmp_path / "first")
+
+    vcs.use_hooks_directory(repo, worktree, tmp_path / "second")
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+
+    assert settings_of(worktree) == {"core.fsmonitor": "false", "core.hookspath": str(tmp_path / "second")}
+
+
+def test_a_setting_of_a_person_in_the_settings_file_stays_when_the_port_sets_its_own(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    worktree = tmp_path / "wt"
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    git_dir = Path(git(worktree, "rev-parse", "--absolute-git-dir").strip())
+    (git_dir / "delegate.config").write_text("# mine\n[user]\n\tname = Someone\n[core]\n\tfsmonitor = true\n")
+
+    vcs.ensure_worktree(repo, worktree, "feature", "main")
+    vcs.use_hooks_directory(repo, worktree, tmp_path / "hooks")
+
+    assert settings_of(worktree) == {"user.name": "Someone", "core.fsmonitor": "false", "core.hookspath": str(tmp_path / "hooks")}
+
+
+def test_a_worktree_with_a_start_that_is_no_commit_is_an_error_that_names_the_command(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError, match="git worktree add .* failed"):
+        vcs.ensure_worktree(repo, tmp_path / "wt", "feature", "no-such-start")
+    assert not (tmp_path / "wt").exists()

@@ -11,8 +11,36 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..ports.vcs import VcsError, VersionControl
+from ..ports.vcs import VcsError, VersionControl, WorktreeState
 from .errors import EngineError
+
+
+class KnownTree:
+    """What a phase of a step knows about its worktree for the next phase, so that the next phase starts no git process for it (#348).
+
+    A phase `give`s the HEAD when it read it after the last session, rebase or gate that can move HEAD. The next phase
+    `take`s it. A phase that read the paths of the changes after a session that leaves the tree as it was gives them with
+    `give_paths`, and the next phase takes them with `take_paths`. A `take` empties the note, so a value is used once: a
+    phase that finds no note reads the value itself.
+    """
+
+    def __init__(self) -> None:
+        self._head: str | None = None
+        self._paths: frozenset[str] | None = None
+
+    def give(self, head: str) -> None:
+        self._head = head
+
+    def take(self) -> str | None:
+        head, self._head = self._head, None
+        return head
+
+    def give_paths(self, paths: frozenset[str]) -> None:
+        self._paths = paths
+
+    def take_paths(self) -> frozenset[str] | None:
+        paths, self._paths = self._paths, None
+        return paths
 
 
 @contextmanager
@@ -42,6 +70,12 @@ def head_commit(vcs: VersionControl, worktree: Path) -> str:
     """The id of the commit that the worktree has checked out."""
     with vcs_errors():
         return vcs.head_commit(worktree)
+
+
+def worktree_state(vcs: VersionControl, worktree: Path) -> WorktreeState:
+    """The HEAD of the worktree and its uncommitted changes, from one read of the port (#348)."""
+    with vcs_errors():
+        return vcs.worktree_state(worktree)
 
 
 def worktree_environment(vcs: VersionControl, worktree: Path) -> dict[str, str]:

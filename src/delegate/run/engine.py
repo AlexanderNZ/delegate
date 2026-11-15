@@ -189,7 +189,7 @@ from typing import NamedTuple
 from ..ports import harness
 from ..ports.gates import GateRunner
 from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
-from ..ports.vcs import REBASED, VcsError, VersionControl
+from ..ports.vcs import REBASED, VcsError, VersionControl, WorktreeState
 from ..shared.tiers import Tiers
 from . import chain, domain, run_state, step_scans
 from .context import ResumeRequest, RunContext
@@ -211,7 +211,7 @@ from .events import (
     RETRY_PHASE_SPECIALIST, RETRY_PHASE_GATES, RETRY_PHASE_VERIFIER, RETRY_PHASE_SCOPED_VERIFIER, RETRY_PHASE_FIXUP, RETRY_PHASE_CHAIN_FIXUP, RETRY_PHASE_CHAIN,
     PAUSED_BEFORE_STEP, PAUSED_BEFORE_VERIFIER,
 )
-from .gate_run import copy_gate_logs, gate_log_path, gate_outcomes, green_result, red_gates_text, run_gate_with_output
+from .gate_run import copy_gate_logs, gate_log_path, gate_outcomes, green_result, red_gates_text, run_gate_with_output, tip_after
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
@@ -234,7 +234,7 @@ from .state_location import (
 )
 from .step_pause import Paused, pause_point
 from .time_limits import minutes_text, seconds
-from .vcs_access import branch_tip, head_commit, holds_commit, vcs_errors, worktree_environment
+from .vcs_access import KnownTree, branch_tip, head_commit, holds_commit, vcs_errors, worktree_environment, worktree_state
 from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, ticket_branch
 
 # The phase of a step that an event of the step starts, for the `phase` of a `crashed` event. An `agent-start` starts
@@ -1946,8 +1946,10 @@ def _build_with_continuations(
                 # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
                 # something else than the commit. `economy` mode runs no gate here, but its chain gates run on this tree later.
                 # The specialist was the last step that can move HEAD, so one read serves the check and the first gate (#239).
-                head = head_commit(vcs, worktree) if each_ticket else None
-                uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers, head)
+                # One read gives the HEAD and the changes of the tree: the check and the first gate use them (#348).
+                state = worktree_state(vcs, worktree) if each_ticket else None
+                head = state.head if state is not None else None
+                uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers, state)
                 if uncommitted:
                     trigger, reason, uncommitted_paths = TRIGGER_UNCOMMITTED, _uncommitted_reason(uncommitted), tuple(uncommitted)
                 elif head is None:
@@ -1956,6 +1958,7 @@ def _build_with_continuations(
                     outcomes = gate_outcomes(step, 0, GATE_PHASE_BUILD, head)
                     red = [outcome for outcome in outcomes if not outcome.green]
                     if not red:
+                        step.known_tree.give(tip_after(outcomes, head))
                         return None
                     trigger = "gates-red"
                     # The gates ran in a tree with no change that is not committed, so what the tree holds now is theirs.
@@ -1991,7 +1994,7 @@ def _uncommitted_paths(vcs: VersionControl, worktree: Path) -> list[str]:
 
 def _uncommitted_before_gates(
     journal: Journal, vcs: VersionControl, worktree: Path, gates: Sequence[str] | None, leftovers: frozenset[str] = frozenset(),
-    head: str | None = None,
+    state: WorktreeState | None = None,
 ) -> list[str]:
     """The paths that a change not committed holds in the worktree, when a gate is about to run in it. Else an empty list.
 
@@ -2003,13 +2006,15 @@ def _uncommitted_before_gates(
     the tree of a later gate, so the answer does not depend on the journal.
     A path in `leftovers` is a file that an earlier gate run of this process
     left in a tree that was clean before it: it is no work of the specialist.
-    `head` is the HEAD of the worktree when the caller read it after the last step that can move it, or None.
+    `state` is the HEAD and the changes of the worktree when the caller read them after the last step that can move
+    them (#348), or None, and then this function reads what it needs.
     """
     if gates is not None:
-        commit = head if head is not None else head_commit(vcs, worktree)
+        commit = state.head if state is not None else head_commit(vcs, worktree)
         if all(green_result(journal, gate, commit) is not None for gate in gates):
             return []
-    return [path for path in _uncommitted_paths(vcs, worktree) if path not in leftovers]
+    paths = [change.path for change in state.changes] if state is not None else _uncommitted_paths(vcs, worktree)
+    return [path for path in paths if path not in leftovers]
 
 
 def _uncommitted_reason(paths: Sequence[str]) -> str:
@@ -2060,6 +2065,8 @@ class _Step:
     # a step is made for the stack: it holds the id of the last ticket of the stack and the text of all of them.
     anchor: Ticket | None = None
     segments: tuple[ChainSegment, ...] | None = None
+    # The HEAD of the worktree that the last phase read after its last step that can move HEAD (#348). The next phase takes it.
+    known_tree: KnownTree = field(default_factory=KnownTree, compare=False)
 
     @property
     def stack(self) -> Stack:
@@ -2099,7 +2106,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     """
     ticket, run_branch = step.ticket, step.run.workflow.run_branch
     onto = _check_run_branch(step.journal, step.run.vcs, step.run.repo, run_branch, ticket.id)
-    before = head_commit(step.run.vcs, step.worktree)
+    before = step.known_tree.take() or head_commit(step.run.vcs, step.worktree)
     with vcs_errors():
         rebase = step.run.vcs.rebase_onto(step.worktree, run_branch)
     if rebase.status != REBASED:
@@ -2125,6 +2132,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     red = [outcome.label for outcome in outcomes if not outcome.green]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
+    step.known_tree.give(tip_after(outcomes, after))
     return None
 
 
@@ -2170,7 +2178,7 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     while True:
         # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves the
         # gates text, the brief and the verifier (#239).
-        verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
+        verified = step.known_tree.take() or branch_tip(step.run.vcs, step.run.repo, step.branch)
         gates_text = _engine_gates_text(step, verified)
         fixup_body = (
             None if findings_text is None
@@ -2248,7 +2256,9 @@ def _run_fixup(
     )
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
     # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
-    leftovers = frozenset(_uncommitted_paths(step.run.vcs, step.worktree))
+    # After a REJECT, the check of the verifier read them already, and nothing changed the tree since.
+    known = step.known_tree.take_paths() if (fields or {}).get("trigger") == TRIGGER_REJECT else None
+    leftovers = known if known is not None else frozenset(_uncommitted_paths(step.run.vcs, step.worktree))
     scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_FIXUP)
     inputs = _specialist_inputs(step, report_path, scratch, notes=step.stack.specialist_notes)
     prompt = specialist_brief(inputs, rejected, findings_text, red_gates=red_gates)
@@ -2282,8 +2292,10 @@ def _run_fixup(
         raise StepFailed(unfinished)
     # The gates run next, and a gate runs in the worktree as it is (#176). A fix-up with no new commit is refused
     # by the brief generator (see `_checked_fixup_brief`), with a message of its own.
-    uncommitted = [path for path in _uncommitted_paths(step.run.vcs, step.worktree) if path not in leftovers]
-    if uncommitted and head_commit(step.run.vcs, step.worktree) != rejected:
+    state = worktree_state(step.run.vcs, step.worktree)
+    step.known_tree.give(state.head)
+    uncommitted = [change.path for change in state.changes if change.path not in leftovers]
+    if uncommitted and state.head != rejected:
         raise StepFailed(_uncommitted_reason(uncommitted) + f"; no gate ran (after the fix-up of round {round_number})")
     return findings_text
 
@@ -2341,10 +2353,11 @@ def _fixup_gates(step: _Step, round_number: int) -> int:
     """
     mode = step.run.workflow.mode
     while True:
-        tip = head_commit(step.run.vcs, step.worktree)
+        tip = step.known_tree.take() or head_commit(step.run.vcs, step.worktree)
         outcomes = gate_outcomes(step, round_number, GATE_PHASE_FIXUP, tip)
         red = [outcome for outcome in outcomes if not outcome.green]
         if not red:
+            step.known_tree.give(tip_after(outcomes, tip))
             return round_number
         if round_number >= domain.fixup_round_limit(mode):
             raise StepFailed(domain.fixup_gates_reason(mode, [outcome.label for outcome in red]))
@@ -2481,7 +2494,9 @@ def _verify_round(
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:
-            check_worktree_unchanged(step.run.vcs, before)
+            after = check_worktree_unchanged(step.run.vcs, before)
+            # The tree is as it was, and a REJECT goes on to a fix-up that needs these paths (#348).
+            step.known_tree.give_paths(frozenset(after.paths))
         except InvariantViolation as found:
             violation = found
         # The copy and the second copy of a red proof go; the verdict report, the event stream and the other files
