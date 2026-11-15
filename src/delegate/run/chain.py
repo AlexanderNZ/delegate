@@ -103,7 +103,7 @@ class ChainStep(Protocol):
 
 
 class ChainGateRun(Protocol):
-    """The outcome of one gate, as the chain reads it: the engine's `_GateRun`."""
+    """The outcome of one gate, as the chain reads it: `gate_run.GateRun`."""
 
     command: str
     green: bool
@@ -116,7 +116,7 @@ class ChainSteps:
     """The steps of the engine that the verification of a chain drives. The engine builds it, and `ChainRun` calls it.
 
     Each field has the signature of the engine function that it holds: `make_step` makes the step of a stack (`_Step`),
-    `run_gate` runs one gate (`_run_gate_with_output`), `copy_gate_logs`, `scratch_directory` and `red_gates_text` write the
+    `run_gate` runs one gate (`gate_run.run_gate_with_output`), `copy_gate_logs`, `scratch_directory` and `red_gates_text` write the
     findings of red gates, `run_fixup` and `checked_fixup_brief` run a fix-up round and check its commit, `findings_text`
     writes the findings of a verdict, `verify_round` runs one verifier, `check_run_branch`, `check_verifier_stop` and
     `advance_run_branch` are the checks of the run branch, and `ends_the_run` and `halt_reason` sort an error that ends the run.

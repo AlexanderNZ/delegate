@@ -126,7 +126,7 @@ A run that ends with a failed step or a skipped ticket ends with the result
 A run can pause. `delegate pause` writes a request file in the directory of the
 run (see `pause.py`), and the engine reads it at each step boundary: before a
 step starts, before a gate runs, and before a verifier starts (see
-`_pause_point`). It stops there and does not cut off an agent. The journal
+`pause_point`). It stops there and does not cut off an agent. The journal
 records `pause-requested` and `paused`, the run writes no `run-end`, and a
 resume goes on from the boundary as from a stop.
 
@@ -194,7 +194,7 @@ from . import chain, domain, run_state, step_scans
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
-    gate_log_copies_text, green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
+    green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
     specialist_brief, verifier_run_brief, verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
@@ -206,8 +206,9 @@ from .events import (
     TREE_WORKTREE, TREE_VERIFY_COPY, TREE_SEAL,
     TRIGGER_GATES_RED, TRIGGER_REJECT, TRIGGER_REPORT_INVALID, TRIGGER_REPORT_MISSING, TRIGGER_UNCOMMITTED,
     RETRY_PHASE_SPECIALIST, RETRY_PHASE_GATES, RETRY_PHASE_VERIFIER, RETRY_PHASE_SCOPED_VERIFIER, RETRY_PHASE_FIXUP, RETRY_PHASE_CHAIN_FIXUP, RETRY_PHASE_CHAIN,
-    PAUSED_BEFORE_STEP, PAUSED_BEFORE_GATE, PAUSED_BEFORE_VERIFIER,
+    PAUSED_BEFORE_STEP, PAUSED_BEFORE_VERIFIER,
 )
+from .gate_run import copy_gate_logs, gate_log_path, gate_outcomes, green_result, red_gates_text, run_gate_with_output
 from .guards import (
     GuardError, InvariantViolation, changed_paths, check_worktree_unchanged, hotspot_matches, install_push_guard,
     snapshot_worktree, WorktreeSnapshot,
@@ -227,17 +228,10 @@ from .state_location import (
     CRASH_FILE_PREFIX, JOURNAL_NAME, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, VERIFY_COPY_NAME, VERIFY_SCRATCH_PREFIX,
     StateLocation, locate_state, record_state_root,
 )
-from .vcs_access import branch_tip, holds_commit, vcs_errors
+from .step_pause import Paused, pause_point
+from .time_limits import minutes_text, seconds
+from .vcs_access import branch_tip, head_commit, holds_commit, vcs_errors, worktree_environment
 from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, ticket_branch
-
-# The journal keeps this many characters of the end of a gate's output.
-GATE_OUTPUT_TAIL_CHARS: int = 4000
-
-# The directory of the run that holds the log file of each gate run, in one directory for each ticket.
-GATE_LOG_DIRECTORY: str = "gates"
-
-# The reason of a gate that left a change to a tracked file in the worktree (#276).
-GATE_CHANGED_TRACKED_FILES: str = "the gate changed tracked files"
 
 # The phase of a step that an event of the step starts, for the `phase` of a `crashed` event. An `agent-start` starts
 # the phase of its role, and a valid `report-validation` starts the gates.
@@ -273,10 +267,6 @@ class RunInterrupted(Exception):
     def __init__(self, run_id: str, journal: Path | None) -> None:
         super().__init__(f"run {run_id} was interrupted")
         self.run_id, self.journal = run_id, journal
-
-
-class _Paused(Exception):
-    """A pause request stopped the run at a step boundary. The journal holds `paused`. The message tells where."""
 
 
 class _Halted(Exception):
@@ -362,18 +352,6 @@ def _specialist_key(tier: str) -> str:
 def _specialist_model(roles: dict[str, tuple[str, str]], workflow: Workflow, ticket: Ticket) -> tuple[str, str]:
     """The tier and the model of the specialist of `ticket`, of its continuations and of its fix-ups."""
     return roles[_specialist_key(specialist_tier(workflow, ticket))]
-
-
-def _head(vcs: VersionControl, worktree: Path) -> str:
-    """The id of the commit that the worktree has checked out."""
-    with vcs_errors():
-        return vcs.head_commit(worktree)
-
-
-def _worktree_environment(vcs: VersionControl, worktree: Path) -> dict[str, str]:
-    """The environment entries that carry the settings of the worktree (the push guard, the file watcher off) to a process of its ticket (#221)."""
-    with vcs_errors():
-        return vcs.worktree_environment(worktree)
 
 
 def _commit_lines(vcs: VersionControl, path: Path, since: str, until: str | None = None) -> list[str]:
@@ -1024,14 +1002,14 @@ def _execute(
         prior = step_scans.step_events(progress.events, ticket.id) if ticket.id == progress.open_ticket else None
         start = _start_ref(workflow, order, built, ticket, run_base, vcs, repo)
         try:
-            _pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
+            pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
             if plan is not None and ticket.id == plan.ticket:
                 reason = _retry_ticket(
                     _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason, start
                 )
             else:
                 reason = _build_ticket(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, start, prior)
-        except _Paused as stop:
+        except Paused as stop:
             # The step stays open, or does not start: a resume goes on with it.
             paused = str(stop)
             break
@@ -1073,7 +1051,7 @@ def _execute(
         tip = [t.id for t in order if t.id in built][-1]
         try:
             unmapped = chain_run.verify()
-        except _Paused as stop:
+        except Paused as stop:
             paused = str(stop)
         except _Halted as halt:
             stopped_by = halt
@@ -1154,31 +1132,6 @@ def _clean_up(
     result = clean_tickets(vcs, repo, trees, workflow.run_branch)
     remove_empty_directories(worktrees_dir, hooks_dir)
     journal.append("cleanup", **result.fields())
-
-
-def _pause_point(journal: Journal, ticket: str, before: str, where: str, **fields: object) -> None:
-    """A step boundary: stop the run here when the directory of the run holds a pause request. Do nothing when it holds none.
-
-    Write `pause-requested` with the time of the request, and `paused` with the
-    ticket, the work that does not start (`before`, one of the `PAUSED_BEFORE_`
-    values) and `fields`. Remove the request, and raise `_Paused` with `where`,
-    the text that tells where the run stopped. The engine calls it only between
-    two pieces of work, so a pause never cuts off an agent or a gate.
-    """
-    request = journal.path.parent / PAUSE_REQUEST_NAME
-    try:
-        text = request.read_text()
-    except FileNotFoundError:
-        return
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = None
-    requested_at = data.get("time") if isinstance(data, dict) else None
-    journal.append("pause-requested", ticket=ticket, requested_at=requested_at)
-    journal.append("paused", ticket=ticket, before=before, **fields)
-    request.unlink(missing_ok=True)
-    raise _Paused(where)
 
 
 def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.PlanCheck, progress: Progress) -> None:
@@ -1483,14 +1436,14 @@ def _request(
 ) -> AdapterRequest:
     """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack.
 
-    `environment` holds the entries of the worktree of the ticket (see `_worktree_environment`). `scratch` is the
+    `environment` holds the entries of the worktree of the ticket (see `worktree_environment`). `scratch` is the
     scratch directory of the session (see `_scratch_directory`): the request adds it to `added_directories`, and sets
     `TMPDIR` to it in the environment (#227).
     """
     return AdapterRequest(
         agent, model, prompt, cwd, report_path, stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
-        added_directories=(*added_directories, scratch), agent_timeout=_seconds(stack.agent_timeout), sealed=sealed,
+        added_directories=(*added_directories, scratch), agent_timeout=seconds(stack.agent_timeout), sealed=sealed,
         environment={**(environment or {}), "TMPDIR": str(scratch)},
     )
 
@@ -1551,27 +1504,17 @@ def _make_proof_copy(copy: Path) -> tuple[Path, ...]:
     return (proof,)
 
 
-def _seconds(minutes: float | None) -> float | None:
-    """A time limit of a stack, given in minutes, in seconds. None stays None: no limit."""
-    return None if minutes is None else minutes * 60
-
-
-def _minutes_text(minutes: float | None) -> str:
-    """A time limit in minutes as the reasons and the notes write it: `10` for 10.0, `0.05` for 0.05."""
-    return f"{minutes:g}"
-
-
 def _journal_timeout(journal: Journal, result: AdapterResult, stack: Stack, ticket: str, role: str, round_number: int) -> None:
     """Record that the adapter ended the session of the agent at the agent timeout of the stack, if it did, before its result event."""
     if result.ended_timeout:
-        journal.append("agent-timeout", ticket=ticket, role=role, round=round_number, seconds=_seconds(stack.agent_timeout))
+        journal.append("agent-timeout", ticket=ticket, role=role, round=round_number, seconds=seconds(stack.agent_timeout))
 
 
 def _ended_reason(result: AdapterResult, who: str, stack: Stack) -> str:
     """The reason that an agent run is no done session: the time limit when the adapter ended it there, else the reason of
     the adapter (for example the text of the failed result of the harness, #271), else its end state and exit status."""
     if result.ended_timeout:
-        return f"{who} session ran past the agent-timeout of {_minutes_text(stack.agent_timeout)} minutes"
+        return f"{who} session ran past the agent-timeout of {minutes_text(stack.agent_timeout)} minutes"
     if result.reason is not None:
         return f"{who} session failed: {result.reason}"
     return f"{who} ended {result.end_state} with exit status {result.exit_status}"
@@ -1662,9 +1605,9 @@ def _run_prepare(
     """
     fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
     # The verifier copy is a repository of its own, which holds its settings itself.
-    environment = {**(_worktree_environment(vcs, path) if tree == TREE_WORKTREE else {}), PREPARE_REPO_VARIABLE: str(repo)}
+    environment = {**(worktree_environment(vcs, path) if tree == TREE_WORKTREE else {}), PREPARE_REPO_VARIABLE: str(repo)}
     for command in stack.prepare:
-        log = _gate_log_path(journal, ticket, f"prepare-{tree}", round_number)
+        log = gate_log_path(journal, ticket, f"prepare-{tree}", round_number)
         journal.append("prepare-start", **fields, command=command, prepare_log=str(log))
         result = gates.run(command, path, log=log, environment=environment)
         journal.append("prepare-result", **fields, command=command, exit_status=result.exit_status, prepare_log=str(log))
@@ -1929,7 +1872,7 @@ def _build_with_continuations(
                 adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
                 _request(
                     stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed,
-                    environment=_worktree_environment(vcs, worktree), scratch=scratch,
+                    environment=worktree_environment(vcs, worktree), scratch=scratch,
                 ),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
@@ -1976,14 +1919,14 @@ def _build_with_continuations(
                 # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
                 # something else than the commit. `economy` mode runs no gate here, but its chain gates run on this tree later.
                 # The specialist was the last step that can move HEAD, so one read serves the check and the first gate (#239).
-                head = _head(vcs, worktree) if each_ticket else None
+                head = head_commit(vcs, worktree) if each_ticket else None
                 uncommitted = _uncommitted_before_gates(journal, vcs, worktree, stack.gates if each_ticket else None, leftovers, head)
                 if uncommitted:
                     trigger, reason, uncommitted_paths = TRIGGER_UNCOMMITTED, _uncommitted_reason(uncommitted), tuple(uncommitted)
                 elif head is None:
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `chain.ChainRun`)
                 else:
-                    outcomes = _gate_outcomes(gates, vcs, stack, ticket.id, worktree, journal, 0, GATE_PHASE_BUILD, head)
+                    outcomes = gate_outcomes(gates, vcs, stack, ticket.id, worktree, journal, 0, GATE_PHASE_BUILD, head)
                     red = [outcome for outcome in outcomes if not outcome.green]
                     if not red:
                         return None
@@ -1992,7 +1935,7 @@ def _build_with_continuations(
                     leftovers = frozenset(_uncommitted_paths(vcs, worktree))
                     reason = "gates red: " + "; ".join(outcome.label for outcome in red)
                     gate_output = "\n".join(f"$ {outcome.command}\n{outcome.output.rstrip(chr(10))}" for outcome in red)
-                    gate_logs = _copy_gate_logs(red, scratch)
+                    gate_logs = copy_gate_logs(red, scratch)
         if not domain.may_continue(workflow.mode, continuations):
             journal.append("continuation-limit", ticket=ticket.id, count=continuations, limit=limit, trigger=trigger)
             return f"{reason}; the continuation limit of {limit} is reached"
@@ -2038,8 +1981,8 @@ def _uncommitted_before_gates(
     `head` is the HEAD of the worktree when the caller read it after the last step that can move it, or None.
     """
     if gates is not None:
-        commit = head if head is not None else _head(vcs, worktree)
-        if all(_green_result(journal, gate, commit) is not None for gate in gates):
+        commit = head if head is not None else head_commit(vcs, worktree)
+        if all(green_result(journal, gate, commit) is not None for gate in gates):
             return []
     return [path for path in _uncommitted_paths(vcs, worktree) if path not in leftovers]
 
@@ -2126,7 +2069,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
 
     A rebase that keeps the commit runs no gate again: the green results of the
     build hold for the same commit, and the journal records `gate-skip` for each
-    gate (see `_run_gate_with_output`).
+    gate (see `gate_run.run_gate_with_output`).
 
     Return None when the branch is rebased and the gates are green, or the
     reason the step fails. A rebase that stops is aborted, so the branch and its
@@ -2135,7 +2078,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     """
     ticket, run_branch = step.ticket, step.workflow.run_branch
     onto = _check_run_branch(step.journal, step.vcs, step.repo, run_branch, ticket.id)
-    before = _head(step.vcs, step.worktree)
+    before = head_commit(step.vcs, step.worktree)
     with vcs_errors():
         rebase = step.vcs.rebase_onto(step.worktree, run_branch)
     if rebase.status != REBASED:
@@ -2147,7 +2090,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
         if files:
             return f"rebase onto {run_branch} stopped with a conflict in {', '.join(files)}"
         return f"rebase onto {run_branch} failed: {rebase.detail}"
-    after = _head(step.vcs, step.worktree)
+    after = head_commit(step.vcs, step.worktree)
     step.journal.append(
         "rebase", ticket=ticket.id, result="rebased", onto_commit=onto, from_commit=before, to_commit=after, files=[]
     )
@@ -2157,7 +2100,7 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
             f"{run_branch} holds its work already"
         )
     # The rebase was the last step that can move HEAD, so the first gate uses `after` (#239).
-    outcomes = _gate_outcomes(step.gates, step.vcs, step.stack, ticket.id, step.worktree, step.journal, 0, GATE_PHASE_REBASE, after)
+    outcomes = gate_outcomes(step.gates, step.vcs, step.stack, ticket.id, step.worktree, step.journal, 0, GATE_PHASE_REBASE, after)
     red = [outcome.label for outcome in outcomes if not outcome.green]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
@@ -2249,7 +2192,7 @@ def _engine_gates_text(step: _Step, commit: str) -> str | None:
     """
     outputs: list[tuple[str, str]] = []
     for gate in step.stack.gates:
-        green = _green_result(step.journal, gate, commit)
+        green = green_result(step.journal, gate, commit)
         if green is None:
             return None
         outputs.append((gate, str(green.get("output_tail", ""))))
@@ -2296,7 +2239,7 @@ def _run_fixup(
         step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
         _request(
             step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed,
-            environment=_worktree_environment(step.vcs, step.worktree), scratch=scratch,
+            environment=worktree_environment(step.vcs, step.worktree), scratch=scratch,
         ),
     )
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
@@ -2326,7 +2269,7 @@ def _run_fixup(
     # The gates run next, and a gate runs in the worktree as it is (#176). A fix-up with no new commit is refused
     # by the brief generator (see `_checked_fixup_brief`), with a message of its own.
     uncommitted = [path for path in _uncommitted_paths(step.vcs, step.worktree) if path not in leftovers]
-    if uncommitted and _head(step.vcs, step.worktree) != rejected:
+    if uncommitted and head_commit(step.vcs, step.worktree) != rejected:
         raise StepFailed(_uncommitted_reason(uncommitted) + f"; no gate ran (after the fix-up of round {round_number})")
     return findings_text
 
@@ -2370,8 +2313,8 @@ def _fixup_gates(step: _Step, round_number: int) -> int:
     """
     mode = step.workflow.mode
     while True:
-        tip = _head(step.vcs, step.worktree)
-        outcomes = _gate_outcomes(
+        tip = head_commit(step.vcs, step.worktree)
+        outcomes = gate_outcomes(
             step.gates, step.vcs, step.stack, step.ticket.id, step.worktree, step.journal, round_number, GATE_PHASE_FIXUP, tip,
         )
         red = [outcome for outcome in outcomes if not outcome.green]
@@ -2380,9 +2323,9 @@ def _fixup_gates(step: _Step, round_number: int) -> int:
         if round_number >= domain.fixup_round_limit(mode):
             raise StepFailed(domain.fixup_gates_reason(mode, [outcome.label for outcome in red]))
         round_number += 1
-        copies = _copy_gate_logs(red, _scratch_directory(step.run_dir, step.ticket.id, ROLE_FIXUP))
+        copies = copy_gate_logs(red, _scratch_directory(step.run_dir, step.ticket.id, ROLE_FIXUP))
         findings_text = _run_fixup(
-            step, round_number, tip, _red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red], copies, "the fix-up commit"),
+            step, round_number, tip, red_gates_text(tip, [(outcome.command, outcome.output) for outcome in red], copies, "the fix-up commit"),
             True, {"trigger": TRIGGER_GATES_RED},
         )
         _checked_fixup_brief(step, round_number, tip, findings_text)
@@ -2439,7 +2382,7 @@ def _verify_round(
     """
     ticket = step.ticket
     where = f"stack {ticket.stack}" if step.segments is not None else f"ticket {ticket.id}"
-    _pause_point(step.journal, ticket.id, PAUSED_BEFORE_VERIFIER, f"before the verifier of {where}", round=round_number, **step.chain_fields)
+    pause_point(step.journal, ticket.id, PAUSED_BEFORE_VERIFIER, f"before the verifier of {where}", round=round_number, **step.chain_fields)
     tier, model = step.roles["verifier"]
     mode = "full" if fixup_body is None else "fix-up"
     if verified is None:
@@ -2513,7 +2456,7 @@ def _verify_round(
             step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
             _request(
                 step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added,
-                sealed=sealed, environment=_worktree_environment(step.vcs, step.worktree), scratch=own_scratch,
+                sealed=sealed, environment=worktree_environment(step.vcs, step.worktree), scratch=own_scratch,
             ),
         )
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
@@ -2776,190 +2719,14 @@ def _archive_old_step(run_dir: Path, ticket_id: str, number: int) -> None:
         shutil.move(str(evidence), run_dir / "verifier" / f"{ticket_id}-failed-{number}")
 
 
-def _red_gates_text(
-    commit: str, red: list[tuple[str, str]], copies: Sequence[GateLogCopy] = (), place: str = "the tip of the chain"
-) -> str:
-    """The findings of a fix-up round for red gates: each red gate on `commit`, its output, and the copy of each full log (#246).
-
-    `place` names `commit` for the specialist: the tip of an `economy` chain, or the fix-up commit of `assure` mode (#277).
-    """
-    gates = "".join(f"- The gate `{gate}` is red.\n" for gate, _ in red)
-    output = "\n\n".join(f"$ {gate}\n{text.rstrip(chr(10))}" for gate, text in red)
-    text = f"The engine ran the gates on {place}, the commit `{commit}`.\n\n{gates}\nThe output of the red gates:\n\n```\n{output}\n```\n"
-    return text + (f"\n{gate_log_copies_text(copies)}\n" if copies else "")
-
-
 def _chain_steps() -> chain.ChainSteps:
     """The steps of the engine that the verification of an `economy` chain drives (see `chain.ChainSteps`)."""
     return chain.ChainSteps(
-        make_step=_Step, run_gate=_run_gate_with_output, copy_gate_logs=_copy_gate_logs, scratch_directory=_scratch_directory,
-        red_gates_text=_red_gates_text, run_fixup=_run_fixup, checked_fixup_brief=_checked_fixup_brief, findings_text=_findings_text,
+        make_step=_Step, run_gate=run_gate_with_output, copy_gate_logs=copy_gate_logs, scratch_directory=_scratch_directory,
+        red_gates_text=red_gates_text, run_fixup=_run_fixup, checked_fixup_brief=_checked_fixup_brief, findings_text=_findings_text,
         verify_round=_verify_round, check_run_branch=_check_run_branch, check_verifier_stop=_check_verifier_stop,
         advance_run_branch=_advance_run_branch, ends_the_run=_ends_the_run, halt_reason=_halt_reason,
     )
-
-
-class _GateRun(NamedTuple):
-    """The outcome of one gate for the engine: whether it is green, its output, and the name that a reason gives it.
-
-    `label` is the name of the gate, or its command when it has no name, and a gate that the runner ended at its time limit has `(timed out)` after it.
-    `log` is the log file of the gate run, with its full output, or None for a gate that did not run again (see `gate-skip`).
-    `commit` is the commit that the result is for: the HEAD of the worktree before the gate.
-    """
-
-    command: str
-    green: bool
-    output: str
-    label: str
-    log: Path | None = None
-    commit: str | None = None
-
-
-def _gate_outcomes(
-    gates: GateRunner, vcs: VersionControl, stack: Stack, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    head: str,
-) -> list[_GateRun]:
-    """Run each gate of `stack` as `_run_gate_with_output` does, in order, and return their outcomes.
-
-    `head` is the HEAD of the worktree, which the caller read after the last step that can move it. The first gate uses
-    it. A gate that ran is a step that can move HEAD, so the gate after it reads HEAD again. A gate that the journal
-    let skip ran nothing, so the gate after it uses the same commit (#239).
-    """
-    outcomes: list[_GateRun] = []
-    commit: str | None = head
-    for gate in stack.gates:
-        outcome = _run_gate_with_output(
-            gates, vcs, gate, ticket, worktree, journal, round_number, phase, stack.gate_limit, stack.gate_names.get(gate), commit=commit,
-        )
-        outcomes.append(outcome)
-        commit = outcome.commit if outcome.log is None else None
-    return outcomes
-
-
-def _run_gate_with_output(
-    gates: GateRunner, vcs: VersionControl, command: str, ticket: str, worktree: Path, journal: Journal, round_number: int, phase: str,
-    gate_timeout: float | None = None, name: str | None = None, *, commit: str | None = None,
-) -> _GateRun:
-    """Run one gate command in the worktree through `gates`, and record the result. Return its outcome: whether it is green, and the tail of its output.
-
-    `round_number` is 0 for the first build and the fix-up round for a later run.
-    `phase` is one of GATE_PHASE_BUILD, GATE_PHASE_REBASE and GATE_PHASE_FIXUP, or GATE_PHASE_CHAIN: the gates on the tip of an `economy` chain.
-
-    `gate_timeout` is the time limit of the gate in minutes (#179). The callers give the `gate_limit` of the stack: 120 minutes
-    when the stack has no `gate-timeout` (#275). With None the runner waits for the gate with no limit. A gate that runs longer gets its process group ended by
-    the runner. The result then has `timed_out`, and it is red. The engine writes `gate-result` with `green` false and
-    `timed_out` true, and ends the output with a line that names the limit, so the specialist and a reader see the cause.
-    The step goes on as for any red gate.
-
-    A gate runs at most once green on one commit. When the journal holds a green
-    `gate-result` of the same command on the commit that the worktree has
-    checked out, the engine does not run the gate again: it writes `gate-skip`
-    with that commit and the `seq` of the green result, and the gate counts as
-    green. A rebase that keeps the commit, and a resume after a stop, so cost no
-    second gate run. The output of a skipped gate is the output of that green result.
-
-    `name` is the name that the workflow gives to the gate (#223), or None. A gate with a name has `name` in its
-    `gate-start`, `gate-result` and `gate-skip`, and in the `paused` event before it, and the reason of a red gate gives
-    the name in place of the command. A gate with no name has no such field.
-
-    Before a gate runs, the engine makes an empty log file for it and writes
-    `gate-start` with the path of the file. The gate runner appends the output
-    to the file while the gate runs, so `delegate status` and `delegate watch`
-    see the activity of a long gate.
-
-    `commit` is the HEAD of the worktree when the caller read it after the last step that can move it. With None the
-    engine reads it here.
-
-    After the gate, the engine checks the worktree (see `_changed_by_gate`). A gate that changed a tracked file is red,
-    whatever its exit status is: its `gate-result` has `clean` false and the paths in `changed`, its output ends with a
-    line that names the paths, and its label gives the reason. Each other result has `clean` true (#276).
-    """
-    if commit is None:
-        commit = _head(vcs, worktree)
-    named: dict[str, object] = {} if name is None else {"name": name}
-    shown = name or command
-    green = _green_result(journal, command, commit)
-    if green is not None:
-        green_seq = int(green["seq"])  # type: ignore[call-overload]
-        journal.append(
-            "gate-skip", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit, green_seq=green_seq,
-            reason=f"the journal holds a green result of this gate on commit {commit} (seq {green_seq})", **named,
-        )
-        return _GateRun(command, True, str(green.get("output_tail", "")), shown, commit=commit)
-    _pause_point(journal, ticket, PAUSED_BEFORE_GATE, f"before the gate `{shown}` of ticket {ticket}", command=command, phase=phase, **named)
-    log = _gate_log_path(journal, ticket, phase, round_number)
-    journal.append("gate-start", ticket=ticket, round=round_number, phase=phase, command=command, gate_log=str(log), **named)
-    result = gates.run(command, worktree, log=log, timeout=_seconds(gate_timeout), environment=_worktree_environment(vcs, worktree))
-    output = result.output[-GATE_OUTPUT_TAIL_CHARS:]
-    labels: list[str] = []
-    if result.timed_out:
-        output += f"\n[delegate: the gate ran past the gate-timeout of {_minutes_text(gate_timeout)} minutes, and the engine ended it]\n"
-        labels.append("timed out")
-    changed = _changed_by_gate(vcs, worktree)
-    if changed:
-        paths = ", ".join(f"`{path}`" for path in changed)
-        output += f"\n[delegate: {GATE_CHANGED_TRACKED_FILES}: {paths}; the engine put them back to the commit]\n"
-        labels.append(f"{GATE_CHANGED_TRACKED_FILES}: {paths}")
-    green = result.green and not changed
-    journal.append(
-        "gate-result", ticket=ticket, round=round_number, phase=phase, command=command, commit=commit,
-        exit_status=result.exit_status, green=green, timed_out=result.timed_out, output_tail=output, clean=not changed,
-        **({"changed": changed} if changed else {}), **named,
-    )
-    return _GateRun(command, green, output, f"{shown} ({'; '.join(labels)})" if labels else shown, log, commit)
-
-
-def _changed_by_gate(vcs: VersionControl, worktree: Path) -> list[str]:
-    """Check the worktree after a gate, and give the tracked paths that the gate changed, in the order of the paths.
-
-    A gate result is a fact about the commit that it names (#176), so a gate must leave the tracked files as the
-    commit holds them (#276). The check is the check before the gates (see `_uncommitted_before_gates`), with no path
-    that no commit holds: a file that the gate made and that git does not ignore stays, as a file of a red gate does.
-    When a path changed, the engine puts the tracked files and the index back to the commit, so the next gate runs on
-    the commit. The tree was clean before the gate: the engine checks it before the first gate of a phase, and after
-    each gate, and a rebase needs a clean tree.
-    """
-    with vcs_errors():
-        changed = [change.path for change in vcs.uncommitted_changes(worktree) if change.code != "??"]
-        if changed:
-            vcs.restore_tracked(worktree)
-    return changed
-
-
-def _copy_gate_logs(red: Sequence[_GateRun], scratch: Path) -> list[GateLogCopy]:
-    """Copy the full log of each red gate into the scratch directory `scratch` of the next session, and give the copies (#246).
-
-    The brief gives only the end of the output of a gate (`GATE_OUTPUT_TAIL_CHARS`), and a host can refuse a read of the
-    gate log in the directory of the run. The copy has the name of the log with `gate-` before it, so a later copy does not
-    replace it. The engine does not read the output of a test runner: the copy is the log as the gate wrote it.
-    """
-    copies: list[GateLogCopy] = []
-    for outcome in red:
-        if outcome.log is None:
-            continue
-        copy = scratch / f"gate-{outcome.log.name}"
-        shutil.copyfile(outcome.log, copy)
-        copies.append(GateLogCopy(outcome.command, copy, len(copy.read_bytes().splitlines())))
-    return copies
-
-
-def _gate_log_path(journal: Journal, ticket: str, phase: str, round_number: int) -> Path:
-    """Make a new, empty log file for one gate run, and return its path.
-
-    The file is `gates/<ticket>/<phase>-<round>.log` in the run directory, then
-    `<phase>-<round>-2.log`, and so on. It is never an earlier log.
-    """
-    directory = journal.path.parent / GATE_LOG_DIRECTORY / ticket
-    directory.mkdir(parents=True, exist_ok=True)
-    number = 1
-    while True:
-        path = directory / (f"{phase}-{round_number}.log" if number == 1 else f"{phase}-{round_number}-{number}.log")
-        try:
-            path.touch(exist_ok=False)
-        except FileExistsError:
-            number += 1
-            continue
-        return path
 
 
 def _refused_fields(result: AdapterResult) -> dict[str, object]:
@@ -2968,18 +2735,3 @@ def _refused_fields(result: AdapterResult) -> dict[str, object]:
         return {}
     return {"refused": [{"tool": tool, "mode": mode} for tool, mode in result.refused]}
 
-
-def _green_result(journal: Journal, command: str, commit: str) -> dict[str, object] | None:
-    """The first green `gate-result` of `command` on `commit` in the journal, or None when it holds none.
-
-    Only a result with `clean: true` counts: the worktree had no change that was
-    not committed when the gate ran (#176), and the gate changed no tracked file
-    (#276). A result of an older journal has no such field, so it skips no gate.
-    """
-    for event in journal.events:
-        if (
-            event["event"] == "gate-result" and event["green"] and event.get("clean") is True
-            and event["command"] == command and event.get("commit") == commit
-        ):
-            return event
-    return None

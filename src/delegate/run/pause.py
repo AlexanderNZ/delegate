@@ -5,7 +5,7 @@ needs no signal, and it works from any shell on the host. The file holds the
 time of the request and the process id of the command that wrote it.
 
 The engine reads the file at each step boundary: before a step starts, before a
-gate runs, and before a verifier starts (see `engine._pause_point`). It stops
+gate runs, and before a verifier starts (see `step_pause.pause_point`). It stops
 there, so it never cuts off an agent. It writes `pause-requested` and `paused`,
 removes the file, and the run process ends with no `run-end`. `delegate run
 --resume` goes on from a paused run as from a stopped one.
