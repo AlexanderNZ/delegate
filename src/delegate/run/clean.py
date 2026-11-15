@@ -57,22 +57,19 @@ from ..ports.vcs import VcsError, VersionControl
 from .index import cleaned
 from .cleanup import Cleanup, Holder, TicketTree, clean_tickets, delete_held_branch, not_held_reason, remove_empty_directories
 from . import run_state
+from .brief import red_proof_copy
 from .errors import EngineError
 from .events import RUN_END
 from .journal import ABANDONED, Journal, JournalError, abandon_note, read_events
 from .lock import LockError, LockHolder, live_holder, run_lock
 from .progress import restore_progress
-from .runs import JOURNAL_NAME, RunsError, journal_of
+from .runs import RunsError, journal_of
 from .state_location import (
-    CRASH_FILE_PREFIX, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, StateLocation, locate_state,
+    CRASH_FILE_PREFIX, JOURNAL_NAME, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, VERIFY_COPY_NAME, VERIFY_SCRATCH_PREFIX,
+    StateLocation, locate_state,
 )
 
 BUILT: str = "built"
-
-# The prefix of the name of the scratch directory of a verifier, and the name of the copy in it. See `engine._verify_round`.
-VERIFY_SCRATCH_PREFIX: str = "delegate-verify-"
-VERIFY_COPY_NAME: str = "copy"
-PROOF_COPY_NAME: str = "proof"
 
 
 class CleanError(Exception):
@@ -398,7 +395,7 @@ def _leftover_copies(events: list[dict[str, object]]) -> list[Path]:
         copy = Path(str(event["copy"]))
         if copy.name != VERIFY_COPY_NAME or not copy.parent.name.startswith(VERIFY_SCRATCH_PREFIX):
             continue
-        for path in (copy, copy.parent / PROOF_COPY_NAME):
+        for path in (copy, red_proof_copy(copy)):
             if path.is_dir() and path not in found:
                 found.append(path)
     return found

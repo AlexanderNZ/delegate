@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TextIO
 
 # The SGR code of each role of tokens.md. `fg` is the default foreground, so it has no code.
-ROLES: dict[str, str | None] = {
+PAINT_ROLES: dict[str, str | None] = {
     "fg": None, "dim": "2", "bold": "1", "ok": "32", "now": "36", "warn": "33", "bad": "31", "plan": "34",
 }
 
@@ -75,9 +75,9 @@ def paint(role: str, text: str, stream: TextIO | None = None) -> str:
     The text is plain when `colour_on(stream)` is false, and for `fg`. `stream` is the stream that gets the text, and
     standard output when it is None. Raise ValueError for a role that tokens.md does not have.
     """
-    if role not in ROLES:
-        raise ValueError(f"no paint role {role!r}; the roles are {', '.join(ROLES)}")
-    code = ROLES[role]
+    if role not in PAINT_ROLES:
+        raise ValueError(f"no paint role {role!r}; the roles are {', '.join(PAINT_ROLES)}")
+    code = PAINT_ROLES[role]
     if code is None or not colour_on(stream):
         return text
     return f"\x1b[{code}m{text}{RESET}"

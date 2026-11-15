@@ -38,6 +38,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output, run_state
+from .events import GATE_PHASE_FIXUP, ROLE_FIXUP, ROLE_SPECIALIST, ROLE_VERIFIER
 from .journal import ABANDONED, JournalError, abandon_note, crash_note, event_time, plan_ids, read_new_events, setup_problem_note
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
@@ -66,7 +67,9 @@ _PHASE_OF_EVENT: dict[str, str] = {
 }
 
 # The phase of the agent that an `agent-start` event names, by its `role`.
-_PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
+_PHASE_OF_ROLE: dict[str, str] = {
+    ROLE_SPECIALIST: domain.PHASE_SPECIALIST, ROLE_VERIFIER: domain.PHASE_VERIFIER, ROLE_FIXUP: domain.PHASE_FIXUP,
+}
 
 # The phase of the verification of an `economy` chain that an event starts. In `economy` mode only the chain verifies.
 # A `gate-start` or a `gate-skip` starts the phase `gates` only when its phase is the phase of the chain gates.
@@ -134,7 +137,7 @@ def _ticket(
                 totals[str(event["event_stream"])] = ended_totals
         elif kind in _PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
             phase = _PHASE_OF_EVENT[kind]
-        elif kind in ("gate-start", "gate-result", "gate-skip") and event["phase"] != "fixup":
+        elif kind in ("gate-start", "gate-result", "gate-skip") and event["phase"] != GATE_PHASE_FIXUP:
             phase = domain.PHASE_GATES
         if kind == "gate-start":
             gate = event

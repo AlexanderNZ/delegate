@@ -48,6 +48,7 @@ from ..cli.watch import PROMPT
 from ..run import live, output, run_state, status, status_picker, status_table, watch
 from ..run.journal import ACTIVITY_FIELDS, read_new_events
 from ..run.lock import run_lock
+from ..run.state_location import JOURNAL_NAME
 
 # The journals and the event streams of the figures, in the package source, so a Nix build can read them.
 SOURCE: Path = Path(__file__).parent / "figures"
@@ -151,8 +152,8 @@ PAD: int = 16
 # The attribute of a run in the `bold` role.
 BOLD: str = ' font-weight="600"'
 
-# The SGR code of the colour of each role of `output.ROLES`, by the code.
-COLOUR_OF_CODE: dict[str, str] = {code: role for role, code in output.ROLES.items() if code and role not in ("dim", "bold")}
+# The SGR code of the colour of each role of `output.PAINT_ROLES`, by the code.
+COLOUR_OF_CODE: dict[str, str] = {code: role for role, code in output.PAINT_ROLES.items() if code and role not in ("dim", "bold")}
 
 
 class _Drawn(Exception):
@@ -208,7 +209,7 @@ def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Pat
     for source in figure.journals:
         run = state / "runs" / source.stem
         run.mkdir(parents=True)
-        journal = run / "journal.jsonl"
+        journal = run / JOURNAL_NAME
         journal.write_text(source.read_text().replace("$RUN", json.dumps(str(run))[1:-1]))
         events = [json.loads(line) for line in journal.read_text().splitlines()]
         files = {Path(str(event[name])) for event in events for name in ACTIVITY_FIELDS if name in event}

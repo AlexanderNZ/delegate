@@ -38,6 +38,15 @@ SCRATCH_DIRECTORY: str = "scratch"
 # `delegate-verifier-<run id>-<ticket>-<random>` (#294). See `engine._verifier_scratch_directory`.
 VERIFIER_SCRATCH_PREFIX: str = "delegate-verifier-"
 
+# The prefix of the name of the scratch directory of a verifier copy, and the name of the copy in it: `<temp>/delegate-verify-<random>/copy`.
+# The engine makes them (`engine._verify_round`), the `verify-start` event names the copy, and `delegate clean` removes a leftover copy by
+# these names. The two sides read them from here, so that a change shows in both.
+VERIFY_SCRATCH_PREFIX: str = "delegate-verify-"
+VERIFY_COPY_NAME: str = "copy"
+
+# The name of the journal file in the directory of a run: `<state dir>/runs/<run id>/journal.jsonl`.
+JOURNAL_NAME: str = "journal.jsonl"
+
 # The file in the directory of a run that asks the run to pause at its next step boundary (see `delegate.run.pause`).
 PAUSE_REQUEST_NAME: str = "pause-request"
 
@@ -216,7 +225,7 @@ def workflow_of_run(repo: Path, run_id: str, vcs: VersionControl, *, location: S
     """
     state_dir = (location or locate_state(repo, vcs)).state_directory(run_id)
     try:
-        events = read_events(state_dir / "runs" / run_id / "journal.jsonl", torn_tail=True)
+        events = read_events(state_dir / "runs" / run_id / JOURNAL_NAME, torn_tail=True)
     except JournalError as error:
         raise EngineError(f"run {run_id!r} cannot be resumed: {error}") from None
     if not events or events[0]["event"] != "run-start":

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
+from . import domain
+
 SCHEMA_VERSION: int = 2
 
 # The version of a journal with no `schema` in `run-start`: a journal that an earlier version of the kit wrote.
@@ -71,6 +73,56 @@ CLEANUP: str = "cleanup"
 JOURNAL_REPAIRED: str = "journal-repaired"
 INDEX_WARNING: str = "index-warning"
 RUN_END: str = "run-end"
+
+# The values of the fields of the events: the `role`, the `phase`, the `tree`, the `trigger` and the `before` that an event
+# names. Each name says which field it fills. The engine writes them, and a reader of the journal may compare with them.
+# The `role` of an `agent-start` event: the agent that the engine starts.
+ROLE_SPECIALIST: str = "specialist"
+ROLE_FIXUP: str = "fix-up"
+ROLE_VERIFIER: str = "verifier"
+
+# The `phase` of a gate result in the journal: the gates after the specialist
+# built the ticket, after the rebase onto the run branch, after a fix-up, and on
+# the tip of an `economy` chain.
+GATE_PHASE_BUILD: str = "build"
+GATE_PHASE_REBASE: str = "rebase"
+GATE_PHASE_FIXUP: str = "fixup"
+GATE_PHASE_CHAIN: str = domain.GATES_OF_CHAIN
+
+# The `tree` of a `prepare-start` and a `prepare-result`: the worktree of a ticket, or the temporary copy of a verifier (#155).
+TREE_WORKTREE: str = "worktree"
+TREE_VERIFY_COPY: str = "verify-copy"
+# The tree of an `agents-changed` event: the seal of the agent, outside each tree (#217).
+TREE_SEAL: str = "seal"
+
+# The `trigger` of a `fixup-start` of a chain: red gates on the tip of the chain, or a REJECT.
+TRIGGER_GATES_RED: str = "gates-red"
+TRIGGER_REJECT: str = "reject"
+
+# The `trigger` of a `continuation` whose report check failed on a branch with work: it asks only for a corrected report.
+# The report file is there but not valid, or there is no report file.
+TRIGGER_REPORT_INVALID: str = "report-invalid"
+TRIGGER_REPORT_MISSING: str = "report-missing"
+
+# The `trigger` of a `continuation` whose worktree holds a change that is not committed when a gate must run (#176).
+TRIGGER_UNCOMMITTED: str = "uncommitted"
+
+# The `phase` of a `retry` event: the first phase of the failed step that did not complete.
+# `specialist` is only in `economy` mode, where the specialist of the step continues.
+RETRY_PHASE_SPECIALIST: str = "specialist"
+RETRY_PHASE_GATES: str = "gates"
+RETRY_PHASE_VERIFIER: str = "verifier"
+RETRY_PHASE_SCOPED_VERIFIER: str = "scoped-verifier"
+# The agent check stopped a fix-up session (#209): `assure` mode runs the fix-up of the round again, `economy` mode the chain fix-up.
+RETRY_PHASE_FIXUP: str = "fixup"
+RETRY_PHASE_CHAIN_FIXUP: str = domain.RETRY_CHAIN_FIXUP
+# A retry with a commit of the coordinator goes on with a chain whose verification failed (#225): `economy` mode only.
+RETRY_PHASE_CHAIN: str = "chain"
+
+# The `before` of a `paused` event: the work that the pause did not start.
+PAUSED_BEFORE_STEP: str = "step"
+PAUSED_BEFORE_GATE: str = "gate"
+PAUSED_BEFORE_VERIFIER: str = "verifier"
 
 
 class PlanTicket(TypedDict):

@@ -35,10 +35,8 @@ from . import run_state
 from .errors import EngineError
 from .journal import JournalError, read_events, read_new_events
 from .lock import LockError, live_holder, live_holder_of_run
-from .state_location import STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
+from .state_location import JOURNAL_NAME, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from ..ports.vcs import VersionControl
-
-JOURNAL_NAME: str = "journal.jsonl"
 
 # The name of the log file of a detached run, in the directory of the run.
 LOG_NAME: str = "run.log"
