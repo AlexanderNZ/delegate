@@ -457,7 +457,7 @@ def _expected_tip(events: list[dict[str, object]]) -> str | None:
 
 
 def _check_run_branch(journal: Journal, vcs: VersionControl, repo: Path, run_branch: str, ticket: str) -> str:
-    """Halt the run when the run branch is not at the tip that the journal says (#186). Return the tip.
+    """End the run for good when the run branch is not at the tip that the journal says (#186, #358). Return the tip.
 
     The run branch moves only when the engine advances it after an ACCEPT. A difference means that a commit landed with
     no verification. The engine writes `run-branch-moved` (the expected tip and the tip that it found) and raises
@@ -2584,7 +2584,7 @@ def _verify_round(
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
         session = _Session(step.stack.verifier, model, sealed, copy, report_path, stream, own_scratch, added)
         result = _run_agent(step.run.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number, _request(step, session, prompt, report_valid))
-        # The check runs at once, before the evidence is moved; the journal and the halt come after it.
+        # The check runs at once, before the evidence is moved; the journal and the end of the run for good come after it.
         violation: InvariantViolation | None = None
         try:
             after = check_worktree_unchanged(step.run.vcs, before)
