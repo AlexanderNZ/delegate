@@ -163,11 +163,16 @@ class ChainRun:
     tip by fast-forward.
 
     The verification covers only the built tickets whose work the run branch
-    does not hold yet, and reads only the journal events after the last
-    `retry` or `plan-change`. So after a retry or a plan change, the chain
-    verification of the run before it does not count, and the tickets that it
-    accepted are not verified again. A ticket that a plan change added after
-    the chain verification gets its own gates and verifier.
+    does not hold yet. It reads only the current pass of the journal: the
+    events after the newest event for which
+    `run_state.starts_chain_verification` is true (see `run_state.ChainPass`,
+    ADR 0009). A `plan-change` and a `retry` start a pass, except a `retry`
+    with the phase `chain-fixup` (#320): it goes on with the verification that
+    the stop cut off, so the verdicts and the fix-up rounds before it still
+    count. So after any other retry or a plan change, the chain verification
+    of the run before it does not count, and the tickets that it accepted are
+    not verified again. A ticket that a plan change added after the chain
+    verification gets its own gates and verifier.
     """
 
     def __init__(
@@ -213,7 +218,7 @@ class ChainRun:
         The start is the `base_commit` of the newest `step-start` of the ticket in
         `events`. The tip is the tip of the branch now. For the last ticket of the
         chain, a resume after a fix-up takes the commit that the first fix-up of
-        the chain since the last retry (in `since_retry`) started from, so the
+        the current pass (`since_retry`, see `run_state.ChainPass`) started from, so the
         diff of the ticket holds no fix-up commit.
         """
         fixups = [e for e in since_retry if e["event"] == "fixup-start" and "stack" in e]

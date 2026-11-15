@@ -26,8 +26,8 @@ findings to a file, sends the specialist a fix-up brief in the same worktree,
 requires the fix as a new commit on top of the rejected commit, runs the gates,
 and spawns a fresh verifier with the scoped brief (the findings, the delta
 from the rejected commit, and the output of the green gates on the fix-up
-commit). After `FIXUP_ROUND_LIMIT` rounds the step fails and
-the step fails. The run branch moves only on ACCEPT.
+commit). After `FIXUP_ROUND_LIMIT` rounds a REJECT or red gates fail the step, and the run branch does not move for it.
+The run branch moves only on ACCEPT.
 
 The engine checks that. The tip that the journal says is the `to_commit` of the newest `run-branch-advance`, or the
 `base_commit` of `run-start`. Before each rebase onto the run branch, before each fast-forward, before the chain
@@ -921,6 +921,27 @@ def _execute(
     run: RunContext, resume: ResumeRequest | None, broken: LockHolder | None, on_start: Callable[[str, Path], None] | None,
     agents_changed: bool, observers: Sequence[EventObserver],
 ) -> RunResult:
+    """Run the tickets of a workflow, or the rest of them on a resume, and return the result that the command reports.
+
+    A new run (`resume` is None) seals the agents, makes the run branch at the base commit, and writes `run-start`. A resume
+    checks the journal and the workflow (`resume_checks`), writes `resume`, and records a `--stack-changed` change, a plan
+    change and the outlook of the skipped tickets. A retry (`plan`) revives the tickets that its stop failed and runs the
+    retried ticket first, with `_retry_ticket`.
+
+    The loop takes each ticket that is not complete in plan order. A ticket whose blocker failed or was skipped is skipped,
+    with the reason of the skip rule (`domain.skip_reason`). Any other ticket runs, and the loop writes `step-end` for it. A
+    failed step does not end the run. These ends of the loop leave the step open, so a resume goes on with it: a pause
+    (`paused`), a halt of the harness (`halted`) and a crash (`crashed`, #281). An invariant violation or a moved run branch
+    ends the run: the loop fails the step and skips each ticket after it.
+
+    After the loop, an `economy` run verifies the chain once (`chain.ChainRun`). The chain pass starts at the newest event
+    for which `run_state.starts_chain_verification` is true, so it reads the events after the last `plan-change` or `retry`
+    that is not a retry at `chain-fixup`. The chain is not verified when the loop stopped early or no ticket was built.
+
+    A pause, a halt and a crash each return the result with no `run-end`. Else the run ends: the engine cleans up the
+    worktrees of a run that built every ticket, unless the workflow keeps them, and writes `run-end` with the result `built`
+    or `failed`. A skipped ticket fails the run.
+    """
     workflow, workflow_path, adapter, vcs, repo, state_dir, run_id = (
         run.workflow, run.workflow_path, run.adapter, run.vcs, run.repo, run.state_dir, run.run_id
     )

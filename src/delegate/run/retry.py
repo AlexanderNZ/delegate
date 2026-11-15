@@ -579,7 +579,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     The report is valid and says partial or blocked (see `unfinished_report`), and a word of its `blocked_reason` matches
     a hotspot of the stack of its ticket: the work can need a change that only the coordinator makes. The last
     verification of the chain is its events after the newest `retry` that is not a retry at the chain fix-up, or the
-    newest `plan-change`, as in `chain.ChainRun`.
+    newest `plan-change`: the current pass of the run state (`run_state.ChainPass`), as in `chain.ChainRun`.
     """
     start = run_state.fold(events).chain.start
     report = unfinished_report([e for e in events[start:] if e["event"] == "fixup-report"])
