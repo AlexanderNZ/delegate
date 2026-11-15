@@ -1504,8 +1504,7 @@ def _verifier_scratch_directory(run_id: str, ticket: str) -> Path:
     The directory is new and private (`tempfile.mkdtemp`), in the temp directory of the host, with a name that starts
     with `delegate-verifier-<run id>-<ticket>-`. It is outside the directory of the run, which holds the report of the
     specialist, so the brief and the environment of a blind verifier name no path there. The caller removes it when the
-    session ends, or empties it but for the verifier copy when the copy is in it (#349), and `delegate clean` removes
-    one that a kill left.
+    session ends, and `delegate clean` removes one that a kill left.
     """
     return Path(tempfile.mkdtemp(prefix=f"{VERIFIER_SCRATCH_PREFIX}{run_id}-{ticket}-"))
 
@@ -2051,84 +2050,6 @@ def _hotspot_stop(step: _Step, since: str, merge_base: bool, phase: str, round_n
     return "hotspot finding: " + "; ".join(f"{m.path} matches the hotspot {m.pattern!r}" for m in matches)
 
 
-class _VerifierPlace:
-    """The directory of the verifier copy of one step, kept for all the rounds of the step (#349).
-
-    `scratch` holds the copy (`VERIFY_COPY_NAME`), the proof copy and the report. Each session gets a new scratch
-    directory of its own (#294). When the copy must be under that directory (see `_verifier_temp_parent`), `session`
-    is the scratch directory of the last session, kept while it holds `scratch`, and the next session moves the copy
-    into its own directory. After each session `end_session` removes each other file of the session, so the next
-    verifier sees no file of an earlier one, and `remove` removes the rest when the step ends.
-    """
-
-    def __init__(self) -> None:
-        self.scratch: Path | None = None
-        self.session: Path | None = None
-        # The directory of the copy of the earlier session, and its scratch directory, while the copy moves (#349).
-        self._earlier: tuple[Path, Path | None] | None = None
-
-    def start_session(self, run_id: str, ticket: str) -> tuple[Path, Path, Path | None]:
-        """Make the scratch directory of a new session. Give it, the directory of the copy, and the copy to move, or None."""
-        own_scratch = _verifier_scratch_directory(run_id, ticket)
-        try:
-            parent = _verifier_temp_parent(own_scratch)
-            if self.scratch is not None and parent is None:
-                return own_scratch, self.scratch, None
-            scratch = Path(tempfile.mkdtemp(prefix=VERIFY_SCRATCH_PREFIX, dir=parent))
-        except OSError:
-            shutil.rmtree(own_scratch, ignore_errors=True)
-            raise
-        earlier = None
-        if self.scratch is not None:
-            self._earlier, earlier = (self.scratch, self.session), self.scratch / VERIFY_COPY_NAME
-        self.scratch, self.session = scratch, own_scratch if parent is not None else None
-        return own_scratch, scratch, earlier
-
-    def drop_earlier(self, vcs: VersionControl) -> None:
-        """Remove the directory of the copy of the earlier session, and its scratch directory, after the move."""
-        if self._earlier is not None:
-            scratch, session = self._earlier
-            self._earlier = None
-            _remove_copy_directory(vcs, scratch)
-            if session is not None:
-                shutil.rmtree(session, ignore_errors=True)
-
-    def end_session(self, own_scratch: Path) -> None:
-        """Remove each file of the session that ended: all of `own_scratch` but the copy, and the proof copy."""
-        assert self.scratch is not None
-        keep = {self.scratch, self.scratch / VERIFY_COPY_NAME}
-        for directory in (self.scratch, own_scratch):
-            for entry in directory.iterdir() if directory.is_dir() else ():
-                if entry in keep:
-                    continue
-                if entry.is_dir() and not entry.is_symlink():
-                    shutil.rmtree(entry, ignore_errors=True)
-                else:
-                    entry.unlink(missing_ok=True)
-        if own_scratch != self.session:
-            shutil.rmtree(own_scratch, ignore_errors=True)
-
-    def remove(self, vcs: VersionControl) -> None:
-        """Remove the copy and its directories. Do nothing when no session made them."""
-        self.drop_earlier(vcs)
-        if self.scratch is not None:
-            _remove_copy_directory(vcs, self.scratch)
-        if self.session is not None:
-            shutil.rmtree(self.session, ignore_errors=True)
-        self.scratch = self.session = None
-
-
-def _remove_copy_directory(vcs: VersionControl, scratch: Path) -> None:
-    """Stop the file watcher of the verifier copy in `scratch`, and remove `scratch`.
-
-    A copy that moved to the directory of a later session is not there, and needs no git process to stop its watcher.
-    """
-    copy = scratch / VERIFY_COPY_NAME
-    if copy.exists():
-        vcs.stop_file_watcher(copy)
-    shutil.rmtree(scratch, ignore_errors=True)
-
-
 @dataclass(frozen=True)
 class _Step:
     """The state that the specialist, the gates, the verifier step and the fix-up rounds of one ticket share.
@@ -2146,8 +2067,6 @@ class _Step:
     segments: tuple[ChainSegment, ...] | None = None
     # The HEAD of the worktree that the last phase read after its last step that can move HEAD (#348). The next phase takes it.
     known_tree: KnownTree = field(default_factory=KnownTree, compare=False)
-    # The copy and the scratch directory of the verifier, kept from round to round of the step (#349).
-    verifier_place: _VerifierPlace = field(default_factory=_VerifierPlace, compare=False)
 
     @property
     def stack(self) -> Stack:
@@ -2256,33 +2175,25 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
         raise StepFailed(used_up)
     rejected, findings_text = first_fixup if first_fixup is not None else ("", None)
     round_number = first_round
-    try:
-        while True:
-            # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves
-            # the gates text, the brief and the verifier (#239). The verifier copy is made from the ticket branch, so the
-            # accepted commit is its tip, not the HEAD of the worktree that the gates gave: a specialist can leave the
-            # worktree on another branch. That HEAD is dropped, so no later phase takes it.
-            step.known_tree.take()
-            verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
-            gates_text = _engine_gates_text(step, verified)
-            fixup_body = (
-                None if findings_text is None
-                else _checked_fixup_brief(step, round_number, rejected, findings_text, gates_text)
-            )
-            report = _verify_round(step, round_number, fixup_body, gates_text, verified=verified)
-            if domain.is_accepted(report.verdict):
-                return verified
-            if round_number >= domain.fixup_round_limit(mode):
-                raise Rejected(domain.rejection_reason(mode, report.findings), report.findings)
-            rejected = verified
-            round_number, findings_text = _fixup_round(step, round_number + 1, rejected, report.findings)
-    finally:
-        _end_verifier(step)
-
-
-def _end_verifier(step: _Step) -> None:
-    """Remove the copy and the scratch directory that the verifier rounds of the step used (#349)."""
-    step.verifier_place.remove(step.run.vcs)
+    while True:
+        # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves the
+        # gates text, the brief and the verifier (#239). The verifier copy is made from the ticket branch, so the accepted
+        # commit is its tip, not the HEAD of the worktree that the gates gave: a specialist can leave the worktree on
+        # another branch. That HEAD is dropped, so no later phase takes it.
+        step.known_tree.take()
+        verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
+        gates_text = _engine_gates_text(step, verified)
+        fixup_body = (
+            None if findings_text is None
+            else _checked_fixup_brief(step, round_number, rejected, findings_text, gates_text)
+        )
+        report = _verify_round(step, round_number, fixup_body, gates_text, verified=verified)
+        if domain.is_accepted(report.verdict):
+            return verified
+        if round_number >= domain.fixup_round_limit(mode):
+            raise Rejected(domain.rejection_reason(mode, report.findings), report.findings)
+        rejected = verified
+        round_number, findings_text = _fixup_round(step, round_number + 1, rejected, report.findings)
 
 
 def _fixup_round(step: _Step, round_number: int, rejected: str, findings: list[str]) -> tuple[int, str]:
@@ -2496,10 +2407,7 @@ def _verify_round(
     step: _Step, round_number: int, fixup_body: str | None, gates_text: str | None = None, fixups: tuple[str, str] | None = None,
     earlier_fixups: tuple[str, str] | None = None, *, verified: str | None = None,
 ) -> VerifierReport:
-    """Run one fresh verifier in the temporary copy of the step and return its valid verdict report.
-
-    The first round of the step makes the copy, and a later round updates it (see `_VerifierPlace`). The caller
-    removes the copy when the step ends (`_end_verifier`).
+    """Run one fresh verifier in a new temporary copy and return its valid verdict report.
 
     With no `fixup_body` the pass is full. A fix-up round gets the fix-up brief in `fixup_body`.
     The verifier gets the task or the findings, and the diff or the delta, and
@@ -2524,19 +2432,18 @@ def _verify_round(
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
-    place = step.verifier_place
-    own_scratch, scratch, earlier = place.start_session(step.run_dir.name, ticket.id)
+    own_scratch = _verifier_scratch_directory(step.run_dir.name, ticket.id)
+    try:
+        scratch = Path(tempfile.mkdtemp(prefix=VERIFY_SCRATCH_PREFIX, dir=_verifier_temp_parent(own_scratch)))
+    except OSError:
+        shutil.rmtree(own_scratch, ignore_errors=True)
+        raise
     try:
         copy = scratch / VERIFY_COPY_NAME
         report_path = scratch / "verdict.json"
         try:
-            try:
-                with vcs_errors():
-                    step.run.vcs.make_verifier_copy(
-                        step.run.repo, copy, step.branch, step.run.workflow.run_branch, earlier=earlier, tip=verified,
-                    )
-            finally:
-                place.drop_earlier(step.run.vcs)
+            with vcs_errors():
+                step.run.vcs.make_verifier_copy(step.run.repo, copy, step.branch, step.run.workflow.run_branch, tip=verified)
             # Each verifier brief holds the verifier notes of the stack after the gates, before the working copy.
             notes = notes_section(step.stack.verifier_notes)
             # Each commit of the coordinator on the branch under verification is named, so the verifier checks it too (#225).
@@ -2595,14 +2502,16 @@ def _verify_round(
             step.known_tree.give_paths(frozenset(after.paths))
         except InvariantViolation as found:
             violation = found
-        # The second copy of a red proof goes, and the copy stays for the next round; the verdict report, the event
-        # stream and the other files of the verifier stay as evidence of the run.
+        # The copy and the second copy of a red proof go; the verdict report, the event stream and the other files
+        # of the verifier stay as evidence of the run.
         evidence.mkdir(parents=True, exist_ok=True)
         for entry in scratch.iterdir():
             if entry not in (copy, red_proof_copy(copy)):
                 shutil.move(str(entry), evidence / entry.name)
     finally:
-        place.end_session(own_scratch)
+        step.run.vcs.stop_file_watcher(scratch / VERIFY_COPY_NAME)
+        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(own_scratch, ignore_errors=True)
     report_path = evidence / report_path.name
     stream = result.event_stream
     if stream.is_relative_to(scratch):
@@ -2845,7 +2754,7 @@ def _chain_steps() -> chain.ChainSteps:
         make_step=_Step, run_gate=run_gate_with_output, copy_gate_logs=copy_gate_logs, scratch_directory=_scratch_directory,
         red_gates_text=red_gates_text, run_fixup=_run_fixup, checked_fixup_brief=_checked_fixup_brief, findings_text=_findings_text,
         verify_round=_verify_round, check_run_branch=_check_run_branch, check_verifier_stop=_check_verifier_stop,
-        advance_run_branch=_advance_run_branch, end_verifier=_end_verifier, ends_the_run=_ends_the_run, halt_reason=_halt_reason,
+        advance_run_branch=_advance_run_branch, ends_the_run=_ends_the_run, halt_reason=_halt_reason,
     )
 
 

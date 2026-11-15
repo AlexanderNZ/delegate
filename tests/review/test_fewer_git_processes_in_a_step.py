@@ -3,6 +3,11 @@
 A git process takes 73 to 170 ms on a machine with endpoint security, so each call that a step can leave out is time
 of the run. A shim of `git` on `PATH` is the system boundary: it counts each process and passes it to the real git.
 The case calls `delegate.main` against a real temporary git repository.
+
+The run starts 75 git processes, 25 fewer than before #348. Two rules of the review of the release cost processes that
+#348 had saved. The engine reads the tip of the ticket branch for each round of verification, because the HEAD of the
+worktree can be on another branch. Each of the three rounds also clones a new verifier copy, because a kept copy could
+show content that the repository does not hold (#349).
 """
 
 from __future__ import annotations
@@ -21,8 +26,8 @@ from ..support import WORKFLOW, git, make_repo, read_journal
 # each of the three sessions.
 BEFORE = 100
 
-# The cut that the change must give.
-CUT = 25
+# The git processes that this run starts now, with the rules of the docstring. The case fails when a change adds one.
+NOW = 75
 
 THREE_GATES = 'gates = ["test -f feature.txt", "ls seed.txt", "cat seed.txt"]'
 
@@ -63,7 +68,7 @@ def test_a_one_ticket_assure_run_with_two_rejects_and_three_gates_starts_at_leas
     assert [e["verdict"] for e in events if e["event"] == "verdict"] == ["REJECT", "REJECT", "ACCEPT"]
     assert git(repo, "rev-parse", "run/demo") == git(repo, "rev-parse", "run/demo-a")
     print(f"git processes of the run: {started}; before the change: {BEFORE}; fewer: {BEFORE - started}")
-    assert started <= BEFORE - CUT, f"{started} git processes; before the change {BEFORE}, so at most {BEFORE - CUT} are allowed"
+    assert started <= NOW, f"{started} git processes; before the change {BEFORE}, and at most {NOW} are allowed"
 
 
 def test_a_new_worktree_gets_its_settings_and_its_push_guard_with_no_git_config_process(tmp_path, capsys, git_calls, scripted):

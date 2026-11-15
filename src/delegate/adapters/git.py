@@ -4,8 +4,8 @@ Each method runs git through `subprocess`, with the path of the repository or
 worktree as the working directory of the command (`git -C`). A command that
 fails raises `VcsError` with the command and the message of git. Each command reads no stdin, asks for no
 credential on a terminal (`GIT_TERMINAL_PROMPT=0`), and has a time limit: 10 minutes, and 30 minutes for the clone of
-a verifier copy and for the fetch, the checkout and the clean that update it (#349). A command that reaches its limit
-raises `VcsError` with "timed out after N seconds" (#295). The command that stops the fsmonitor daemon has its own limit.
+a verifier copy. A command that reaches its limit raises `VcsError` with "timed out after N seconds" (#295). The command
+that stops the fsmonitor daemon has its own limit.
 
 Every worktree and every copy that this backend makes runs with
 `core.fsmonitor=false`, whatever the user sets. With the setting on, git starts a
@@ -359,109 +359,8 @@ def _rebase_in_progress(worktree: Path) -> bool:
     return any((worktree / path).exists() for path in paths)
 
 
-# The settings in the git directory of a verifier copy that can make git start a program or work in another repository:
-# the configuration, the names of the hooks, the files of `info` (attributes can name a filter of the configuration),
-# and whether a `commondir` file sends git to another git directory. None when they cannot be read.
-_CopySettings = tuple[bytes, tuple[str, ...], tuple[tuple[str, bytes], ...], bool] | None
-
-# The hooks of the git commands that update a verifier copy: a path with no hook in it, so no hook of the copy runs.
-_NO_HOOKS: tuple[str, str] = ("-c", "core.hooksPath=/dev/null")
-
-
-def _settings_of_copy(copy: Path) -> _CopySettings:
-    """The settings in the git directory of the verifier copy `copy`, read with no git process."""
-    git_dir = copy / ".git"
-    try:
-        hooks = tuple(sorted(entry.name for entry in (git_dir / "hooks").iterdir())) if (git_dir / "hooks").is_dir() else ()
-        info = git_dir / "info"
-        files = tuple(sorted((entry.name, entry.read_bytes()) for entry in info.iterdir())) if info.is_dir() else ()
-        return (git_dir / "config").read_bytes(), hooks, files, (git_dir / "commondir").exists()
-    except OSError:
-        return None
-
-
-# The files that let git read objects or parents that the refs of a copy do not hold.
-_OTHER_HISTORY_FILES: tuple[str, ...] = ("objects/info/alternates", "objects/info/http-alternates", "info/grafts", "shallow")
-
-
-def _reads_other_history(copy: Path) -> bool:
-    """Tell whether the git directory of the verifier copy `copy` can make git show content or history that its refs do not hold.
-
-    A replace ref, a file of alternates, a grafts file or a shallow file can each do that (review of #349). The check
-    reads the files with no git process. A copy with refs in the reftable format needs one process to list its replace refs.
-    """
-    git_dir = copy / ".git"
-    try:
-        if any((git_dir / name).exists() for name in _OTHER_HISTORY_FILES):
-            return True
-        if (git_dir / "reftable").exists():
-            listing = _run(copy, *_NO_HOOKS, "for-each-ref", "--count=1", "refs/replace/")
-            return listing.returncode != 0 or listing.stdout != ""
-        replace = git_dir / "refs" / "replace"
-        if replace.is_dir() and any(path.is_file() for path in replace.rglob("*")):
-            return True
-        packed = git_dir / "packed-refs"
-        return packed.exists() and b" refs/replace/" in packed.read_bytes()
-    except OSError:
-        return True
-
-
-def _drop_index_flags(copy: Path) -> None:
-    """Remove the index of the verifier copy `copy` when it can hold a flag that hides a changed file from the status.
-
-    Git writes the index in version 2 unless an entry has an extended flag, as `skip-worktree` or `intent-to-add`, or a
-    setting asks for a later version. With the flag, `checkout -f` keeps the file of the writer, and the status shows
-    the copy clean. With no index, `checkout -f` writes each tracked file again.
-    """
-    index = copy / ".git" / "index"
-    try:
-        with index.open("rb") as file:
-            header = file.read(8)
-    except OSError:
-        return
-    if header[:4] != b"DIRC" or int.from_bytes(header[4:8], "big") != 2:
-        index.unlink(missing_ok=True)
-
-
-def _reset_verifier_copy(repo: Path, copy: Path, branch: str, base: str, tip: str | None) -> bool:
-    """Bring the verifier copy `copy` to the branches `branch` and `base` of `repo`, with no file that a verifier left (#349).
-
-    The copy fetches the two branches from `repo` by force, checks out `branch` by force, and removes each untracked
-    and ignored file. Return True when the copy is then clean and on `branch` at the commit `tip`, and False when a
-    step failed or the copy is not so: the caller then makes the copy again. With no `tip`, the tip of `branch` in
-    `repo` before the fetch is the commit.
-    """
-    if tip is None:
-        read = _run(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
-        if read.returncode != 0:
-            return False
-        tip = read.stdout.strip()
-    steps = (
-        (
-            "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-auto-maintenance", "--update-head-ok", str(repo),
-            f"+refs/heads/{branch}:refs/heads/{branch}", f"+refs/heads/{base}:refs/heads/{base}",
-        ),
-        ("checkout", "-q", "-f", "-B", branch, f"refs/heads/{branch}"),
-        ("clean", "-q", "-ffdx"),
-    )
-    _drop_index_flags(copy)
-    for args in steps:
-        if _run(copy, *_NO_HOOKS, *args, timeout=_CLONE_TIMEOUT).returncode != 0:
-            return False
-    status = _run(copy, *_NO_HOOKS, "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=all")
-    lines = status.stdout.splitlines()
-    return (
-        status.returncode == 0 and f"# branch.oid {tip}" in lines and f"# branch.head {branch}" in lines
-        and all(line.startswith("# ") for line in lines)
-    )
-
-
 class GitVersionControl:
     """The version-control port, kept by git."""
-
-    def __init__(self) -> None:
-        # The settings in the git directory of each verifier copy that this backend made, by the path of the copy (#349).
-        self._copy_settings: dict[Path, _CopySettings] = {}
 
     def repository_root(self, path: Path) -> Path:
         return Path(_git(path, "rev-parse", "--show-toplevel"))
@@ -688,34 +587,10 @@ class GitVersionControl:
         _git(repo, "update-ref", f"refs/heads/{branch}", f"{to_commit}^{{commit}}", tip)
         return True
 
-    def make_verifier_copy(
-        self, repo: Path, copy: Path, branch: str, base: str, *, earlier: Path | None = None, tip: str | None = None
-    ) -> None:
-        copy = copy.absolute()
-        source = copy if earlier is None else earlier.absolute()
-        made = self._copy_settings.pop(source, None)
-        if made is not None and source.is_dir():
-            moved = source == copy
-            if not moved:
-                try:
-                    source.rename(copy)
-                    moved = True
-                except OSError:
-                    pass  # the copy stays where it is, and the caller removes it
-            # The update starts git in a directory that a verifier could change, so it goes on only while the settings
-            # in the git directory are those that the copy had when it was made (#349), and while no file in it makes git
-            # read other objects or other parents. The updated copy must hold the tip of `branch` that the caller read.
-            if (
-                moved and _settings_of_copy(copy) == made and not _reads_other_history(copy)
-                and _reset_verifier_copy(repo, copy, branch, base, tip)
-            ):
-                self._copy_settings[copy] = made
-                return
-            if moved:
-                self.stop_file_watcher(copy)
-                shutil.rmtree(copy, ignore_errors=True)
+    def make_verifier_copy(self, repo: Path, copy: Path, branch: str, base: str, *, tip: str | None = None) -> None:
         # The clone starts on the branch that the HEAD of the repository names, and that branch can be `base`.
         # So the clone checks out `branch` first, which frees the other names, and then sets `base` by force.
+        copy = copy.absolute()
         existed = copy.exists()
         try:
             _git(repo, "clone", "-q", "-c", "core.fsmonitor=false", "--no-checkout", str(repo), str(copy), timeout=_CLONE_TIMEOUT)
@@ -728,7 +603,6 @@ class GitVersionControl:
                 self.stop_file_watcher(copy)
                 shutil.rmtree(copy, ignore_errors=True)
             raise
-        self._copy_settings[copy] = _settings_of_copy(copy)
 
     def make_scratch_repository(self, path: Path) -> None:
         path = path.absolute()

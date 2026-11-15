@@ -242,9 +242,9 @@ def test_a_reject_gets_one_fixup_round_as_a_new_commit_on_the_chain_tip_and_a_fr
     assert fixup.cwd.name == "c" and "## Findings to fix" in fixup.prompt and FINDING_B in fixup.prompt
     assert tip(repo, "run/demo-c~1") == rejected  # the fix-up is one new commit on top of the rejected tip
     first, second = scripted.verifier_calls
-    assert "## Findings under verification" not in first.prompt
-    # The second verifier is a new session in the copy of the chain, reset after the first round (#349): it sees the
-    # commit of the fix-up and no file that the first verifier left.
+    assert first.cwd != second.cwd and "## Findings under verification" not in first.prompt
+    # The second verifier is a new session in a new copy of the chain (#349): it sees the commit of the fix-up and no
+    # file that the first verifier left.
     assert (first.resume_session, second.resume_session) == (None, None)
     assert ["fixup-1.txt" in files for files in seen] == [False, True]
     assert ["left-by-the-first-verifier.txt" in files for files in seen] == [False, False]

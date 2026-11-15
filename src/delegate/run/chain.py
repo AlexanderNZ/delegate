@@ -117,8 +117,7 @@ class ChainSteps:
     `run_gate` runs one gate of the step (`gate_run.run_gate_with_output`), `copy_gate_logs`, `scratch_directory` and `red_gates_text` write the
     findings of red gates, `run_fixup` and `checked_fixup_brief` run a fix-up round and check its commit, `findings_text`
     writes the findings of a verdict, `verify_round` runs one verifier, `check_run_branch`, `check_verifier_stop` and
-    `advance_run_branch` are the checks of the run branch, `end_verifier` removes the verifier copy that the rounds of a
-    step used (#349), and `ends_the_run` and `halt_reason` sort an error that ends the run.
+    `advance_run_branch` are the checks of the run branch, and `ends_the_run` and `halt_reason` sort an error that ends the run.
     """
 
     make_step: Callable[..., ChainStep]
@@ -133,7 +132,6 @@ class ChainSteps:
     check_run_branch: Callable[[Journal, VersionControl, Path, str, str], str]
     check_verifier_stop: Callable[[Journal, VersionControl, Path, str, list[dict[str, object]]], None]
     advance_run_branch: Callable[[ChainStep, str], str | None]
-    end_verifier: Callable[[ChainStep], None]
     ends_the_run: Callable[[Exception], bool]
     halt_reason: Callable[[Exception], str]
 
@@ -275,8 +273,6 @@ class ChainRun:
                 self._verify_stack(step, stack_pass.fixup_starts, chain_start, chain_redo(events, tickets[-1].id, name))
             except StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
-            finally:
-                self.steps.end_verifier(step)
         assert last is not None
         reason = self.steps.advance_run_branch(last, branch_tip(self.run.vcs, self.run.repo, last.branch))
         if reason:
