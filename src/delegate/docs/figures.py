@@ -15,8 +15,8 @@ on, a UTF-8 locale and the UTC time zone:
 
 * `watch`: `delegate.run.watch.follow` with the live view of `delegate.run.live`, and the stream reader of the
   harness adapter of the run, as `delegate watch` on a terminal. The figure is the first frame that the view draws.
-* `status`: the lines of `delegate status` (`delegate.run.status.render`), with the same reader.
-* `picker`: the run picker of `delegate watch` with more than one active run (`delegate.run.status.picker_lines`),
+* `status`: the lines of `delegate status` (`delegate.run.status_table.render`), with the same reader.
+* `picker`: the run picker of `delegate watch` with more than one active run (`delegate.run.status_picker.picker_lines`),
   cut to the width, and the prompt.
 
 The path of the temporary state directory shows as `STATE_DIRECTORY` in a frame. The SVG writer uses the standard library only.
@@ -45,7 +45,7 @@ from xml.sax.saxutils import escape
 
 from ..cli.status import stream_reader_of
 from ..cli.watch import PROMPT
-from ..run import live, output, run_state, status, watch
+from ..run import live, output, run_state, status, status_picker, status_table, watch
 from ..run.journal import ACTIVITY_FIELDS, read_new_events
 from ..run.lock import run_lock
 
@@ -260,11 +260,11 @@ def _watch(figure: Figure, journal: Path, now: datetime) -> list[str]:
 
 def _status(journal: Path, now: datetime) -> list[str]:
     events, _ = read_new_events(journal, 0, 1)
-    return status.render(events, journal, status.snapshot_of(events, journal, stream_reader_of, now))
+    return status_table.render(events, journal, status.snapshot_of(events, journal, stream_reader_of, now))
 
 
 def _picker(figure: Figure, journals: list[Path], now: datetime) -> list[str]:
-    lines = status.picker_lines(status.active_runs(journals, now), now)
+    lines = status_picker.picker_lines(status_picker.active_runs(journals, now), now)
     return [*(output.cut(line, figure.columns) for line in lines), PROMPT]
 
 

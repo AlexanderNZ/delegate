@@ -23,7 +23,7 @@ from datetime import timedelta
 import pytest
 
 from delegate.cli import delegate
-from delegate.run.status import format_duration, format_tokens
+from delegate.run.status_model import format_duration, format_tokens
 
 from .support import bare_repo, frames
 from .test_watch_frame import Clock, ends_at_first_poll, painted_frames, terminal_of_a_person, watch  # noqa: F401

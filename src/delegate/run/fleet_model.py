@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import fleet_rules, output
 from .live import IDLE_WARNING_MINUTES
-from .status import format_duration
+from .status_model import format_duration
 
 # The stall limit of `delegate watch`, in seconds: an agent idle for this time or more is an alert.
 IDLE_LIMIT_SECONDS: int = int(IDLE_WARNING_MINUTES * 60)

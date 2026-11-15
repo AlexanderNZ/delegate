@@ -644,7 +644,10 @@ def test_an_ordinary_import_passes_the_reexport_rule(tmp_path):
 
 # The modules of the views of the run context: they read the journal and the state of a run, and they never drive a run. They find the
 # state of a run through `run/state_location.py`, so a view does not load the engine (#331).
-VIEW_MODULES = ("status", "runs", "fleet", "fleet_hosts", "fleet_model", "fleet_view", "watch", "live", "clean", "pause")
+VIEW_MODULES = (
+    "status", "status_model", "status_table", "status_picker", "runs", "fleet", "fleet_hosts", "fleet_model", "fleet_view", "watch", "live", "clean",
+    "pause",
+)
 
 
 def engine_imports(package_dir: Path, modules: tuple[str, ...] = VIEW_MODULES) -> list[str]:

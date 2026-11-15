@@ -61,7 +61,7 @@ from pathlib import Path
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..adapters.shell import ShellGateRunner
-from ..run import status
+from ..run import status, status_model
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.engine import PlanReview, RetryHint, RunInterrupted, check_start, new_run_id, project_config_paths, retry_hints, review_plan_change, run_workflow
@@ -92,7 +92,7 @@ EXIT_PAUSED: int = 3
 EXIT_HALTED: int = 4
 
 # The paint role of the result of a run in its summary line (tokens.md): the result word is bold.
-RESULT_ROLES: dict[str, str] = {status.BUILT: "ok bold", status.FAILED: "bad bold", status.PAUSED: "warn bold", status.HALTED: "bad bold"}
+RESULT_ROLES: dict[str, str] = {status_model.BUILT: "ok bold", status_model.FAILED: "bad bold", status_model.PAUSED: "warn bold", status_model.HALTED: "bad bold"}
 
 # The program of a detached run process: it imports the package from the import path of the command that started it
 # (argv[1]), then runs `delegate` with the rest of its arguments. A Nix wrapper puts the package on the import path of
@@ -344,7 +344,7 @@ def _start_lines(run_id: str, journal: Path) -> list[str]:
     return [f"run {run_id}", f"journal {journal}", f"follow it with delegate watch{dot}pause it with delegate pause {short_run_id(run_id)}"]
 
 
-def _end_lines(snap: status.Snapshot, hints: list[RetryHint]) -> list[str]:
+def _end_lines(snap: status_model.Snapshot, hints: list[RetryHint]) -> list[str]:
     """The summary line of a run that ended or paused, and one retry line for each retry that the engine accepts, in plan order.
 
     `hints` gives the retries (see `retry_hints`), also a retry that goes on only with a new text of the ticket. In
@@ -358,11 +358,11 @@ def _end_lines(snap: status.Snapshot, hints: list[RetryHint]) -> list[str]:
     dot = f" {glyphs().pending} "
     states = [ticket.state for ticket in snap.tickets]
     parts = [
-        styled(RESULT_ROLES.get(snap.state, ""), f"run {snap.state}"), status.format_duration(snap.elapsed_seconds),
-        *(f"{states.count(state)} {state}" for state in (status.BUILT, status.FAILED, status.SKIPPED)),
+        styled(RESULT_ROLES.get(snap.state, ""), f"run {snap.state}"), status_model.format_duration(snap.elapsed_seconds),
+        *(f"{states.count(state)} {state}" for state in (status_model.BUILT, status_model.FAILED, status_model.SKIPPED)),
     ]
     if snap.tokens_new is not None and snap.tokens_cache is not None:
-        parts.append(styled("dim", f"{status.format_tokens(snap.tokens_new)} new{dot}{status.format_tokens(snap.tokens_cache)} cache"))
+        parts.append(styled("dim", f"{status_model.format_tokens(snap.tokens_new)} new{dot}{status_model.format_tokens(snap.tokens_cache)} cache"))
     retries = [
         f"retry with delegate run --resume {short_run_id(snap.run_id)} --retry {hint.ticket}"
         + (" --coordinator-commit <sha>" if hint.coordinator else "")

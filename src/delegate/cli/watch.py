@@ -15,10 +15,10 @@ run id, the percentage and the local time of the ETA while the watch goes on, an
 
 With no run id, the active runs decide (`delegate.run.runs.runs_of`), also with `--from` (#137). The one active run is
 followed, also when a newer run ended. With more than one, standard input and standard output on a terminal get the run
-picker of frame 2b (#118): the table of the active runs, newest first (`delegate.run.status.picker_lines`), and the prompt
+picker of frame 2b (#118): the table of the active runs, newest first (`delegate.run.status_picker.picker_lines`), and the prompt
 `watch which? [1]`. The reader types the number of a run, and Enter takes 1. Then this module follows that run. When
 standard input or standard output is not a terminal, nobody can answer the prompt: this module prints one line on stderr
-that names each active run (`delegate.run.status.choices_line`), follows none, and exits with `watch.EXIT_ERROR`. Ctrl-C
+that names each active run (`delegate.run.status_picker.choices_line`), follows none, and exits with `watch.EXIT_ERROR`. Ctrl-C
 at the prompt ends the command as before it finds a run: `delegate: interrupted` and 130. With no active run and with
 `--from`, this module goes on in the journal of the newest run from the position. With no active run and no `--from`,
 the newest run gets one line and no replay of its journal:
@@ -49,7 +49,7 @@ import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
-from ..run import clock, live, run_state, status, watch
+from ..run import clock, live, run_state, status, status_picker, watch
 from ..run.journal import JournalError, setup_problem_note
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, runs_of
@@ -227,14 +227,14 @@ def _newest_run(newest: watch.EndedRun | watch.StoppedRun, raw: bool) -> int:
     return newest.code
 
 
-def _pick(runs: list[status.ActiveRun], raw: bool) -> status.ActiveRun | None:
+def _pick(runs: list[status_picker.ActiveRun], raw: bool) -> status_picker.ActiveRun | None:
     """Show the run picker on the terminal, read the answer, and return the run that the reader chose.
 
     Enter takes 1. An answer that is not the number of a row gets one line on stderr, and the prompt again. Return None
     at the end of the input, with one line on stderr. Ctrl-C ends the line of the prompt and goes to the caller.
     """
     width = shutil.get_terminal_size().columns
-    print("\n".join(cut(line, width) for line in status.picker_lines(runs, utc_now())), flush=True)
+    print("\n".join(cut(line, width) for line in status_picker.picker_lines(runs, utc_now())), flush=True)
     while True:
         sys.stdout.write(PROMPT)
         sys.stdout.flush()
@@ -270,9 +270,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(line, file=sys.stderr)
             if runs.chosen is None:
                 # More than one run is active: the reader chooses one, or, with no terminal, follow none.
-                active = status.active_runs(runs.active, utc_now())  # an error prints no part of the list
+                active = status_picker.active_runs(runs.active, utc_now())  # an error prints no part of the list
                 if args.json or not (sys.stdin.isatty() and sys.stdout.isatty()):  # --json prints no prompt
-                    _error(status.choices_line(active), args.raw)
+                    _error(status_picker.choices_line(active), args.raw)
                     return watch.EXIT_ERROR
                 picked = _pick(active, args.raw)
                 if picked is None:

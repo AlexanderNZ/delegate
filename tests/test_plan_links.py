@@ -12,7 +12,7 @@ with the scripted adapter. The other cases write the events of a journal with th
 from __future__ import annotations
 
 from delegate.run.journal import read_events
-from delegate.run.status import plan_links
+from delegate.run.status_picker import plan_links
 
 from .support import state_dir
 from .support import bare_repo, finished_run, make_repo, run_start, step_end, step_start, write_journal

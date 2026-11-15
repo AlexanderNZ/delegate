@@ -18,8 +18,9 @@ from itertools import groupby
 
 from . import fleet_rules, output
 from .fleet_model import IDLE_LIMIT_SECONDS, Fleet, LostHost, RunRow, alert_text
-from .status import BAR_CELLS, BAR_COLUMNS, BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, format_duration, format_tokens
 from .journal import ABANDONED
+from .status_model import BUILT, FAILED, HALTED, PAUSED, PAUSING, RUNNING, STOPPED, format_duration, format_tokens
+from .status_table import BAR_CELLS, BAR_COLUMNS
 
 # The columns of the table, in order. `new` and `cache` are numbers and align right.
 COLUMNS: tuple[str, ...] = ("host", "repo", "run", "state", "ended", "ETA", "slip", "new", "cache", "trend", "alert", "do")

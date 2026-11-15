@@ -28,7 +28,8 @@ from .host import host_name
 from .journal import EventObserver, Journal, JournalError, JournalReads, event_time
 from .runs import RunsError, all_journals, machine_states
 from .state_location import repository_name
-from .status import Snapshot, snapshot_at, snapshot_of
+from .status import snapshot_at, snapshot_of
+from .status_model import Snapshot
 
 # The events after which the engine writes the record of the run.
 INDEXED: frozenset[str] = frozenset({RUN_START, RESUME, STEP_END, PAUSED, HALTED, CRASHED, INTERRUPTED, SETUP_PROBLEM, RUN_END})

@@ -18,329 +18,72 @@ count a ticket that a plan change added. The state of the run is `running`,
 is active (see `delegate.run.runs`), `paused` from its `paused` event until a
 resume, `stopped` when it has no `run-end`, no pause, no halt and no live process (#193), or the result of its `run-end`. A pause request of a run that is not
 active stays until the next resume: the run then keeps the state of its
-journal, and the snapshot has the note `PAUSE_REQUEST_NOTE`.
+journal, and the snapshot has the note `_PAUSE_REQUEST_NOTE`.
 
-The report (`report`) gives the lines of `delegate status`: the header lines of
-the run, and the ticket table of frame 1i of the design (#117), with the verdict,
-the branch and the last event of each ticket from the journal. `view_lines` draws
-the snapshot for the live view of `delegate watch`: the run line and the ticket
-table of frame 3a of the design (#143), fitted to the height of the terminal as in
-frame 3b (#144). The two tables share their tracks: the rows are flat and in plan
-order, and `plan_links` gives the rail and the `after` cell of each row, so the depth
-of the plan never makes the table wider.
-
-When more than one run is active (see `delegate.run.runs`), `delegate status`
-and `delegate watch` with no run id show the run picker of frame 2b (#118):
-`active_runs` reads each active run, newest first, `picker_lines` draws the
-table, and `choices_line` gives the one line that names each run.
+The values of a snapshot are in `delegate.run.status_model`. The report of `delegate status` and the live view of
+`delegate watch` are in `delegate.run.status_table`, and the run picker and the plan links are in `delegate.run.status_picker` (#335).
 
 `liveness` gives the time since the last activity of an agent (#147). A snapshot,
 as the run picker, gives `active <time> ago`. The live view on a terminal gives
-a spinner while the agent is active, and `quiet <time>` after `QUIET_SECONDS`.
+a spinner while the agent is active, and `quiet <time>` after `_QUIET_SECONDS`.
 Past the stall time, both give `⚠ idle <time>`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output, run_state
-from .journal import (
-    ABANDONED, JournalError, abandon_note, activity_files, crash_note, last_change, plan_ids, read_new_events, setup_problem_note,
-)
+from .journal import ABANDONED, JournalError, abandon_note, crash_note, plan_ids, read_new_events, setup_problem_note
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
 from .state_location import StateLocation
-
-# The states that a ticket shows. A ticket with no event is pending, a ticket
-# with `step-start` and no `step-end` is running, and the rest follow `step-end`
-# and `skip`.
-PENDING: str = "pending"
-RUNNING: str = "running"
-BUILT: str = "built"
-FAILED: str = "failed"
-SKIPPED: str = "skipped"
-
-# The states of the chain row of an `economy` stack, beside `running` (#196).
-ACCEPTED: str = "accepted"
-REJECTED: str = "rejected"
-
-# The states of a run that has no `run-end`, beside `running`. A run is `pausing` from a pause request until the engine
-# reads it at a step boundary, and `paused` from its `paused` event until a resume (see `delegate.run.pause`).
-PAUSING: str = "pausing"
-PAUSED: str = "paused"
-# A failure of the harness stopped the run, and the run wrote no `run-end`: a resume goes on (#177).
-HALTED: str = "halted"
-# A run with no `run-end`, no pause, no halt and no live process: a crash, a kill, Ctrl-C, or a stop of the machine. A resume goes on (#193).
-# A run whose newest `crashed` comes after its newest `resume` is stopped also while its process ends (#281).
-STOPPED: str = "stopped"
+from .status_model import (
+    ACCEPTED, BUILT, FAILED, HALTED, PAUSED, PAUSING, REJECTED, RUNNING, SKIPPED, STOPPED, ChainSnapshot, ReaderOf, Snapshot,
+    StreamReader, TicketSnapshot, format_duration,
+)
 
 # The states of the run state in which the clock of the snapshot stops at the event that gives the state (and the run has a live process).
 _CLOCK_STOPS: tuple[str, ...] = (run_state.ENDED, run_state.PAUSED, run_state.HALTED)
 
 # The note of a run with a pause request and no live process: the run stopped before the engine read the request.
-PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
-
-# What a line shows for a value that it does not have: the ETA before the first ticket ends.
-NONE: str = "-"
+_PAUSE_REQUEST_NOTE: str = "a pause request waits; delegate run --resume removes it"
 
 # The seconds with no activity of an agent after which the live view shows `quiet <time>` and no spinner (#147).
-QUIET_SECONDS: int = 30
-
-
-def render(events: list[dict[str, object]], journal: Path, snap: Snapshot) -> list[str]:
-    """The lines of the report for a run, from its journal events and its snapshot.
-
-    The header lines give the run, the note when there is one, the progress, and the journal. Under them and a blank
-    line, the ticket table of frame 1i of the design (#117, #143): the table of the live view (`view_lines`), with
-    `state` 8 cells wide and the columns `verdict`, `branch` and `last event`. Status is a snapshot, so it has no live
-    tail: the last column has only the reason of a row that failed, was skipped, or that a pause stopped before. A
-    cell that the journal has no value for is empty. The table is not cut to the width of the terminal, and no column
-    drops.
-    """
-    start = events[0]
-    if start["event"] != "run-start":
-        raise JournalError(f"journal {journal}: the first event is {start['event']!r}, not 'run-start'")
-    # A branch that a `cleanup` event lists as deleted is gone: no line says that it is kept.
-    deleted = {str(b) for e in events if e["event"] == "cleanup" for b in e.get("branches_deleted", [])}  # type: ignore[union-attr]
-    lines = [
-        f"run {start['run_id']}: {snap.state} (mode {start['mode']}, adapter {start['adapter']})",
-        *([f"note: {snap.note}"] if snap.note else []),
-        f"progress: {_run_progress(snap)}", f"journal {journal}",
-        *[output.stack_change_line(e) for e in events if e["event"] == "stack-change"],
-        *[
-            f"kept: branch {e['failed_branch']} holds the old work of ticket {e['ticket']}, which a retry started again; delegate clean removes it"
-            for e in events if e["event"] == "retry" and e.get("failed_branch") and e["failed_branch"] not in deleted
-        ],
-    ]
-    states = {t.id: t.state for t in snap.tickets}
-    # An `economy` run reads the verdicts of the current pass of the chain, as the engine does (#304): a retry that
-    # started the verification again leaves the verdict of the first pass out.
-    verdict_events = events[run_state.fold(events).chain.start :] if domain.chain_units(str(start["mode"])) else events
-    facts: dict[str, dict[str, str]] = {}
-    plan = plan_ids(events)
-    owns = _events_by_ticket(events, plan)
-    verdicts_of_run = [e for e in verdict_events if e["event"] == "verdict"]
-    for ticket in plan:
-        own = owns[ticket]
-        # The verdict of a chain (`economy` mode) covers each ticket in its `tickets` field, not only the ticket it names.
-        verdicts = [
-            str(e["verdict"]) for e in verdicts_of_run
-            if e.get("ticket") == ticket or ticket in e.get("tickets", [])  # type: ignore[operator]
-        ]
-        branch = next((str(e["branch"]) for e in own if e["event"] == "step-start"), "")
-        facts[ticket] = {
-            "verdict": output.styled("bold", verdicts[-1]) if verdicts else "",
-            "branch": branch if states[ticket] == RUNNING else output.styled("dim", branch),
-            "last event": output.styled("dim", str(own[-1]["time"])) if own else "",
-        }
-    rows = _rows(snap, plan_links(events), None, output.glyphs(), live=False, facts=facts)
-    table, _ = _table(snap, rows, STATUS_COLUMNS, STATUS_TRACKS, frozenset(), output.glyphs())
-    return [*lines, "", *table]
-
-
-def report(
-    repo: Path, run_id: str | None, vcs: VersionControl, reader_of: ReaderOf, now: datetime, *, location: StateLocation | None = None,
-) -> list[str]:
-    """The lines of the report for a run of the repository: the run with that id, or the newest run when `run_id` is None.
-
-    The errors are the errors of `snapshot`. `location` is as in `snapshot`.
-    """
-    return report_of_journal(journal_of(repo, run_id, vcs, location=location), reader_of, now)
-
-
-def report_of_journal(journal: Path, reader_of: ReaderOf, now: datetime) -> list[str]:
-    """The lines of the report for the run of the journal file `journal`, as `report` gives them, with no lookup of the repository."""
-    events, _ = read_new_events(journal, 0, 1)
-    if not events:
-        raise JournalError(f"journal {journal} holds no event")
-    return render(events, journal, snapshot_of(events, journal, reader_of, now))
-
+_QUIET_SECONDS: int = 30
 
 # The states of a ticket that ended.
 ENDED: tuple[str, ...] = (BUILT, FAILED, SKIPPED)
 
 # The phase that an event of a running ticket starts. `report-validation` starts the gates only when the report is valid.
-PHASE_OF_EVENT: dict[str, str] = {
+_PHASE_OF_EVENT: dict[str, str] = {
     "step-start": domain.PHASE_SPECIALIST, "continuation": domain.PHASE_SPECIALIST, "report-validation": domain.PHASE_GATES,
     "rebase": domain.PHASE_GATES, "verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP,
 }
 
 # The phase of the agent that an `agent-start` event names, by its `role`.
-PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
+_PHASE_OF_ROLE: dict[str, str] = {"specialist": domain.PHASE_SPECIALIST, "verifier": domain.PHASE_VERIFIER, "fix-up": domain.PHASE_FIXUP}
 
 # The phase of the verification of an `economy` chain that an event starts. In `economy` mode only the chain verifies.
 # A `gate-start` or a `gate-skip` starts the phase `gates` only when its phase is the phase of the chain gates.
-PHASE_OF_CHAIN_EVENT: dict[str, str] = {
+_PHASE_OF_CHAIN_EVENT: dict[str, str] = {
     "verify-start": domain.PHASE_VERIFIER, "fixup-start": domain.PHASE_FIXUP,
     "gate-start": domain.PHASE_GATES, "gate-skip": domain.PHASE_GATES,
 }
 
 # The events that end an agent run.
-AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
-
-# A reader of an event stream: the path of the stream gives the activity of the agent.
-StreamReader = Callable[[Path], Activity]
-
-# The reader of the streams of a run, from the adapter name of the run. It gives None when the command knows no such
-# adapter, or the adapter has no reader: the snapshot then has no tokens and no activity.
-ReaderOf = Callable[[str], StreamReader | None]
+_AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
 
 
-@dataclass(frozen=True)
-class TicketSnapshot:
-    """One ticket in a snapshot. `phase` is set only for a running ticket, and `idle_seconds` only while its agent runs.
-
-    `tokens_new` counts the input, the cache writes, and the output of the agents of the ticket. `tokens_cache` counts
-    their cache reads. The two counts and `idle_seconds` are None when the snapshot has no reader of the streams. The two
-    counts are None also when a stream of the ticket cannot be read, and `idle_seconds` when the stream of the agent that
-    runs now cannot be read.
-
-    `gate` is the command of the gate that runs now, from its `gate-start`, and None when no gate of the ticket runs.
-    `gate_name` is the `name` of that `gate-start` (#223), or None: the table shows it in place of the short name of the
-    command, and `to_json` leaves it out.
-    `gate_idle_seconds` is the seconds since the log file of that gate last changed. It is None when no gate runs, or
-    when the log file cannot be read. It needs no reader of the streams.
-
-    The last five fields are for the ticket table, and `to_json` leaves them out. `reason` is the reason of the
-    `step-end` or the `skip` of the ticket. `traceback` is the `traceback` of that `step-end`, the file that holds the
-    traceback of a crash (#194), or None. `fixup_round` is the round of the newest `fixup-start` of the step, or 0.
-    `continuation` is the count and the limit of the newest `continuation` of the step, or None. `gate_count` is set
-    only in the phase `gates`: the number of the gate of the round (the gates that ended, and the gate that runs), and
-    the gates of the stack of the ticket (see `_gate_counts`). It is None when no gate of the round started yet, or
-    when the journal does not show how many gates the stack has.
-    """
-
-    id: str
-    state: str
-    phase: str | None
-    elapsed_seconds: int
-    tokens_new: int | None
-    tokens_cache: int | None
-    idle_seconds: int | None
-    gate: str | None = None
-    gate_idle_seconds: int | None = None
-    reason: str | None = None
-    traceback: str | None = None
-    fixup_round: int = 0
-    continuation: tuple[int, int] | None = None
-    gate_count: tuple[int, int] | None = None
-    gate_name: str | None = None
-
-
-@dataclass(frozen=True)
-class ChainSnapshot:
-    """The verification of one stack of an `economy` chain in a snapshot: one chain row of the table (#196).
-
-    The row exists from the first gate, verifier or fix-up of the chain of the stack. `state` is `running`, `accepted` or
-    `rejected`. `phase` is `gates`, `verifier` or `fix-up` while the chain of the stack runs, and None after it ended.
-    `elapsed_seconds` is the time from the start of the verification of the stack to now, or to its end.
-
-    `gate_command` and `gate_idle_seconds` are as `TicketSnapshot.gate` and `gate_idle_seconds`, for the gate of the
-    chain. `tokens_new` and `tokens_cache` count the agents of the chain (the verifier and the fix-up specialist), and
-    are None as for a ticket. `verdict` is the verdict that ended the chain, or None while it runs and when red gates
-    ended it.
-
-    The last three fields are for the table, and `to_json` leaves them out. `idle_seconds` is the seconds since the
-    activity of the agent of the chain that runs now. `fixup_round` is the round of the newest `fixup-start`. `after` is
-    the id of the last ticket of the stack in plan order: the row goes under the rows of that ticket. `gate_name` is the
-    name that the workflow gives to the gate that runs (#223), and `to_json` leaves it out too.
-    """
-
-    stack: str
-    phase: str | None
-    state: str
-    elapsed_seconds: int
-    gate_command: str | None
-    gate_idle_seconds: int | None
-    tokens_new: int | None
-    tokens_cache: int | None
-    verdict: str | None
-    idle_seconds: int | None = None
-    fixup_round: int = 0
-    after: str = ""
-    gate_name: str | None = None
-
-
-@dataclass(frozen=True)
-class Snapshot:
-    """One snapshot of a run. `time` is the time of the snapshot: now, the time of `run-end` for a run that ended, or the
-    time of `paused` for a run that is paused. `state` is the result of a run that ended, `paused`, `halted`, `pausing`, or `running`.
-
-    `phase` is the phase of the verification of the chain while it runs in `economy` mode, and None otherwise.
-
-    `note` is `PAUSE_REQUEST_NOTE` when a pause request waits and the run is not active, and None otherwise.
-
-    `mode` is the mode of the run. `paused_before` is the ticket and the `before` field of the `paused` event of a run
-    that is paused, and None otherwise. `to_json` leaves the two out.
-
-    `plan` is each ticket id of the newest plan, in plan order, with the blockers that the plan records for it. It is
-    None when the journal records no plan (an earlier version of the engine).
-
-    `chains` is the chain row of each stack that started its verification in `economy` mode (#196), and empty in any
-    other mode. It is the last field.
-
-    `tokens_new` and `tokens_cache` are None when the snapshot has no reader of the streams. Otherwise each is the sum of
-    the tickets that have tokens: a ticket with a stream that cannot be read adds nothing.
-    """
-
-    run_id: str
-    state: str
-    time: datetime
-    elapsed_seconds: int
-    tickets_total: int
-    tickets_ended: int
-    percent: int
-    eta: datetime | None
-    tokens_new: int | None
-    tokens_cache: int | None
-    tickets: tuple[TicketSnapshot, ...]
-    phase: str | None = None
-    note: str | None = None
-    mode: str = ""
-    paused_before: tuple[str, str] | None = None
-    plan: tuple[tuple[str, tuple[str, ...]], ...] | None = None
-    chains: tuple[ChainSnapshot, ...] = ()
-
-    def to_json(self) -> dict[str, object]:
-        """The snapshot as the JSON object that `delegate status --json` prints. The reference page of `status` documents it.
-
-        `plan` is the last field (#120): a new field comes after the fields of earlier versions, which keep their bytes.
-        """
-        return {
-            "run_id": self.run_id, "state": self.state, "time": self.time.isoformat(), "elapsed_seconds": self.elapsed_seconds,
-            "tickets_total": self.tickets_total, "tickets_ended": self.tickets_ended, "percent": self.percent,
-            "eta": self.eta.isoformat() if self.eta else None, "tokens_new": self.tokens_new, "tokens_cache": self.tokens_cache,
-            "phase": self.phase, "note": self.note,
-            "tickets": [
-                {
-                    "id": t.id, "state": t.state, "phase": t.phase, "elapsed_seconds": t.elapsed_seconds, "tokens_new": t.tokens_new,
-                    "tokens_cache": t.tokens_cache, "idle_seconds": t.idle_seconds, "gate": t.gate, "gate_idle_seconds": t.gate_idle_seconds,
-                }
-                for t in self.tickets
-            ],
-            "plan": None if self.plan is None else [{"id": ticket, "blocked_by": list(blockers)} for ticket, blockers in self.plan],
-            "chains": [
-                {
-                    "stack": c.stack, "phase": c.phase, "state": c.state, "elapsed_seconds": c.elapsed_seconds,
-                    "gate_command": c.gate_command, "gate_idle_seconds": c.gate_idle_seconds, "tokens_new": c.tokens_new,
-                    "tokens_cache": c.tokens_cache, "verdict": c.verdict, "fixup_round": c.fixup_round,
-                }
-                for c in self.chains
-            ],
-        }
-
-
-def _time(event: dict[str, object]) -> datetime:
+def time_of(event: dict[str, object]) -> datetime:
     return datetime.fromisoformat(str(event["time"]))
 
 
-def _seconds(start: datetime, end: datetime) -> int:
+def seconds_between(start: datetime, end: datetime) -> int:
     return max(0, int((end - start).total_seconds()))
 
 
@@ -376,9 +119,9 @@ def _ticket(
         if kind in ("step-start", "retry"):
             trace, fixup_round, continuation = None, 0, None
         if kind == "step-start":
-            started = started or _time(event)
+            started = started or time_of(event)
         elif kind == "step-end":
-            ended, live, gate = ended or _time(event), None, None
+            ended, live, gate = ended or time_of(event), None, None
             trace = None if event.get("traceback") is None else str(event["traceback"])
         elif kind == "retry":
             ended = None
@@ -387,14 +130,14 @@ def _ticket(
         elif kind == "continuation":
             continuation = (int(event["count"]), int(event["limit"]))  # type: ignore[call-overload]
         if kind == "agent-start":
-            phase, live = PHASE_OF_ROLE[str(event["role"])], event
-        elif kind in AGENT_RESULTS:
+            phase, live = _PHASE_OF_ROLE[str(event["role"])], event
+        elif kind in _AGENT_RESULTS:
             live = None
             ended_totals = journal_totals(event)
             if ended_totals is not None:
                 totals[str(event["event_stream"])] = ended_totals
-        elif kind in PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
-            phase = PHASE_OF_EVENT[kind]
+        elif kind in _PHASE_OF_EVENT and (kind != "report-validation" or event["valid"]):
+            phase = _PHASE_OF_EVENT[kind]
         elif kind in ("gate-start", "gate-result", "gate-skip") and event["phase"] != "fixup":
             phase = domain.PHASE_GATES
         if kind == "gate-start":
@@ -407,7 +150,7 @@ def _ticket(
         phase = None
     if run_ended:
         live = gate = None
-    elapsed = _seconds(started, ended or now) if started else 0
+    elapsed = seconds_between(started, ended or now) if started else 0
     duration = elapsed if started and ended else None
     gate_command = None if gate is None else str(gate["command"])
     gate_idle = None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now)
@@ -438,16 +181,16 @@ def _agent_counts(
         if tokens is not None:
             tokens = (tokens[0] + found.tokens_new, tokens[1] + found.tokens_cache)
         if is_live:
-            idle = _seconds(found.last_event or _time(live), now)  # type: ignore[arg-type, union-attr]
+            idle = seconds_between(found.last_event or time_of(live), now)  # type: ignore[arg-type, union-attr]
     return (*tokens, idle) if tokens is not None else (None, None, idle)
 
 
 # The phases of the gates of one ticket that run every gate of its stack: the build, and the gates after a rebase.
-GATE_RUN_PHASES: frozenset[str] = frozenset({"build", "rebase"})
+_GATE_RUN_PHASES: frozenset[str] = frozenset({"build", "rebase"})
 
 # The events of a ticket that start a new run of its gates: a valid report starts the build gates, and a rebase the
 # gates after it.
-GATE_RUN_STARTS: frozenset[str] = frozenset({"report-validation", "rebase"})
+_GATE_RUN_STARTS: frozenset[str] = frozenset({"report-validation", "rebase"})
 
 
 def _gate_runs(own: list[dict[str, object]]) -> list[tuple[frozenset[str], int]]:
@@ -460,9 +203,9 @@ def _gate_runs(own: list[dict[str, object]]) -> list[tuple[frozenset[str], int]]
     runs: list[tuple[set[str], int]] = []
     for event in own:
         kind = str(event["event"])
-        if kind in GATE_RUN_STARTS and (kind != "report-validation" or event["valid"]):
+        if kind in _GATE_RUN_STARTS and (kind != "report-validation" or event["valid"]):
             runs.append((set(), 0))
-        elif kind in ("gate-start", "gate-skip") and event.get("phase") in GATE_RUN_PHASES:
+        elif kind in ("gate-start", "gate-skip") and event.get("phase") in _GATE_RUN_PHASES:
             if not runs:
                 runs.append((set(), 0))  # a journal with a gate and no report before it
             commands, number = runs[-1]
@@ -513,8 +256,8 @@ def _chain_phase_of(event: dict[str, object]) -> str | None:
         return domain.PHASE_FIXUP if event.get("phase") == domain.RETRY_CHAIN_FIXUP else None
     if kind == "agent-start":
         role = str(event["role"])
-        return PHASE_OF_ROLE[role] if role != "specialist" else None
-    return PHASE_OF_CHAIN_EVENT.get(kind)
+        return _PHASE_OF_ROLE[role] if role != "specialist" else None
+    return _PHASE_OF_CHAIN_EVENT.get(kind)
 
 
 def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, int]:
@@ -529,12 +272,12 @@ def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, 
     for event in events:
         found = _chain_phase_of(event)
         if found is not None:
-            phase, started = found, started or _time(event)
-    return phase, _seconds(started, now) if started else 0
+            phase, started = found, started or time_of(event)
+    return phase, seconds_between(started, now) if started else 0
 
 
 # The events of the chain of one stack that the chain row reads, beside the events that start a phase.
-CHAIN_RESULT_EVENTS: frozenset[str] = frozenset({"gate-result", "verdict", "step-end", *AGENT_RESULTS})
+_CHAIN_RESULT_EVENTS: frozenset[str] = frozenset({"gate-result", "verdict", "step-end", *_AGENT_RESULTS})
 
 
 def _chains(
@@ -566,7 +309,7 @@ def _chains(
             continue
         if kind == "step-start":
             groups.pop(ticket, None)
-        elif _chain_phase_of(event) is not None or (ticket in groups and kind in CHAIN_RESULT_EVENTS and event.get("phase", chain) == chain):
+        elif _chain_phase_of(event) is not None or (ticket in groups and kind in _CHAIN_RESULT_EVENTS and event.get("phase", chain) == chain):
             groups.setdefault(ticket, []).append((index, event))
     found: dict[str, ChainSnapshot] = {}
     newest: dict[str, int] = {}
@@ -593,10 +336,10 @@ def _chain_of(
         kind = str(event["event"])
         found = _chain_phase_of(event)
         if found is not None:
-            phase, started, verdict = found, started or _time(event), None  # a phase after a verdict: the chain goes on
+            phase, started, verdict = found, started or time_of(event), None  # a phase after a verdict: the chain goes on
         if kind == "agent-start":
             live = event
-        elif kind in AGENT_RESULTS:
+        elif kind in _AGENT_RESULTS:
             live = None
             ended_totals = journal_totals(event)
             if ended_totals is not None:
@@ -620,10 +363,10 @@ def _chain_of(
     accepted = verdict is not None and domain.is_accepted(str(verdict[1]["verdict"]))
     refused = verdict is not None and not accepted and any(position > verdict[0] for position in failures)
     if accepted:
-        state, ended = ACCEPTED, _time(verdict[1])  # type: ignore[index]
+        state, ended = ACCEPTED, time_of(verdict[1])  # type: ignore[index]
     elif failed is not None or refused or run_ended:
         state = REJECTED
-        ended = _time(failed if failed is not None else verdict[1] if verdict is not None else last_event)
+        ended = time_of(failed if failed is not None else verdict[1] if verdict is not None else last_event)
     else:
         state, ended = RUNNING, None
     running = state == RUNNING
@@ -634,7 +377,7 @@ def _chain_of(
     after = next((t for t in reversed(plan) if stack is not None and stacks.get(t) == stack), ticket)
     return ChainSnapshot(
         stack=str(stack) if stack is not None else "chain", phase=phase if running else None, state=state,
-        elapsed_seconds=_seconds(started, ended or now), gate_command=None if gate is None else str(gate["command"]),
+        elapsed_seconds=seconds_between(started, ended or now), gate_command=None if gate is None else str(gate["command"]),
         gate_idle_seconds=None if gate is None else _log_idle_seconds(Path(str(gate["gate_log"])), now), tokens_new=new, tokens_cache=cache,
         verdict=None if running or verdict is None else str(verdict[1]["verdict"]), idle_seconds=idle,
         fixup_round=fixup_round, after=after, gate_name=None if gate is None or not gate.get("name") else str(gate["name"]),
@@ -651,7 +394,7 @@ def _log_idle_seconds(log: Path, now: datetime) -> int | None:
         changed = log.stat().st_mtime
     except OSError:
         return None
-    return _seconds(datetime.fromtimestamp(changed, now.tzinfo), now)
+    return seconds_between(datetime.fromtimestamp(changed, now.tzinfo), now)
 
 
 def journal_totals(event: dict[str, object]) -> Activity | None:
@@ -671,7 +414,7 @@ def journal_totals(event: dict[str, object]) -> Activity | None:
         return None  # a result event with no totals, or with totals that the view cannot use: the stream is the source
 
 
-class CachedReader:
+class _CachedReader:
     """A reader of event streams that parses a stream again only when the stream changed (#183).
 
     It keeps the last `Activity` of each path, with the size and the modification time of the file at that time. The live
@@ -696,13 +439,13 @@ class CachedReader:
 
 
 def caching(reader_of: ReaderOf) -> ReaderOf:
-    """`reader_of` with a `CachedReader` for each adapter name, so that all calls of a live view share one cache."""
+    """`reader_of` with a `_CachedReader` for each adapter name, so that all calls of a live view share one cache."""
     readers: dict[str, StreamReader | None] = {}
 
     def cached(adapter: str) -> StreamReader | None:
         if adapter not in readers:
             found = reader_of(adapter)
-            readers[adapter] = None if found is None else CachedReader(found)
+            readers[adapter] = None if found is None else _CachedReader(found)
         return readers[adapter]
 
     return cached
@@ -770,9 +513,9 @@ def snapshot_at(
     at_stop = folded.status.kind in _CLOCK_STOPS
     live = at_stop or (folded.status.kind == run_state.ACTIVE and live_process)
     if at_stop:
-        now = _time(stop)  # the clock of a run that ended, paused or halted stops at that event
+        now = time_of(stop)  # the clock of a run that ended, paused or halted stops at that event
     elif not live:
-        now = _time(events[-1])  # and the clock of a stopped run at its newest event
+        now = time_of(events[-1])  # and the clock of a stopped run at its newest event
     now = now.replace(microsecond=0)
     # No agent and no gate works in a run that ended, paused, halted or stopped.
     stopped = at_stop or not live
@@ -781,7 +524,7 @@ def snapshot_at(
     tickets: list[TicketSnapshot] = []
     durations: list[float] = []
     plan = plan_ids(events)
-    owns = _events_by_ticket(events, plan)
+    owns = events_by_ticket(events, plan)
     for ticket, own in owns.items():
         found, duration = _ticket(ticket, own, folded.ticket(ticket), activity, now, stopped)
         tickets.append(found)
@@ -802,7 +545,7 @@ def snapshot_at(
     state, note = _state(folded.status, live, pause_request, journal.parent.name, folded.unresumable)
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
-        elapsed_seconds=_seconds(_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
+        elapsed_seconds=seconds_between(time_of(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase] + ([chain_phase] if chain_phase else []), units),
         eta=None if to_end is None or (to_end == 0 and unit_runs) or not live or (at_stop and not run_ended) else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),
@@ -813,7 +556,7 @@ def snapshot_at(
     )
 
 
-def _events_by_ticket(events: list[dict[str, object]], plan: list[str]) -> dict[str, list[dict[str, object]]]:
+def events_by_ticket(events: list[dict[str, object]], plan: list[str]) -> dict[str, list[dict[str, object]]]:
     """The events of each ticket of `plan`, in order, from one pass over `events`."""
     owns: dict[str, list[dict[str, object]]] = {ticket: [] for ticket in plan}
     for event in events:
@@ -846,19 +589,19 @@ def _state(
     `live` is True when the run has a live process (a run that ended, paused or halted has one for this function), and
     `requested` when a pause request waits. The state is the `result` of its `run-end`, `paused`, `halted`, `pausing` while
     a pause request waits and the run is live, `running` while it is live, or `stopped` when it has no live process. The
-    note of a halted run is `halt_note`. The note of a stopped run is `stopped_note`, or `journal.crash_note` when a crash
+    note of a halted run is `_halt_note`. The note of a stopped run is `_stopped_note`, or `journal.crash_note` when a crash
     stopped it (#281), or `journal.setup_problem_note` when the check of the setup stopped it (#296). The note of an
     abandoned run is `journal.abandon_note`: the state and the reason (#201). The note of a run that ended and cannot be
-    resumed (`unresumable`, #358) is `unresumable_note`: it comes before the note of a pause request, which no resume removes. Otherwise it is `PAUSE_REQUEST_NOTE` when a pause request
+    resumed (`unresumable`, #358) is `_unresumable_note`: it comes before the note of a pause request, which no resume removes. Otherwise it is `_PAUSE_REQUEST_NOTE` when a pause request
     waits and the run has no live process, and None otherwise.
     """
     kind, event = stop.kind, stop.event
     if kind == run_state.HALTED:
-        return HALTED, halt_note(event)  # type: ignore[arg-type]
+        return HALTED, _halt_note(event)  # type: ignore[arg-type]
     if kind in (run_state.ENDED, run_state.PAUSED):
-        note = PAUSE_REQUEST_NOTE if requested else None
+        note = _PAUSE_REQUEST_NOTE if requested else None
         if kind == run_state.ENDED and unresumable is not None and event["result"] != ABANDONED:  # type: ignore[index]
-            note = unresumable_note(unresumable)
+            note = _unresumable_note(unresumable)
         if kind == run_state.PAUSED:
             return PAUSED, note
         if event["result"] == ABANDONED:  # type: ignore[index]
@@ -871,21 +614,21 @@ def _state(
         return STOPPED, crash_note(event, run_id) + removes  # type: ignore[arg-type]
     if kind == run_state.SETUP_PROBLEM:
         return STOPPED, setup_problem_note(event, run_id)  # type: ignore[arg-type]
-    return STOPPED, stopped_note(run_id, requested)
+    return STOPPED, _stopped_note(run_id, requested)
 
 
-def stopped_note(run_id: str, requested: bool = False) -> str:
+def _stopped_note(run_id: str, requested: bool = False) -> str:
     """The note of a stopped run: no process works on it, and the command that goes on with it."""
     note = f"no process works on the run; go on with delegate run --resume {run_id}"
     return note + ("; the resume removes the pause request that waits" if requested else "")
 
 
-def unresumable_note(found: run_state.Unresumable) -> str:
+def _unresumable_note(found: run_state.Unresumable) -> str:
     """The note of a run that cannot be resumed (#358): why, and that the person starts a new run."""
     return f"cannot be resumed: {found.reason}; start a new run"
 
 
-def halt_note(halt: dict[str, object]) -> str:
+def _halt_note(halt: dict[str, object]) -> str:
     """The note of a halted run: where the harness failed, and the message of the failure."""
     return f"halted at the {halt['role']} of ticket {halt['ticket']}: {halt['message']}"
 
@@ -915,540 +658,25 @@ def snapshot_of_journal(journal: Path, reader_of: ReaderOf, now: datetime) -> Sn
     return snapshot_of(events, journal, reader_of, now)
 
 
-def format_duration(seconds: int) -> str:
-    """A duration in a short form: `45s`, `12m05s`, `2h03m`, or `3d04h`."""
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}m{seconds % 60:02d}s"
-    if seconds < 86400:
-        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
-    return f"{seconds // 86400}d{seconds % 86400 // 3600:02d}h"
-
-
-def format_tokens(count: int) -> str:
-    """A token count in a short form: `950`, `26k`, or `1.2M`."""
-    if count < 1000:
-        return str(count)
-    if count < 1_000_000:
-        return f"{count / 1000:.0f}k"
-    return f"{count / 1_000_000:.1f}M"
-
-
-def format_token_counts(new: int, cache: int) -> str:
-    """The two token counts in the short form of each line: `tokens 302k new, 9.7M cache`."""
-    return f"tokens {format_tokens(new)} new, {format_tokens(cache)} cache"
-
-
-def _run_progress(snap: Snapshot) -> str:
-    """The progress of the run: the phase of an `economy` chain, the percentage, the tickets that ended, the time used,
-    the ETA, and the tokens.
-
-    The ETA shows only while the run runs: in the time from now, or `-` before the first ticket ends. The tokens show
-    only when the snapshot has them.
-    """
-    eta = format_duration(_seconds(snap.time, snap.eta)) if snap.eta else "-"
-    parts = [snap.phase] if snap.phase else []
-    parts += [f"{snap.percent}%", f"{snap.tickets_ended} of {snap.tickets_total} ended", f"{format_duration(snap.elapsed_seconds)} used"]
-    if snap.state in (RUNNING, PAUSING):
-        parts.append(f"ETA {eta}")
-    if snap.tokens_new is not None and snap.tokens_cache is not None:
-        parts.append(format_token_counts(snap.tokens_new, snap.tokens_cache))
-    return ", ".join(parts)
-
-
-# The run line of the live view draws the bar only on a terminal of this many columns or more, and the bar has 16 cells.
-BAR_COLUMNS: int = 100
-BAR_CELLS: int = 16
-
-# The columns of the ticket table of the live view, in order (components.md § Ticket table (watch), #143). The rail
-# and the live tail have no header. The columns of numbers align right.
-RAIL: str = "rail"
-TAIL: str = "tail"
-TABLE_COLUMNS: tuple[str, ...] = ("#", RAIL, "plan", "state", "phase", "after", "used", "new", "cache", TAIL)
-TABLE_NUMBERS: frozenset[str] = frozenset({"#", "used", "new", "cache"})
-
-# The columns of the ticket table of `delegate status` (frame 1i, components.md § Ticket table (status)): the columns of
-# the live view, with `verdict` and `branch` after `after`, and `last event` last. Status is a snapshot, so it has no
-# live tail: its last column is only the reason of a row that failed, was skipped, or that a pause stopped before.
-STATUS_COLUMNS: tuple[str, ...] = (
-    "#", RAIL, "plan", "state", "phase", "after", "verdict", "branch", "used", "new", "cache", "last event", TAIL,
-)
-
-# The design width of each column of the ticket table of the live view, in cells. A column is as wide as its track, or
-# as its widest value when that is wider, so the depth of the plan never makes the table wider. The live tail has no
-# track. The table of `delegate status` has the same tracks, with `state` 8, `verdict` 7 and `branch` 15. `last event`
-# has no track.
-TRACKS: dict[str, int] = {"#": 3, RAIL: 2, "plan": 6, "state": 10, "phase": 13, "after": 8, "used": 7, "new": 5, "cache": 6}
-STATUS_TRACKS: dict[str, int] = {**TRACKS, "state": 8, "verdict": 7, "branch": 15}
-
-# The steps of the fit to the width, in the order of components.md § 80 columns: the columns that drop at each step.
-# The bar of the run line goes first, by `BAR_COLUMNS`. Then `new` and `cache` drop, then `used`. The phases stack, so
-# their labels stay.
-FIT_STEPS: tuple[frozenset[str], ...] = (frozenset(), frozenset({"new", "cache"}), frozenset({"new", "cache", "used"}))
-
-# The phases of a running ticket. In `economy` mode only the chain verifies, so a ticket has two phases.
-TRACK: tuple[str, ...] = (domain.PHASE_SPECIALIST, domain.PHASE_GATES, domain.PHASE_VERIFIER, domain.PHASE_FIXUP)
-ECONOMY_TRACK: tuple[str, ...] = (domain.PHASE_SPECIALIST, domain.PHASE_GATES)
-
-# The reason of a ticket that a pause stopped before, by the `before` field of the `paused` event.
-PAUSED_CELL: dict[str, str] = {"step": "paused before this step", "gate": "paused before the gate", "verifier": "paused before the verifier"}
-
-# The live tail of the next row while the run is pausing (copy-deck.md): present tense until the engine reads the request.
-PAUSING_CELL: str = "pauses before this step"
-
-# The fit to the height (components.md § Ticket table (watch), Fit to height, #144). When the rows in the middle fold,
-# the tickets of the first `FOLD_KEEP` rows and the `FOLD_KEEP` tickets before the running ticket stay. The fold of the
-# tail alone is enough only when it keeps the `FOLD_NEAREST` tickets after the running ticket, or each ticket after it.
-FOLD_KEEP: int = 3
-FOLD_NEAREST: int = 3
-
-# The order of the states in the text of a fold row. The glyph of the fold row is the glyph of its first state.
-FOLD_STATES: tuple[str, ...] = (BUILT, FAILED, SKIPPED, RUNNING, PENDING)
-
-
-@dataclass(frozen=True)
-class _Row:
-    """One row of the ticket table: the cells by the name of the column, the ticket and its state, and whether the
-    live tail counts in the fit to the width. A reason in the tail does not count: the cut of the line ends it."""
-
-    ticket: str
-    state: str
-    cells: dict[str, str]
-    measured: bool = False
-
-
-def view_lines(
-    snap: Snapshot, links: Sequence[PlanLink], width: int, height: int | None = None, idle_limit: int | None = None,
-    spin: int | None = None, warned: frozenset[str] = frozenset(),
-) -> list[str]:
-    """The lines of the live view of a snapshot: the run line, a blank line, and the ticket table, each cut to `width`.
-
-    The spec is `design/docs/components.md`. `links` gives the rail and the
-    `after` cell of each ticket (`plan_links`). The rows are flat and in plan order, and the running ticket has a
-    sub-row for each phase after its first. When the lines would be more than `height`, the rows fold (`_fit`): first
-    the tail, then the rows in the middle. With no `height`, no row folds. When a line of the table is wider than
-    `width`, the columns drop in the order of `FIT_STEPS`. An agent or a gate log that has not changed for
-    `idle_limit` seconds or more shows a warning in the live tail. `spin` is the frame of the spinner of a live view
-    that animates, or None for the text of a snapshot (`liveness`). `warned` gives the ids of the tickets whose newest
-    event is a problem: the live tail of their rows starts with the warning mark (#222). The view names only the run id, the ticket ids, the
-    states, the phases, the reasons with no path, and the numbers. It shows no tool call.
-    """
-    glyph = output.glyphs()
-    rows = _fit(snap, _rows(snap, links, idle_limit, glyph, live=True, spin=spin, warned=warned), None if height is None else height - 3)
-    for dropped in FIT_STEPS:
-        table, measured = _table(snap, rows, TABLE_COLUMNS, TRACKS, dropped, glyph)
-        if measured <= width:
-            break
-    return [output.cut(line, max(width, 1)) for line in [_run_line(snap, width, glyph), "", *table]]
-
-
-def _run_line(snap: Snapshot, width: int, glyph: output.Glyphs) -> str:
-    """The run line: the short run id, the state, the bar, the percentage, the tickets that ended, the time used, the
-    ETA while the run runs, and the two token counts when the snapshot has them."""
-    dot = f" {glyph.pending} "  # the separator of tokens.md, which has an ASCII form
-    state = snap.state + (f"{dot}{snap.phase}" if snap.phase else "")
-    role = {PAUSED: "warn", PAUSING: "warn", HALTED: "bad bold", BUILT: "ok bold", FAILED: "bad bold"}.get(snap.state, "")
-    progress = f"{snap.percent}%"
-    if width >= BAR_COLUMNS:
-        filled = snap.percent * BAR_CELLS // 100
-        progress = output.styled("ok", glyph.fill * filled) + output.styled("dim", glyph.empty * (BAR_CELLS - filled)) + " " + progress
-    parts = [
-        "run " + output.styled("bold", output.short_run_id(snap.run_id)), output.styled(role, state), progress,
-        f"{snap.tickets_ended}/{snap.tickets_total} ended", output.styled("dim", f"{format_duration(snap.elapsed_seconds)} used"),
-    ]
-    if snap.state in (RUNNING, PAUSING):
-        parts.append("ETA " + (format_duration(_seconds(snap.time, snap.eta)) if snap.eta else NONE))
-    if snap.tokens_new is not None and snap.tokens_cache is not None:
-        parts.append(output.styled("dim", f"{format_tokens(snap.tokens_new)} new{dot}{format_tokens(snap.tokens_cache)} cache"))
-    return output.GAP.join(parts)
-
-
-def _table(
-    snap: Snapshot, rows: Sequence[_Row | _Fold], columns: tuple[str, ...], tracks: dict[str, int], dropped: frozenset[str],
-    glyph: output.Glyphs,
-) -> tuple[list[str], int]:
-    """The lines of the ticket table, and the width that the fit to the width measures.
-
-    The lines are the header and the rows, with a line for each fold (`_fold_line`). Each column is as wide as its
-    track, or as its widest value when that is wider. The columns of `dropped` are not in the table, and neither are
-    `new` and `cache` when the snapshot has no tokens. The width is the widest line, without a reason in the tail
-    (`_Row.measured`) and without a fold.
-    """
-    names = [name for name in columns if name not in dropped and (snap.tokens_new is not None or name not in ("new", "cache"))]
-    header = [output.styled("dim", "" if name in (RAIL, TAIL) else name) for name in names]
-    kept = [row for row in rows if isinstance(row, _Row)]
-    totals = [_fold_totals(snap, row) for row in rows if isinstance(row, _Fold) and not row.tail]
-    body = [[row.cells.get(name, "") for name in names] for row in kept]
-    widths = [
-        max(tracks.get(name, 0), *(output.width(cells[index]) for cells in [header, *body]), *(output.width(t.get(name, "")) for t in totals))
-        for index, name in enumerate(names)
-    ]
-    right = {index for index, name in enumerate(names) if name in TABLE_NUMBERS}
-    drawn = iter(line.rstrip(" ") for line in output.columns([header, *body], right=right, tracks=widths))
-    lines = [next(drawn)]
-    for row in rows:
-        lines.append(next(drawn) if isinstance(row, _Row) else _fold_line(snap, row, names, widths, glyph))
-    quiet = [[cells[index] if name != TAIL or row.measured else "" for index, name in enumerate(names)] for row, cells in zip(kept, body)]
-    measured = max(output.width(line.rstrip(" ")) for line in output.columns([header, *quiet], right=right, tracks=widths))
-    return lines, measured
-
-
-@dataclass(frozen=True)
-class _Fold:
-    """One row of the ticket table that holds the rows of the tickets that do not fit the height of the terminal.
-
-    `tickets` are the tickets of the fold, in plan order, and `first` is the plan position of the first. `tail` is
-    true for the fold of the tail, the last row above the divider, and false for the fold in the middle. `rail` is the
-    rail cell of the fold: the rail runs through the fold in the middle when the row under it has the rail.
-    """
-
-    tickets: tuple[TicketSnapshot, ...]
-    first: int
-    tail: bool
-    rail: str = ""
-
-
-def _fit(snap: Snapshot, rows: list[_Row], room: int | None) -> list[_Row | _Fold]:
-    """The rows of the ticket table that fit in `room` rows, with a fold for the rows that do not (#144).
-
-    The spec is components.md § Ticket table (watch), Fit to height. The anchor is the running ticket, or else the
-    ticket that the pause stopped before, the first pending ticket, or the last ticket. Its rows never fold. When the
-    rows from the top to the anchor, the rows of `FOLD_NEAREST` tickets after it and a fold of the tail fit, the rows show from the
-    top in plan order and the tail folds into one last row. If not, the rows in the middle fold too: the first
-    `FOLD_KEEP` rows and the `FOLD_KEEP` rows before the anchor stay. The rows after the anchor that fit then show,
-    the nearest first, and the rest fold into the tail. The rows of one ticket fold together. With no `room`, or when
-    each row fits, no row folds.
-    """
-    if room is None or len(rows) <= room:
-        return list(rows)
-    blocks: list[list[_Row]] = []  # the rows of each ticket, in plan order
-    for row in rows:
-        if blocks and blocks[-1][0].ticket == row.ticket:
-            blocks[-1].append(row)
-        else:
-            blocks.append([row])
-    states = [RUNNING if any(row.state == RUNNING for row in block) else block[0].state for block in blocks]
-    ids = [block[0].ticket for block in blocks]
-    paused = snap.paused_before[0] if snap.paused_before is not None else None
-    anchor = next((index for index, state in enumerate(states) if state == RUNNING), None)
-    if anchor is None:
-        anchor = ids.index(paused) if paused in ids else next((i for i, state in enumerate(states) if state == PENDING), len(blocks) - 1)
-    after = blocks[anchor + 1:]
-    shown = _nearest(after, room - sum(len(block) for block in blocks[:anchor + 1]))
-    middle = blocks[FOLD_KEEP:max(FOLD_KEEP, anchor - FOLD_KEEP)]
-    head: list[_Row | _Fold] = [row for block in blocks[:anchor + 1] for row in block]
-    # The rows from the top to the anchor can be more than `room` when no ticket, or too few tickets, come after the anchor
-    # (the chain row of an `economy` run is under the last ticket, #196): the rows in the middle fold then too.
-    if (len(shown) < min(FOLD_NEAREST, len(after)) or len(head) > room) and len(middle) > 1:
-        before = blocks[anchor - FOLD_KEEP:anchor + 1]
-        fold = _Fold(_tickets_of(snap, middle), FOLD_KEEP + 1, tail=False, rail=before[0][0].cells.get(RAIL, ""))
-        head = [*(row for block in blocks[:FOLD_KEEP] for row in block), fold, *(row for block in before for row in block)]
-        shown = _nearest(after, room - len(head))
-    fitted = [*head, *(row for block in shown for row in block)]
-    if len(shown) < len(after):
-        fitted.append(_Fold(_tickets_of(snap, after[len(shown):]), anchor + 2 + len(shown), tail=True))
-    return fitted
-
-
-def _nearest(after: list[list[_Row]], room: int) -> list[list[_Row]]:
-    """The tickets after the anchor that fit in `room` rows, the nearest first: each one when they all fit, or else the
-    ones that fit with the fold of the tail."""
-    if sum(len(block) for block in after) <= room:
-        return after
-    shown: list[list[_Row]] = []
-    used = 1  # the fold of the tail
-    for block in after:
-        if used + len(block) > room:
-            break
-        shown.append(block)
-        used += len(block)
-    return shown
-
-
-def _tickets_of(snap: Snapshot, blocks: list[list[_Row]]) -> tuple[TicketSnapshot, ...]:
-    by_id = {ticket.id: ticket for ticket in snap.tickets}
-    return tuple(by_id[block[0].ticket] for block in blocks)
-
-
-def _fold_totals(snap: Snapshot, fold: _Fold) -> dict[str, str]:
-    """The cells `used`, `new` and `cache` of the fold in the middle: the sums of its tickets that have a step. A ticket
-    with no tokens adds nothing, as in the run line."""
-    stepped = [t for t in fold.tickets if t.state not in (PENDING, SKIPPED)]
-    if not stepped:
-        return {}
-    cells = {"used": output.styled("dim", format_duration(sum(t.elapsed_seconds for t in stepped)))}
-    if snap.tokens_new is not None and any(t.tokens_new is not None and t.tokens_cache is not None for t in stepped):
-        cells["new"] = output.styled("dim", format_tokens(sum(t.tokens_new or 0 for t in stepped)))
-        cells["cache"] = output.styled("dim", format_tokens(sum(t.tokens_cache or 0 for t in stepped)))
-    return cells
-
-
-def _fold_line(snap: Snapshot, fold: _Fold, names: list[str], widths: list[int], glyph: output.Glyphs) -> str:
-    """The line of a fold, on the tracks of the table.
-
-    In `plan` and `state`: the glyph of the first state and the count of each state, as `✓ 17 built` or
-    `· 11 pending`. In `after`: the range of the ids, as `104–120`. Then `rows <first>–<last> folded`: in the live
-    tail for the fold in the middle, which also gives its totals in `used`, `new` and `cache` (`_fold_totals`), and
-    from the first of these columns for the fold of the tail. The text is `dim`, and the rail is `plan`.
-    """
-    start = {name: sum(widths[:index]) + len(output.GAP) * index for index, name in enumerate(names)}
-    end = {name: start[name] + widths[index] for index, name in enumerate(names)}
-    counts = {state: sum(1 for t in fold.tickets if t.state == state) for state in FOLD_STATES}
-    first = next(state for state in FOLD_STATES if counts[state])
-    role, mark = {
-        BUILT: ("ok", glyph.built), FAILED: ("bad", glyph.failed), SKIPPED: ("dim", glyph.skipped),
-        RUNNING: ("now", glyph.running), PENDING: ("dim", glyph.pending),
-    }[first]
-    words = ", ".join(f"{counts[state]} {state}" for state in FOLD_STATES if counts[state])
-    summary = output.styled("dim", f"{mark} {words}") if role == "dim" else output.styled(role, mark) + output.styled("dim", f" {words}")
-    ids, last = (fold.tickets[0].id, fold.tickets[-1].id), fold.first + len(fold.tickets) - 1
-    pieces = [(start[RAIL], fold.rail)] if fold.rail and RAIL in start else []
-    pieces += [(start["plan"], summary), (start["after"], output.styled("dim", glyph.dash.join(ids) if ids[0] != ids[1] else ids[0]))]
-    if not fold.tail:
-        pieces += [(end[name] - output.width(text), text) for name, text in _fold_totals(snap, fold).items() if name in start]
-    folded = f"rows {fold.first}{glyph.dash}{last} folded" if last != fold.first else f"row {last} folded"
-    pieces.append((start[TAIL] if not fold.tail else min(start[name] for name in ("used", "new", "cache", TAIL) if name in start), output.styled("dim", folded)))
-    line = ""
-    for cell, text in pieces:
-        line += " " * max(1 if line else 0, cell - output.width(line)) + text
-    return line
-
-
-def _rows(
-    snap: Snapshot, links: Sequence[PlanLink], idle_limit: int | None, glyph: output.Glyphs, live: bool,
-    facts: dict[str, dict[str, str]] | None = None, spin: int | None = None, warned: frozenset[str] = frozenset(),
-) -> list[_Row]:
-    """The rows of the ticket table in plan order: one row for each ticket, and under the row of a running ticket a
-    sub-row for each phase after its first.
-
-    The rail of a row joins it to the row above it: its one blocker is that row. A sub-row has the rail when the next
-    row has it, so the rail runs through the sub-rows. `live` gives the live tail of the live view: the activity of the
-    running ticket on its row, and the gate that runs on the sub-row of its phase. Without it, as in `delegate status`,
-    the tail has only the reason of a row. While the run is pausing, the live tail of the next row gives
-    `PAUSING_CELL` (`_pausing_before`). `facts` gives, for each ticket id, the cells of the columns that the live
-    view does not have: `verdict`, `branch` and `last event` of `delegate status`. `spin` and `warned` are as for `view_lines`.
-    """
-    by_id = {link.id: link for link in links}
-    pausing = _pausing_before(snap) if live else None
-    rows = []
-    for position, ticket in enumerate(snap.tickets, start=1):
-        link = by_id.get(ticket.id)
-        below = by_id.get(snap.tickets[position].id) if position < len(snap.tickets) else None
-        phases, active = _phases(snap, ticket, glyph)
-        details = [""] * max(1, len(phases))
-        if live and ticket.state == RUNNING:
-            details[0] = _activity_tail(ticket, idle_limit, glyph, spin)
-            if ticket.gate is not None:
-                at = active if 0 < active < len(details) else 0
-                details[at] = f" {glyph.pending} ".join(part for part in (details[at], _gate_tail(str(ticket.gate), ticket.gate_idle_seconds, idle_limit, glyph, ticket.gate_name)) if part)
-        reason = output.styled("warn", PAUSING_CELL) if ticket.id == pausing else _reason(snap, ticket, live)
-        cells = _row(ticket, position, link, glyph)
-        tail = reason or details[0]
-        if ticket.id in warned:
-            tail = f"{output.styled('warn', glyph.idle)} {tail}".rstrip()  # a problem is the newest event of the ticket (#222)
-        cells.update(phase=phases[0] if phases else "", **{TAIL: tail})
-        cells.update((facts or {}).get(ticket.id, {}))
-        rows.append(_Row(ticket.id, ticket.state, cells, measured=not reason))
-        rail = output.styled("plan", glyph.rail) if below is not None and below.rail else ""
-        for phase, detail in zip(phases[1:], details[1:]):
-            rows.append(_Row(ticket.id, ticket.state, {RAIL: rail, "phase": phase, TAIL: detail}, measured=True))
-        for chain in snap.chains:
-            if chain.after == ticket.id:
-                rows.append(_Row(ticket.id, chain.state, _chain_row(snap, chain, rail, idle_limit, glyph, live, spin), measured=True))
-    return rows
-
-
-def _chain_row(
-    snap: Snapshot, chain: ChainSnapshot, rail: str, idle_limit: int | None, glyph: output.Glyphs, live: bool, spin: int | None
-) -> dict[str, str]:
-    """The cells of the chain row of one stack of an `economy` run (#196), by the name of the column.
-
-    The row goes under the rows of the last ticket of the stack. The `plan` cell holds the stack name, `state` is
-    `running`, `accepted` or `rejected`, and `phase` is the active phase of the chain: `gates`, `verifier` or `fix-up`
-    with its round. `used` is the time since the verification of the stack started, and `new` and `cache` count its
-    agents. The live tail gives the gate that runs and the age of its log, or the activity of the agent. When the chain
-    ended, the `verdict` cell holds its verdict, and the live view, which has no such column, gives it in the live tail.
-    """
-    node, id_role, state = {
-        ACCEPTED: (output.styled("ok", glyph.node), "dim", output.styled("ok", glyph.built) + output.styled("dim", f" {ACCEPTED}")),
-        REJECTED: (output.styled("bad", glyph.failed), "bad bold", output.styled("bad bold", REJECTED)),
-    }.get(chain.state, (output.styled("now", glyph.running), "now bold", output.styled("now bold", RUNNING)))
-    cells = {
-        RAIL: rail, "plan": node + " " + output.styled(id_role, chain.stack), "state": state, "used": output.styled("dim", format_duration(chain.elapsed_seconds)),
-        "verdict": output.styled("bold", chain.verdict) if chain.verdict else "",
-    }
-    if chain.tokens_new is not None and chain.tokens_cache is not None:
-        cells["new"], cells["cache"] = output.styled("dim", format_tokens(chain.tokens_new)), output.styled("dim", format_tokens(chain.tokens_cache))
-    parts: list[str] = []
-    if chain.phase is not None:
-        rounds = f" {chain.fixup_round}/{domain.fixup_round_limit(snap.mode)}" if chain.fixup_round and snap.mode in domain.FIXUP_ROUND_LIMIT else ""
-        cells["phase"] = output.styled("warn" if chain.phase == domain.PHASE_FIXUP else "now", f"{chain.phase} {glyph.node}{rounds}")
-        if chain.idle_seconds is not None:
-            parts.append(output.styled(*liveness(chain.idle_seconds, idle_limit, spin)))
-        if chain.gate_command is not None:
-            parts.append(_gate_tail(chain.gate_command, chain.gate_idle_seconds, idle_limit, glyph, chain.gate_name))
-    elif live and chain.verdict:
-        parts.append(output.styled("ok" if chain.state == ACCEPTED else "bad", f"verdict {chain.verdict}"))
-    cells[TAIL] = f" {glyph.pending} ".join(parts)
-    return cells
-
-
-def _row(ticket: TicketSnapshot, position: int, link: PlanLink | None, glyph: output.Glyphs) -> dict[str, str]:
-    """The cells of the row of one ticket that the live view and `delegate status` share, by the name of its column."""
-    node, id_role, state = {
-        BUILT: (output.styled("ok", glyph.node), "dim", output.styled("ok", glyph.built) + output.styled("dim", " built")),
-        RUNNING: (output.styled("now", glyph.running), "now bold", output.styled("now bold", RUNNING)),
-        FAILED: (output.styled("bad", glyph.failed), "bad bold", output.styled("bad bold", FAILED)),
-        SKIPPED: (output.styled("dim", glyph.skipped), "dim", output.styled("dim", SKIPPED)),
-    }.get(ticket.state, (output.styled("dim", glyph.pending), "dim", output.styled("dim", ticket.state)))
-    has_step = ticket.state not in (PENDING, SKIPPED)
-    tokens = has_step and ticket.tokens_new is not None and ticket.tokens_cache is not None
-    return {
-        "#": output.styled("dim", str(position)),
-        RAIL: output.styled("plan", glyph.rail) if link is not None and link.rail else "",
-        "plan": node + " " + output.styled(id_role, ticket.id),
-        "state": state,
-        "after": output.styled("plan", " ".join(link.after)) if link is not None else "",
-        "used": output.styled("dim", format_duration(ticket.elapsed_seconds)) if has_step else "",
-        "new": output.styled("dim", format_tokens(ticket.tokens_new)) if tokens else "",  # type: ignore[arg-type]
-        "cache": output.styled("dim", format_tokens(ticket.tokens_cache)) if tokens else "",  # type: ignore[arg-type]
-    }
-
-
-def _pausing_before(snap: Snapshot) -> str | None:
-    """The ticket of the next row while the run is pausing: the first pending ticket after the running ticket in plan
-    order, or the first pending ticket when no ticket runs. None when the run is not pausing, or no ticket is pending."""
-    if snap.state != PAUSING:
-        return None
-    running = next((index for index, t in enumerate(snap.tickets) if t.state == RUNNING), 0)
-    return next((t.id for t in snap.tickets[running:] if t.state == PENDING), None)
-
-
-def _reason(snap: Snapshot, ticket: TicketSnapshot, live: bool) -> str:
-    """The reason of a ticket that the pause of the run stopped before, that failed, or that was skipped, or empty.
-
-    The reason of a crash ends with the file of its traceback. `delegate status` gives the whole path. The live view
-    cuts it to the name of the file, as it does each path (`output.without_paths`).
-    """
-    if snap.state == PAUSED and snap.paused_before is not None and snap.paused_before[0] == ticket.id:
-        return output.styled("warn", PAUSED_CELL.get(snap.paused_before[1], f"paused before the {snap.paused_before[1]}"))
-    if ticket.state == FAILED and ticket.reason:
-        text = output.styled("bad", output.without_paths(ticket.reason))
-        if ticket.traceback:
-            text += output.styled("dim", f" (traceback {output.without_paths(ticket.traceback) if live else ticket.traceback})")
-        return text
-    if ticket.state == SKIPPED and ticket.reason:
-        return output.styled("dim", output.without_paths(ticket.reason))
-    return ""
-
-
-def _phases(snap: Snapshot, ticket: TicketSnapshot, glyph: output.Glyphs) -> tuple[list[str], int]:
-    """The phase cells of a running ticket, one for each phase in order, and the index of the active phase.
-
-    A phase that is done has `✓` in `ok`, the active phase has `●` in `now`, and a phase to come has `○` in `dim`. The
-    active phase `gates` gives its gate count (`gates ● 2/3`), and a fix-up round is in `warn` with its round and the
-    limit of the mode (`fix-up ● 1/2`). A ticket that does not run has no phase.
-    """
-    if ticket.state != RUNNING or ticket.phase is None:
-        return [], 0
-    track = ECONOMY_TRACK if snap.mode == domain.ECONOMY else TRACK
-    active = track.index(ticket.phase) if ticket.phase in track else len(track)
-    rounds = f" {ticket.fixup_round}/{domain.fixup_round_limit(snap.mode)}" if ticket.fixup_round and snap.mode in domain.FIXUP_ROUND_LIMIT else ""
-    cells = []
-    for index, phase in enumerate(track):
-        if phase == domain.PHASE_FIXUP and index == active:
-            cells.append(output.styled("warn", f"{phase} {glyph.node}{rounds}"))
-        elif index == active:
-            count = f" {ticket.gate_count[0]}/{ticket.gate_count[1]}" if phase == domain.PHASE_GATES and ticket.gate_count else ""
-            cells.append(output.styled("now", f"{phase} {glyph.node}{count}"))
-        elif index < active or (phase == domain.PHASE_FIXUP and rounds):
-            cells.append(output.styled("dim", phase + " ") + output.styled("ok", glyph.built) + (output.styled("dim", rounds) if phase == domain.PHASE_FIXUP else ""))
-        else:
-            cells.append(output.styled("dim", f"{phase} {glyph.open}"))
-    return cells, active
-
-
-def _idle(seconds: int, quiet: str, idle_limit: int | None, glyph: output.Glyphs) -> str:
-    """The warning of an activity that is idle for `idle_limit` seconds or more, or else `quiet`."""
-    if idle_limit is not None and seconds >= idle_limit:
-        return output.styled("warn", f"{glyph.idle} idle {format_duration(seconds)}")
-    return quiet
-
-
 def liveness(seconds: int, idle_limit: int | None, spin: int | None) -> tuple[str, str]:
     """The paint role and the text of the time since the last activity of an agent (#147).
 
     At `idle_limit` seconds or more, it is the warning `⚠ idle <time>` in `warn`. Else, with no `spin`, it is the text
     of a snapshot: `active <time> ago` in `now`. A live view that animates gives the frame of its spinner in `spin`:
-    under `QUIET_SECONDS`, the text is that frame of the spinner, in `now`, and after it `quiet <time>` in `dim`.
+    under `_QUIET_SECONDS`, the text is that frame of the spinner, in `now`, and after it `quiet <time>` in `dim`.
     """
     if idle_limit is not None and seconds >= idle_limit:
         return "warn", f"{output.glyphs().idle} idle {format_duration(seconds)}"
     if spin is None:
         return "now", f"active {format_duration(seconds)} ago"
-    if seconds < QUIET_SECONDS:
+    if seconds < _QUIET_SECONDS:
         frames = output.spinner()
         return "now", frames[spin % len(frames)]
     return "dim", f"quiet {format_duration(seconds)}"
 
 
-def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Glyphs, spin: int | None) -> str:
-    """The live tail of the row of a running ticket: its continuations, and the activity of its agent (`liveness`)."""
-    parts = []
-    if ticket.continuation is not None:
-        parts.append(output.styled("warn", f"cont {ticket.continuation[0]}/{ticket.continuation[1]}"))
-    if ticket.idle_seconds is not None:
-        parts.append(output.styled(*liveness(ticket.idle_seconds, idle_limit, spin)))
-    return f" {glyph.pending} ".join(parts)
 
-
-def _gate_tail(command: str, log_idle_seconds: int | None, idle_limit: int | None, glyph: output.Glyphs, name: str | None = None) -> str:
-    """The detail of the gate that runs: its short name and the age of its log, on the sub-row of its phase (or the chain row)."""
-    gate = f"gate {output.gate_name(command, name)}"
-    if log_idle_seconds is not None:
-        gate += f" {glyph.pending} " + _idle(log_idle_seconds, f"log {format_duration(log_idle_seconds)} ago", idle_limit, glyph)
-    return gate
-
-
-@dataclass(frozen=True)
-class PlanLink:
-    """The link of one ticket of the newest plan to the rows above it in the ticket table (#143).
-
-    `blockers` are the blockers of the ticket that are in the plan, in the order of the plan record. `rail` is true when
-    the one blocker of the ticket is the ticket directly above it in plan order: the rail joins the two rows. `after`
-    gives the blockers that the `after` column names: none when the rail joins the rows, and else each blocker, so a
-    join (two blockers or more) names each one.
-    """
-
-    id: str
-    blockers: tuple[str, ...]
-    rail: bool
-
-    @property
-    def after(self) -> tuple[str, ...]:
-        return () if self.rail else self.blockers
-
-
-def plan_links(events: list[dict[str, object]]) -> list[PlanLink]:
-    """The link of each ticket of the newest plan of a run, in plan order: its blockers, and whether the rail joins it to
-    the row above.
-
-    The blockers come from the `plan` field of the newest `plan-change`, or else of `run-start` (#107). A blocker that is
-    not in the plan does not count. A journal of an earlier version of the engine records no plan: no ticket has a
-    blocker, so the table has no rail and no `after` cell.
-    """
-    blockers = _newest_blockers(events) or {}
-    ids = plan_ids(events)
-    known = set(ids)
-    links = []
-    for index, ticket in enumerate(ids):
-        own = tuple(blocker for blocker in blockers.get(ticket, []) if blocker in known)
-        links.append(PlanLink(ticket, own, index > 0 and own == (ids[index - 1],)))
-    return links
-
-
-def _newest_blockers(events: list[dict[str, object]]) -> dict[str, list[str]] | None:
+def newest_blockers(events: list[dict[str, object]]) -> dict[str, list[str]] | None:
     """The blockers of each ticket in the `plan` field of the newest `plan-change`, or else of `run-start` (#107).
 
     None when that event records no plan: an earlier version of the engine wrote only the ticket ids.
@@ -1461,87 +689,7 @@ def _newest_blockers(events: list[dict[str, object]]) -> dict[str, list[str]] | 
 
 def _plan(events: list[dict[str, object]]) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
     """The newest plan of a run for `status --json`: each ticket id in plan order, with its blockers as recorded."""
-    blockers = _newest_blockers(events)
+    blockers = newest_blockers(events)
     if blockers is None:
         return None
     return tuple((ticket, tuple(blockers.get(ticket, ()))) for ticket in plan_ids(events))
-
-
-@dataclass(frozen=True)
-class ActiveRun:
-    """One active run, for the run picker (frame 2b, #118): its journal, its snapshot with no tokens, its run branch,
-    the time of its `run-start` event, and the seconds since its last activity.
-
-    The last activity is the newest change of the journal, of the event streams, of the gate logs and of the prepare
-    logs, as for the stall check of `delegate watch`.
-    """
-
-    journal: Path
-    snap: Snapshot
-    run_branch: str
-    started: datetime
-    idle_seconds: int
-
-
-def active_runs(journals: Sequence[Path], now: datetime) -> list[ActiveRun]:
-    """Each active run of `journals`, the newest run first. `now` is the time of the clock, in UTC.
-
-    The picker numbers the runs in this order, so 1 is the newest run. Raise JournalError when a journal is not valid.
-    """
-    found = []
-    for journal in journals:
-        events, _ = read_new_events(journal, 0, 1)
-        # The picker needs no tokens, so the snapshot reads no event stream.
-        snap = snapshot_of(events, journal, lambda adapter: None, now)
-        changed = datetime.fromtimestamp(last_change(journal, activity_files(events)), now.tzinfo)
-        found.append(ActiveRun(journal, snap, str(events[0]["run_branch"]), _time(events[0]), _seconds(changed, now)))
-    return sorted(found, key=lambda run: run.started, reverse=True)
-
-
-# The columns of the run picker, in order, and the columns of numbers, which align right.
-PICKER_HEADER: tuple[str, ...] = ("#", "run", "run branch", "mode", "since", "progress", "now")
-PICKER_NUMBERS: frozenset[int] = frozenset({0})
-
-
-def picker_lines(runs: Sequence[ActiveRun], now: datetime) -> list[str]:
-    """The lines of the run picker: `<n> runs are active in this repository`, and a table with one row for each run.
-
-    The spec is `design/docs/components.md` (Run picker). The rows keep the
-    order of `runs`. A row gives the number to choose, the full run id with its short id bold, the run branch, the mode,
-    the local start time (with the day of the week when the run did not start today), the progress, and what runs now
-    with the time since the last activity, as `active 2s ago` (`liveness`). `now` is the time of the clock, in UTC.
-    """
-    glyph = output.glyphs()
-    dot = f" {glyph.pending} "
-    today = now.astimezone().date()
-    rows = [[output.styled("dim", name) for name in PICKER_HEADER]]
-    for number, run in enumerate(runs, start=1):
-        snap = run.snap
-        prefix, _, short = snap.run_id.rpartition("-")
-        started = run.started.astimezone()
-        running = [f"{t.id} {t.phase}" if t.phase else t.id for t in snap.tickets if t.state == RUNNING]
-        if snap.phase:
-            running.append(f"chain {snap.phase}")
-        doing = output.styled("now", f"{glyph.running} {', '.join(running)}") if running else output.styled("dim", "no ticket running")
-        if snap.state != RUNNING:
-            doing = output.styled("warn", snap.state) + dot + doing
-        rows.append([
-            output.styled("dim", str(number)),
-            prefix + ("-" if prefix else "") + output.styled("bold", short),
-            run.run_branch,
-            snap.mode,
-            output.styled("dim", started.strftime("%H:%M" if started.date() == today else "%a %H:%M")),
-            f"{snap.tickets_ended}/{snap.tickets_total} ended{dot}{snap.percent}%",
-            doing + dot + output.styled(*liveness(run.idle_seconds, None, None)),
-        ])
-    table = [line.rstrip(" ") for line in output.columns(rows, right=PICKER_NUMBERS)]
-    return [f"{len(runs)} runs are active in this repository", *table]
-
-
-def choices_line(runs: Sequence[ActiveRun]) -> str:
-    """The one line that names each active run, in the order of `runs`, for a reader that cannot answer a prompt.
-
-    The copy deck gives it: `<n> runs are active in this repository; give a run id: <id> (<branch>, <state>), …`.
-    """
-    named = ", ".join(f"{run.snap.run_id} ({run.run_branch}, {run.snap.state})" for run in runs)
-    return f"{len(runs)} runs are active in this repository; give a run id: {named}"

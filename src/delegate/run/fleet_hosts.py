@@ -25,7 +25,7 @@ from . import clock, fleet_rules
 from .fleet_model import FORMAT, LostHost, RunRow
 from .fleet_rules import in_window
 from .last_answers import LastAnswers
-from .status import HALTED, PAUSED, PAUSING, RUNNING, STOPPED
+from .status_model import HALTED, PAUSED, PAUSING, RUNNING, STOPPED
 
 # The seconds that the read of one other host may take (#318), and the seconds between two reads of the same hosts in `delegate runs --watch`.
 HOST_READ_SECONDS: float = 10.0

@@ -32,7 +32,8 @@ from .index import record_runs
 from .journal import JournalError, JournalReads, event_time
 from .runs import RunsError, all_journals, failed_starts, machine_states
 from .state_location import repository_name
-from .status import FAILED, PAUSING, RUNNING, ReaderOf, snapshot_at, snapshot_of
+from .status import snapshot_at, snapshot_of
+from .status_model import FAILED, PAUSING, RUNNING, ReaderOf
 
 
 def _eta_then(events: list[dict[str, object]], journal: Path, now: datetime) -> datetime | None:

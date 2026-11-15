@@ -2,8 +2,8 @@
 the feed of the ticket that runs now (#116).
 
 `LiveView` is a sink of `delegate.run.watch.follow`. At each poll it makes a frame: the run line and the ticket table
-(`status.view_lines`, of the same snapshot as `delegate status`, with the rail and the `after` cells of
-`status.plan_links`), a divider, and the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in place on the terminal. The spec is
+(`status_table.view_lines`, of the same snapshot as `delegate status`, with the rail and the `after` cells of
+`status_picker.plan_links`), a divider, and the lines of the feed. The command (in `delegate.cli.watch`) draws the frame in place on the terminal. The spec is
 `design/docs/components.md`.
 
 A line of the feed is short: the local time (`HH:MM`), the ticket, and what happened. It shows no path and no `None`.
@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import domain, output, run_state, status
+from . import domain, output, run_state, status, status_model, status_picker, status_table
 from .clock import Clock, utc_now
 from .events import JOURNAL_CHANGED
 from .journal import JournalError, crash_where
@@ -148,7 +148,7 @@ class LiveView:
     """
 
     def __init__(
-        self, journal: Path, reader_of: status.ReaderOf, clock: Clock,
+        self, journal: Path, reader_of: status_model.ReaderOf, clock: Clock,
         size: Callable[[], tuple[int, int]], draw: Callable[[list[str]], None], stall_minutes: float | None = None,
     ) -> None:
         self._journal, self._clock, self._size, self._draw = journal, clock, size, draw
@@ -165,10 +165,10 @@ class LiveView:
         self._timed_out: set[tuple[str, str]] = set()  # the (ticket, role) of an agent that the engine ended at the agent timeout
         self._gates: dict[tuple[str, str], datetime] = {}  # the start of the gate that runs, by ticket and command
         self._chain: dict[str, str] = {}  # the stack of the chain verification, by the ticket that its events name
-        self._reader: status.StreamReader | None = None
+        self._reader: status_model.StreamReader | None = None
         # The facts of the newest frame, which a draw between two reads of the journal uses again (#147): the snapshot,
         # the tokens of each agent that runs, and the time of the clock.
-        self._snap: status.Snapshot | None = None
+        self._snap: status_model.Snapshot | None = None
         self._agent_counts: dict[tuple[str, str], str | None] = {}
         self._at: datetime | None = None
         self._spin = 0  # the frame of the spinner of the next draw
@@ -233,7 +233,7 @@ class LiveView:
         """The lines to draw: the run line, a blank line, the table, the divider, and the feed, each cut to `columns`.
 
         A frame fits in `rows`, with the last line free for the cursor. The table gets the rows that are left when the
-        feed keeps `FEED_LINES` lines, and the rows that do not fit fold (`status.view_lines`). The feed gets the rows
+        feed keeps `FEED_LINES` lines, and the rows that do not fit fold (`status_table.view_lines`). The feed gets the rows
         that the table does not use, and keeps its newest lines. The last frame keeps the whole feed, so the terminal
         scrolls it. With 0 `rows`, the size of the terminal is not known: no row folds, and the frame keeps each line. A
         frame of a watch that goes on also tells each agent that runs now; the last frame does not.
@@ -256,8 +256,8 @@ class LiveView:
         block: list[str] = []
         if snap is not None:
             height = room - 1 - FEED_LINES if known else None
-            block = status.view_lines(
-                snap, status.plan_links(self._events), width, height, self._idle_limit, spin, frozenset(self._warned),
+            block = status_table.view_lines(
+                snap, status_picker.plan_links(self._events), width, height, self._idle_limit, spin, frozenset(self._warned),
             )
         id_cells = max([ID_CELLS, *(output.width(line.subject) for line in feed)])
         lines = [line.painted(id_cells) for line in feed]
@@ -271,7 +271,7 @@ class LiveView:
         self._spinning = spin is not None and any(status.liveness(seconds, self._idle_limit, spin)[0] == "now" for seconds in idle)
         return [output.cut(line, width) for line in [*block, *divider, *lines]]
 
-    def _running(self, snap: status.Snapshot, spin: int | None) -> list[_Line]:
+    def _running(self, snap: status_model.Snapshot, spin: int | None) -> list[_Line]:
         """A line for each agent that runs now: its role, the time since it started, its tokens in `dim` when the run has a
         reader of the event streams, and the time since its last activity (`status.liveness`). `spin` is the frame of the
         spinner, or None when the frame has no paint."""
@@ -301,9 +301,9 @@ class LiveView:
         found = status.read_stream(self._reader, Path(str(stream)), is_live=True)
         if found is None:
             return None
-        return f"{status.format_tokens(found.tokens_new)} new{SEPARATOR}{status.format_tokens(found.tokens_cache)} cache"
+        return f"{status_model.format_tokens(found.tokens_new)} new{SEPARATOR}{status_model.format_tokens(found.tokens_cache)} cache"
 
-    def _snapshot(self, now: datetime | None = None) -> status.Snapshot | None:
+    def _snapshot(self, now: datetime | None = None) -> status_model.Snapshot | None:
         """The snapshot of the events so far at `now` (default: the clock), or None when the journal does not start with
         `run-start`."""
         try:
@@ -347,7 +347,7 @@ class LiveView:
         """The tokens of the agent that a result event ends: the totals of the event, or else the tokens of its stream."""
         totals = status.journal_totals(event)
         if totals is not None:
-            return status.format_token_counts(totals.tokens_new, totals.tokens_cache)
+            return status_model.format_token_counts(totals.tokens_new, totals.tokens_cache)
         return self._tokens(event.get("event_stream"))
 
     def _tokens(self, stream: object) -> str | None:
@@ -356,7 +356,7 @@ class LiveView:
             return None
         try:
             found = self._reader(Path(str(stream)))
-            return status.format_token_counts(found.tokens_new, found.tokens_cache)
+            return status_model.format_token_counts(found.tokens_new, found.tokens_cache)
         except Exception:  # noqa: BLE001 - the view only shows data, as `delegate status` does
             return None
 
@@ -447,7 +447,7 @@ class LiveView:
             return
         if kind == "step-end":
             state = str(event["state"])
-            text = state if state == status.BUILT or not event.get("reason") else f"{state}{SEPARATOR}{event['reason']}"
+            text = state if state == status_model.BUILT or not event.get("reason") else f"{state}{SEPARATOR}{event['reason']}"
             self._join(ticket, when, subject, [("", text)])
             return
         if kind == "run-end":
@@ -500,12 +500,12 @@ class LiveView:
                 self._flush(ticket)
         start = datetime.fromisoformat(str(self._events[0]["time"])) if self._events and self._events[0]["event"] == "run-start" else when
         result = str(event["result"])
-        spans: list[Span] = [("ok bold" if result == status.BUILT else "bad", f"run {result}"), JOIN, ("", duration((when - start).total_seconds()))]
+        spans: list[Span] = [("ok bold" if result == status_model.BUILT else "bad", f"run {result}"), JOIN, ("", duration((when - start).total_seconds()))]
         if event.get("reason"):
             spans += [JOIN, ("", f"reason: {event['reason']}")]
         snap = self._snapshot()
         if snap is not None and snap.tokens_new is not None and snap.tokens_cache is not None:
-            spans += [JOIN, ("dim", status.format_token_counts(snap.tokens_new, snap.tokens_cache))]
+            spans += [JOIN, ("dim", status_model.format_token_counts(snap.tokens_new, snap.tokens_cache))]
         if newest is None:
             self._add(when, "", spans)
         else:

@@ -7,7 +7,7 @@ know, or that has no stream reader, gives no reader: the output then has the pro
 
 With no run id, the active runs decide (`delegate.run.runs.runs_of`), as for `delegate watch`: the one active run, or
 the newest run when no run is active. With more than one active run, the output is the table of the run picker of
-`delegate watch`, newest first (`delegate.run.status.picker_lines`), with no prompt, and `--json` is an error, because one
+`delegate watch`, newest first (`delegate.run.status_picker.picker_lines`), with no prompt, and `--json` is an error, because one
 snapshot cannot hold two runs. A newest
 run that failed at start (`delegate.run.runs.FailedStart`) has no journal: the output is one line with the last line of
 its log, and `--json` is an error, because the run has no snapshot.
@@ -25,7 +25,7 @@ from pathlib import Path
 from .. import adapters
 from ..adapters.git import GitVersionControl
 from ..ports.harness import Activity
-from ..run import clock, status
+from ..run import clock, status, status_picker, status_table
 from ..run.journal import JournalError
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, locate, runs_of
 from .epilog import STATUS_PAGE, HelpFormatter, epilog
@@ -98,8 +98,8 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     raise RunsError(f"{len(runs.active)} runs are active: {ids}; give a run id to show one of them")
                 now = utc_now()
-                active = status.active_runs(runs.active, now)  # an error prints no part of the list
-                print("\n".join(status.picker_lines(active, now)))
+                active = status_picker.active_runs(runs.active, now)  # an error prints no part of the list
+                print("\n".join(status_picker.picker_lines(active, now)))
                 return 0
             if isinstance(runs.chosen, FailedStart):
                 # The newest run failed at start: it has no journal, so no report and no snapshot.
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             snap = status.snapshot_of_journal(journal, stream_reader_of, utc_now())
             print(json.dumps(snap.to_json(), indent=2))
             return 0
-        lines = status.report_of_journal(journal, stream_reader_of, utc_now())
+        lines = status_table.report_of_journal(journal, stream_reader_of, utc_now())
     except (RunsError, JournalError) as error:
         print(f"delegate status: {error}", file=sys.stderr)
         return EXIT_ERROR
