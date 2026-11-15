@@ -26,7 +26,7 @@ from .support import (
     write_project_agents,
 )
 
-pytestmark = pytest.mark.usefixtures("git_identity", "home")
+pytestmark = [pytest.mark.usefixtures("git_identity", "home"), pytest.mark.scripted_adapter(probes_guard=True)]
 
 WEB_STACK = """[stacks.web]
 specialist = "web-specialist"
@@ -61,14 +61,6 @@ def repo_with_agents(tmp_path: Path, *, web: bool = False) -> Path:
     repo = make_repo(tmp_path, workflow)
     write_agents(repo, "python-specialist", "python-verifier", *(("web-specialist", "web-verifier") if web else ()))
     return repo
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(probes_guard=True)
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def start(repo: Path, capsys) -> tuple[int, str, str, list[dict[str, object]]]:

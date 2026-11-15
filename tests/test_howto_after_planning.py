@@ -8,10 +8,9 @@ import re
 
 import pytest
 
-from delegate import adapters
 
 from .pages import HOW_TO, file_block, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter, write_project_agents
+from .support import write_project_agents
 
 PAGE = HOW_TO / "use-the-kit-after-to-spec-and-to-tickets.md"
 
@@ -21,12 +20,7 @@ FILES = {
 }
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket=FILES)
-    adapters.register("claude-code", adapter)  # the scripted adapter in place of the live harness
-    yield adapter
-    adapters.unregister("claude-code")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket=FILES, registered_as="claude-code")
 
 
 @outside_the_package

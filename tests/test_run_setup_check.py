@@ -13,12 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, event_names, make_repo, read_journal, resume_main, run_main
+from .support import event_names, make_repo, read_journal, resume_main, run_main
 
-pytestmark = pytest.mark.usefixtures("git_identity", "home")
+pytestmark = [pytest.mark.usefixtures("git_identity", "home"), pytest.mark.scripted_adapter(checks_setup=True)]
 
 GATE = "test -f feature.txt"
 REASON = "the guard has no rule for this command"
@@ -30,14 +29,6 @@ def write_agents(repo: Path) -> None:
     for name in ("python-specialist", "python-verifier"):
         (directory / f"{name}.md").write_text(f"---\nname: {name}\n---\nThe rules of {name}.\n")
     (repo / ".git" / "info" / "exclude").write_text(".claude/\n")
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(checks_setup=True)
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def start(repo: Path, capsys) -> tuple[int, str, str, list[dict[str, object]]]:

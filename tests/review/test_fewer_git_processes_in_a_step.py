@@ -12,10 +12,9 @@ import shutil
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from ..support import WORKFLOW, ScriptedAdapter, git, make_repo, read_journal
+from ..support import WORKFLOW, git, make_repo, read_journal
 
 # The git processes that this run started before #348, counted with the same shim on the tree of the commit before the
 # change. They include the 6 processes of the scripted adapter, which writes and commits the work of the specialist for
@@ -43,12 +42,7 @@ def git_calls(tmp_path, monkeypatch):
     return calls
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def test_a_one_ticket_assure_run_with_two_rejects_and_three_gates_starts_at_least_25_git_processes_fewer_than_before(

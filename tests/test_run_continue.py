@@ -17,12 +17,7 @@ from delegate.cli import delegate
 from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys, *extra):

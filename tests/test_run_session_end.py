@@ -13,11 +13,10 @@ scripted adapter by name, and calls `delegate.main`.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 
-from .support import ScriptedAdapter, event_names, git, make_repo, read_journal
+from .support import event_names, git, make_repo, read_journal
 
 FINDING = "FINDING-5120 the header row is missing from feature.txt"
 
@@ -25,12 +24,7 @@ FINDING = "FINDING-5120 the header row is missing from feature.txt"
 SIGTERM_STATUS = 143
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys):

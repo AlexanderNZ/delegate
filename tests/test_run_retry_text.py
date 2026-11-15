@@ -12,9 +12,8 @@ import hashlib
 
 import pytest
 
-from delegate import adapters
 
-from .support import HEAD, ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
+from .support import HEAD, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 
 RULING = "RULING-5202 add no new dependency."
 OLD_B = "Ticket b adds its file."
@@ -31,12 +30,7 @@ def workflow_of(b_text: str = OLD_B, b_blocked_by: tuple[str, ...] = (), a_text:
     return HEAD + a + b + ticket("c", ("b",))
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
 
 
 def failed_run(tmp_path, capsys, scripted):

@@ -17,15 +17,10 @@ from delegate.run.journal import Journal, read_events
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from ..support import ScriptedAdapter, WORKFLOW, make_repo
+from ..support import WORKFLOW, make_repo
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def test_a_journal_calls_each_observer_that_it_got_at_its_start_after_each_event_that_it_wrote(tmp_path):

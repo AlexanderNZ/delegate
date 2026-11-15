@@ -10,19 +10,13 @@ the harness.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import HEAD, ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
+from .support import HEAD, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 from .test_run_retry_text import NEW_B, OLD_B, RULING, failed_run, workflow_of, write
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
 
 
 def commits(repo, branch: str) -> list[str]:

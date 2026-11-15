@@ -11,9 +11,7 @@ scripted adapter plays each agent and records the brief that it gets.
 
 import pytest
 
-from delegate import adapters
 
-from .support import ScriptedAdapter
 from .test_run_report_rule import SCENARIOS, run_from_above
 
 # A resumed session keeps the context of its first brief, and that brief holds the rule.
@@ -21,12 +19,7 @@ BRIEFS = [scenario for scenario in SCENARIOS if scenario != "resumed continuatio
 VERIFIERS = {"full verifier", "fix-up verifier"}
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def commands_section(prompt: str) -> str:

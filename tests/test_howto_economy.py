@@ -8,11 +8,10 @@ import json
 
 import pytest
 
-from delegate import adapters
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
 from .support import state_dir
-from .support import ScriptedAdapter, git, state_and_verdict
+from .support import git, state_and_verdict
 
 PAGE = HOW_TO / "run-an-economy-chain.md"
 
@@ -23,12 +22,7 @@ TESTS = {
 }
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket=TESTS)
-    adapters.register("claude-code", adapter)  # the scripted adapter in place of the live harness
-    yield adapter
-    adapters.unregister("claude-code")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket=TESTS, registered_as="claude-code")
 
 
 @outside_the_package

@@ -9,10 +9,9 @@ import json
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import BASE_BRANCH_START, GATE_LISTING, HEAD, ScriptedAdapter, event_names, git, make_repo, read_journal, ticket, tree, valid_report, warned
+from .support import BASE_BRANCH_START, GATE_LISTING, HEAD, event_names, git, make_repo, read_journal, ticket, tree, valid_report, warned
 
 
 @pytest.fixture(autouse=True)
@@ -23,12 +22,7 @@ def committer_identity(monkeypatch):
         monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
 
 
 def run(repo, capsys, *extra):

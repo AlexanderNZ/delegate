@@ -9,19 +9,13 @@ import json
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .support import state_dir
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
+from .support import WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys, *extra):

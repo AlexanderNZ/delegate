@@ -20,7 +20,7 @@ from .support import (
     WORKFLOW, ScriptedAdapter, event_names, git, journal_path, read_journal, read_journal_file, resume_main, run_main,
 )
 
-pytestmark = pytest.mark.usefixtures("git_identity")
+pytestmark = [pytest.mark.usefixtures("git_identity"), pytest.mark.scripted_adapter()]
 
 AGENTS = (".claude", "agents")
 NAMES = ("python-specialist", "python-verifier", "web-specialist", "web-verifier")
@@ -74,14 +74,6 @@ def make_repo(
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "seed")
     return repo
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def start_run(repo: Path, capsys) -> tuple[int, str, str, list[dict[str, object]]]:
@@ -168,14 +160,6 @@ def make_repo(
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "seed")
     return repo
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def start_run(repo: Path, capsys) -> tuple[int, str, str, list[dict[str, object]]]:

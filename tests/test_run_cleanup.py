@@ -15,21 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .support import state_dir
-from .support import CLEANED_WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal
+from .support import CLEANED_WORKFLOW, event_names, git, make_repo, read_journal
 
 TWO_TICKETS = CLEANED_WORKFLOW + '\n[[tickets]]\nid = "b"\ntext = "The import command reads a CSV file."\nstack = "python"\nblocked-by = []\n'
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={"b": {"feature.txt": "feature\n", "b.txt": "b\n"}})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={"b": {"feature.txt": "feature\n", "b.txt": "b\n"}})
 
 
 def run(repo: Path, capsys) -> tuple[int, str, str]:

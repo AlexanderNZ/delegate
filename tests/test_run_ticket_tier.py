@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 
-from .support import HEAD, ScriptedAdapter, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket_of
+from .support import HEAD, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket_of
 
 ECONOMY_HEAD = HEAD.replace('mode = "assure"', 'mode = "economy"')
 
@@ -39,12 +38,7 @@ def tier_table(tmp_path: Path, extra: str = "") -> Path:
     return path
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
 
 
 def run(repo: Path, capsys, tiers: Path, *extra: str) -> tuple[int, str, str]:

@@ -28,11 +28,7 @@ LOUD = 'echo "GATE-LOG-MARKER-$((2400 + 61)) the first failure"; seq 1 2000'
 LOUD_LINES = 2001
 
 
-@pytest.fixture
-def scripted(scripted):
-    """The scripted adapter of conftest, with the default files: ticket a writes `feature.txt`."""
-    scripted.files_by_ticket = {}
-    return scripted
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def with_gate(gate: str, text: str = WORKFLOW) -> str:

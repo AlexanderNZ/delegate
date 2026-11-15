@@ -23,11 +23,7 @@ from delegate.cli import delegate
 from .support import WORKFLOW, git, journal_path, kill_a_run, live_lock, make_repo, read_journal, read_journal_file, stale_lock, state_dir
 
 
-@pytest.fixture
-def scripted(scripted):
-    """The scripted adapter of conftest, with the default files: ticket a writes `feature.txt`, which the gate needs."""
-    scripted.files_by_ticket = {}
-    return scripted
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def workflow_on(tmp_path: Path, run_branch: str, base_branch: str = "main") -> Path:

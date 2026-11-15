@@ -16,14 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 
 from .. import claude_fake
 from ..support import (
     WORKFLOW, ScriptedAdapter, event_names, make_repo, read_journal, read_journal_file, resume_main, run_main, write_project_agents,
 )
 
-pytestmark = pytest.mark.usefixtures("git_identity", "home")
+pytestmark = [pytest.mark.usefixtures("git_identity", "home"), pytest.mark.scripted_adapter(probes_guard=True, checks_setup=True, version="2.1.300")]
 
 # The wall time of the first probe of each case, and its text in the journal.
 FIRST = datetime(2026, 11, 15, tzinfo=timezone.utc).timestamp()
@@ -37,14 +36,6 @@ def write_agents(repo: Path, verifier_rules: str = "The rules of python-verifier
     (directory / "python-specialist.md").write_text("---\nname: python-specialist\n---\nThe rules of python-specialist.\n")
     (directory / "python-verifier.md").write_text(f"---\nname: python-verifier\n---\n{verifier_rules}\n")
     (repo / ".git" / "info" / "exclude").write_text(".claude/\n")
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(probes_guard=True, checks_setup=True, version="2.1.300")
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def repo_of(tmp_path: Path) -> Path:

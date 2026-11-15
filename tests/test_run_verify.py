@@ -10,21 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report, valid_verdict
+from .support import WORKFLOW, event_names, git, make_repo, read_journal, valid_report, valid_verdict
 
 SPECIALIST_CLAIM = "SPECIALIST-CLAIM-7731 all criteria are met"
 SPECIALIST_NOTE = "SPECIALIST-NOTE-5519 I chose a flat file"
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys, *extra):

@@ -15,17 +15,11 @@ import json
 
 import pytest
 
-from delegate import adapters
 
-from .support import HEAD, ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
+from .support import HEAD, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={"a": {"a.txt": "a\n"}})
 
 
 def start(repo, capsys):

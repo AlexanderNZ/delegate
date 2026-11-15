@@ -14,14 +14,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from delegate import adapters
 from delegate.cli import delegate
 from delegate.ports.harness import McpServer, McpTool
 
 from . import claude_fake, opencode_fake
-from .support import WORKFLOW, ScriptedAdapter, make_repo, read_journal, run_main, write_project_agents
+from .support import WORKFLOW, make_repo, read_journal, run_main, write_project_agents
 
-pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
+pytestmark = [pytest.mark.usefixtures("home", "claude_stand_in"), pytest.mark.scripted_adapter(files_by_ticket={"b": {"export.md": "docs\n"}})]  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
 BROWSER = McpServer("browser", command=("npx", "@playwright/mcp@latest"))
 TRACKER = McpServer("tracker", url="https://mcp.example.invalid/mcp")
@@ -55,14 +54,6 @@ def with_servers(workflow: str) -> str:
     """The workflow with the two servers in the stack `python`, a stack `docs` with no server, and one ticket of each."""
     head, tickets = workflow.split("[[tickets]]", 1)
     return head + SERVERS + DOCS_STACK + "\n[[tickets]]" + tickets + DOCS_TICKET
-
-
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={"b": {"export.md": "docs\n"}})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def test_the_specialist_and_the_verifier_of_a_stack_get_its_mcp_servers_and_the_agents_of_another_stack_get_none(tmp_path, capsys, scripted):

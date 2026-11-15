@@ -9,14 +9,13 @@ import time
 
 import pytest
 
-from delegate import adapters
 from delegate.adapters.shell import ShellGateRunner
 from delegate.run.domain import IDLE_TIMEOUT_SECONDS
 
 from . import claude_fake
-from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, run_main, write_project_agents
+from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, event_names, git, make_repo, read_journal, run_main, write_project_agents
 
-pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
+pytestmark = [pytest.mark.usefixtures("home", "claude_stand_in"), pytest.mark.scripted_adapter()]  # the dry run looks in the user directory for agent files (#182), and probes the guard (#219)
 
 GATE = 'gates = ["test -f feature.txt"]'
 
@@ -25,14 +24,6 @@ def with_limits(gate: str | None = None, agent: str | None = None, gates: str = 
     """The test workflow with the stack fields `gate-timeout` and `agent-timeout` after the gates."""
     lines = [gates] + ([f"gate-timeout = {gate}"] if gate is not None else []) + ([f"agent-timeout = {agent}"] if agent is not None else [])
     return text.replace(GATE, "\n".join(lines))
-
-
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def run(repo, capsys, *extra):

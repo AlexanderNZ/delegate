@@ -17,13 +17,10 @@ import json
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .support import BASE_BRANCH_START, HEAD, ticket, warned, without_take_over
-from .support import (
-    ScriptedAdapter, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree,
-)
+from .support import git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree
 
 # The subject of the commits that the scripted specialist makes.
 SPECIALIST_WORK = "scripted work (python-specialist)"
@@ -32,12 +29,7 @@ SPECIALIST_WORK = "scripted work (python-specialist)"
 LANDED = "landed on main during the run"
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
 
 
 def run(repo, capsys, *extra):

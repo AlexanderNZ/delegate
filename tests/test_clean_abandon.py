@@ -15,21 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import HEAD, ScriptedAdapter, bare_repo, event_names, git, journal_path, live_lock, make_repo, read_journal_file, resume_main, run_end, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, write_journal
+from .support import HEAD, bare_repo, event_names, git, journal_path, live_lock, make_repo, read_journal_file, resume_main, run_end, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, write_journal
 from .test_run_pause import ECONOMY_HEAD, pause_during_the_specialist_of, run_id_of
 
 REASON = "the owner cancelled the work"
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
 
 
 def main(capsys, *argv: str) -> tuple[int, str, str]:

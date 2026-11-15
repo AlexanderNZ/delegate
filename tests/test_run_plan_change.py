@@ -16,13 +16,10 @@ import json
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .support import HEAD, state_dir, ticket
-from .support import (
-    ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report,
-)
+from .support import event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report
 from .test_run_economy import ECONOMY
 from .test_run_pause import ECONOMY_HEAD, RUN_PAUSED, pause_during_the_specialist_of
 
@@ -31,12 +28,7 @@ def text_of(ticket_id: str) -> str:
     return f"Ticket {ticket_id} adds its file."
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcdxy"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcdxy"})
 
 
 def write_workflow(repo, text: str) -> None:

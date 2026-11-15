@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate
 
@@ -40,12 +39,7 @@ def git_calls(tmp_path, monkeypatch):
     return calls
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 # The temp prefixes where a guard lets a verifier write. On a host whose temp directory is in one, the copy is in the

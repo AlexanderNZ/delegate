@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake
-from .support import NO_TIMEOUTS_WORKFLOW, ScriptedAdapter, make_repo, run_main, write_project_agents
+from .support import NO_TIMEOUTS_WORKFLOW, make_repo, run_main, write_project_agents
 from .test_run_detach import printed, wait_for_ends
 
-pytestmark = pytest.mark.usefixtures("home", "claude_stand_in")  # the dry run checks the agent files and probes the guard
+pytestmark = [pytest.mark.usefixtures("home", "claude_stand_in"), pytest.mark.scripted_adapter()]  # the dry run checks the agent files and probes the guard
 
 # The support workflow with no time limits, on an adapter with a setup check: one stack `python` with hotspots, one ticket, `assure` mode.
 BASE = NO_TIMEOUTS_WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
@@ -234,14 +233,6 @@ def test_a_workflow_with_only_warnings_exits_0_and_prints_no_warning_on_stderr(t
         ["warn", "agent-timeout:"], ["warn", "ticket-start:"], ["warn", "hotspots:"], ["warn", "gate-names:"],
     ]
     assert err == ""
-
-
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
 
 
 def test_a_run_without_dry_run_prints_the_warn_lines_on_stderr_and_no_ok_line(tmp_path, capsys, scripted):

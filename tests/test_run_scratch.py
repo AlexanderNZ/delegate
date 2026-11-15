@@ -71,11 +71,7 @@ def working_claude(tmp_path, monkeypatch, git_identity, home):
     adapters.unregister("claude-code")
 
 
-@pytest.fixture
-def scripted(scripted):
-    """The scripted adapter of conftest, with the default files: ticket a writes `feature.txt`, which the gate needs."""
-    scripted.files_by_ticket = {}
-    return scripted
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo: Path, capsys, *extra: str) -> tuple[int, str, str]:

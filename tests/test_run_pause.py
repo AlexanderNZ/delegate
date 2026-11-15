@@ -19,10 +19,9 @@ import sys
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import HEAD, ScriptedAdapter, bare_repo, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, tree, write_journal
+from .support import HEAD, bare_repo, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, tree, write_journal
 
 ECONOMY_HEAD = HEAD.replace('mode = "assure"', 'mode = "economy"')
 
@@ -41,12 +40,7 @@ sys.exit(main(["pause", Path.cwd().parent.name, "--repo", str(Path.cwd())]))
 """
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
 
 
 def run_id_of(repo) -> str:

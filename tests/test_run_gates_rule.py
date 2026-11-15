@@ -14,10 +14,9 @@ the specialist, the fix-up specialist and the verifier, and records each prompt.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import WORKFLOW, ScriptedAdapter, make_repo
+from .support import WORKFLOW, make_repo
 
 GATES = ["test -f feature.txt", "grep -q feature feature.txt"]
 TWO_GATES = WORKFLOW.replace('gates = ["test -f feature.txt"]', "gates = [" + ", ".join(f"'{g}'" for g in GATES) + "]")
@@ -28,12 +27,7 @@ GATES_GREEN = "`gates_green` states whether the tests that you ran pass."
 ENGINE_DECIDES = "The engine does not trust this field: the result of the gates that the engine runs decides."
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys, *extra):

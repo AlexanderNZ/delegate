@@ -24,10 +24,9 @@ from contextlib import redirect_stdout
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import HEAD, ScriptedAdapter, Terminal, make_repo, read_journal, resume_main, run_main, state_dir, ticket, ticket_of
+from .support import HEAD, Terminal, make_repo, read_journal, resume_main, run_main, state_dir, ticket, ticket_of
 from .test_run_pause import RUN_PAUSED
 
 # An SGR sequence: the paint of a role.
@@ -45,12 +44,7 @@ def plain_environment(monkeypatch):
     monkeypatch.setenv("DELEGATE_NO_TITLE", "1")
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
 
 
 def start(repo, capsys) -> tuple[int, str, str]:

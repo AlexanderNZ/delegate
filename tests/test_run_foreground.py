@@ -11,9 +11,7 @@ scripted adapter plays each agent and records the brief that it gets.
 
 import pytest
 
-from delegate import adapters
 
-from .support import ScriptedAdapter
 from .test_run_report_rule import SCENARIOS, run_from_above
 
 FOREGROUND_RULE = "Run every command in the foreground."
@@ -21,12 +19,7 @@ FOREGROUND_RULE = "Run every command in the foreground."
 BRIEFS = [scenario for scenario in SCENARIOS if scenario != "resumed continuation"]
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 @pytest.mark.parametrize("scenario", BRIEFS)

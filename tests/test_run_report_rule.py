@@ -16,22 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, git, make_repo, valid_report
+from .support import git, make_repo, valid_report
 
 RULE = re.compile(r"Write the report only at the absolute path `([^`]+)`\.")
 GIT_DIRECTORY_RULE = re.compile(r"Except for the (worktree|copy) and the report, create, change, or remove nothing inside the git directory")
 CONTRADICTION = "Change no file outside it."
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run_from_above(tmp_path, monkeypatch, capsys):

@@ -11,22 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from ..support import HEAD, ScriptedAdapter, make_repo, read_journal, run_main, state_dir, ticket, ticket_of
+from ..support import HEAD, make_repo, read_journal, run_main, state_dir, ticket, ticket_of
 from ..test_run_setup_check import write_agents
 
 GATE = "test -f feature.txt"
 REASON = "the guard has no rule for this command"
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"}, checks_setup=True)
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"}, checks_setup=True)
 
 
 @pytest.fixture

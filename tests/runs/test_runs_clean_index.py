@@ -11,20 +11,14 @@ import os
 
 import pytest
 
-from delegate import adapters
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.cli import delegate
 
-from ..support import HEAD, ScriptedAdapter, make_repo, read_journal, run_main, ticket
+from ..support import HEAD, make_repo, read_journal, run_main, ticket
 from ..test_clean_abandon import REASON, a_paused_run
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
 
 
 def test_clean_ended_forgets_the_record_of_each_run_that_ended_built(tmp_path, capsys, monkeypatch, scripted):

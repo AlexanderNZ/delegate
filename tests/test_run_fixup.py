@@ -10,22 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, valid_report
+from .support import WORKFLOW, event_names, git, make_repo, read_journal, valid_report
 
 SPECIALIST_CLAIM = "SPECIALIST-CLAIM-3318 the findings are fixed"
 SPECIALIST_NOTE = "SPECIALIST-NOTE-8120 I added a header file"
 FINDING = "FINDING-4471 the header row is missing from feature.txt"
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys, *extra):

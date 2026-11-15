@@ -10,18 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from delegate import adapters
 
 from .support import state_dir
-from .support import ScriptedAdapter, make_repo, run_main
+from .support import make_repo, run_main
 
 
-@pytest.fixture
-def scripted(git_identity):
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def journal_now(repo: Path) -> list[dict[str, object]]:

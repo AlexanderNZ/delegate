@@ -16,10 +16,9 @@ scripted adapter by name, and calls `delegate.main`.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal, tree
+from .support import WORKFLOW, git, make_repo, read_journal, tree
 
 HEAD = WORKFLOW.split("[[tickets]]")[0].replace('gates = ["test -f feature.txt"]', 'gates = ["test -f shared.txt"]')
 
@@ -48,12 +47,7 @@ def committer_identity(monkeypatch):
         monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket=dict(SAME_FILE))
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket=dict(SAME_FILE))
 
 
 def run(repo, capsys, *extra):

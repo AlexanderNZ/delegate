@@ -6,21 +6,15 @@ is the model that the live harness would receive on its command line.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .pages import HOW_TO, follow, new_repo, outside_the_package, write_files
-from .support import ScriptedAdapter, git, write_project_agents
+from .support import git, write_project_agents
 
 PAGE = HOW_TO / "point-the-tiers-at-a-gateway.md"
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files={"test_feature.py": "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_feature(self):\n        self.assertTrue(True)\n"})
-    adapters.register("claude-code", adapter)  # the scripted adapter in place of the live harness
-    yield adapter
-    adapters.unregister("claude-code")
+pytestmark = pytest.mark.scripted_adapter(files={"test_feature.py": "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_feature(self):\n        self.assertTrue(True)\n"}, registered_as="claude-code")
 
 
 def a_repo(tmp_path):

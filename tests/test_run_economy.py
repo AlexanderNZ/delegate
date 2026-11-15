@@ -8,11 +8,10 @@ The expected values come from the ticket's acceptance criteria.
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 
 from .support import without_take_over
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
+from .support import WORKFLOW, event_names, git, make_repo, read_journal
 
 ECONOMY = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')
 
@@ -31,12 +30,7 @@ blocked-by = []
 '''
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter(files_by_ticket={"a": {"feature.txt": "a\n"}, "b": {"b.txt": "b\n"}, "c": {"c.txt": "c\n"}})
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter(files_by_ticket={"a": {"feature.txt": "a\n"}, "b": {"b.txt": "b\n"}, "c": {"c.txt": "c\n"}})
 
 
 def run(repo, capsys, *extra):

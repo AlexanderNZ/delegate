@@ -28,6 +28,10 @@ def pytest_configure(config):
     """
     config.addinivalue_line(
         "markers",
+        "scripted_adapter(**fields): the fixture `scripted` makes `ScriptedAdapter(**fields)`; `registered_as=` is its registry name (#354)",
+    )
+    config.addinivalue_line(
+        "markers",
         "kit_repository: the test looks up the repository of the kit itself through the version control port (#285); say why in the test",
     )
     entries = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
@@ -226,17 +230,34 @@ def git_identity(monkeypatch):
         monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
 
 
+# The adapter that a test module without the marker `scripted_adapter` gets from the fixture `scripted`: each ticket a to d
+# writes its own file.
+DEFAULT_SCRIPTED_FILES: dict[str, dict[str, str]] = {t: {f"{t}.txt": f"{t}\n"} for t in "abcd"}
+
+
 @pytest.fixture
-def scripted(git_identity):
-    """A scripted adapter registered as `scripted`. Each ticket a to d writes its own file."""
+def scripted(request, git_identity):
+    """The one scripted adapter of the suite, registered for the test as `scripted`.
+
+    A module or a test that needs another adapter sets the marker `scripted_adapter(...)`: its keyword arguments are the
+    fields of `ScriptedAdapter` (`files_by_ticket=`, `probes_guard=`, `checks_setup=` and so on), and `registered_as=`
+    names the adapter in the registry when it is not `scripted`. The marker with no argument gives the adapter with
+    the default files: ticket a writes `feature.txt`, which the gate of the shared workflow needs. With no marker each
+    ticket a to d writes its own file.
+    """
+    import copy
+
     from delegate import adapters
 
     from .support import ScriptedAdapter
 
-    adapter = ScriptedAdapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcd"})
-    adapters.register("scripted", adapter)
+    marker = request.node.get_closest_marker("scripted_adapter")
+    options = {"files_by_ticket": copy.deepcopy(DEFAULT_SCRIPTED_FILES)} if marker is None else copy.deepcopy(marker.kwargs)
+    name = options.pop("registered_as", "scripted")
+    adapter = ScriptedAdapter(**options)
+    adapters.register(name, adapter)
     yield adapter
-    adapters.unregister("scripted")
+    adapters.unregister(name)
 
 
 # The environment variables of a host that change how the engine works: where it keeps its state (#97), and what

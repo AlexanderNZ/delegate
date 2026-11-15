@@ -11,21 +11,15 @@ import re
 
 import pytest
 
-from delegate import adapters
 from delegate.cli import delegate
 from delegate.run.reports import SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, VERIFIER_REQUIRED
 
-from .support import ScriptedAdapter, make_repo, read_journal, valid_verdict
+from .support import make_repo, read_journal, valid_verdict
 
 EXAMPLE = re.compile(r"^```json\n(.*?)^```", re.DOTALL | re.MULTILINE)
 
 
-@pytest.fixture
-def scripted():
-    adapter = ScriptedAdapter()
-    adapters.register("scripted", adapter)
-    yield adapter
-    adapters.unregister("scripted")
+pytestmark = pytest.mark.scripted_adapter()
 
 
 def run(repo, capsys):
