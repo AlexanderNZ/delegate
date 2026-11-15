@@ -165,7 +165,10 @@ def test_opencode_specialist_catch_all_precedes_every_push_deny(rendered):
     assert list(spec["permission"]["bash"].items()) == [
         ("*", "allow"),
         ("git push*", "deny"),
-        ("git -C * push*", "deny"),
+        ("git -* push*", "deny"),
+        ("git *-c *core.hooksPath*", "deny"),
+        ("git *-c *core.hookspath*", "deny"),
+        ("git *--config-env*", "deny"),
     ]
 
 

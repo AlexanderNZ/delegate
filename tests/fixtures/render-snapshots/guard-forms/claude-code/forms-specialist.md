@@ -12,7 +12,7 @@ hooks:
   - matcher: Bash
     hooks:
     - type: command
-      command: 'python3 -c ''import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"]; sys.exit(3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b", c) else 0)'' 2>/dev/null; case $? in 0) exit 0 ;; 3) echo ''git push is blocked for specialist agents. Report the branch to the coordinator.'' >&2; exit 2 ;; *) echo ''specialist push guard: no command text, or python3 is absent. The guard fails closed.'' >&2; exit 2 ;; esac'
+      command: 'python3 -c ''import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"].replace("\\\n",""); W=r"(?:\x27[^\x27]*\x27|\x22(?:\\.|[^\x22\\])*\x22|\\.|[^\s\x27\x22\\;&|<>()])+"; O=r"(?:(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source))\x00[^\x00]*\x00|-[^\x00]*\x00)"; S=["\x00".join(re.sub(r"[\x27\x22\\]","",t) for t in re.findall(W,m.group(1)))+"\x00" for m in re.finditer(r"(?<![\w.-])git(?![\w.-])((?:[ \t]+"+W+r")*)",c)]; sys.exit(4 if any(re.match(O+r"*?(?:-c\x00(?i:core\.hookspath)|--config-env[=\x00])",s) for s in S) else 3 if any(re.match(O+r"*push\x00",s) for s in S) else 0)'' 2>/dev/null; case $? in 0) exit 0 ;; 3) echo ''git push is blocked for specialist agents. Report the branch to the coordinator.'' >&2; exit 2 ;; 4) echo ''A git command that sets core.hooksPath or uses --config-env is blocked for specialist agents. The pre-push hook must run.'' >&2; exit 2 ;; *) echo ''specialist push guard: no command text, or python3 is absent. The guard fails closed.'' >&2; exit 2 ;; esac'
 ---
 
 You are the forms specialist. You implement one task in an isolated git worktree and you report to the coordinator. Your verifier twin is `forms-verifier`; it reviews your diff blind, so your report must stand on evidence.

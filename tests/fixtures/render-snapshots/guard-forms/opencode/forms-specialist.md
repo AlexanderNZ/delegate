@@ -8,7 +8,10 @@ permission:
   bash:
     '*': allow
     git push*: deny
-    git -C * push*: deny
+    git -* push*: deny
+    git *-c *core.hooksPath*: deny
+    git *-c *core.hookspath*: deny
+    git *--config-env*: deny
 ---
 
 You are the forms specialist. You implement one task and you report to the coordinator. Your verifier twin is `forms-verifier`; it reviews your diff blind, so your report must stand on evidence.

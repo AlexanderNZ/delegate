@@ -14,6 +14,7 @@ from string import Template
 from .declaration import READ_PREFIX_MARK, Agent
 from .guard import (
     GIT_PUSH_HOOK,
+    SPECIALIST_OPENCODE_BASH,
     VERIFIER_OPENCODE_EDIT,
     VERIFIER_WRITE_HOOK,
     free_gates,
@@ -210,15 +211,8 @@ def render_opencode(agent: Agent, tiers: Tiers) -> dict[str, str]:
             perm["external_directory"] = verifier_external_directory_permission()
             fm["permission"] = perm
         else:
-            # Catch-all first here too: OpenCode keeps the last matching rule,
-            # so a deny placed before "*" is shadowed and the agent can push.
-            # Two denies, because an OpenCode pattern is an anchored glob:
-            # "git push*" becomes "^git push.*$" and does not cover the
-            # "git -C <path> push" form that the Claude Code hook stops. The map
-            # does not add a wider "*git push*" pattern (ADR 0002).
-            fm["permission"] = {
-                "bash": {"*": "allow", "git push*": "deny", "git -C * push*": "deny"}
-            }
+            # The catch-all comes first: see SPECIALIST_OPENCODE_BASH.
+            fm["permission"] = {"bash": dict(SPECIALIST_OPENCODE_BASH)}
         files[f"{name}.md"] = _frontmatter(fm) + _body(f"opencode-{role}", agent, name, twin if agent.pair else "")
     return files
 

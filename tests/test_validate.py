@@ -334,8 +334,8 @@ def test_declaration_rejects_unknown_key():
 def test_opencode_shadowed_deny_in_pattern_map_fails(rendered, tiers):
     p = rendered / "opencode" / "java-spring-specialist.md"
     text = p.read_text()
-    fixed = "permission:\n  bash:\n    '*': allow\n    git push*: deny\n    git -C * push*: deny\n"
-    inverted = "permission:\n  bash:\n    git push*: deny\n    '*': allow\n    git -C * push*: deny\n"
+    fixed = "permission:\n  bash:\n    '*': allow\n    git push*: deny\n    git -* push*: deny\n"
+    inverted = "permission:\n  bash:\n    git push*: deny\n    '*': allow\n    git -* push*: deny\n"
     assert fixed in text, "renderer must emit the catch-all first"
     assert "RULE_SHADOWED" not in _codes(validate_opencode_dir(rendered / "opencode", tiers))
     p.write_text(text.replace(fixed, inverted, 1))

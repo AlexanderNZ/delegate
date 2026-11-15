@@ -1683,13 +1683,55 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 # A PreToolUse hook on Bash. Exit 2 blocks the call and returns stderr to the
 # agent. A disallowedTools entry with a specifier would remove Bash entirely,
 # so the block is a hook. The hook reads the command with python3, which the
-# kit already requires, so it needs no jq. The reader exits 3 for a push and 0
-# for any other command. Any other status ends at exit 2: the input holds no
-# command text, or python3 is absent (status 127). The hook fails closed.
+# kit already requires, so it needs no jq.
+#
+# The reader removes each backslash-newline, then reads each git command of
+# the text as words (W): a quoted part, an escaped character, or a run of
+# characters that is not a space, a quote or a shell operator. It removes the
+# quotes and the backslashes of each word. Then it skips the global options of
+# git (O): "-C <path>", "-c <name>=<value>", a long option that takes the next
+# word ("--git-dir <path>"), and each other word that starts with "-". The
+# first word after the options is the subcommand (#359).
+#
+# - Exit 4: an option is "-c core.hooksPath..." (in any case) or
+#   "--config-env". A setting on the command line wins over each
+#   configuration file, so it can turn off the pre-push hook of the engine.
+# - Exit 3: the subcommand is push.
+# - Exit 0: any other command, also a read that names a push as an argument
+#   ("git log --grep push").
+#
+# Any other status ends at exit 2: the input holds no command text, or
+# python3 is absent (status 127). The hook fails closed.
 GIT_PUSH_HOOK = (
-    r'''python3 -c 'import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"]; '''
-    r'''sys.exit(3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b", c) else 0)' 2>/dev/null; '''
+    r'''python3 -c 'import json,re,sys; c=json.load(sys.stdin)["tool_input"]["command"].replace("\\\n",""); '''
+    r'''W=r"(?:\x27[^\x27]*\x27|\x22(?:\\.|[^\x22\\])*\x22|\\.|[^\s\x27\x22\\;&|<>()])+"; '''
+    r'''O=r"(?:(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source))\x00[^\x00]*\x00|-[^\x00]*\x00)"; '''
+    r'''S=["\x00".join(re.sub(r"[\x27\x22\\]","",t) for t in re.findall(W,m.group(1)))+"\x00" '''
+    r'''for m in re.finditer(r"(?<![\w.-])git(?![\w.-])((?:[ \t]+"+W+r")*)",c)]; '''
+    r'''sys.exit(4 if any(re.match(O+r"*?(?:-c\x00(?i:core\.hookspath)|--config-env[=\x00])",s) for s in S) '''
+    r'''else 3 if any(re.match(O+r"*push\x00",s) for s in S) else 0)' 2>/dev/null; '''
     "case $? in 0) exit 0 ;; "
     "3) echo 'git push is blocked for specialist agents. Report the branch to the coordinator.' >&2; exit 2 ;; "
+    "4) echo 'A git command that sets core.hooksPath or uses --config-env is blocked for specialist agents. "
+    "The pre-push hook must run.' >&2; exit 2 ;; "
     "*) echo 'specialist push guard: no command text, or python3 is absent. The guard fails closed.' >&2; exit 2 ;; esac"
 )
+
+#: The `permission.bash` map of an OpenCode specialist. The catch-all comes
+#: first: OpenCode keeps the last matching rule, so a deny placed before "*"
+#: is shadowed and the agent can push. An OpenCode pattern is an anchored glob
+#: (ADR 0002): "git push*" becomes "^git push.*$". "git -* push*" covers a
+#: push after the global options of git ("git -C <path> push",
+#: "git -c x=y push", "git --no-pager push"), and also denies a read with
+#: options before it that names a push as an argument. The last three denies
+#: stop a git command that turns off the pre-push hook of the engine (#359).
+#: The glob is case-sensitive, so the map names the two usual spellings of
+#: the key. The map does not add a wider "*git push*" pattern (ADR 0002).
+SPECIALIST_OPENCODE_BASH: dict[str, str] = {
+    "*": "allow",
+    "git push*": "deny",
+    "git -* push*": "deny",
+    "git *-c *core.hooksPath*": "deny",
+    "git *-c *core.hookspath*": "deny",
+    "git *--config-env*": "deny",
+}

@@ -33,6 +33,14 @@ The push-pattern decision was recorded with no separate reason. The table under 
 - An OpenCode specialist can push from inside a compound command, with two spaces, or after an environment assignment. This risk is on OpenCode only. The skill names it under Limits.
 - Review this decision if a later OpenCode version divides a compound command before the permission check. The narrow pattern then applies to each segment of the command.
 
+## Amendment (#359): a push after the global options of git, and a command that turns off the hooks
+
+A review of 2026-11-15 pushed a branch to a bare remote from an engine worktree with `git -c core.hooksPath=/dev/null push`. A setting on the command line wins over each configuration file, so git ran no `pre-push` hook. Both harness guards let the command through: they matched only `git push` and `git -C <one word> push`.
+
+- The Claude Code hook reads each git command as words. It skips the global options of git (`-C <path>`, `-c <name>=<value>`, a long option and its value, quoted paths), and it refuses a push after them. It refuses a git command whose options set `core.hooksPath` (in any case) or use `--config-env`. A read that names a push as an argument (`git log --grep push`) passes.
+- The OpenCode map replaces `git -C * push*` with `git -* push*`, which also covers `git -c x=y push` and `git --no-pager push`. It adds `git *-c *core.hooksPath*`, `git *-c *core.hookspath*` and `git *--config-env*`. The patterns stay anchored at `git`, so a `grep` for the words still passes. `git -* push*` also denies a read with options before it that names a push as an argument.
+- The rest of the decision holds: the map adds no `*git push*`, and an OpenCode specialist still pushes from inside a compound command. In the table under Evidence, the row `git -c a=b push` is now a deny in the current map.
+
 ## Evidence
 
 - 2026-09-19: a review of the first OpenCode specialist map found the anchored compile of `git push*` and the missing `git -C` case. The second deny and the finding `SPECIALIST_CAN_PUSH` came in on the same day, with a test for each harness.
