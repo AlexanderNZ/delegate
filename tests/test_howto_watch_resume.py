@@ -17,18 +17,11 @@ import pytest
 from delegate import adapters
 
 from .pages import HOW_TO, Block, follow, new_repo, outside_the_package, write_files
-from .support import state_dir
-from .support import ScriptedAdapter, git, state_and_verdict
+from .support import FILES_OF_TICKETS_1_AND_2, ScriptedAdapter, git, state_and_verdict, state_dir
 
 PAGE = HOW_TO / "watch-and-resume-a-run.md"
 ROOT = Path(__file__).resolve().parents[1]  # the child imports `tests` from here and the package from src/
 SOURCE = ROOT / "src"
-
-FILES = {
-    ticket: {f"test_{ticket}.py": f"import unittest\n\n\nclass T(unittest.TestCase):\n    def test_{ticket}(self):\n        self.assertTrue(True)\n"}
-    for ticket in ("1", "2")
-}
-
 
 def containing(text: str):
     return lambda block: any(text in command for command in block.body.splitlines())
@@ -78,7 +71,7 @@ def registered():
 def test_the_page_shows_the_state_of_a_finished_run_and_its_journal_by_run_id_to_the_end_and_from_a_position(
     tmp_path, monkeypatch, git_identity, registered
 ):
-    registered(ScriptedAdapter(files_by_ticket=FILES))
+    registered(ScriptedAdapter(files_by_ticket=FILES_OF_TICKETS_1_AND_2))
     repo = a_repo(tmp_path)
 
     started = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
@@ -112,7 +105,7 @@ def test_the_page_shows_the_state_of_a_finished_run_and_its_journal_by_run_id_to
 def test_the_page_resumes_a_run_that_ctrl_c_stopped_and_builds_only_the_ticket_that_was_not_done(
     tmp_path, monkeypatch, git_identity, registered
 ):
-    adapter = Interrupted(files_by_ticket=FILES)  # the interrupt comes as the specialist of ticket 2 starts
+    adapter = Interrupted(files_by_ticket=FILES_OF_TICKETS_1_AND_2)  # the interrupt comes as the specialist of ticket 2 starts
     registered(adapter)
     repo = a_repo(tmp_path)
     stopped = follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml"))
@@ -136,8 +129,7 @@ KILL = """\
 import os, signal, sys
 from delegate import adapters
 from delegate.cli import delegate
-from tests.support import ScriptedAdapter
-from tests.test_howto_watch_resume import FILES
+from tests.support import FILES_OF_TICKETS_1_AND_2, ScriptedAdapter
 
 class Killer(ScriptedAdapter):
     seen = 0
@@ -148,7 +140,7 @@ class Killer(ScriptedAdapter):
             os.kill(os.getpid(), signal.SIGKILL)
         return super().run(request)
 
-adapters.register("claude-code", Killer(files_by_ticket=FILES))
+adapters.register("claude-code", Killer(files_by_ticket=FILES_OF_TICKETS_1_AND_2))
 sys.exit(delegate.main(["run", "workflow.toml", "--repo", sys.argv[1]]))
 """
 
@@ -162,7 +154,7 @@ def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_t
     child = subprocess.run([sys.executable, "-c", KILL, str(repo)], cwd=repo, env=env, capture_output=True, text=True)
     assert child.returncode == -signal.SIGKILL, child.stderr
     run_id = next((state_dir(repo) / "runs").iterdir()).name
-    adapter = ScriptedAdapter(files_by_ticket=FILES)
+    adapter = ScriptedAdapter(files_by_ticket=FILES_OF_TICKETS_1_AND_2)
     registered(adapter)
 
     resumed = follow(PAGE, repo, monkeypatch, only=containing("--resume"), replace={"<run-id>": run_id})
@@ -176,7 +168,7 @@ def test_the_page_resumes_a_run_that_was_killed_with_no_flag_and_notes_that_it_t
 
 @outside_the_package
 def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lost(tmp_path, monkeypatch, git_identity, registered):
-    adapter = ScriptedAdapter(files_by_ticket=FILES)
+    adapter = ScriptedAdapter(files_by_ticket=FILES_OF_TICKETS_1_AND_2)
     registered(adapter)
     repo = a_repo(tmp_path)
     paused: list = []
@@ -206,7 +198,7 @@ def test_the_page_pauses_a_run_at_a_step_boundary_and_resumes_it_with_no_work_lo
 
 @outside_the_package
 def test_the_page_cleans_up_after_a_merged_run_and_its_dry_run_changes_nothing(tmp_path, monkeypatch, git_identity, registered):
-    registered(ScriptedAdapter(files_by_ticket=FILES))
+    registered(ScriptedAdapter(files_by_ticket=FILES_OF_TICKETS_1_AND_2))
     repo = a_repo(tmp_path)
     run_id = run_id_of(follow(PAGE, repo, monkeypatch, only=containing("delegate run workflow.toml")))
     git(repo, "merge", "-q", "--ff-only", "run/demo")

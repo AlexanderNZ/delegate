@@ -18,9 +18,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from . import test_changelog
 from .pages import ROOT, outside_the_package
 from .support import TEMPLATE_GIT, copy_of, git
+from .support_changelog import (
+    check_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry,
+    check_an_entry_with_a_date_has_the_version_of_the_package,
+    check_each_subsection_is_a_type_of_keep_a_changelog_or_consumer_impact,
+    check_the_entry_for_the_first_release_names_each_part_of_the_kit,
+    check_the_first_release_is_the_oldest_entry_and_unreleased_comes_before_it,
+    entry,
+)
 
 pytestmark = outside_the_package
 
@@ -403,13 +410,13 @@ IMPACT = "### Consumer impact\n\n- Render your committed pairs again.\n\n### Add
     ["", "### Added\n\n- A thing.\n\n", IMPACT],
     ids=["notes-from-commits", "unreleased-body", "consumer-impact"],
 )
-def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_after_apply_on_a_copy_of_the_real_files(tmp_path, monkeypatch, unreleased):
+def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_after_apply_on_a_copy_of_the_real_files(tmp_path, unreleased):
     repo = make_repo(tmp_path)
     changelog = (repo / "CHANGELOG.md")
     # The real Unreleased body changes with each merge, so the case sets it.
-    head, rest = test_changelog.CHANGELOG.read_text().split("## [Unreleased]\n\n", 1)
+    head, rest = (ROOT / "CHANGELOG.md").read_text().split("## [Unreleased]\n\n", 1)
     changelog.write_text(f"{head}## [Unreleased]\n\n{unreleased}{rest[rest.index('## ['):]}")
-    (repo / "pyproject.toml").write_text(test_changelog.PYPROJECT.read_text())
+    (repo / "pyproject.toml").write_text((ROOT / "pyproject.toml").read_text())
     git(repo, "add", "-A")
     commit(repo, "docs: the real files")
     git(repo, "tag", "v0.1.0")
@@ -418,17 +425,15 @@ def test_the_changelog_tests_of_the_repository_still_pass_for_the_new_version_af
     done = release(repo, "apply", "--version", "0.2.0", "--date", "2026-03-04")
 
     assert (done.returncode, done.stderr) == (0, "")
-    monkeypatch.setattr(test_changelog, "CHANGELOG", changelog)
-    monkeypatch.setattr(test_changelog, "PYPROJECT", repo / "pyproject.toml")
     assert tomllib.loads((repo / "pyproject.toml").read_text())["project"]["version"] == "0.2.0"
-    test_changelog.test_the_changelog_has_an_entry_with_a_date_for_the_version_of_the_package()
-    test_changelog.test_the_first_release_is_the_oldest_entry_and_an_unreleased_section_comes_before_it()
-    test_changelog.test_the_entry_for_the_first_release_names_each_part_of_the_kit_that_a_user_can_run()
-    test_changelog.test_each_subsection_of_an_entry_is_a_type_of_keep_a_changelog_or_consumer_impact()
-    test_changelog.test_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry()
-    assert ("A thing." if unreleased else "a change for the next release") in test_changelog.entry("0.2.0")
+    check_an_entry_with_a_date_has_the_version_of_the_package(changelog, repo / "pyproject.toml")
+    check_the_first_release_is_the_oldest_entry_and_unreleased_comes_before_it(changelog)
+    check_the_entry_for_the_first_release_names_each_part_of_the_kit(changelog)
+    check_each_subsection_is_a_type_of_keep_a_changelog_or_consumer_impact(changelog)
+    check_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry(changelog)
+    assert ("A thing." if unreleased else "a change for the next release") in entry(changelog, "0.2.0")
     if unreleased == IMPACT:
-        assert test_changelog.entry("0.2.0").startswith("\n" + IMPACT)
+        assert entry(changelog, "0.2.0").startswith("\n" + IMPACT)
 
 
 def test_the_notes_start_with_the_consumer_impact_subsection_of_the_unreleased_section_and_leave_out_its_other_subsections(tmp_path):

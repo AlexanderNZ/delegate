@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from delegate.cli import delegate
-from pathlib import Path
 import io
 import json
 import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from delegate.cli import delegate
 
 from . import claude_fake
 from .support import Terminal, fake_clock, hold_lock, journal_path

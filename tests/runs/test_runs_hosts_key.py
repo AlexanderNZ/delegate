@@ -13,9 +13,7 @@ import json
 import pytest
 
 from .journals import NOW, runs
-from .test_runs_config import config_file
-from .test_runs_hosts import this_machine
-from .test_runs_read_hosts import document, reason_of, run_of
+from ..support_runs import config_file, this_machine, document, reason_of, run_of
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +106,7 @@ def test_local_starts_no_ssh_and_shows_no_host_of_hosts(machine, far, ssh, capsy
 def test_a_host_that_the_index_names_and_hosts_names_is_read_once(machine, far, ssh, capsys, tmp_path, monkeypatch):
     from delegate.adapters.run_index import DirectoryRunIndex
 
-    from .test_runs_hosts import record
+    from ..support_runs import record
 
     shared = tmp_path / "shared"
     monkeypatch.setenv("DELEGATE_INDEX", str(shared))

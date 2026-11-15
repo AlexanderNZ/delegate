@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from delegate.cli import delegate
-from pathlib import Path
 import io
 import json
 import os
-import pytest
 import sys
 import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pytest
+from delegate.cli import delegate
 
 from .support import Terminal, append_events, bare_repo, fake_clock, frames, run_end, run_start, screens, step_end, step_start, without_titles, write_journal
 from .support_watch_live import PYTEST, Run, START

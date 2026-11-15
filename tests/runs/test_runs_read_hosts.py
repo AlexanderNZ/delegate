@@ -22,27 +22,13 @@ import pytest
 from delegate.run import fleet_hosts
 
 from ..support import Terminal, fake_clock, frames
-from .journals import NOW, clock_time, runs
-from .test_runs_alert import every_kind, failed_start
-from .test_runs_hosts import index, record, this_machine, two_other_hosts
-from .test_runs_watch import ctrl_c, watching
+from .journals import clock_time, runs
+from ..support_runs import every_kind, failed_start, index, record, this_machine, two_other_hosts, ctrl_c, watching, document, reason_of, run_of
 
 
 @pytest.fixture(autouse=True)
 def table_width(monkeypatch) -> None:
     monkeypatch.setenv("COLUMNS", "120")
-
-
-def document(host: str, *found: dict[str, object], format: int | None = 1) -> dict[str, object]:
-    """The document of `delegate runs --local --json` of `host`: its fields, and the runs `found`. With `format` None, the document has no `format`."""
-    fields = {"format": format, "host": host, "time": NOW.isoformat(), "window_seconds": 21600, "runs": list(found)}
-    return {key: value for key, value in fields.items() if key != "format" or format is not None}
-
-
-def reason_of(lines: list[str], host: str) -> str:
-    """The text of the row under the row of `host`, after its rail: the reason that the command could not read the host (#323)."""
-    row = next(number for number, line in enumerate(lines) if line.startswith(f"{host} "))
-    return lines[row + 1].removeprefix("│").strip()
 
 
 def group_is_gone(group: int, seconds: float = 1.0) -> bool:
@@ -62,21 +48,6 @@ def group_is_gone(group: int, seconds: float = 1.0) -> bool:
 def row_of(lines: list[str], start: str) -> list[str]:
     """The cells of the first line that starts with `start`, or that holds it as a cell."""
     return next(line for line in lines if line.startswith(start) or f" {start} " in line).split()
-
-
-def run_of(
-    host: str, repo: str, short: str, state: str, ended: int, total: int, eta: str | None = "16:05", tokens: tuple[int, int] = (20_000, 500_000),
-    alert: str | None = None, do: str | None = None, trend: tuple[int, ...] = (0, 0, 1, 1, 1, 0), idle_seconds: int | None = None,
-    fixup: tuple[int, int] | None = None, failed_start: bool = False,
-) -> dict[str, object]:
-    """One run of the document of a host. It started at 12:00, and it has not ended. `alert` is the text for a person; the reader uses `idle_seconds`, `fixup` and `failed_start`."""
-    started = clock_time(12, 0)
-    return {
-        "run_id": f"{started.strftime('%Y%m%dT%H%M%SZ')}-{short}", "repo": repo, "host": host, "state": state, "started": started.isoformat(), "ended": None,
-        "tickets_ended": ended, "tickets_total": total, "eta": clock_time(*map(int, eta.split(":"))).isoformat() if eta else None,
-        "tokens_new": tokens[0], "tokens_cache": tokens[1], "alert": alert, "do": do, "trend": list(trend), "slip_seconds": None,
-        "idle_seconds": idle_seconds, "fixup_round": fixup[0] if fixup else None, "fixup_limit": fixup[1] if fixup else None, "failed_start": failed_start,
-    }
 
 
 def test_a_host_that_gives_its_document_shows_its_runs_as_live_runs_and_they_are_in_the_sums(machine, index, ssh, capsys):

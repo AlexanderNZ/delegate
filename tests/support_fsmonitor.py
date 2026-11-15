@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 
 GLOBAL_CONFIG: str = "[core]\n\tfsmonitor = true\n"

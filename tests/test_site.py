@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from .pages import ROOT, outside_the_package
-from .test_contributing import bash_commands
+from .support_contributing import bash_commands
 
 CONFIG = ROOT / "zensical.toml"
 PIN = ROOT / ".zensical-version"

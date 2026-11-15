@@ -15,7 +15,7 @@ import pytest
 
 from delegate.docs.neutrality import KIT_ROOT_VAR
 
-from .test_skill_commands import commands_of, parse_error
+from .support_skills import commands_of, parse_error
 
 KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[1] / "skills")
 SKILL = KIT_ROOT / "agent-delegation" / "SKILL.md"

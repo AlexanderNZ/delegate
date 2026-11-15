@@ -19,25 +19,11 @@ import yaml
 
 from delegate.cli import delegate
 
-from .pages import ROOT, Block, blocks, commands, outside_the_package
+from .pages import ROOT, blocks, outside_the_package
+from .support_contributing import CONTRIBUTING, bash_commands, section
 
-CONTRIBUTING = ROOT / "CONTRIBUTING.md"
+
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-
-
-def section(heading: str) -> str:
-    """The text of the `## heading` section of CONTRIBUTING, up to the next `## ` heading."""
-    text = CONTRIBUTING.read_text()
-    match = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", text, flags=re.MULTILINE | re.DOTALL)
-    assert match, f"CONTRIBUTING has no section {heading!r}"
-    return match.group(1)
-
-
-def bash_commands(heading: str) -> list[str]:
-    """Every command of every bash block in the section."""
-    body = section(heading)
-    found = [Block(lang, path or None, text) for _fence, lang, path, text in re.findall(r'^(`{3,})(\w+)(?: title="([^"]+)")?\n(.*?)^\1$', body, flags=re.MULTILINE | re.DOTALL)]
-    return [command for block in found if block.lang == "bash" for command in commands(block)]
 
 
 def ci_steps() -> list[dict]:

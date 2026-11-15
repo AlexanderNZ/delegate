@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import pytest
 import re
 import shlex
 import subprocess
+from pathlib import Path
+
+import pytest
 
 from .support import TEMPLATE_GIT, copy_of
 

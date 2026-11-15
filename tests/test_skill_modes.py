@@ -6,22 +6,16 @@ reason. The expected cells come from the engine's own mode settings, and from
 a real run of each mode with a scripted adapter, so the table cannot drift.
 """
 
-import os
 import re
-from pathlib import Path
 
 import pytest
 
 from delegate.cli import delegate
 from delegate.run import domain
-from delegate.docs.neutrality import KIT_ROOT_VAR
 
 from .support import ScriptedAdapter, WORKFLOW, git, make_repo, read_journal
+from .support_skills import SKILL, in_the_kit, section
 
-KIT_ROOT = Path(os.environ.get(KIT_ROOT_VAR) or Path(__file__).resolve().parents[1] / "skills")
-SKILL = KIT_ROOT / "agent-delegation" / "SKILL.md"
-
-in_the_kit = pytest.mark.skipif(not SKILL.is_file(), reason="the protocol skill is outside the package source, as in a Nix build")
 
 # The seven invariants of the spec, in its order. They hold in every mode.
 INVARIANTS: list[str] = [
@@ -33,19 +27,6 @@ INVARIANTS: list[str] = [
     "a fix-up is a new commit",
     "no lower verifier tier",
 ]
-
-
-def section(text: str, heading: str) -> str:
-    """The lines under `heading` (a full heading line) up to the next heading of the same or a higher level."""
-    level = len(heading) - len(heading.lstrip("#"))
-    lines = text.splitlines()
-    assert heading in lines, f"the skill has no heading {heading!r}"
-    body: list[str] = []
-    for line in lines[lines.index(heading) + 1:]:
-        if re.match(rf"^#{{1,{level}}} ", line):
-            break
-        body.append(line)
-    return "\n".join(body)
 
 
 def mode_table() -> dict[str, dict[str, str]]:

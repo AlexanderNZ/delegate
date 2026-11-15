@@ -11,61 +11,21 @@ The index is a real directory of the directory backend. The clock is `NOW`, 14:2
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 
 import pytest
 
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.cli import delegate
-from delegate.ports.index import RunRecord
 
 from ..support import HEAD, make_repo, read_journal, run_main, ticket
-from .journals import NOW, built, clock_time, run_end, runs, working, write_run
+from .journals import clock_time, run_end, runs
+from ..support_runs import index, record, this_machine, two_other_hosts
 
 
 @pytest.fixture(autouse=True)
 def table_width(monkeypatch) -> None:
     """120 columns: the table fits with each column, and the bar and the legend show."""
     monkeypatch.setenv("COLUMNS", "120")
-
-
-@pytest.fixture
-def index(tmp_path, monkeypatch) -> DirectoryRunIndex:
-    """The run index of the case: the directory that `DELEGATE_INDEX` names."""
-    directory = tmp_path / "shared-index"
-    monkeypatch.setenv("DELEGATE_INDEX", str(directory))
-    return DirectoryRunIndex(directory)
-
-
-def record(
-    index: DirectoryRunIndex, host: str, repo: str, short: str, state: str, ended: int, total: int, heard_minutes_ago: int,
-    eta: datetime | None = None, started: datetime | None = None,
-) -> RunRecord:
-    """Keep the record of a run of `host` that the host wrote `heard_minutes_ago` minutes before `NOW`."""
-    started = started or clock_time(12, 0)
-    kept = RunRecord(
-        run_id=f"{started.strftime('%Y%m%dT%H%M%SZ')}-{short}", host=host, repo=repo, started=started.isoformat(), state=state,
-        tickets_ended=ended, tickets_total=total, eta=eta.isoformat() if eta else None,
-        heard=(NOW - timedelta(minutes=heard_minutes_ago)).isoformat(),
-    )
-    index.record(kept)
-    return kept
-
-
-def this_machine(root) -> None:
-    """One run of `laptop`, in its journals: 1 of 2 tickets ended, a ticket runs now. It started at 13:40."""
-    started = clock_time(13, 40)
-    write_run(
-        root, "alpha", "aaaa", started,
-        [*built("1", started, clock_time(14, 0), tokens=(12_000, 340_000)), working("2", clock_time(14, 0))],
-        adapter="claude-code", lock=True,
-    )
-
-
-def two_other_hosts(index: DirectoryRunIndex) -> None:
-    """`build-host` has a run with 3 of 6 tickets, last heard 47 minutes ago. `ci-runner` has a run with 3 of 10, heard 3 hours 5 minutes ago."""
-    record(index, "build-host", "docs-site", "a41e", "running", 3, 6, 47, eta=clock_time(16, 5))
-    record(index, "ci-runner", "api-service", "5d02", "running", 3, 10, 185, started=clock_time(9, 0))
 
 
 def test_an_index_with_the_records_of_two_other_hosts_shows_two_more_groups_that_are_unreachable_with_the_last_known_values_and_heard(machine, index, capsys):

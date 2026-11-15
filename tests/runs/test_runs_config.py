@@ -18,16 +18,9 @@ import pytest
 
 from ..support import HEAD, event_names, make_repo, read_journal, run_main, ticket
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
+from ..support_runs import config_file
 
 TWO_TICKETS = HEAD + ticket("a") + ticket("b", ("a",))
-
-
-def config_file(config_home: Path, text: str) -> Path:
-    """Write the configuration file of the user with `text`, and return its path."""
-    path = config_home / "delegate" / "config.toml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
 
 
 def records(directory: Path) -> dict[str, dict[str, object]]:

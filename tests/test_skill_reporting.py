@@ -10,7 +10,7 @@ Nix build that copies only the package skips these cases with a reason.
 import re
 
 from .pages import HOW_TO, outside_the_package
-from .test_skill_modes import SKILL, in_the_kit, section
+from .support_skills import SKILL, in_the_kit, section
 
 PAGE = HOW_TO / "watch-and-resume-a-run.md"
 

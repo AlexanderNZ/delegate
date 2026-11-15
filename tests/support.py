@@ -908,7 +908,6 @@ def write_project_agents(repo: Path) -> None:
         (target / name).write_text(content)
 
 
-
 class FakeClock:
     """The clock of a case (#297): the `clock` fixture of `conftest` makes it the clock of the commands
     (`delegate.run.clock.use`), so no case replaces a function of the module `time`.
@@ -942,3 +941,15 @@ def fake_clock() -> FakeClock:
     found = run_clock.current()
     assert isinstance(found, FakeClock), "the case needs the `clock` fixture: the commands use the clock of the system"
     return found
+
+
+def stack_workflow(fields: str) -> str:
+    """The test workflow with `fields` in the stack `python`."""
+    return WORKFLOW.replace('gates = ["test -f feature.txt"]', f'gates = ["test -f feature.txt"]\n{fields}')
+
+
+# The files that the scripted adapter writes for the tickets 1 and 2 of the how-to pages: one passing unittest each.
+FILES_OF_TICKETS_1_AND_2 = {
+    ticket: {f"test_{ticket}.py": f"import unittest\n\n\nclass T(unittest.TestCase):\n    def test_{ticket}(self):\n        self.assertTrue(True)\n"}
+    for ticket in ("1", "2")
+}

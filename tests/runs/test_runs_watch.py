@@ -13,36 +13,18 @@ from __future__ import annotations
 import builtins
 import io
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 from delegate.cli import delegate
 
-from ..support import Terminal, fake_clock, final_screen, frames, without_titles
+from ..support import fake_clock, final_screen, frames, without_titles
 from .journals import built, clock_time, run_end, runs, working, write_run
+from ..support_runs import ctrl_c, watching
 
 SHOW_CURSOR = "\x1b[?25h"
 INTERRUPTED = 130
-
-
-def ctrl_c() -> None:
-    raise KeyboardInterrupt
-
-
-def watching(monkeypatch, capsys, *argv: str, columns: int = 80, lines: int = 1000, out: Terminal | None = None) -> tuple[int, str, str]:
-    """Run `delegate runs --watch` on a terminal. Return the exit code, what the terminal got, and stderr."""
-    terminal = Terminal() if out is None else out
-    monkeypatch.setattr(sys, "stdout", terminal)
-    monkeypatch.setenv("COLUMNS", str(columns))
-    monkeypatch.setenv("LINES", str(lines))
-    capsys.readouterr()
-    try:
-        code = delegate.main(["runs", "--watch", *argv])
-    except KeyboardInterrupt:
-        pytest.fail("Ctrl-C left `delegate runs --watch` as a KeyboardInterrupt, which prints a traceback")
-    return code, terminal.getvalue(), capsys.readouterr().err
 
 
 def append(journal: Path, name: str, **fields: object) -> None:

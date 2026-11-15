@@ -17,7 +17,7 @@ from delegate.cli import delegate
 
 from ..support import Terminal
 from .journals import built, clock_time, run_end, runs, working, write_run
-from .test_runs_alert import agent_idle
+from ..support_runs import agent_idle
 
 LIFE, TICKET, NOW_COLUMN, PROJECTION = "─", "●", "┊", "░"
 

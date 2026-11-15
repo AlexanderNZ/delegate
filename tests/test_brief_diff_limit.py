@@ -14,18 +14,13 @@ import pytest
 from delegate import adapters
 from delegate.cli import brief, delegate
 
-from .support import WORKFLOW, git, make_repo, run_main, write_project_agents
-from .test_claude_code_seal import seal, write_agents
+from .support import git, make_repo, run_main, stack_workflow, write_project_agents
+from .support_claude_code import seal, write_agents
 
 pytestmark = [pytest.mark.usefixtures("home", "claude_stand_in"), pytest.mark.scripted_adapter()]  # the dry run looks for agent files and probes the guard
 
 LINES = 8000  # "line <n>" lines: the diff is far above 60,000 characters
 SMALL_DIFF = "diff --git a/feature.txt b/feature.txt"
-
-
-def stack_workflow(fields: str) -> str:
-    """The test workflow with `fields` in the stack `python`."""
-    return WORKFLOW.replace('gates = ["test -f feature.txt"]', f'gates = ["test -f feature.txt"]\n{fields}')
 
 
 def brief_repo(tmp_path, lines: int):

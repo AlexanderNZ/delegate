@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-from delegate.cli import delegate
-from pathlib import Path
 import json
+from datetime import timedelta
+from pathlib import Path
+
 import pytest
+from delegate.cli import delegate
 
 from . import claude_fake
 from .support import START, hold_lock, journal_path

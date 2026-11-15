@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import re
+import time
 from dataclasses import dataclass
+from pathlib import Path
+
 from delegate.adapters.shell import ShellGateRunner
 from delegate.cli import delegate
 from delegate.ports.gates import GateResult
 from delegate.ports.harness import AdapterResult
-from pathlib import Path
-import json
-import re
-import time
 
 from .support import HEAD, ScriptedAdapter, WORKFLOW, append_events, commit_head, git, journal_path, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket, ticket_of, valid_report
 

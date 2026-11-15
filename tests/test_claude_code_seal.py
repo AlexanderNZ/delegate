@@ -7,40 +7,20 @@ the renderer made, with a stand-in `claude` command that answers `--version`.
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
 import yaml
 from delegate import adapters
-from delegate.definitions.declaration import Agent
-from delegate.definitions.render import render
 from delegate.ports.harness import AdapterError
 
 from . import claude_fake
+from .support_claude_code import GATE, seal, write_agents
 
 pytestmark = pytest.mark.usefixtures("claude_version")
-
-GATE = "python3 -m pytest -rs"
-
-
-def write_agents(root: Path, tiers, skills: list[str] | None = None) -> Path:
-    """Render the pair `python` for Claude Code into `root/.claude/agents`, and give that directory."""
-    target = root / ".claude" / "agents"
-    target.mkdir(parents=True, exist_ok=True)
-    agent = Agent(key="python", description="The python stack.", gate_commands=[GATE], skills=skills or [])
-    for name, content in render([agent], tiers)["claude-code"].items():
-        (target / name).write_text(content)
-    return target
 
 
 def frontmatter(text: str) -> dict:
     return yaml.safe_load(text.split("---\n")[1])
-
-
-def seal(repo: Path, into: Path, agent: str = "python-verifier"):
-    sealed = adapters.get("claude-code").seal(agent, repo, into)
-    assert sealed is not None
-    return sealed
 
 
 def test_the_agent_file_of_the_seal_has_no_hooks_and_the_hooks_are_in_the_hooks_file_without_a_change(tmp_path, home, tiers):

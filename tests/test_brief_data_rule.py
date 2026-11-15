@@ -13,8 +13,7 @@ import pytest
 
 from delegate.cli import brief
 
-from .support import git, make_repo, run_main
-from .test_brief_diff_limit import stack_workflow
+from .support import git, make_repo, run_main, stack_workflow
 
 pytestmark = [pytest.mark.usefixtures("home"), pytest.mark.scripted_adapter()]
 

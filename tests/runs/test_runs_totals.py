@@ -14,9 +14,7 @@ from datetime import timedelta
 import pytest
 
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
-from .test_runs_alert import agent_idle, failed_end
-from .test_runs_hosts import index, record
-from .test_runs_read_hosts import document, run_of
+from ..support_runs import agent_idle, failed_end, index, record, document, run_of
 
 
 @pytest.fixture(autouse=True)

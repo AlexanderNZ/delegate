@@ -17,7 +17,7 @@ from delegate.cli import delegate
 
 from ..support import Terminal
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
-from .test_runs_alert import agent_idle
+from ..support_runs import agent_idle
 
 # The header line of a machine with no configuration file (#323): it names the settings in use.
 HEADER = "no configuration file · the index of this machine only · no other host"
