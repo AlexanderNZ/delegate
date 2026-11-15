@@ -8,7 +8,7 @@ the skills of the host never reach the test, and goes through `cli.main`.
 import pytest
 
 from delegate.cli.agent_definitions import main
-from tests.test_bootstrap import _agent_files, _args, _paths, repo  # noqa: F401  (repo is a fixture)
+from .support_bootstrap import _agent_files, _args, _paths, repo  # noqa: F401  (repo is a fixture)
 
 # The rendered java-spring agents preload these skills.
 JAVA_SPRING_SKILLS = ("clean-ddd-hexagonal", "api-design-principles", "tdd", "test-quality", "oauth2-resource-server")

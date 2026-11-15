@@ -14,15 +14,14 @@ import tomllib
 
 from delegate.cli.agent_definitions import main
 from delegate.definitions.validate import split_frontmatter
-from tests.test_bootstrap import _agent_files, _args, _blocks, _paths, repo  # noqa: F401  (repo is a fixture)
-from tests.test_bootstrap_options import _rerun_argv
+from .support_bootstrap import _agent_files, _args, _blocks, _paths, repo, _rerun_argv  # noqa: F401  (repo is a fixture)
 
 SKILL_ONLY_ARGS = ("--skill-only",)
 
 
 def _skill_only_argv(repo, *extra: str) -> list[str]:
     """The options that the context skill uses, and nothing else."""
-    from tests.test_bootstrap import DOMAIN, GATES_REF, OPERATE_REF
+    from .support_bootstrap import DOMAIN, GATES_REF, OPERATE_REF
 
     return [
         "bootstrap", "--repo", str(repo), "--name", "acme-api", "--domain", DOMAIN,

@@ -10,7 +10,7 @@ the file and the line. Each case goes through `cli.main`.
 import pytest
 
 from delegate.cli.agent_definitions import main
-from tests.test_bootstrap import _args, _paths, repo  # noqa: F401  (repo is a fixture)
+from .support_bootstrap import _args, _paths, repo  # noqa: F401  (repo is a fixture)
 
 CODE = "LOAD_BLOCK_NOT_PLAIN"
 

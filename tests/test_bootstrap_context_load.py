@@ -12,8 +12,7 @@ import tomllib
 import pytest
 
 from delegate.cli.agent_definitions import main
-from tests.test_bootstrap import GATES_REF, OPERATE_REF, _agent_files, _args, _blocks, _paths, repo  # noqa: F401
-from tests.test_bootstrap_options import _rerun_argv
+from .support_bootstrap import GATES_REF, OPERATE_REF, _agent_files, _args, _blocks, _paths, repo, _rerun_argv  # noqa: F401
 
 CODE = "LOAD_BLOCK_IN_READ_SKILL"
 

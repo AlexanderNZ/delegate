@@ -15,7 +15,7 @@ import pytest
 
 from delegate.cli.agent_definitions import main
 from tests.support import TEMPLATE_GIT, copy_of
-from tests.test_bootstrap import LONG_DOC, SHORT_DOC, _args, _blocks, _git, _paths
+from .support_bootstrap import LONG_DOC, SHORT_DOC, _args, _blocks, _git, _paths
 
 # The heading index of LONG_DOC: line 1 is "# Operate", line 201 is "## Runbooks".
 LONG_DOC_INDEX = "1:# Operate\n201:## Runbooks\n"

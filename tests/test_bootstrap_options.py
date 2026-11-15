@@ -7,11 +7,10 @@ text comes from the specification: the ASD-STE100 sentence, the flake reason,
 and the declaration keys.
 """
 
-import shlex
 import tomllib
 
 from delegate.cli.agent_definitions import main
-from tests.test_bootstrap import _agent_files, _args, _paths, repo  # noqa: F401  (repo is a fixture)
+from .support_bootstrap import _agent_files, _args, _paths, repo, _rerun_argv  # noqa: F401  (repo is a fixture)
 
 STE = "Write in ASD-STE100 Simplified Technical English."
 FLAKE_REASON = "An unstaged file is invisible to a flake."
@@ -24,20 +23,6 @@ def _all_options():
         "--get-only-command", "./scripts/api",
         "--gate-command", "npm test",
     )
-
-
-def _rerun_argv(declaration_text: str, repo) -> list[str]:
-    """The re-run command from the comment at the top of a generated file."""
-    lines = []
-    for line in declaration_text.splitlines():
-        if line.startswith("#   agent-definitions "):
-            lines.append(line.removeprefix("#   "))
-            break
-    [command] = lines
-    argv = shlex.split(command)[1:]  # drop the program name
-    assert argv[argv.index("--repo") + 1] == "."
-    argv[argv.index("--repo") + 1] = str(repo)
-    return argv
 
 
 def test_output_language_ste_writes_the_field_and_the_pair_carries_the_rule(repo):
