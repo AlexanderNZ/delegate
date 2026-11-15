@@ -1,0 +1,64 @@
+## Continuation
+
+Ticket a
+
+The last run of the specialist on this ticket committed work in the worktree `<STATE>/worktrees/<RUN>/a`, but the report at `<STATE>/runs/<RUN>/reports/a.specialist.json` is missing or not valid. The check of the report found these problems:
+
+- report missing: the specialist wrote no file at <STATE>/runs/<RUN>/reports/a.specialist.json
+
+The branch holds these commits:
+
+- <SHA> scripted work (python-specialist)
+
+Write only a corrected report. Do not change a file in the worktree, and do not add a commit. The report path is outside the worktree. Write the report only at the absolute path `<STATE>/runs/<RUN>/reports/a.specialist.json`. Use this path as it is. Do not make a relative path to it from the worktree. Except for the worktree and the report, create, change, or remove nothing inside the git directory of the repository. Change no other file outside the worktree.
+
+## Commands
+
+Run every command in the foreground. Do not use background tasks or a monitor tool. In a headless session, their notifications do not come to you, and a monitor that stays open keeps the session alive after your report. For a long command, give the command a long timeout.
+
+The session starts in the worktree. Run `git` there with no `cd`, and never join `cd` and `git` in one command: a harness can refuse that command with its own approval check. Use `git -C <path>` only for a path outside the worktree.
+
+## Scratch directory
+
+Your scratch directory is `<STATE>/runs/<RUN>/scratch/a/specialist`. The engine made it for this session, outside the worktree. Write each scratch file there: the output of a command, a note, or a file that you make only to read it again. Write a scratch file with the file-write tool of your harness, not with a shell redirect: a host in `dontAsk` mode can refuse a shell redirect into this directory. Never write a scratch file to `/tmp` or to the worktree: a host can refuse a write to `/tmp`, and a file in the worktree changes the work. The engine set `TMPDIR` to this directory, so a tool that makes a temporary file makes it there. The report and each other path that this brief names are not scratch files. Use them as the brief says.
+
+## Report
+
+When you finish, write one JSON object to `<STATE>/runs/<RUN>/reports/a.specialist.json`. Give each field the JSON type that this list names. The engine rejects a report with a field of a different type.
+
+Required fields:
+
+- `ticket`: string
+- `status`: string, one of `committed`, `blocked`, `partial`
+- `branch`: string
+- `head_sha`: string
+- `commits`: list of strings
+- `gates_green`: boolean
+- `summary`: string
+
+Optional fields:
+
+- `worktree`: string
+- `blocked_reason`: string
+- `judgement_calls`: string
+
+`gates_green` states whether the tests that you ran pass. The engine does not trust this field: the result of the gates that the engine runs decides. A string field holds one string. To give more than one item in a string field, join the items with "; ".
+
+Example:
+
+```json
+{
+  "ticket": "a",
+  "status": "committed",
+  "branch": "<the branch of the worktree>",
+  "head_sha": "<the full SHA of the tip of the branch>",
+  "commits": [
+    "<the full SHA of the first commit that you added>",
+    "<the full SHA of the next commit>"
+  ],
+  "gates_green": true,
+  "summary": "<what you changed, in one or two sentences>",
+  "worktree": "<STATE>/worktrees/<RUN>/a",
+  "judgement_calls": "<the first decision that you made>; <the next decision>"
+}
+```

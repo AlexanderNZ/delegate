@@ -221,9 +221,20 @@ def _fenced_diff(diff: str) -> str:
     return f"{fence}diff\n{body}\n{fence}"
 
 
-def _diff_block(
-    vcs: VersionControl, repo: str | Path, diff: str, command: str, since: str, until: str, limit: int, *, from_merge_base: bool,
-) -> str:
+@dataclass(frozen=True)
+class _DiffRange:
+    """The two names of a diff, and its form: the three-dot form from the merge base, or the two-dot form."""
+
+    since: str
+    until: str
+    from_merge_base: bool
+
+    @property
+    def command(self) -> str:
+        return f"git diff {self.since}{'...' if self.from_merge_base else '..'}{self.until}"
+
+
+def _diff_block(vcs: VersionControl, repo: str | Path, diff: str, span: _DiffRange, limit: int) -> str:
     """The diff as a brief holds it (#292): the fenced diff up to `limit` characters, and above it the stat and the command.
 
     Above the limit, the block gives the output of `git diff --stat` for the same range, and tells the verifier to read the
@@ -233,12 +244,12 @@ def _diff_block(
     if len(diff) <= limit:
         return _fenced_diff(diff)
     with _vcs_errors():
-        stat = vcs.diff_stat(Path(repo), since, until, from_merge_base=from_merge_base)
+        stat = vcs.diff_stat(Path(repo), span.since, span.until, from_merge_base=span.from_merge_base)
     return (
         f"The diff has {len(diff):,} characters. This is more than the limit of {limit:,} characters, so this brief does not hold it. "
         "This is the stat of the diff:\n\n"
         f"{_fence(stat)}\n{stat.rstrip(chr(10))}\n{_fence(stat)}\n\n"
-        f"Read the diff in your copy with this command: `{command}`. Your copy holds both refs of the command."
+        f"Read the diff in your copy with this command: `{span.command}`. Your copy holds both refs of the command."
     )
 
 
@@ -466,51 +477,72 @@ def coordinator_section(commits: Sequence[tuple[str, Sequence[str]]]) -> str:
     return "\n" + _sections((COORDINATOR_HEADING, f"{COORDINATOR_RULE}\n\n{lines}"))
 
 
-def full_brief(
-    vcs: VersionControl,
-    repo: str | Path,
-    branch: str,
-    base: str,
-    task: str,
-    stacks: Sequence[str] = (),
-    gate_commands: Sequence[str] | None = None,
-    plan_change: str | None = None,
-    gates_text: str | None = None,
-    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
-) -> str:
+@dataclass(frozen=True)
+class VerifierInputs:
+    """The inputs that the briefs of a verifier share (#362): the repository, the gates, and the limit of a diff.
+
+    The engine makes one value from its step, and each brief function of a verifier takes it with its own values.
+
+    `repo` is the repository or the worktree that the brief reads. The gates come from the delegation doc of the
+    repository, and `stacks` selects the gate blocks of its stacks. `gate_commands` replaces them: the workflow engine
+    knows the gate commands of the stack, and a repository need not hold a delegation doc. `gates_text` replaces the whole
+    text of the `## Gates` section: the engine gives the output of the gates that it ran green (see `green_gates_text`).
+    A diff of more than `diff_limit` characters is not in the brief (see `_diff_block`).
+    """
+
+    vcs: VersionControl
+    repo: str | Path
+    stacks: tuple[str, ...] = ()
+    gate_commands: tuple[str, ...] | None = None
+    gates_text: str | None = None
+    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT
+
+
+@dataclass(frozen=True)
+class VerifierSession:
+    """What the engine adds to a verifier brief for the session of one verifier (#362).
+
+    `report_path` is where the verifier writes its verdict, and `scratch` its scratch directory (#227). `notes` are the
+    verifier notes of the stack, and `coordinator` holds each commit of the coordinator on the branch with its paths (#225).
+    """
+
+    report_path: str | Path
+    scratch: str | Path | None = None
+    notes: str | None = None
+    coordinator: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+
+def full_brief(inputs: VerifierInputs, branch: str, base: str, task: str, plan_change: str | None = None) -> str:
     """The first-pass brief: the task, the three-dot diff, and the gates.
 
     The diff is the three-dot form. A two-dot diff reports the base's later
     commits as removals, and the verifier reads those as deletions the
     specialist never made.
 
-    The gates come from the delegation doc of the repository. `gate_commands`
-    replaces them: the workflow engine knows the gate commands of the stack,
-    and a repository need not hold a delegation doc.
+    The gates are the gates of `inputs` (see `VerifierInputs`).
 
     With `plan_change`, the text of `plan_change_text`, the brief has the
-    section "Plan change" after the task. `gates_text` replaces the whole text
-    of the `## Gates` section, as in `chain_brief`: the engine gives the output
-    of the gates that it ran green (see `green_gates_text`).
+    section "Plan change" after the task.
 
-    A diff of more than `diff_limit` characters is not in the brief: the brief holds its stat and the command instead (see `_diff_block`).
+    A diff of more than `inputs.diff_limit` characters is not in the brief: the brief holds its stat and the command instead (see `_diff_block`).
     """
-    command = f"git diff {base}...{branch}"
+    vcs, repo = inputs.vcs, inputs.repo
+    span = _DiffRange(base, branch, True)
     diff = _diff(vcs, repo, base, branch, from_merge_base=True)
     if not diff.strip():
-        raise BriefError(f"{command} is empty. The branch holds no change to verify.")
-    if gates_text is not None:
-        gates = gates_text
-    elif gate_commands is None:
-        gates = read_gates(repo, _changed_files(vcs, repo, base, branch, from_merge_base=True), stacks)
+        raise BriefError(f"{span.command} is empty. The branch holds no change to verify.")
+    if inputs.gates_text is not None:
+        gates = inputs.gates_text
+    elif inputs.gate_commands is None:
+        gates = read_gates(repo, _changed_files(vcs, repo, base, branch, from_merge_base=True), inputs.stacks)
     else:
-        gates = _bash("\n".join(gate_commands))
+        gates = _bash("\n".join(inputs.gate_commands))
     plan = [(PLAN_CHANGE_HEADING, plan_change)] if plan_change is not None else []
     return _sections(
         ("## Task", task),
         (DATA_HEADING, DATA_RULE),
         *plan,
-        ("## Diff", f"`{command}`\n\n" + _diff_block(vcs, repo, diff, command, base, branch, diff_limit, from_merge_base=True)),
+        ("## Diff", f"`{span.command}`\n\n" + _diff_block(vcs, repo, diff, span, inputs.diff_limit)),
         ("## Gates", gates),
     )
 
@@ -584,14 +616,10 @@ def green_gates_text(commit: str, outputs: Sequence[tuple[str, str]]) -> str:
 
 
 def chain_brief(
-    vcs: VersionControl,
-    repo: str | Path,
+    inputs: VerifierInputs,
     segments: Sequence[ChainSegment],
-    gate_commands: Sequence[str],
-    gates_text: str | None = None,
     fixups: tuple[str, str] | None = None,
     earlier_fixups: tuple[str, str] | None = None,
-    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
 ) -> str:
     """The first-pass brief for a chain: the task and the three-dot diff of each ticket, and the gates.
 
@@ -600,7 +628,7 @@ def chain_brief(
     `full_brief` is the form for one ticket, and this is the same form for
     many, with the labels that map a finding to a ticket.
 
-    `gates_text` replaces the gate commands in the `## Gates` section: the
+    `inputs.gates_text` replaces the gate commands in the `## Gates` section: the
     engine gives the output of the gates that it ran green (see
     `green_gates_text`). `fixups` is the pair `(start, tip)` of the fix-up
     commits that red gates caused before the first verifier of the stack. The
@@ -612,73 +640,62 @@ def chain_brief(
     holds their delta `git diff <start>..<tip>` and names those files. When
     they change no such file, the brief does not hold them.
 
-    Each diff follows the rule of `diff_limit` of `full_brief`.
+    Each diff follows the rule of `inputs.diff_limit` of `full_brief`.
     """
+    vcs, repo, diff_limit = inputs.vcs, inputs.repo, inputs.diff_limit
     tasks: list[str] = []
     diffs: list[str] = []
     files: set[str] = set()  # each file that a ticket of the stack changed
     for segment in segments:
-        command = f"git diff {segment.base}...{segment.tip}"
+        span = _DiffRange(segment.base, segment.tip, True)
         diff = _diff(vcs, repo, segment.base, segment.tip, from_merge_base=True)
         if not diff.strip():
-            raise BriefError(f"{command} is empty. The ticket {segment.ticket} holds no change to verify.")
+            raise BriefError(f"{span.command} is empty. The ticket {segment.ticket} holds no change to verify.")
         tasks.append(f"Ticket {segment.ticket}\n\n{segment.text.rstrip(chr(10))}")
-        block = _diff_block(vcs, repo, diff, command, segment.base, segment.tip, diff_limit, from_merge_base=True)
-        diffs.append(f"### Ticket {segment.ticket}\n\n`{command}`\n\n{block}")
+        block = _diff_block(vcs, repo, diff, span, diff_limit)
+        diffs.append(f"### Ticket {segment.ticket}\n\n`{span.command}`\n\n{block}")
         if earlier_fixups is not None:
             files.update(_paths(vcs, repo, segment.base, segment.tip, from_merge_base=True))
     if earlier_fixups is not None:
         start, tip = earlier_fixups
         shared = sorted(files.intersection(_paths(vcs, repo, start, tip, from_merge_base=False)))
         if shared:
-            command = f"git diff {start}..{tip}"
+            span = _DiffRange(start, tip, False)
             names = ", ".join(f"`{name}`" for name in shared)
             earlier = _diff(vcs, repo, start, tip, from_merge_base=False)
             diffs.append(
                 "### The fix-ups of the stacks before this stack\n\n"
                 f"The fix-up commits of the stacks that the engine verified before this stack change these files of "
                 f"the tickets of this stack: {names}. Check these changes against the tickets of this stack.\n\n"
-                f"`{command}`\n\n" + _diff_block(vcs, repo, earlier, command, start, tip, diff_limit, from_merge_base=False)
+                f"`{span.command}`\n\n" + _diff_block(vcs, repo, earlier, span, diff_limit)
             )
     if fixups is not None:
         start, tip = fixups
-        command = f"git diff {start}..{tip}"
+        span = _DiffRange(start, tip, False)
         diff = _diff(vcs, repo, start, tip, from_merge_base=False)
         diffs.append(
             f"### The fix-ups of the red gates\n\nThe gates were red on the commit `{start}`. "
-            f"These commits fix them.\n\n`{command}`\n\n"
-            + _diff_block(vcs, repo, diff, command, start, tip, diff_limit, from_merge_base=False)
+            f"These commits fix them.\n\n`{span.command}`\n\n"
+            + _diff_block(vcs, repo, diff, span, diff_limit)
         )
     return _sections(
         ("## Task", "\n\n".join(tasks)),
         (DATA_HEADING, DATA_RULE),
         ("## Diff", "\n\n".join(diffs)),
-        ("## Gates", gates_text if gates_text is not None else _bash("\n".join(gate_commands))),
+        ("## Gates", inputs.gates_text if inputs.gates_text is not None else _bash("\n".join(inputs.gate_commands or ()))),
     ) + finding_labels_section()
 
 
-def fixup_brief(
-    vcs: VersionControl,
-    repo: str | Path,
-    branch: str,
-    rejected: str,
-    findings: str,
-    authorised: str | None = None,
-    stacks: Sequence[str] = (),
-    gate_commands: Sequence[str] | None = None,
-    gates_text: str | None = None,
-    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
-) -> str:
+def fixup_brief(inputs: VerifierInputs, branch: str, rejected: str, findings: str, authorised: str | None = None) -> str:
     """The scoped brief: the findings verbatim, the delta, and the gates.
 
     The delta exists only when the specialist added the fix-up on top of the
     rejected commit. An amend or a rebase destroys it, so both states stop the
     command instead of producing a brief that hides the loss.
 
-    The gates come from the delegation doc of the repository. `gate_commands`
-    replaces them, as in `full_brief`. `gates_text` replaces the whole text of
-    the `## Gates` section, as in `chain_brief`. A delta of more than `diff_limit` characters follows the rule of `full_brief`.
+    The gates are the gates of `inputs`, as in `full_brief`. A delta of more than `inputs.diff_limit` characters follows the rule of `full_brief`.
     """
+    vcs, repo = inputs.vcs, inputs.repo
     with _vcs_errors():
         vcs.commit_of(Path(repo), rejected)
     try:
@@ -692,25 +709,25 @@ def fixup_brief(
             "The specialist amended or rewrote it, so no delta exists. "
             "Ask the specialist to keep the rejected commit and to add the fix-up as a new commit."
         )
-    command = f"git diff {rejected}..{branch}"
+    span = _DiffRange(rejected, branch, False)
     delta = _diff(vcs, repo, rejected, branch, from_merge_base=False)
     if not delta.strip():
         raise BriefError(
-            f"{command} is empty. The tip of {branch} is the rejected commit, "
+            f"{span.command} is empty. The tip of {branch} is the rejected commit, "
             "so there is no fix-up to verify."
         )
     pairs = [(FINDINGS_HEADING, findings.rstrip("\n")), (DATA_HEADING, DATA_RULE)]
     if authorised:
         pairs.append(("## Coordinator-authorised additions", authorised))
     pairs.append(
-        ("## Delta", f"`{command}`\n\n" + _diff_block(vcs, repo, delta, command, rejected, branch, diff_limit, from_merge_base=False))
+        ("## Delta", f"`{span.command}`\n\n" + _diff_block(vcs, repo, delta, span, inputs.diff_limit))
     )
-    if gates_text is not None:
-        gates = gates_text
-    elif gate_commands is None:
-        gates = read_gates(repo, _changed_files(vcs, repo, rejected, branch, from_merge_base=False), stacks)
+    if inputs.gates_text is not None:
+        gates = inputs.gates_text
+    elif inputs.gate_commands is None:
+        gates = read_gates(repo, _changed_files(vcs, repo, rejected, branch, from_merge_base=False), inputs.stacks)
     else:
-        gates = _bash("\n".join(gate_commands))
+        gates = _bash("\n".join(inputs.gate_commands))
     pairs.append(("## Gates", gates))
     return _sections(*pairs)
 
@@ -728,20 +745,34 @@ def _specialist_report_shape(ticket: str, worktree: str | Path, report_path: str
     )
 
 
+@dataclass(frozen=True)
+class SpecialistInputs:
+    """The inputs that the briefs of a specialist share (#362): the ticket, its worktree, and the rules of its stack.
+
+    The engine makes one value from its step, and each brief function of a specialist takes it with its own values.
+
+    `hotspots` are the path patterns that only the coordinator may change, and `gates` the gate commands of the stack.
+    `report_path` is where the specialist writes its report. With `gates_at_chain_end`, the engine runs the gates once, on
+    the tip of an `economy` chain, and not after this ticket. With `plan_change`, the text of `plan_change_text`, a brief
+    has the section "Plan change" after the task. With `notes`, the specialist notes of the stack, a brief has the section
+    "Notes of this stack" before the file boundary. With `scratch`, the scratch directory of the session, a brief has the
+    section "Scratch directory" after the commands (#227).
+    """
+
+    ticket: str
+    text: str
+    worktree: str | Path
+    hotspots: tuple[str, ...]
+    gates: tuple[str, ...]
+    report_path: str | Path
+    gates_at_chain_end: bool = False
+    plan_change: str | None = None
+    notes: str | None = None
+    scratch: str | Path | None = None
+
+
 def specialist_brief(
-    ticket: str,
-    text: str,
-    worktree: str | Path,
-    hotspots: Sequence[str],
-    gates: Sequence[str],
-    report_path: str | Path,
-    rejected: str | None = None,
-    findings: str | None = None,
-    red_gates: bool = False,
-    gates_at_chain_end: bool = False,
-    plan_change: str | None = None,
-    notes: str | None = None,
-    scratch: str | Path | None = None,
+    inputs: SpecialistInputs, rejected: str | None = None, findings: str | None = None, red_gates: bool = False,
 ) -> str:
     """The brief the engine sends a specialist: the ticket, the file boundary, the foreground rule, the gates, the report path.
 
@@ -755,16 +786,15 @@ def specialist_brief(
     the findings are the output of the gates that were red on the rejected
     commit, and not the findings of a verifier.
 
-    With `gates_at_chain_end`, the engine runs the gates once, on the tip of an
+    With `inputs.gates_at_chain_end`, the engine runs the gates once, on the tip of an
     `economy` chain, and not after this ticket. The specialist runs the tests of
     what it changes.
 
-    With `plan_change`, the text of `plan_change_text`, the brief has the
-    section "Plan change" after the task. With `notes`, the specialist notes of
-    the stack, the brief has the section "Notes of this stack" before the file
-    boundary. With `scratch`, the scratch directory of the session, the brief has the section "Scratch directory" after
-    the commands (#227).
+    The sections "Plan change", "Notes of this stack" and "Scratch directory" follow the fields of `inputs`
+    (see `SpecialistInputs`).
     """
+    ticket, text, worktree, report_path = inputs.ticket, inputs.text, inputs.worktree, inputs.report_path
+    hotspots, plan_change = inputs.hotspots, inputs.plan_change
     if hotspots:
         reserved = "These paths are reserved. Only the coordinator changes them. Do not change them:\n\n" + "\n".join(
             f"- `{pattern}`" for pattern in hotspots
@@ -793,35 +823,36 @@ def specialist_brief(
             "Do not amend, rebase or reset: a verifier reads only the delta from the rejected commit, "
             "and the engine refuses a branch that no longer holds it.",
         ))
-    pairs += _notes_pairs(notes)
+    pairs += _notes_pairs(inputs.notes)
     pairs += [
         ("## File boundary", boundary),
         ("## Commands", _commands("worktree")),
-        *_scratch_pairs(scratch, "worktree"),
-        ("## Gates", _specialist_gates(gates, gates_at_chain_end)),
+        *_scratch_pairs(inputs.scratch, "worktree"),
+        ("## Gates", _specialist_gates(inputs.gates, inputs.gates_at_chain_end)),
         ("## Report", report),
     ]
     return _sections(*pairs)
 
 
-def continuation_brief(
-    ticket: str,
-    text: str,
-    worktree: str | Path,
-    hotspots: Sequence[str],
-    gates: Sequence[str],
-    report_path: str | Path,
-    commits: Sequence[str],
-    reason: str,
-    resumed: bool,
-    gate_output: str | None = None,
-    gates_at_chain_end: bool = False,
-    plan_change: str | None = None,
-    notes: str | None = None,
-    uncommitted: Sequence[str] = (),
-    scratch: str | Path | None = None,
-    gate_logs: Sequence[GateLogCopy] = (),
-) -> str:
+@dataclass(frozen=True)
+class Continuation:
+    """Why the last run of a specialist stopped, and the state that it left (#362). The values that `continuation_brief` adds.
+
+    `reason` is the reason the last run stopped, and `commits` the commits on the branch so far. `gate_output` is the
+    output of the red gates when a gate was the reason, and `gate_logs` holds the copy of the full log of each red gate in
+    the scratch directory (#246): the brief names each copy after the output of the red gates (see `gate_log_copies_text`).
+    `uncommitted` names the paths of the worktree that hold a change that is not committed (#176). The engine ran no gate
+    because of them. The brief names each path, and tells the specialist to commit it or remove it.
+    """
+
+    reason: str
+    commits: tuple[str, ...] = ()
+    gate_output: str | None = None
+    uncommitted: tuple[str, ...] = ()
+    gate_logs: tuple[GateLogCopy, ...] = ()
+
+
+def continuation_brief(inputs: SpecialistInputs, continuation: Continuation, resumed: bool) -> str:
     """The brief the engine sends a specialist that continues its work in the same worktree.
 
     It holds the ticket id, the reason the last run stopped, the commits on the
@@ -831,18 +862,16 @@ def continuation_brief(
     brief holds only the continuation and the gates again: the rule not to run
     a gate command must be near the output of red gates. A new agent has no
     context, so its brief is the full specialist brief with the continuation added, and with the sections "Plan
-    change" and "Notes of this stack" when `plan_change` and `notes` are set.
+    change" and "Notes of this stack" when `inputs.plan_change` and `inputs.notes` are set.
 
-    `uncommitted` names the paths of the worktree that hold a change that is not
-    committed (#176). The engine ran no gate because of them. The brief names
-    each path, and tells the specialist to commit it or remove it.
+    `continuation.uncommitted` and `continuation.gate_logs` are described in `Continuation`.
 
-    `scratch` is the scratch directory of the session (#227). A resumed brief names it again in the section "Scratch
+    `inputs.scratch` is the scratch directory of the session (#227). A resumed brief names it again in the section "Scratch
     directory", and a new agent gets it in its full specialist brief.
-
-    `gate_logs` holds the copy of the full log of each red gate in `scratch` (#246). The brief names each copy after the
-    output of the red gates (see `gate_log_copies_text`).
     """
+    ticket, worktree, report_path = inputs.ticket, inputs.worktree, inputs.report_path
+    reason, commits, gate_output = continuation.reason, continuation.commits, continuation.gate_output
+    uncommitted, gate_logs = continuation.uncommitted, continuation.gate_logs
     lines = [
         f"Ticket {ticket}",
         "",
@@ -871,32 +900,25 @@ def continuation_brief(
     if gate_logs:
         lines += ["", gate_log_copies_text(gate_logs)]
     lines += ["", "When you finish, write the report as the first brief says. " + _report_rule("worktree", report_path)]
-    continuation = ("## Continuation", "\n".join(lines))
+    continuation_section = ("## Continuation", "\n".join(lines))
     if resumed:
-        return _sections(continuation, *_scratch_pairs(scratch, "worktree"), ("## Gates", _specialist_gates(gates, gates_at_chain_end)))
-    section = _sections(continuation)
-    return specialist_brief(
-        ticket, text, worktree, hotspots, gates, report_path, gates_at_chain_end=gates_at_chain_end, plan_change=plan_change,
-        notes=notes, scratch=scratch,
-    ) + "\n" + section
+        return _sections(
+            continuation_section, *_scratch_pairs(inputs.scratch, "worktree"),
+            ("## Gates", _specialist_gates(inputs.gates, inputs.gates_at_chain_end)),
+        )
+    return specialist_brief(inputs) + "\n" + _sections(continuation_section)
 
 
-def report_correction_brief(
-    ticket: str,
-    worktree: str | Path,
-    report_path: str | Path,
-    commits: Sequence[str],
-    problems: Sequence[str],
-    scratch: str | Path | None = None,
-) -> str:
+def report_correction_brief(inputs: SpecialistInputs, commits: Sequence[str], problems: Sequence[str]) -> str:
     """The brief the engine sends a specialist that committed work but wrote a report that is missing or not valid.
 
     It asks only for a corrected report. It holds the ticket id, the commits on
     the branch, each problem of the report check, the report rule, the foreground
     rule, and the shape of the report. It does not give the task again, so a
-    resumed session and a new agent get the same brief. With `scratch`, it names the scratch directory of the session
+    resumed session and a new agent get the same brief. With `inputs.scratch`, it names the scratch directory of the session
     in the section "Scratch directory" (#227).
     """
+    ticket, worktree, report_path = inputs.ticket, inputs.worktree, inputs.report_path
     lines = [
         f"Ticket {ticket}",
         "",
@@ -915,7 +937,7 @@ def report_correction_brief(
     return _sections(
         ("## Continuation", "\n".join(lines)),
         ("## Commands", _commands("worktree")),
-        *_scratch_pairs(scratch, "worktree"),
+        *_scratch_pairs(inputs.scratch, "worktree"),
         ("## Report", _specialist_report_shape(ticket, worktree, report_path)),
     )
 
@@ -993,30 +1015,27 @@ def verifier_run_sections(
 
 
 def verifier_run_brief(
-    vcs: VersionControl,
-    copy: str | Path, branch: str, base: str, task: str, gates: Sequence[str], report_path: str | Path,
-    plan_change: str | None = None, notes: str | None = None, gates_text: str | None = None,
-    coordinator: Sequence[tuple[str, Sequence[str]]] = (),
-    scratch: str | Path | None = None,
-    diff_limit: int = DEFAULT_VERIFIER_DIFF_LIMIT,
+    inputs: VerifierInputs, branch: str, base: str, task: str, session: VerifierSession, plan_change: str | None = None,
 ) -> str:
     """The brief the engine sends a verifier: the full brief, the working copy, and the report path.
 
     The full brief comes from `full_brief`, so it holds the task, the diff and
-    the gates, and never the specialist's report. `copy` is the temporary copy
+    the gates, and never the specialist's report. `inputs.repo` is the temporary copy
     of the branch that the engine prepared. With `plan_change`, the brief has the
-    section "Plan change" after the task. With `notes`, the verifier notes of
+    section "Plan change" after the task. With `session.notes`, the verifier notes of
     the stack, the section "Notes of this stack" comes after the gates. With
-    `gates_text`, the output of the gates that the engine ran green on the
+    `inputs.gates_text`, the output of the gates that the engine ran green on the
     commit under verification (see `green_gates_text`), the brief gives that
-    output in place of the gate commands, and the verifier does not run the gates. With `coordinator`, each commit of
+    output in place of the gate commands, and the verifier does not run the gates. With `session.coordinator`, each commit of
     the coordinator on the branch and its paths, the section "Commit of the coordinator" comes before the notes (#225).
-    With `scratch`, the brief names the scratch directory of the session (see `verifier_run_sections`).
-    `diff_limit` is the `verifier-diff-limit` of the stack (see `full_brief`).
+    With `session.scratch`, the brief names the scratch directory of the session (see `verifier_run_sections`).
+    `inputs.diff_limit` is the `verifier-diff-limit` of the stack (see `full_brief`).
     """
     return (
-        full_brief(vcs, copy, branch, base, task, gate_commands=gates, plan_change=plan_change, gates_text=gates_text, diff_limit=diff_limit)
-        + coordinator_section(coordinator)
-        + notes_section(notes)
-        + verifier_run_sections(copy, report_path, "full", engine_gates=gates_text is not None, scratch=scratch)
+        full_brief(inputs, branch, base, task, plan_change)
+        + coordinator_section(session.coordinator)
+        + notes_section(session.notes)
+        + verifier_run_sections(
+            inputs.repo, session.report_path, "full", engine_gates=inputs.gates_text is not None, scratch=session.scratch,
+        )
     )

@@ -194,9 +194,10 @@ from . import chain, domain, run_state, step_scans
 from .context import ResumeRequest, RunContext
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
-    BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
-    green_gates_text, notes_section, plan_change_section, plan_change_text, red_proof_copy, report_correction_brief,
-    specialist_brief, verifier_run_brief, verifier_run_sections,
+    BriefError, ChainSegment, Continuation, GateLogCopy, SpecialistInputs, VerifierInputs, VerifierSession, chain_brief,
+    continuation_brief, coordinator_section, finding_labels_section, fixup_brief, green_gates_text, notes_section,
+    plan_change_section, plan_change_text, red_proof_copy, report_correction_brief, specialist_brief, verifier_run_brief,
+    verifier_run_sections,
 )
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .errors import EngineError, Rejected, StepFailed
@@ -1845,18 +1846,14 @@ def _build_with_continuations(
     limit = domain.continuation_limit(workflow.mode)
     each_ticket = domain.gates_each_ticket(workflow.mode)
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
-    prompt = specialist_brief(
-        ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, gates_at_chain_end=not each_ticket,
-        plan_change=plan_change, notes=stack.specialist_notes, scratch=scratch,
+    inputs = _specialist_inputs(
+        step, report_path, scratch, plan_change=plan_change, notes=stack.specialist_notes, gates_at_chain_end=not each_ticket,
     )
+    prompt = specialist_brief(inputs)
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far or reported:
-            prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, so_far,
-                stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
-                notes=stack.specialist_notes, scratch=scratch,
-            )
+            prompt = continuation_brief(inputs, Continuation(stop_reason, tuple(so_far)), resumed=False)
     resume_session: str | None = None
     leftovers: frozenset[str] = frozenset()  # the paths that red gates left in the worktree (see `_uncommitted_before_gates`)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
@@ -1948,13 +1945,11 @@ def _build_with_continuations(
             mode="resume" if resume_session is not None else "brief", resume_session=resume_session, commits=commits, reason=reason,
         )
         if trigger in (TRIGGER_REPORT_INVALID, TRIGGER_REPORT_MISSING):
-            prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems, scratch=scratch)
+            prompt = report_correction_brief(inputs, commits, problems)
         else:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, commits, reason,
-                resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
-                plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths, scratch=scratch,
-                gate_logs=gate_logs,
+                inputs, Continuation(reason, tuple(commits), gate_output, tuple(uncommitted_paths), tuple(gate_logs)),
+                resumed=resume_session is not None,
             )
 
 
@@ -2225,10 +2220,8 @@ def _run_fixup(
     # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
     leftovers = frozenset(_uncommitted_paths(step.run.vcs, step.worktree))
     scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_FIXUP)
-    prompt = specialist_brief(
-        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots(step.run.config_paths), step.stack.gates, report_path, rejected, findings_text,
-        red_gates=red_gates, notes=step.stack.specialist_notes, scratch=scratch,
-    )
+    inputs = _specialist_inputs(step, report_path, scratch, notes=step.stack.specialist_notes)
+    prompt = specialist_brief(inputs, rejected, findings_text, red_gates=red_gates)
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
     session = _Session(step.stack.specialist, model, sealed, step.worktree, report_path, stream, scratch)
@@ -2270,6 +2263,25 @@ def _findings_text(findings: list[str]) -> str:
     return "".join(f"- {finding}\n" for finding in findings)
 
 
+def _specialist_inputs(
+    step: _Step, report_path: Path, scratch: Path, *, plan_change: str | None = None, notes: str | None = None,
+    gates_at_chain_end: bool = False,
+) -> SpecialistInputs:
+    """The inputs of the briefs of the specialist of `step`: the ticket, its worktree, its stack, and the paths of the session (#362)."""
+    ticket, run = step.ticket, step.run
+    return SpecialistInputs(
+        ticket.id, ticket.text, step.worktree, tuple(step.stack.all_hotspots(run.config_paths)), tuple(step.stack.gates),
+        report_path, gates_at_chain_end, plan_change, notes, scratch,
+    )
+
+
+def _verifier_inputs(step: _Step, repo: str | Path, gates_text: str | None) -> VerifierInputs:
+    """The inputs of the briefs of the verifier of `step`, which read `repo`: the gate commands of its stack and its diff limit (#362)."""
+    return VerifierInputs(
+        step.run.vcs, repo, gate_commands=tuple(step.stack.gates), gates_text=gates_text, diff_limit=step.stack.verifier_diff_limit,
+    )
+
+
 def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings_text: str, gates_text: str | None = None) -> str:
     """Check the fix-up commit of a round, and return the scoped brief for the fresh verifier.
 
@@ -2283,10 +2295,7 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
     if stop:
         raise StepFailed(stop)
     try:
-        return fixup_brief(
-            step.run.vcs, step.run.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text,
-            diff_limit=step.stack.verifier_diff_limit,
-        )
+        return fixup_brief(_verifier_inputs(step, step.run.repo, gates_text), step.branch, rejected, findings_text)
     except BriefError as error:
         step.journal.append("fixup-refused", ticket=ticket.id, round=round_number, reason=str(error))
         raise StepFailed(f"the fix-up of round {round_number} is refused: {error}") from None
@@ -2393,12 +2402,11 @@ def _verify_round(
             notes = notes_section(step.stack.verifier_notes)
             # Each commit of the coordinator on the branch under verification is named, so the verifier checks it too (#225).
             coordinator = _coordinator_of_step(step)
+            inputs = _verifier_inputs(step, copy, gates_text)
             if step.segments is not None:
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
-                    chain_brief(
-                        step.run.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups, step.stack.verifier_diff_limit,
-                    )
+                    chain_brief(inputs, step.segments, fixups, earlier_fixups)
                     + plan_change_section(_plan_change_note(step.journal, step.run.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
@@ -2408,10 +2416,9 @@ def _verify_round(
                 )
             elif fixup_body is None:
                 prompt = verifier_run_brief(
-                    step.run.vcs, copy, step.branch, step.run.workflow.run_branch, ticket.text, step.stack.gates, report_path,
+                    inputs, step.branch, step.run.workflow.run_branch, ticket.text,
+                    VerifierSession(report_path, own_scratch, step.stack.verifier_notes, tuple((c, tuple(p)) for c, p in coordinator)),
                     plan_change=_plan_change_note(step.journal, step.run.workflow, [ticket.id], verifier=True),
-                    notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator, scratch=own_scratch,
-                    diff_limit=step.stack.verifier_diff_limit,
                 )
             else:
                 prompt = (

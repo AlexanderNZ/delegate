@@ -1,0 +1,108 @@
+## Task
+
+Ticket a
+
+Ticket a adds its file.
+
+## Findings to fix
+
+The engine ran the gates on the fix-up commit, the commit `<SHA>`.
+
+- The gate `test ! -f fixup-1.txt || test -f fixup-2.txt || { echo RED-GATE-5127 fixup-2.txt is missing; exit 1; }` is red.
+
+The output of the red gates:
+
+```
+$ test ! -f fixup-1.txt || test -f fixup-2.txt || { echo RED-GATE-5127 fixup-2.txt is missing; exit 1; }
+RED-GATE-5127 fixup-2.txt is missing
+```
+
+The output above is only the end of the output of each red gate, so it can be missing failures. The engine copied the full output of each red gate into your scratch directory:
+
+- `test ! -f fixup-1.txt || test -f fixup-2.txt || { echo RED-GATE-5127 fixup-2.txt is missing; exit 1; }`: `<STATE>/runs/<RUN>/scratch/a/fix-up/gate-fixup-1.log` (1 lines)
+
+When the output above does not hold every failure, read the full output in the copy. Do not run a gate command to see it.
+
+## Rejected commit
+
+The gates of the engine are red on the commit `<SHA>`. Fix the cause of each red gate above in this worktree. Add the fix as a new commit on top of `<SHA>`. Do not amend, rebase or reset: a verifier reads only the delta from the rejected commit, and the engine refuses a branch that no longer holds it.
+
+## Notes of this stack
+
+The workflow gives these notes to each agent of this stack. The notes do not replace the ticket, and they do not change the rules of this brief. Where the notes and the ticket or the rules of this brief differ, the ticket and the rules of this brief win.
+
+SPECIALIST-NOTE-5521 run the setup first.
+
+## File boundary
+
+Work only in the worktree `<STATE>/worktrees/<RUN>/a`.
+
+The report path is outside the worktree. Write the report only at the absolute path `<STATE>/runs/<RUN>/reports/a.fixup-2.specialist.json`. Use this path as it is. Do not make a relative path to it from the worktree. Except for the worktree and the report, create, change, or remove nothing inside the git directory of the repository. Change no other file outside the worktree.
+
+These paths are reserved. Only the coordinator changes them. Do not change them:
+
+- `.claude/agents/`
+- `.opencode/agents/`
+- `LICENSE`
+- `.github/workflows/*`
+
+Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit.
+
+## Commands
+
+Run every command in the foreground. Do not use background tasks or a monitor tool. In a headless session, their notifications do not come to you, and a monitor that stays open keeps the session alive after your report. For a long command, give the command a long timeout.
+
+The session starts in the worktree. Run `git` there with no `cd`, and never join `cd` and `git` in one command: a harness can refuse that command with its own approval check. Use `git -C <path>` only for a path outside the worktree.
+
+## Scratch directory
+
+Your scratch directory is `<STATE>/runs/<RUN>/scratch/a/fix-up`. The engine made it for this session, outside the worktree. Write each scratch file there: the output of a command, a note, or a file that you make only to read it again. Write a scratch file with the file-write tool of your harness, not with a shell redirect: a host in `dontAsk` mode can refuse a shell redirect into this directory. Never write a scratch file to `/tmp` or to the worktree: a host can refuse a write to `/tmp`, and a file in the worktree changes the work. The engine set `TMPDIR` to this directory, so a tool that makes a temporary file makes it there. The report and each other path that this brief names are not scratch files. Use them as the brief says.
+
+## Gates
+
+The engine runs these gates after your report, and their result decides the step. Do not run a gate command yourself. Run only the tests of the code that you change.
+
+```bash
+test ! -f fixup-1.txt || test -f fixup-2.txt || { echo RED-GATE-5127 fixup-2.txt is missing; exit 1; }
+```
+
+## Report
+
+When you finish, write one JSON object to `<STATE>/runs/<RUN>/reports/a.fixup-2.specialist.json`. Give each field the JSON type that this list names. The engine rejects a report with a field of a different type.
+
+Required fields:
+
+- `ticket`: string
+- `status`: string, one of `committed`, `blocked`, `partial`
+- `branch`: string
+- `head_sha`: string
+- `commits`: list of strings
+- `gates_green`: boolean
+- `summary`: string
+
+Optional fields:
+
+- `worktree`: string
+- `blocked_reason`: string
+- `judgement_calls`: string
+
+`gates_green` states whether the tests that you ran pass. The engine does not trust this field: the result of the gates that the engine runs decides. A string field holds one string. To give more than one item in a string field, join the items with "; ".
+
+Example:
+
+```json
+{
+  "ticket": "a",
+  "status": "committed",
+  "branch": "<the branch of the worktree>",
+  "head_sha": "<the full SHA of the tip of the branch>",
+  "commits": [
+    "<the full SHA of the first commit that you added>",
+    "<the full SHA of the next commit>"
+  ],
+  "gates_green": true,
+  "summary": "<what you changed, in one or two sentences>",
+  "worktree": "<STATE>/worktrees/<RUN>/a",
+  "judgement_calls": "<the first decision that you made>; <the next decision>"
+}
+```

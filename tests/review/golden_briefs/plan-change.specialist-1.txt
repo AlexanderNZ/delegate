@@ -1,0 +1,85 @@
+## Task
+
+Ticket x
+
+Ticket x adds its file.
+
+## Notes of this stack
+
+The workflow gives these notes to each agent of this stack. The notes do not replace the ticket, and they do not change the rules of this brief. Where the notes and the ticket or the rules of this brief differ, the ticket and the rules of this brief win.
+
+SPECIALIST-NOTE-5521 run the setup first.
+
+## File boundary
+
+Work only in the worktree `<STATE>/worktrees/<RUN>/x`.
+
+The report path is outside the worktree. Write the report only at the absolute path `<STATE>/runs/<RUN>/reports/x.specialist.json`. Use this path as it is. Do not make a relative path to it from the worktree. Except for the worktree and the report, create, change, or remove nothing inside the git directory of the repository. Change no other file outside the worktree.
+
+These paths are reserved. Only the coordinator changes them. Do not change them:
+
+- `.claude/agents/`
+- `.opencode/agents/`
+- `LICENSE`
+- `.github/workflows/*`
+
+Never push. Commit your work on the branch of this worktree. Do not amend or rewrite a commit.
+
+## Commands
+
+Run every command in the foreground. Do not use background tasks or a monitor tool. In a headless session, their notifications do not come to you, and a monitor that stays open keeps the session alive after your report. For a long command, give the command a long timeout.
+
+The session starts in the worktree. Run `git` there with no `cd`, and never join `cd` and `git` in one command: a harness can refuse that command with its own approval check. Use `git -C <path>` only for a path outside the worktree.
+
+## Scratch directory
+
+Your scratch directory is `<STATE>/runs/<RUN>/scratch/x/specialist`. The engine made it for this session, outside the worktree. Write each scratch file there: the output of a command, a note, or a file that you make only to read it again. Write a scratch file with the file-write tool of your harness, not with a shell redirect: a host in `dontAsk` mode can refuse a shell redirect into this directory. Never write a scratch file to `/tmp` or to the worktree: a host can refuse a write to `/tmp`, and a file in the worktree changes the work. The engine set `TMPDIR` to this directory, so a tool that makes a temporary file makes it there. The report and each other path that this brief names are not scratch files. Use them as the brief says.
+
+## Gates
+
+The engine runs these gates after your report, and their result decides the step. Do not run a gate command yourself. Run only the tests of the code that you change.
+
+```bash
+test ! -f c-early.txt || test -f c.txt
+```
+
+## Report
+
+When you finish, write one JSON object to `<STATE>/runs/<RUN>/reports/x.specialist.json`. Give each field the JSON type that this list names. The engine rejects a report with a field of a different type.
+
+Required fields:
+
+- `ticket`: string
+- `status`: string, one of `committed`, `blocked`, `partial`
+- `branch`: string
+- `head_sha`: string
+- `commits`: list of strings
+- `gates_green`: boolean
+- `summary`: string
+
+Optional fields:
+
+- `worktree`: string
+- `blocked_reason`: string
+- `judgement_calls`: string
+
+`gates_green` states whether the tests that you ran pass. The engine does not trust this field: the result of the gates that the engine runs decides. A string field holds one string. To give more than one item in a string field, join the items with "; ".
+
+Example:
+
+```json
+{
+  "ticket": "x",
+  "status": "committed",
+  "branch": "<the branch of the worktree>",
+  "head_sha": "<the full SHA of the tip of the branch>",
+  "commits": [
+    "<the full SHA of the first commit that you added>",
+    "<the full SHA of the next commit>"
+  ],
+  "gates_green": true,
+  "summary": "<what you changed, in one or two sentences>",
+  "worktree": "<STATE>/worktrees/<RUN>/x",
+  "judgement_calls": "<the first decision that you made>; <the next decision>"
+}
+```

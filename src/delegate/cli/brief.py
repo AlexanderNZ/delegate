@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
-from ..run.brief import BriefError, fixup_brief, full_brief, read_task
+from ..run.brief import BriefError, VerifierInputs, fixup_brief, full_brief, read_task
 from ..shared.version import VersionAction
 from .epilog import COMMANDS_PAGE, HelpFormatter, epilog
 
@@ -53,20 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    vcs = GitVersionControl()
+    inputs = VerifierInputs(GitVersionControl(), args.repo, stacks=tuple(args.stack))
     try:
         if args.mode == "full":
-            out = full_brief(vcs, args.repo, args.branch, args.base, read_task(args.task), args.stack)
+            out = full_brief(inputs, args.branch, args.base, read_task(args.task))
         else:
-            out = fixup_brief(
-                vcs,
-                args.repo,
-                args.branch,
-                args.rejected,
-                Path(args.findings).read_text(),
-                args.authorised,
-                args.stack,
-            )
+            out = fixup_brief(inputs, args.branch, args.rejected, Path(args.findings).read_text(), args.authorised)
     except (BriefError, OSError) as e:
         print(f"verifier-brief: {e}", file=sys.stderr)
         return 1
