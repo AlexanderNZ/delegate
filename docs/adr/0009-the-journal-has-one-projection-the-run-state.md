@@ -6,7 +6,7 @@
 
 ## Context
 
-The journal of a run is the record of the run. Five places read it and fold it into a state, each with its own rules. The engine has `restore_progress` (the outcome of each ticket and the open step at a resume) and `_verify_stacks` (the start of the current pass of the chain verification, and the verdicts and the fix-up rounds of each stack in it). `delegate status`, and `watch` and `runs` through `snapshot_at`, have `_ticket`, `_since_chain_restart`, and the helpers `newest_run_end`, `is_paused`, `halt_of`, `crash_of` and `setup_problem_of`.
+The journal of a run is the record of the run. Five places read it and fold it into a state, each with its own rules. The engine has `restore_progress` (the outcome of each ticket and the open step at a resume) and `_verify_stacks` (the start of the current pass of the chain verification, and the verdicts and the fix-up rounds of each stack in it). `delegate status`, and `watch` and `runs` through `snapshot_at`, have `_ticket`, `_since_chain_restart`, and the helpers `newest_run_end`, `is_paused`, `halt_of`, `crash_of` and `setup_problem_of` (ticket #321 removed `_since_chain_restart`, which was in `delegate.run.status`, and the five helpers, and `_ticket` now reads the run state).
 
 When two folds have different rules, the engine does one thing and a view shows another. Ticket #304 was such a case: the views did not use the start of the pass that the engine used. Three differences were in the code when this ADR was written:
 

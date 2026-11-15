@@ -10,10 +10,14 @@ from pathlib import Path
 from .pages import ROOT, outside_the_package
 from .support_changelog import (
     check_a_consumer_impact_subsection_is_the_first_subsection_of_its_entry,
+    check_an_entry_that_a_later_issue_changed_names_that_issue,
     check_an_entry_with_a_date_has_the_version_of_the_package,
+    check_each_function_that_an_adr_names_exists_or_is_said_to_be_removed,
     check_each_subsection_is_a_type_of_keep_a_changelog_or_consumer_impact,
     check_the_entry_for_the_first_release_names_each_part_of_the_kit,
     check_the_first_release_is_the_oldest_entry_and_unreleased_comes_before_it,
+    check_the_unreleased_section_holds_no_claim_that_a_later_issue_made_false,
+    check_the_unreleased_section_tells_a_consumer_what_to_do,
 )
 
 CHANGELOG = ROOT / "CHANGELOG.md"
@@ -65,3 +69,25 @@ def test_the_preamble_of_the_changelog_tells_when_an_entry_has_a_consumer_impact
 
     assert "### Consumer impact" in preamble
     assert "render" in preamble and "validate" in preamble
+
+
+@outside_the_package
+def test_the_unreleased_section_holds_no_claim_that_a_later_issue_made_false():
+    check_the_unreleased_section_holds_no_claim_that_a_later_issue_made_false(CHANGELOG)
+
+
+@outside_the_package
+def test_an_entry_that_a_later_issue_changed_names_that_issue():
+    check_an_entry_that_a_later_issue_changed_names_that_issue(CHANGELOG)
+
+
+@outside_the_package
+def test_the_unreleased_section_tells_a_consumer_what_to_do():
+    check_the_unreleased_section_tells_a_consumer_what_to_do(CHANGELOG)
+
+
+@outside_the_package
+def test_adr_0009_names_no_function_that_is_gone_unless_it_says_the_function_was_removed():
+    adr = ROOT / "docs" / "adr" / "0009-the-journal-has-one-projection-the-run-state.md"
+
+    check_each_function_that_an_adr_names_exists_or_is_said_to_be_removed(adr, ROOT / "src" / "delegate")
