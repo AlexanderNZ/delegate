@@ -6,6 +6,8 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-11-15
+
 ### Consumer impact
 
 - To read the runs of other hosts with `delegate runs`, write the configuration file `$XDG_CONFIG_HOME/delegate/config.toml` (`~/.config/delegate/config.toml`) on the machine of the viewer (#323). The key `hosts` lists the ssh names of the other hosts. The key `index` names a run index directory that the hosts share; with no `index`, each host has its own index in its state root, and the viewer finds a host by the record in a shared directory or by `hosts`. Without the file, `delegate runs` shows the runs of this machine only, and each run still registers itself in `index/` of the state root with no setting. Install `delegate` 1.22.0 or later on each host, on the `PATH` of a shell that is not interactive, and make `ssh -o BatchMode=yes <host> true` work with no prompt: a host with an earlier `delegate` is `unreachable` with the reason `delegate on <host> is older than 1.22.0`. An error in the file stops `delegate run`, `--detach` and `--resume` with exit 1 before they create a branch, so check the file with `delegate run --dry-run`. See `docs/how-to/see-the-runs-of-more-than-one-host.md`.
