@@ -1,12 +1,15 @@
 """delegate: one command over the renderer, the validator, bootstrap and the brief generator.
 
-This module only dispatches. `render`, `validate` and `bootstrap` go to
-`delegate.cli.agent_definitions.main`, and `brief` goes to `delegate.cli.brief.main`.
+This module only dispatches. One table, `SUBCOMMANDS`, names each subcommand, its module and its line of help. `render`,
+`schema`, `validate` and `bootstrap` go to `delegate.cli.agent_definitions.main`, and `brief` goes to `delegate.cli.brief.main`.
 Each one receives the argument list it would receive from its standalone
 command (`agent-definitions` or `verifier-brief`), so the exit code, the output
 and the files written match by construction, and the two standalone parsers
 stay the single source of every option. Only the top-level help, the two
 usage errors of the umbrella itself, and the title of the terminal (`delegate.cli.title`) are written here.
+
+The command imports the module of a subcommand only when it runs that subcommand. The start of `status` so loads no definitions, no
+PyYAML and no `importlib.metadata`, and the same holds for `watch`, `runs` and `run` (#344).
 
 Ctrl-C ends each subcommand with the exit status 130 (`EXIT_INTERRUPTED`) and no traceback. `watch` and `run` print
 their own line: the position to go on from, and the run to resume. Each other subcommand prints `delegate: interrupted`.
@@ -15,60 +18,82 @@ their own line: the position to go on from, and the run to resume. Each other su
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
+from dataclasses import dataclass
 
 from ..run.watch import EXIT_INTERRUPTED
-from . import agent_definitions, brief, clean, docs_command, pause, run_command, runs, status, stop, watch
 from ..shared.version import VersionAction
 from .epilog import COMMANDS_PAGE, RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .title import Title
 
-# Subcommands that the `agent-definitions` command owns, with the line that
-# `delegate --help` shows for each.
-AGENT_DEFINITIONS_COMMANDS: dict[str, str] = {
-    "render": "render a declaration into <out>/claude-code and <out>/opencode",
-    "schema": "print the keys of a declaration as JSON",
-    "validate": "validate rendered agent directories",
-    "bootstrap": "write a repository's context skill, its declaration, and its rendered pair",
-}
-
-# The subcommand that the `verifier-brief` command owns.
-BRIEF_COMMAND: str = "brief"
-BRIEF_HELP: str = "print a verifier's brief: `brief full` or `brief fixup`"
-
-# The subcommand that `delegate.cli.run_command` owns.
-RUN_COMMAND: str = "run"
-RUN_HELP: str = "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`"
-
-# The subcommand that `delegate.cli.pause` owns.
-PAUSE_COMMAND: str = "pause"
-PAUSE_HELP: str = "ask a run to stop at its next step boundary; go on later with `run --resume <run-id>`"
-
-# The subcommand that `delegate.cli.stop` owns.
-STOP_COMMAND: str = "stop"
-STOP_HELP: str = "stop a run now with SIGTERM; go on later with `run --resume <run-id>`"
-
-# The subcommand that `delegate.cli.status` owns.
-STATUS_COMMAND: str = "status"
-STATUS_HELP: str = "print the state of each ticket of a run, from its journal"
-
-# The subcommand that `delegate.cli.runs` owns.
-RUNS_COMMAND: str = "runs"
-RUNS_HELP: str = "list the runs of this machine in one table, across each repository"
-
-# The subcommand that `delegate.cli.watch` owns.
-WATCH_COMMAND: str = "watch"
-WATCH_HELP: str = "follow the journal of a run, print each event, and exit with a code for the reason"
-
-# The subcommand that `delegate.cli.clean` owns.
-CLEAN_COMMAND: str = "clean"
-CLEAN_HELP: str = "remove the worktrees and the merged branches that ended runs left; check it with `clean --dry-run`"
-
-# The subcommand that `delegate.cli.docs_command` owns.
-DOCS_COMMAND: str = "docs"
-DOCS_HELP: str = "write the generated sections of the reference pages from the code, or check that they are current"
-
 TIERS_OPTION: str = "--tiers"
+
+
+@dataclass(frozen=True)
+class Subcommand:
+    """One subcommand of `delegate`: its name, the module that runs it, and its line in `delegate --help`.
+
+    `standalone` is the command that the subcommand is also known as, and the help line ends with `(as <standalone>)`.
+    `receives_tiers` is true for a subcommand that takes the option `--tiers` before its name: it then gets the whole argument
+    list, as its standalone command would. `sets_title` is false for `watch`, which sets its own title when it found the run."""
+
+    name: str
+    module: str
+    help: str
+    standalone: str
+    receives_tiers: bool = False
+    sets_title: bool = True
+
+    def main(self, args: list[str]) -> int:
+        """Import the module of the subcommand now, and run it with `args`."""
+        return importlib.import_module(f".{self.module}", __package__).main(args)
+
+
+def _agent_definitions(name: str, help: str) -> Subcommand:
+    return Subcommand(name, "agent_definitions", help, f"agent-definitions {name}", receives_tiers=True)
+
+
+# One table of the subcommands, in the order of `delegate --help`.
+SUBCOMMANDS: tuple[Subcommand, ...] = (
+    _agent_definitions("render", "render a declaration into <out>/claude-code and <out>/opencode"),
+    _agent_definitions("schema", "print the keys of a declaration as JSON"),
+    _agent_definitions("validate", "validate rendered agent directories"),
+    _agent_definitions("bootstrap", "write a repository's context skill, its declaration, and its rendered pair"),
+    Subcommand("brief", "brief", "print a verifier's brief: `brief full` or `brief fixup`", "verifier-brief"),
+    Subcommand(
+        "run",
+        "run_command",
+        "build a workflow's tickets, check it with `run <workflow> --dry-run`, or go on with `run --resume <run-id>`",
+        "delegate run",
+    ),
+    Subcommand(
+        "pause", "pause", "ask a run to stop at its next step boundary; go on later with `run --resume <run-id>`", "delegate pause"
+    ),
+    Subcommand("stop", "stop", "stop a run now with SIGTERM; go on later with `run --resume <run-id>`", "delegate stop"),
+    Subcommand("status", "status", "print the state of each ticket of a run, from its journal", "delegate status"),
+    Subcommand("runs", "runs", "list the runs of this machine in one table, across each repository", "delegate runs"),
+    Subcommand(
+        "watch",
+        "watch",
+        "follow the journal of a run, print each event, and exit with a code for the reason",
+        "delegate watch",
+        sets_title=False,
+    ),
+    Subcommand(
+        "clean",
+        "clean",
+        "remove the worktrees and the merged branches that ended runs left; check it with `clean --dry-run`",
+        "delegate clean",
+    ),
+    Subcommand(
+        "docs",
+        "docs_command",
+        "write the generated sections of the reference pages from the code, or check that they are current",
+        "delegate docs",
+    ),
+)
+BY_NAME: dict[str, Subcommand] = {subcommand.name: subcommand for subcommand in SUBCOMMANDS}
 
 
 def _help_parser() -> argparse.ArgumentParser:
@@ -85,17 +110,8 @@ def _help_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action=VersionAction, help="print the version of the package and exit")
     sub = parser.add_subparsers(dest="command", metavar="command")
-    for name, text in AGENT_DEFINITIONS_COMMANDS.items():
-        sub.add_parser(name, help=f"{text} (as agent-definitions {name})", add_help=False)
-    sub.add_parser(BRIEF_COMMAND, help=f"{BRIEF_HELP} (as verifier-brief)", add_help=False)
-    sub.add_parser(RUN_COMMAND, help=f"{RUN_HELP} (as delegate run)", add_help=False)
-    sub.add_parser(PAUSE_COMMAND, help=f"{PAUSE_HELP} (as delegate pause)", add_help=False)
-    sub.add_parser(STOP_COMMAND, help=f"{STOP_HELP} (as delegate stop)", add_help=False)
-    sub.add_parser(STATUS_COMMAND, help=f"{STATUS_HELP} (as delegate status)", add_help=False)
-    sub.add_parser(RUNS_COMMAND, help=f"{RUNS_HELP} (as delegate runs)", add_help=False)
-    sub.add_parser(WATCH_COMMAND, help=f"{WATCH_HELP} (as delegate watch)", add_help=False)
-    sub.add_parser(CLEAN_COMMAND, help=f"{CLEAN_HELP} (as delegate clean)", add_help=False)
-    sub.add_parser(DOCS_COMMAND, help=f"{DOCS_HELP} (as delegate docs)", add_help=False)
+    for subcommand in SUBCOMMANDS:
+        sub.add_parser(subcommand.name, help=f"{subcommand.help} (as {subcommand.standalone})", add_help=False)
     return parser
 
 
@@ -138,94 +154,20 @@ def _dispatch(args: list[str]) -> int:
     if command.startswith("-"):
         parser.parse_args(args)  # -h prints the help and exits 0; any other option is a usage error
         return 2
-    if command in AGENT_DEFINITIONS_COMMANDS:
+    subcommand = BY_NAME.get(command)
+    if subcommand is None:
+        known = ", ".join(BY_NAME)
+        print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
+        return 2
+    if at and not subcommand.receives_tiers:
+        print(
+            f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {command}",
+            file=sys.stderr,
+        )
+        return 2
+    if subcommand.sets_title:
         _set_title(command)
-        return agent_definitions.main(args)
-    if command == BRIEF_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {BRIEF_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return brief.main(args[at + 1 :])
-    if command == RUN_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {RUN_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return run_command.main(args[at + 1 :])
-    if command == PAUSE_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {PAUSE_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return pause.main(args[at + 1 :])
-    if command == STOP_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {STOP_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return stop.main(args[at + 1 :])
-    if command == STATUS_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {STATUS_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return status.main(args[at + 1 :])
-    if command == RUNS_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {RUNS_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return runs.main(args[at + 1 :])
-    if command == WATCH_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {WATCH_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        return watch.main(args[at + 1 :])
-    if command == CLEAN_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {CLEAN_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return clean.main(args[at + 1 :])
-    if command == DOCS_COMMAND:
-        if at:
-            print(
-                f"delegate: {TIERS_OPTION} is an option of render, validate and bootstrap, not of {DOCS_COMMAND}",
-                file=sys.stderr,
-            )
-            return 2
-        _set_title(command)
-        return docs_command.main(args[at + 1 :])
-    known = ", ".join(
-        [*AGENT_DEFINITIONS_COMMANDS, BRIEF_COMMAND, RUN_COMMAND, PAUSE_COMMAND, STOP_COMMAND, STATUS_COMMAND, RUNS_COMMAND, WATCH_COMMAND, CLEAN_COMMAND, DOCS_COMMAND]
-    )
-    print(f"delegate: unknown subcommand {command!r}; expected one of: {known}", file=sys.stderr)
-    return 2
+    return subcommand.main(args if subcommand.receives_tiers else args[at + 1 :])
 
 
 if __name__ == "__main__":  # pragma: no cover

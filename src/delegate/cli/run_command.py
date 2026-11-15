@@ -83,9 +83,9 @@ from ..run.watch import EXIT_INTERRUPTED
 from ..run.workflow import Workflow, WorkflowError, load_workflow, plan_order, specialist_tier
 from ..shared.tiers import Tiers, load_tiers
 from .location import report_location
-from .agent_definitions import add_opencode_override_flags, apply_opencode_override
 from .epilog import RUN_PAGE, WORKFLOW_PAGE, HelpFormatter, epilog
 from .machine_settings import MachineSettings, index_check, machine_settings
+from .opencode_override import add_opencode_override_flags, apply_opencode_override
 from .setup_check import check_setup
 from .stop_signals import stop_signals_as_ctrl_c
 from .status import stream_reader_of, utc_now

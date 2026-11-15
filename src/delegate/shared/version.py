@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import sys
 import tomllib
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 DISTRIBUTION: str = "agent-definitions"
@@ -26,6 +25,9 @@ def package_version() -> str:
             project = tomllib.loads(pyproject.read_text()).get("project", {})
             if project.get("name") == DISTRIBUTION and "version" in project:
                 return project["version"]
+    # The metadata is the fallback of an installed package only, so its import waits until here: it costs about 0.1 s (#344).
+    from importlib.metadata import PackageNotFoundError, version
+
     try:
         return version(DISTRIBUTION)
     except PackageNotFoundError:
