@@ -30,10 +30,10 @@ from importlib import resources
 from pathlib import Path
 from string import Template
 
-import yaml
 
 from .declaration import CONTEXT_LOAD_READ_MARKER, CONTEXT_LOADS, OUTPUT_LANGUAGES, parse_declaration
 from .render import render
+from ..shared import yamlio
 from ..shared.tiers import Tiers
 from .validate import validate_set
 
@@ -73,7 +73,7 @@ def _frontmatter(fm: dict) -> str:
     # not a valid plain YAML scalar, and a hand-built line would emit one.
     return (
         "---\n"
-        + yaml.safe_dump(fm, sort_keys=False, default_flow_style=False, allow_unicode=True, width=100000)
+        + yamlio.dump(fm, width=100000)
         + "---\n"
     )
 

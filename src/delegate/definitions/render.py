@@ -10,7 +10,6 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
-import yaml
 
 from .declaration import READ_PREFIX_MARK, Agent
 from .guard import (
@@ -22,6 +21,7 @@ from .guard import (
     verifier_bash_permission,
     verifier_external_directory_permission,
 )
+from ..shared import yamlio
 from ..shared.tiers import Tiers
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"]
@@ -51,7 +51,7 @@ def _frontmatter(fm: dict) -> str:
     # The width is large because the verifier guard is one long line. A fold
     # inside a quoted scalar puts a line break where the hook has a space, and
     # a reader then cannot copy the hook out of the file.
-    return "---\n" + yaml.safe_dump(fm, sort_keys=False, default_flow_style=False, allow_unicode=True, width=100000) + "---\n"
+    return "---\n" + yamlio.dump(fm, width=100000) + "---\n"
 
 
 def _bullets(items: list[str], empty: str) -> str:

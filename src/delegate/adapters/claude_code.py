@@ -70,13 +70,12 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
-
 from ..definitions.validate import split_frontmatter
 from ..ports.harness import (
     CAPPED, FAILED, FINISHED, Activity, AdapterError, AdapterRequest, AdapterResult, McpServer, McpTool, SealedAgent,
     SealedFile,
 )
+from ..shared import yamlio
 from .environment import process_environment
 from .process import run_harness
 from .skill_text import Skill, with_skills
@@ -448,7 +447,7 @@ class ClaudeCodeAdapter:
         if mcp_tools and "tools" in frontmatter:
             frontmatter["tools"] = _with_mcp_tools(frontmatter["tools"], mcp_tools)
         (into / "agents").mkdir(exist_ok=True)
-        text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True, width=1_000_000, default_flow_style=False)
+        text = yamlio.dump(frontmatter, width=1_000_000)
         (into / "agents" / f"{agent}.md").write_text(f"---\n{text}---{body}{_instructions(source)}")
         files = [SealedFile(path, _digest(path)) for path in sorted(into.rglob("*")) if path.is_file()]
         settings = Path.home() / USER_SETTINGS
@@ -650,22 +649,45 @@ def _listed_agents(init: dict[str, object]) -> list[str]:
     return [entry if isinstance(entry, str) else str(entry.get("name")) for entry in listed if isinstance(entry, (str, dict))]
 
 
+# The version that each `claude` command gave in this process, by the identity of its file: path, inode, size and change time.
+# A command that is replaced gets a new identity, so the answer of the old one does not stand for it.
+_VERSIONS: dict[tuple[str, int, int, int], tuple[int, int, int] | None] = {}
+
+
 def _check_version() -> None:
     """Raise AdapterError when `claude --version` names a version before the minimum.
 
+    The command runs once for each `claude` file in a process (#345): a seal of an agent, a resume and a dry run share the answer.
     A harness that is not installed, or whose output has no version, is no refusal here: the session fails with its own
-    error when it starts.
+    error when it starts. A run that fails or times out is not kept, so the next seal asks again.
     """
-    try:
-        done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=process_environment())
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)
-    if match is None:
-        return
-    found = tuple(int(part) for part in match.groups())
-    if found < MINIMUM_VERSION:
+    environment = process_environment()
+    executable = shutil.which(COMMAND, path=environment.get("PATH"))
+    identity = _identity(executable)
+    if identity is not None and identity in _VERSIONS:
+        found = _VERSIONS[identity]
+    else:
+        try:
+            done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=environment)
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)
+        found = tuple(int(part) for part in match.groups()) if match else None
+        if identity is not None:
+            _VERSIONS[identity] = found
+    if found is not None and found < MINIMUM_VERSION:
         raise AdapterError(
             f"Claude Code {'.'.join(map(str, found))} is older than {'.'.join(map(str, MINIMUM_VERSION))}, "
             "the first version that the sealed agent was measured on; update Claude Code"
         )
+
+
+def _identity(executable: str | None) -> tuple[str, int, int, int] | None:
+    """The key of a `claude` file in the cache of versions. None when the file is not found."""
+    if executable is None:
+        return None
+    try:
+        status = os.stat(executable)
+    except OSError:
+        return None
+    return (os.path.realpath(executable), status.st_ino, status.st_size, status.st_mtime_ns)

@@ -15,6 +15,7 @@ import yaml
 
 from .declaration import CONTEXT_LOAD_READ_MARKER
 from .guard import VERIFIER_GUARD_MARKER, VERIFIER_WRITE_GUARD_MARKER, VERIFIER_WRITE_PATH_PREFIXES
+from ..shared import yamlio
 from ..shared.tiers import Tiers
 
 CLAUDE_CODE_KEYS = {
@@ -192,7 +193,7 @@ def split_frontmatter(text: str) -> tuple[dict | None, str, str | None]:
         return None, text, "frontmatter never closes"
     raw = text[4:end]
     try:
-        fm = yaml.safe_load(raw)
+        fm = yamlio.load(raw)
     except yaml.YAMLError as e:  # pragma: no cover - message text varies
         return None, text, f"frontmatter YAML does not parse: {e}"
     if not isinstance(fm, dict):
