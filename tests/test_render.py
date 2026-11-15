@@ -9,16 +9,16 @@ import pytest
 import yaml
 
 from delegate.definitions.declaration import Agent, load_declaration
-from delegate.definitions.render import (
+from delegate.definitions.guard import (
     GIT_PUSH_HOOK,
     VERIFIER_BASH_HOOK,
     VERIFIER_GUARD_MARKER,
     VERIFIER_READ_COMMANDS,
     VERIFIER_TEMP_DEST_COMMANDS,
     VERIFIER_TEMP_WRITE_COMMANDS,
-    render_claude_code,
     verifier_bash_permission,
 )
+from delegate.definitions.render import render_claude_code
 from delegate.shared.tiers import load_tiers
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 

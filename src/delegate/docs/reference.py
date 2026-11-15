@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..cli import agent_definitions, brief, clean, docs_command, pause, run_command, runs, status, stop, watch
-from ..definitions import declaration, render, validate
+from ..definitions import declaration, guard, validate
 from ..run import watch as run_watch
 from . import figures
 
@@ -129,23 +129,23 @@ def _commands(commands: tuple[str, ...] | list[str]) -> str:
 
 
 def guard_table() -> str:
-    """The table of the commands that the verifier guard permits, from the constants of the renderer."""
-    git_reads = [c for c in render.VERIFIER_READ_COMMANDS if c.startswith("git ")]
-    shell_reads = [c for c in render.VERIFIER_READ_COMMANDS if not c.startswith("git ")]
-    prefixes = list(render.VERIFIER_TEMP_PATH_PREFIXES)
+    """The table of the commands that the verifier guard permits, from the constants of the guard."""
+    git_reads = [c for c in guard.VERIFIER_READ_COMMANDS if c.startswith("git ")]
+    shell_reads = [c for c in guard.VERIFIER_READ_COMMANDS if not c.startswith("git ")]
+    prefixes = list(guard.VERIFIER_TEMP_PATH_PREFIXES)
     temp_paths = ", ".join(f"`{p}`" for p in prefixes[:-1]) + f", or `{prefixes[-1]}`"
-    write_prefixes = list(render.VERIFIER_WRITE_PATH_PREFIXES)
+    write_prefixes = list(guard.VERIFIER_WRITE_PATH_PREFIXES)
     write_paths = ", ".join(f"`{p}`" for p in write_prefixes[:-1]) + f", or `{write_prefixes[-1]}`"
     return "\n".join([
         "| Group | Commands |",
         "|---|---|",
         f"| git reads | {_commands(git_reads)} |",
         f"| shell reads | {_commands(shell_reads)} |",
-        f"| temp writes | {_commands(render.VERIFIER_TEMP_WRITE_COMMANDS)} — each one only when every path argument starts with {temp_paths}. "
+        f"| temp writes | {_commands(guard.VERIFIER_TEMP_WRITE_COMMANDS)} — each one only when every path argument starts with {temp_paths}. "
         "A redirection target obeys the same rule, in every segment, but it can also be exactly `/dev/null`, "
         "which writes no file: `2>/dev/null` is permitted. A relative path counts from the working directory of the "
         "hook, as the path of a `cd` does: in a temp copy with no `.git` entry, `touch app/x` is permitted. |",
-        f"| temp destination | {_commands(render.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
+        f"| temp destination | {_commands(guard.VERIFIER_TEMP_DEST_COMMANDS)} — each one only when the last path argument is a temp path. "
         "The earlier path arguments are sources, and a read of any path is a read. A `cd` takes one path argument, "
         "and it may also go to a directory in the git toplevel of the working directory, with no `..` component: "
         "`cd api && ./gradlew test`. |",

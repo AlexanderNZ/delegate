@@ -16,7 +16,8 @@ import pytest
 import yaml
 
 from delegate.definitions.declaration import Agent, parse_declaration
-from delegate.definitions.render import VERIFIER_BASH_HOOK, render_claude_code, render_opencode
+from delegate.definitions.guard import VERIFIER_BASH_HOOK
+from delegate.definitions.render import render_claude_code, render_opencode
 from delegate.definitions.validate import opencode_bash_action, split_frontmatter
 
 SHELLS = ("bash", "/bin/sh")

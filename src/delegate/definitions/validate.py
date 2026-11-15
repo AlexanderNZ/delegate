@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from .declaration import CONTEXT_LOAD_READ_MARKER
-from .render import VERIFIER_GUARD_MARKER, VERIFIER_WRITE_GUARD_MARKER, VERIFIER_WRITE_PATH_PREFIXES
+from .guard import VERIFIER_GUARD_MARKER, VERIFIER_WRITE_GUARD_MARKER, VERIFIER_WRITE_PATH_PREFIXES
 from ..shared.tiers import Tiers
 
 CLAUDE_CODE_KEYS = {

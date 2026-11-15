@@ -80,8 +80,9 @@ RUN_MODULES = (
     "cleanup", "clean",
 )
 
-# The modules of the definitions context, by their path under the package.
-DEFINITIONS_MODULES = ("declaration", "render", "validate", "bootstrap")
+# The modules of the definitions context, by their path under the package. `guard` makes the guards of the agents,
+# and `render` writes the agent files with them (#336).
+DEFINITIONS_MODULES = ("declaration", "guard", "render", "validate", "bootstrap")
 
 # The modules that the two contexts share: the tier table.
 SHARED_MODULES = ("tiers",)

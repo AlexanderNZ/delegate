@@ -26,7 +26,8 @@ from pathlib import Path
 import pytest
 
 from delegate.definitions.declaration import load_declaration
-from delegate.definitions.render import TREE_SEARCH_LIMIT, render_claude_code
+from delegate.definitions.guard import TREE_SEARCH_LIMIT
+from delegate.definitions.render import render_claude_code
 from delegate.definitions.validate import split_frontmatter
 from delegate.shared.tiers import load_tiers
 

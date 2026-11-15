@@ -1,0 +1,30 @@
+# The declaration of the snapshot test of the rendered files (#336). It holds
+# each form of a gate and of a read command that the verifier guard builds: a
+# plain gate, a gate that takes free arguments, an exact gate, an extra flag
+# alone and with a value, a read command, a read prefix, and a single
+# read-only agent. The agent "python" is the declaration of the how-to
+# docs/how-to/give-the-agents-a-command-line-tool.md.
+
+[agents.python]
+description = "A Python application."
+gateCommands = ["uv run pytest tests/unit", "codegraph explore *"]
+
+[agents.forms]
+description = "Each form of a gate and of a read command of the verifier guard."
+tier = "strong"
+skills = ["tdd", "test-quality"]
+maxTurns = 40
+effort = "high"
+references = ["docs/architecture.md"]
+gateCommands = ["npm test", "./gradlew *", "uvx \"zensical==$(cat .zensical-version)\" build --strict", "nix flake check"]
+gateExtraFlags = ["--reporter", "-t <value>"]
+getOnlyCommands = ["./scripts/api", "gh issue *", "tea issues"]
+outputLanguage = "ste"
+trackedFileBuild = true
+prompt = "Domain notes."
+
+[agents.reviewer]
+description = "A single read-only reviewer."
+pair = false
+readOnly = true
+gateCommands = ["make check"]

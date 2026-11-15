@@ -178,7 +178,7 @@ def _gate_commands(key: str, values, field_name: str = "gateCommands") -> list[s
     arguments, and the guard does not examine the words after it. An exact
     gate cannot take the mark.
     """
-    from .render import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
+    from .guard import VERIFIER_TEMP_DEST_COMMANDS, VERIFIER_TEMP_WRITE_COMMANDS
     from .validate import VERIFIER_BASH_WRITE_PROBES
 
     def opens_write(c: str) -> bool:

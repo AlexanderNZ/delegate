@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from delegate.definitions.render import VERIFIER_BASH_HOOK
+from delegate.definitions.guard import VERIFIER_BASH_HOOK
 from delegate.run.brief import verifier_run_sections
 from delegate.run.reports import read_verifier_report, verifier_example
 

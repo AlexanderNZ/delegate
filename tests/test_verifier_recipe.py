@@ -43,7 +43,7 @@ import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
-from delegate.definitions.render import TREE_SEARCH_LIMIT
+from delegate.definitions.guard import TREE_SEARCH_LIMIT
 from delegate.definitions.validate import split_frontmatter
 from delegate.run.brief import red_proof_copy, verifier_run_sections
 
