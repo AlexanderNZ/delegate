@@ -540,4 +540,6 @@ NOT_SEEN = (
 @pytest.mark.parametrize("command", NOT_SEEN)
 def test_the_claude_code_guard_does_not_see_a_variable_or_a_glob_inside_the_git_word(claude_code_hook, command):
     # A recorded limit: the docs name these forms, so a doc that claims more than the hook does fails review, not this test.
-    assert not refuses(claude_code_hook, command)
+    r = run_hook(claude_code_hook, command)
+
+    assert (r.returncode, r.stderr) == (0, "")
