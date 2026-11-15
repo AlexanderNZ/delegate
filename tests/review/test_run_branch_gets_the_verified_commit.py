@@ -33,8 +33,8 @@ def test_the_run_branch_moves_only_to_the_tip_of_the_ticket_branch_that_the_veri
     branch_tip = git(repo, "rev-parse", "run/demo-a").strip()
     side_tip = git(repo, "rev-parse", "side").strip()
     assert side_tip != branch_tip, "the case needs a HEAD of the worktree that is not the tip of the ticket branch"
-    assert git(repo, "rev-parse", "run/demo").strip() != side_tip
     starts = [e["commit"] for e in events if e["event"] == "verify-start"]
     advances = [e["to_commit"] for e in events if e["event"] == "run-branch-advance"]
     assert starts and set(starts) == {branch_tip}, (code, starts)
-    assert set(advances) <= {branch_tip}, advances
+    assert advances == [branch_tip], advances
+    assert git(repo, "rev-parse", "run/demo").strip() == branch_tip
