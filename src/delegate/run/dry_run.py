@@ -11,21 +11,21 @@ from dataclasses import replace
 from pathlib import Path
 
 from ..ports.vcs import VersionControl
+from .context import ResumeRequest
 from .engine import plan_review_with_outlook, resume_checks, resume_events
 from .errors import EngineError
 from .plan_review import PlanReview
 from .state_location import StateLocation, locate_state
-from .workflow import Workflow, plan_order
+from .workflow import Workflow
 
 
 def review_plan_change(
-    workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
-    retry: str | None = None, *, location: StateLocation | None = None, coordinator_commit: str | None = None,
-    config_paths: Sequence[str] = (), stack_changed: bool = False,
+    workflow: Workflow, workflow_path: Path, repo: Path, vcs: VersionControl, request: ResumeRequest, *,
+    location: StateLocation | None = None, config_paths: Sequence[str] = (),
 ) -> PlanReview:
-    """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
+    """Apply the rules of a plan change to the workflow and the run of the resume `request`, as the resume does, and change nothing.
 
-    `delegate run --resume <run-id> --dry-run` prints the result. `retry` is the
+    `delegate run --resume <run-id> --dry-run` prints the result. The `retry` of `request` is the
     ticket of `--retry`: the text of a failed ticket that it starts again can
     change (rule 10). Raise
     EngineError when the run is unknown, or when the workflow differs from the
@@ -33,26 +33,21 @@ def review_plan_change(
     or None to look it up here.
 
     The result also holds what the resume does with each ticket that the run skipped (see `engine._skipped_outlook`).
-    `coordinator_commit` is the commit of `--coordinator-commit`, or None. With it, the review makes the checks of
+    The `coordinator_commit` of `request` is the commit of `--coordinator-commit`, or None. With it, the review makes the checks of
     the commit that the resume makes (`retry.check_coordinator_commit`), and a refusal has the text of the refusal of the resume
-    (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too. `stack_changed` is
-    `--stack-changed` (#290): a changed stack does not refuse the review, and the result holds each change.
+    (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too. The `stack_changed` of
+    `request` is `--stack-changed` (#290): a changed stack does not refuse the review, and the result holds each change.
 
     When the rules of the plan and of the retry accept, the review also makes each other check of the resume that needs no
     write (`resume_checks`), and `resume_refusal` of the result holds the message of the resume when one refuses (#357).
     """
     location = location or locate_state(repo, vcs)
-    events = resume_events(location.state_directory(run_id), run_id)
-    review = plan_review_with_outlook(
-        workflow, workflow_path, location.top, run_id, vcs, events, reviewed, retry, coordinator_commit, config_paths, stack_changed
-    )
+    events = resume_events(location.state_directory(request.run_id), request.run_id)
+    review = plan_review_with_outlook(workflow, workflow_path, location.top, vcs, events, request, config_paths)
     if review.problems() or review.retry_refusal is not None:
         return review
     try:
-        resume_checks(
-            workflow, workflow_path, plan_order(workflow), vcs, location.top, run_id, events, reviewed, retry, coordinator_commit,
-            None, config_paths, stack_changed,
-        )
+        resume_checks(workflow, workflow_path, vcs, location.top, events, request, None, config_paths)
     except EngineError as error:
         return replace(review, skipped=(), retry_outlook=None, resume_refusal=str(error))
     return review

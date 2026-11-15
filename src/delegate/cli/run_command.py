@@ -65,7 +65,8 @@ from ..run import status, status_model
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.dry_run import review_plan_change
-from ..run.engine import RunInterrupted, check_start, new_run_id, project_config_paths, run_workflow
+from ..run.context import ResumeRequest, project_config_paths
+from ..run.engine import RunInterrupted, check_start, new_run_id, run_context, run_workflow
 from ..run.errors import EngineError
 from ..run.host import host_name
 from ..run.index import index_observers, record_runs
@@ -440,10 +441,10 @@ def main(argv: list[str] | None = None) -> int:
         location = report_location(args.repo, vcs)  # prints the note of the lookup; None when it fails, and the checks say so
     if args.dry_run and args.resume is not None:
         try:
+            request = ResumeRequest(args.resume, reviewed, args.retry, args.coordinator_commit, args.stack_changed)
             review = review_plan_change(
-                workflow, args.workflow, args.repo, args.resume, vcs, reviewed, args.retry, location=location,
-                coordinator_commit=args.coordinator_commit, config_paths=project_config_paths(adapters.get(workflow.adapter)),
-                stack_changed=args.stack_changed,
+                workflow, args.workflow, args.repo, vcs, request, location=location,
+                config_paths=project_config_paths(adapters.get(workflow.adapter)),
             )
         except EngineError as error:
             print(f"delegate run: {error}", file=sys.stderr)
@@ -462,11 +463,13 @@ def main(argv: list[str] | None = None) -> int:
             run_id = args.resume if args.resume is not None else new_run_id()
             try:
                 # The checks that need no agent come before the run process, so their error goes to the caller.
-                location = check_start(
-                    workflow, args.workflow, args.repo, tiers, adapter, vcs, run_id, resume=args.resume is not None,
-                    break_lock=args.break_lock, reviewed=reviewed, retry=args.retry,
-                    coordinator_commit=args.coordinator_commit, detach=True, location=location, stack_changed=args.stack_changed,
+                location = location or locate_state(args.repo, vcs)
+                run = run_context(workflow, args.workflow, tiers, adapter, vcs, ShellGateRunner(), run_id, location)
+                resume = (
+                    ResumeRequest(run_id, reviewed, args.retry, args.coordinator_commit, args.stack_changed)
+                    if args.resume is not None else None
                 )
+                location = check_start(run, location, resume=resume, detach=True)
             except EngineError as error:
                 print(f"delegate run: {error}", file=sys.stderr)
                 return 1

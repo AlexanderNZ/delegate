@@ -178,7 +178,7 @@ import json
 import secrets
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -191,6 +191,7 @@ from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
 from . import chain, domain, run_state, step_scans
+from .context import ResumeRequest, RunContext
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
@@ -544,27 +545,21 @@ def resume_events(state_dir: Path, run_id: str) -> list[dict[str, object]]:
 
 
 def plan_review_with_outlook(
-    workflow: Workflow, workflow_path: Path, top: Path, run_id: str, vcs: VersionControl, events: list[dict[str, object]],
-    reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None, config_paths: Sequence[str], stack_changed: bool,
+    workflow: Workflow, workflow_path: Path, top: Path, vcs: VersionControl, events: list[dict[str, object]], request: ResumeRequest,
+    config_paths: Sequence[str],
 ) -> PlanReview:
     """The review of the plan of `review_plan_change` from the events of the journal, with the outlook of the skipped tickets and of the retry."""
+    run_id, retry = request.run_id, request.retry
     with vcs_errors():
-        review = review_workflow(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry, stack_changed)
-    refusal, outlook = retry_outcome(workflow, events, run_id, review, retry, coordinator_commit, vcs, top, config_paths)
+        review = review_workflow(
+            workflow, workflow_path, events, run_id, request.reviewed, lambda branch: vcs.branch_exists(top, branch), retry,
+            request.stack_changed,
+        )
+    refusal, outlook = retry_outcome(workflow, events, review, request, vcs, top, config_paths)
     skipped = () if refusal is not None else _skipped_outlook(
-        workflow, events, run_id, review, retry, coordinator_commit is not None, config_paths
+        workflow, events, run_id, review, retry, request.coordinator_commit is not None, config_paths
     )
     return replace(review, skipped=skipped, retry_refusal=refusal, retry_outlook=outlook)
-
-
-
-
-def project_config_paths(adapter: object) -> tuple[str, ...]:
-    """The project configuration paths that the harness of `adapter` loads from its working directory (#273).
-
-    An adapter with no such attribute loads none. The paths are hotspots of each stack of the run (see `Stack.all_hotspots`).
-    """
-    return tuple(getattr(adapter, "project_config_paths", ()))
 
 
 
@@ -698,16 +693,30 @@ def _check_chain_start(
         )
 
 
-def check_start(
-    workflow: Workflow, workflow_path: Path, repo: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, run_id: str, *,
-    resume: bool = False, break_lock: bool = False, reviewed: tuple[str, ...] = (), retry: str | None = None,
-    coordinator_commit: str | None = None, detach: bool = False, location: StateLocation | None = None, stack_changed: bool = False,
-) -> StateLocation:
-    """The checks of a run that need no agent: the tier of each role, the lock, and the branches or the plan. Create nothing.
+def run_context(
+    workflow: Workflow, workflow_path: Path, tiers: Tiers, adapter: Adapter, vcs: VersionControl, gates: GateRunner, run_id: str,
+    location: StateLocation,
+) -> RunContext:
+    """The context of the run `run_id` in the repository of `location`: the values that do not change while it runs (#342).
 
-    Raise EngineError, which names the input at fault, when a check fails. A run branch in use is reported first: the
+    The roles get the model of each role from the tier column of the adapter. Raise EngineError, which names the tier,
+    when the tier table has no model for one of them (see `_roles`). Create nothing.
+    """
+    roles = _roles(workflow, tiers, adapter.tier_column)
+    return RunContext(
+        workflow, workflow_path, adapter, vcs, gates, tiers, roles, location.top, location.state_directory(run_id), run_id,
+    )
+
+
+def check_start(
+    run: RunContext, location: StateLocation, *, resume: ResumeRequest | None = None, detach: bool = False,
+) -> StateLocation:
+    """The checks of a run that need no agent: the lock, and the branches or the plan. Create nothing.
+
+    `run_context` checks the tier of each role before, when it makes `run`. Raise EngineError, which names the input at
+    fault, when a check fails. A run branch in use is reported first: the
     run branch of a run that works exists. A new run needs its base branch, and a run branch and ticket branches that
-    do not exist. A resume needs the journal of the run, and the rules of a plan change (see `review_workflow`), with the later
+    do not exist. A resume (`resume`) needs the journal of the run, and the rules of a plan change (see `review_workflow`), with the later
     tickets in `reviewed`, must accept the workflow. `run_workflow` does these checks before it takes the lock.
     `delegate run --detach` does them before it starts the run process, so a run that cannot start gives its error on
     stderr and exits non-zero, as in the foreground.
@@ -716,29 +725,23 @@ def check_start(
     the run branch, and the retry of `retry` with its `coordinator_commit`. They change nothing: a refusal of the run process
     would be only in its log, and the journal would not show it (#240). The foreground run makes these checks after the lock.
 
-    `location` is the location that the command looked up (see `locate_state`), or None to look it up here. Return the
-    location, so the caller passes it on and does not look it up again (#239). `break_lock` has no effect, and 2.0.0
-    removes it: a lock file that no process holds is free (#288).
+    `location` is the location that the command looked up (see `locate_state`). Return it, so the caller passes it on and
+    does not look it up again (#239).
     """
-    location = location or locate_state(repo, vcs)
-    repo = location.top
-    _roles(workflow, tiers, adapter.tier_column)
+    workflow, repo, vcs = run.workflow, run.repo, run.vcs
     try:
         # The lock of a run that started before #200 is in `<git common dir>/delegate`, so a run there counts too.
         for directory in location.directories:
             check_free(directory, workflow.run_branch)
     except LockError as error:
         raise EngineError(str(error)) from None
-    if resume:
+    if resume is not None:
         # One read of the journal serves the review and, with `detach`, the other checks of the resume.
-        events = resume_events(location.state_directory(run_id), run_id)
-        review = plan_review_with_outlook(workflow, workflow_path, repo, run_id, vcs, events, reviewed, retry, None, (), stack_changed)
-        _refuse_plan_change(review, workflow_path, run_id)
+        events = resume_events(location.state_directory(resume.run_id), resume.run_id)
+        review = plan_review_with_outlook(workflow, run.workflow_path, repo, vcs, events, replace(resume, coordinator_commit=None), ())
+        _refuse_plan_change(review, run.workflow_path, resume.run_id)
         if detach:
-            resume_checks(
-                workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None,
-                project_config_paths(adapter), stack_changed,
-            )
+            resume_checks(workflow, run.workflow_path, vcs, repo, events, resume, None, run.config_paths)
     else:
         _check_branches(workflow, repo, vcs)
     return location
@@ -805,6 +808,8 @@ def run_workflow(
     `location` is the location that the command looked up (see `locate_state`), or None to look it up here. The run
     looks it up at most one time (#239).
 
+    The run makes its context (see `run_context`) from these values once, and each function of the run takes the context (#342).
+
     `observers` are the observers of the events of the run (#332). The journal of the run, and the journal that the run reopens
     to record an interrupt, call each of them with the journal and the name of each event after the journal wrote it. The driver
     of `delegate run` gives the observer of the run index (#316, `delegate.run.index.index_observers`): it writes the record of
@@ -815,20 +820,16 @@ def run_workflow(
     if coordinator_commit is not None and retry is None:
         raise EngineError("--coordinator-commit needs --retry TICKET")
     run_id = resume if resume is not None else (run_id or new_run_id())
-    location = check_start(
-        workflow, workflow_path, repo, tiers, adapter, vcs, run_id, resume=resume is not None, break_lock=break_lock, reviewed=reviewed,
-        retry=retry, location=location, stack_changed=stack_changed,
-    )
-    repo, state_dir = location.top, location.state_directory(run_id)
+    location = location or locate_state(repo, vcs)
+    run = run_context(workflow, workflow_path, tiers, adapter, vcs, gates, run_id, location)
+    request = ResumeRequest(run_id, reviewed, retry, coordinator_commit, stack_changed) if resume is not None else None
+    check_start(run, location, resume=request)
+    state_dir = run.state_dir
     record_state_root(location, state_dir)
-    roles = _roles(workflow, tiers, adapter.tier_column)
     try:
         with run_lock(state_dir, workflow.run_branch, run_id) as broken:
             try:
-                result = _execute(
-                    workflow, workflow_path, adapter, vcs, gates, roles, repo, state_dir, run_id, resume is not None, broken, retry,
-                    reviewed, on_start, agents_changed, tiers, coordinator_commit, stack_changed, observers,
-                )
+                result = _execute(run, request, broken, on_start, agents_changed, observers)
             except JournalChanged as changed:
                 raise EngineError(_end_changed_journal(changed, run_id)) from None
             except KeyboardInterrupt:
@@ -868,22 +869,26 @@ def _record_interrupt(state_dir: Path, run_id: str, observers: Sequence[EventObs
 
 
 def resume_checks(
-    workflow: Workflow, workflow_path: Path, order: list[Ticket], vcs: VersionControl, repo: Path, run_id: str,
-    events: list[dict[str, object]], reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None,
-    journal: Journal | None, config_paths: Sequence[str], stack_changed: bool = False,
+    workflow: Workflow, workflow_path: Path, vcs: VersionControl, repo: Path, events: list[dict[str, object]], request: ResumeRequest,
+    journal: Journal | None, config_paths: Sequence[str],
 ) -> tuple[PlanReview, Progress, str, RetryPlan | None]:
-    """The checks that refuse a resume, a retry or a plan change, in the order of the engine. Return what they find.
+    """The checks that refuse the resume `request`, its retry or its plan change, in the order of the engine. Return what they find.
 
     The result is the review of the plan, the progress of the run, the base of the run, and the plan of the retry (None
     with no `retry`). Raise EngineError when a check refuses. With a `journal`, a run branch that is not where the journal
     says is also written to it (see `_check_run_branch_at_resume`). With `journal` None the checks change nothing:
     `check_start` makes them before `delegate run --detach` starts the run process, so a refusal is not only in its log (#240).
     """
+    run_id, retry, coordinator_commit = request.run_id, request.retry, request.coordinator_commit
+    order = plan_order(workflow)
     unresumable = run_state.fold(events).unresumable
     if unresumable is not None:
         raise EngineError(f"run {run_id!r} cannot be resumed: {unresumable.reason}; start a new run")
     with vcs_errors():
-        review = review_workflow(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry, stack_changed)
+        review = review_workflow(
+            workflow, workflow_path, events, run_id, request.reviewed, lambda branch: vcs.branch_exists(repo, branch), retry,
+            request.stack_changed,
+        )
     # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
     _refuse_plan_change(review, workflow_path, run_id)
     progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
@@ -912,18 +917,18 @@ def resume_checks(
 
 
 def _execute(
-    workflow: Workflow, workflow_path: Path, adapter: Adapter, vcs: VersionControl, gates: GateRunner,
-    roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, resuming: bool, broken: LockHolder | None,
-    retry: str | None = None, reviewed: tuple[str, ...] = (), on_start: Callable[[str, Path], None] | None = None,
-    agents_changed: bool = False, tiers: Tiers | None = None, coordinator_commit: str | None = None, stack_changed: bool = False,
-    observers: Sequence[EventObserver] = (),
+    run: RunContext, resume: ResumeRequest | None, broken: LockHolder | None, on_start: Callable[[str, Path], None] | None,
+    agents_changed: bool, observers: Sequence[EventObserver],
 ) -> RunResult:
+    workflow, workflow_path, adapter, vcs, repo, state_dir, run_id = (
+        run.workflow, run.workflow_path, run.adapter, run.vcs, run.repo, run.state_dir, run.run_id
+    )
     order = plan_order(workflow)
     agents_note: str | None = None
     plan: RetryPlan | None = None
     # A pause request from before this process is not for it: the run that it asked to pause has stopped.
     (state_dir / "runs" / run_id / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
-    if not resuming:
+    if resume is None:
         # The seal comes before the run branch: an adapter that refuses to seal leaves no branch and no journal (#217).
         sealed = _seal_agents(adapter, repo, state_dir / "runs" / run_id, workflow)
         with vcs_errors():
@@ -940,10 +945,7 @@ def _execute(
         was_skipped: dict[str, str | None] = {}
     else:
         journal, events = _journal_events(state_dir, run_id, observers)
-        review, progress, run_base, plan = resume_checks(
-            workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
-            project_config_paths(adapter), stack_changed,
-        )
+        review, progress, run_base, plan = resume_checks(workflow, workflow_path, vcs, repo, events, resume, journal, run.config_paths)
         was_skipped = progress.was_skipped()  # before the plan change and the retry, as in the dry run (`_skipped_outlook`)
         # The seal changes only at the request of the person, or when the journal has no record of seals (#217).
         agent_fields: dict[str, object] = {}
@@ -978,8 +980,7 @@ def _execute(
     if broken is not None:
         journal.append("lock-broken", run_id=broken.run_id, pid=broken.pid)
     _check_gates_permitted(adapter, journal, workflow)
-    if tiers is not None:
-        _probe_guards(adapter, vcs, tiers, journal, workflow, state_dir / "runs" / run_id, run_id)
+    _probe_guards(run, journal)
     built, failed, failures, skipped = progress.built, progress.failed, progress.failures, progress.skipped
     retried_reason, before = _prepare_resume(workflow, order, progress, plan)
     for revived in plan.revive if plan is not None else ():
@@ -1004,11 +1005,9 @@ def _execute(
         try:
             pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
             if plan is not None and ticket.id == plan.ticket:
-                reason = _retry_ticket(
-                    _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal), plan, retried_reason, start
-                )
+                reason = _retry_ticket(_Step(run, journal, ticket), plan, retried_reason, start)
             else:
-                reason = _build_ticket(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, start, prior)
+                reason = _build_ticket(run, journal, ticket, start, prior)
         except Paused as stop:
             # The step stays open, or does not start: a resume goes on with it.
             paused = str(stop)
@@ -1044,9 +1043,7 @@ def _execute(
             built.append(ticket.id)
     unmapped: list[str] = []
     if workflow.mode == "economy" and built and not ended_early and paused is None and stopped_by is None and crash is None:
-        chain_run = chain.ChainRun(
-            workflow, order, adapter, vcs, gates, roles, repo, state_dir, run_id, journal, built, failed, failures, _chain_steps(),
-        )
+        chain_run = chain.ChainRun(run, journal, order, built, failed, failures, _chain_steps())
         # The events of the chain verification name the last ticket of the chain. `verify` can fail tickets, so take it first.
         tip = [t.id for t in order if t.id in built][-1]
         try:
@@ -1077,7 +1074,7 @@ def _execute(
     result = BUILT if not failed and not skipped else FAILED
     if result == BUILT and not workflow.keep_worktrees:
         # Before `run-end`, so the newest event of a run that ended stays `run-end`.
-        _clean_up(workflow, order, vcs, repo, state_dir, run_id, journal)
+        _clean_up(run, order, journal)
     journal.append("run-end", result=result, built=built, failed=failed, skipped=list(skipped))
     # A request after the last step boundary finds no boundary: the run ended, and the request goes.
     (journal.path.parent / PAUSE_REQUEST_NAME).unlink(missing_ok=True)
@@ -1116,9 +1113,7 @@ def _prepare_resume(workflow: Workflow, order: list[Ticket], progress: Progress,
     return retried_reason, before
 
 
-def _clean_up(
-    workflow: Workflow, order: list[Ticket], vcs: VersionControl, repo: Path, state_dir: Path, run_id: str, journal: Journal
-) -> None:
+def _clean_up(run: RunContext, order: list[Ticket], journal: Journal) -> None:
     """Remove the worktree and the push-guard hooks of each ticket, and delete each ticket branch that the run branch holds (#167).
 
     The engine calls this when the run ends `built`. The rules are in
@@ -1127,9 +1122,10 @@ def _clean_up(
     the run. The journal records one `cleanup` event with what went, what
     stayed, and why.
     """
+    workflow, state_dir, run_id = run.workflow, run.state_dir, run.run_id
     worktrees_dir, hooks_dir = state_dir / "worktrees" / run_id, state_dir / "hooks" / run_id
     trees = [TicketTree(worktrees_dir / ticket.id, ticket_branch(workflow, ticket), hooks_dir / ticket.id) for ticket in order]
-    result = clean_tickets(vcs, repo, trees, workflow.run_branch)
+    result = clean_tickets(run.vcs, run.repo, trees, workflow.run_branch)
     remove_empty_directories(worktrees_dir, hooks_dir)
     journal.append("cleanup", **result.fields())
 
@@ -1295,9 +1291,7 @@ def _check_gates_permitted(adapter: Adapter, journal: Journal, workflow: Workflo
         raise EngineError("; ".join(problems))
 
 
-def _probe_guards(
-    adapter: Adapter, vcs: VersionControl, tiers: Tiers, journal: Journal, workflow: Workflow, run_dir: Path, run_id: str
-) -> None:
+def _probe_guards(run: RunContext, journal: Journal) -> None:
     """Start the guard probe of each verifier whose seal has no denied probe, and end the run for a result other than `denied` (#219).
 
     It runs before the first agent session of the run or of the resume. An adapter whose `probes_guard` is not true gets
@@ -1307,6 +1301,7 @@ def _probe_guards(
     that goes on. A resume probes again, because no denied probe follows the newest seal. A failure of the harness or of
     the repository of the probe is an `EngineError` too, and the journal gets no event for it.
     """
+    adapter, vcs, tiers, workflow, run_dir, run_id = run.adapter, run.vcs, run.tiers, run.workflow, run.run_dir, run.run_id
     if not getattr(adapter, "probes_guard", False):
         return
     events = journal.events
@@ -1429,22 +1424,35 @@ def _read_session_report(report_path: Path, ticket: str, before: _ReportBefore |
     return read_specialist_report(report_path, ticket)
 
 
-def _request(
-    agent: str, stack: Stack, model: str, prompt: str, cwd: Path, report_path: Path, stream: Path,
-    report_valid: Callable[[], bool], resume_session: str | None = None, added_directories: tuple[Path, ...] = (),
-    sealed: SealedAgent | None = None, environment: Mapping[str, str] | None = None, *, scratch: Path,
-) -> AdapterRequest:
-    """The request for one agent run of the stack: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack.
+class _Session(NamedTuple):
+    """One agent session of a step: the agent, its model and its seal, the directory where it works, and its files.
 
-    `environment` holds the entries of the worktree of the ticket (see `worktree_environment`). `scratch` is the
-    scratch directory of the session (see `_scratch_directory`): the request adds it to `added_directories`, and sets
-    `TMPDIR` to it in the environment (#227).
+    `stream` is the event stream of the session (see `_start_agent`), and `scratch` its scratch directory (see
+    `_scratch_directory`). `added_directories` are the directories that the session can read besides `cwd`.
     """
+
+    agent: str
+    model: str
+    sealed: SealedAgent | None
+    cwd: Path
+    report_path: Path
+    stream: Path
+    scratch: Path
+    added_directories: tuple[Path, ...] = ()
+
+
+def _request(step: _Step, session: _Session, prompt: str, report_valid: Callable[[], bool], resume_session: str | None = None) -> AdapterRequest:
+    """The request for one agent session of the step: the idle timeout of the run, the check of its report, the MCP servers and the agent timeout of the stack.
+
+    The environment holds the entries of the worktree of the step (see `worktree_environment`). The request adds the
+    scratch directory of the session to `added_directories`, and sets `TMPDIR` to it in the environment (#227).
+    """
+    stack, scratch = step.stack, session.scratch
     return AdapterRequest(
-        agent, model, prompt, cwd, report_path, stream, resume_session,
+        session.agent, session.model, prompt, session.cwd, session.report_path, session.stream, resume_session,
         idle_timeout=domain.IDLE_TIMEOUT_SECONDS, report_valid=report_valid, mcp_servers=stack.mcp_servers,
-        added_directories=(*added_directories, scratch), agent_timeout=seconds(stack.agent_timeout), sealed=sealed,
-        environment={**(environment or {}), "TMPDIR": str(scratch)},
+        added_directories=(*session.added_directories, scratch), agent_timeout=seconds(stack.agent_timeout), sealed=session.sealed,
+        environment={**worktree_environment(step.run.vcs, step.worktree), "TMPDIR": str(scratch)},
     )
 
 
@@ -1582,10 +1590,8 @@ def _prepare_worktree(vcs: VersionControl, repo: Path, worktree: Path, branch: s
     return made
 
 
-def _run_prepare(
-    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, tree: str, path: Path, round_number: int, repo: Path
-) -> None:
-    """Run the `prepare` commands of `stack` in `path`, in order, through the gate runner (#155).
+def _run_prepare(step: _Step, tree: str, path: Path, round_number: int) -> None:
+    """Run the `prepare` commands of the stack of the step in `path`, in order, through the gate runner (#155).
 
     `tree` is TREE_WORKTREE or TREE_VERIFY_COPY. A command in the worktree gets the entries of the worktree (#221). A command in either tree
     gets `DELEGATE_REPO`, the path of the main checkout `repo` (#265): the copy of a verifier is a clone with no remote, so a command cannot
@@ -1603,6 +1609,7 @@ def _run_prepare(
     starts and so before a check for uncommitted changes can take the path for
     work of the specialist.
     """
+    gates, vcs, journal, stack, ticket, repo = step.run.gates, step.run.vcs, step.journal, step.stack, step.ticket.id, step.run.repo
     fields: dict[str, object] = {"ticket": ticket, "round": round_number, "tree": tree, "path": str(path)}
     # The verifier copy is a repository of its own, which holds its settings itself.
     environment = {**(worktree_environment(vcs, path) if tree == TREE_WORKTREE else {}), PREPARE_REPO_VARIABLE: str(repo)}
@@ -1622,31 +1629,29 @@ def _run_prepare(
             )
 
 
-def _prepare_ticket_worktree(
-    gates: GateRunner, vcs: VersionControl, journal: Journal, stack: Stack, ticket: str, worktree: Path, made: bool, repo: Path
-) -> None:
-    """Run the `prepare` commands of `stack` in the worktree of `ticket` when it needs them. Raise `StepFailed` when one fails.
+def _prepare_ticket_worktree(step: _Step, made: bool) -> None:
+    """Run the `prepare` commands of the stack of the step in its worktree when it needs them. Raise `StepFailed` when one fails.
 
     The worktree needs them when the engine made it now (`made`), or when the
     journal holds no complete prepare of it: a run that stopped or failed
     before the last command of `prepare` was green. A worktree that the engine
     prepared before keeps what the commands made, so they do not run again.
     """
+    stack, ticket = step.stack, step.ticket.id
     if not stack.prepare:
         return
     if not made:
         last = None
-        for event in journal.events:
+        for event in step.journal.events:
             if event["event"] in ("prepare-start", "prepare-result") and event.get("ticket") == ticket and event.get("tree") == TREE_WORKTREE:
                 last = event
         if last is not None and last["event"] == "prepare-result" and last["exit_status"] == 0 and last["command"] == stack.prepare[-1]:
             return
-    _run_prepare(gates, vcs, journal, stack, ticket, TREE_WORKTREE, worktree, 0, repo)
+    _run_prepare(step, TREE_WORKTREE, step.worktree, 0)
 
 
 def _build_ticket(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, roles: dict[str, tuple[str, str]],
-    repo: Path, state_dir: Path, run_id: str, journal: Journal, start_ref: str, prior: list[dict[str, object]] | None = None,
+    run: RunContext, journal: Journal, ticket: Ticket, start_ref: str, prior: list[dict[str, object]] | None = None,
     retried: str | None = None,
 ) -> str | None:
     """Build one ticket. Return None when it is built, or the reason it failed.
@@ -1673,12 +1678,10 @@ def _build_ticket(
       `_retry_ticket`, with no specialist: at the gates, at a verifier, or, after a stop before a fix-up session, at the fix-up of
       the same round (see `retry._stopped_before_fixup`).
     """
-    tier, model = _specialist_model(roles, workflow, ticket)
-    stack = workflow.stacks[ticket.stack]
-    branch = ticket_branch(workflow, ticket)
-    worktree = state_dir / "worktrees" / run_id / ticket.id
-    hooks_dir = state_dir / "hooks" / run_id / ticket.id
-    report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
+    workflow, vcs, repo = run.workflow, run.vcs, run.repo
+    step = _Step(run, journal, ticket)
+    tier, model = _specialist_model(run.roles, workflow, ticket)
+    stack, branch, worktree, hooks_dir = step.stack, step.branch, step.worktree, run.hooks_dir(ticket.id)
     rebased_onto: str | None = None
     if prior is None:
         with vcs_errors():
@@ -1716,7 +1719,7 @@ def _build_ticket(
         if rebases:
             rebased_onto = str(rebases[-1]["onto_commit"])
     try:
-        _prepare_ticket_worktree(gates, vcs, journal, stack, ticket.id, worktree, made, repo)
+        _prepare_ticket_worktree(step, made)
     except StepFailed as failed:
         return str(failed)
     # The commits of a ticket are the commits beyond the point where its branch started, or, after a rebase,
@@ -1724,16 +1727,13 @@ def _build_ticket(
     # continuation brief see the commits of this ticket only.
     since = domain.work_starts_at(base_commit, rebased_onto)
     reason = _build_with_continuations(
-        workflow, ticket, adapter, vcs, gates, model, repo, worktree, branch, report_path, journal, since,
-        _scratch_directory(state_dir / "runs" / run_id, ticket.id, ROLE_SPECIALIST),
-        spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
+        step, since, spawned=specialist_done, continuations=continuations, interrupted=prior is not None,
         stop_reason="the run was interrupted" if retried is None else f"the step failed: {retried}; after that, the coordinator retried the step",
         completed=completed, reported=retried is not None and unfinished_report(step_scans.specialist_reports(prior)) is not None,
     )
     if reason:
         return reason
     if workflow.mode == "assure":
-        step = _Step(workflow, ticket, adapter, vcs, gates, roles, repo, state_dir, run_id, journal)
         reason = _rebase_onto_run_branch(step)
         return reason if reason else _verify_ticket(step, verify_rounds)
     return None
@@ -1802,16 +1802,14 @@ def _recover_chain_advance(workflow: Workflow, vcs: VersionControl, repo: Path, 
 
 
 def _build_with_continuations(
-    workflow: Workflow, ticket: Ticket, adapter: Adapter, vcs: VersionControl, gates: GateRunner, model: str, repo: Path,
-    worktree: Path, branch: str, report_path: Path, journal: Journal, since: str, scratch: Path, spawned: bool = False,
-    continuations: int = 0, interrupted: bool = False,
+    step: _Step, since: str, *, spawned: bool = False, continuations: int = 0, interrupted: bool = False,
     stop_reason: str = "the run was interrupted", completed: bool = False, reported: bool = False,
 ) -> str | None:
-    """Run the specialist, check its work, and continue it in the same worktree when the work is not done.
+    """Run the specialist of the step, check its work, and continue it in the same worktree when the work is not done.
 
     `since` is the commit or branch where the branch of the ticket started: the commits beyond it
-    are the work of this ticket. `scratch` is the scratch directory of the specialist (see `_scratch_directory`): each
-    session gets it, and each brief names it.
+    are the work of this ticket. The specialist has the scratch directory `scratch/<ticket>/specialist/` of the run (see
+    `_scratch_directory`): each session gets it, and each brief names it.
 
     A resume sets `spawned` when the journal shows that the specialist finished
     with a valid report, so the first pass does not spawn it again. It sets
@@ -1838,19 +1836,24 @@ def _build_with_continuations(
     committed, fails the step with no continuation. After `CONTINUATION_LIMIT`
     continuations the step fails, and the journal records the count.
     """
-    stack = workflow.stacks[ticket.stack]
+    run, journal, ticket, stack = step.run, step.journal, step.ticket, step.stack
+    workflow, adapter, vcs, repo = run.workflow, run.adapter, run.vcs, run.repo
+    worktree, branch = step.worktree, step.branch
+    _tier, model = _specialist_model(run.roles, workflow, ticket)
+    report_path = step.run_dir / "reports" / f"{ticket.id}.specialist.json"
+    scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_SPECIALIST)
     limit = domain.continuation_limit(workflow.mode)
     each_ticket = domain.gates_each_ticket(workflow.mode)
     plan_change = _plan_change_note(journal, workflow, [ticket.id], verifier=False)
     prompt = specialist_brief(
-        ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, gates_at_chain_end=not each_ticket,
+        ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, gates_at_chain_end=not each_ticket,
         plan_change=plan_change, notes=stack.specialist_notes, scratch=scratch,
     )
     if interrupted and not spawned:
         so_far = _commit_lines(vcs, worktree, since)
         if so_far or reported:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, so_far,
+                ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, so_far,
                 stop_reason, resumed=False, gates_at_chain_end=not each_ticket, plan_change=plan_change,
                 notes=stack.specialist_notes, scratch=scratch,
             )
@@ -1868,12 +1871,9 @@ def _build_with_continuations(
                 return str(failed)
             stream = _start_agent(journal, ticket.id, ROLE_SPECIALIST, 0, report_path)
             report_before = _ReportBefore(_report_state(report_path))
+            session = _Session(stack.specialist, model, sealed, worktree, report_path, stream, scratch)
             result = _run_agent(
-                adapter, journal, ticket.id, ROLE_SPECIALIST, 0,
-                _request(
-                    stack.specialist, stack, model, prompt, worktree, report_path, stream, report_valid, resume_session, sealed=sealed,
-                    environment=worktree_environment(vcs, worktree), scratch=scratch,
-                ),
+                adapter, journal, ticket.id, ROLE_SPECIALIST, 0, _request(step, session, prompt, report_valid, resume_session),
             )
             _journal_idle(journal, result, ticket.id, ROLE_SPECIALIST, 0)
             _journal_timeout(journal, result, stack, ticket.id, ROLE_SPECIALIST, 0)
@@ -1913,7 +1913,7 @@ def _build_with_continuations(
                     return unfinished
                 if not _commit_lines(vcs, repo, since, branch):
                     return f"branch {branch} holds no commit beyond {since}, though the report says committed"
-                stop = _hotspot_stop(vcs, journal, ticket.id, stack.all_hotspots(project_config_paths(adapter)), worktree, since, True, GATE_PHASE_BUILD, 0)
+                stop = _hotspot_stop(step, since, True, GATE_PHASE_BUILD, 0)
                 if stop:
                     return stop
                 # A gate runs in the worktree as it is, so a change that is not committed would make its result a fact about
@@ -1926,7 +1926,7 @@ def _build_with_continuations(
                 elif head is None:
                     return None  # `economy` mode: the gates run once, on the tip of the chain (see `chain.ChainRun`)
                 else:
-                    outcomes = gate_outcomes(gates, vcs, stack, ticket.id, worktree, journal, 0, GATE_PHASE_BUILD, head)
+                    outcomes = gate_outcomes(step, 0, GATE_PHASE_BUILD, head)
                     red = [outcome for outcome in outcomes if not outcome.green]
                     if not red:
                         return None
@@ -1951,7 +1951,7 @@ def _build_with_continuations(
             prompt = report_correction_brief(ticket.id, worktree, report_path, commits, problems, scratch=scratch)
         else:
             prompt = continuation_brief(
-                ticket.id, ticket.text, worktree, stack.all_hotspots(project_config_paths(adapter)), stack.gates, report_path, commits, reason,
+                ticket.id, ticket.text, worktree, stack.all_hotspots(run.config_paths), stack.gates, report_path, commits, reason,
                 resumed=resume_session is not None, gate_output=gate_output, gates_at_chain_end=not each_ticket,
                 plan_change=plan_change, notes=stack.specialist_notes, uncommitted=uncommitted_paths, scratch=scratch,
                 gate_logs=gate_logs,
@@ -1992,10 +1992,8 @@ def _uncommitted_reason(paths: Sequence[str]) -> str:
     return "the worktree holds changes that are not committed: " + ", ".join(f"`{path}`" for path in paths)
 
 
-def _hotspot_stop(
-    vcs: VersionControl, journal: Journal, ticket: str, hotspots: Sequence[str], worktree: Path, since: str, merge_base: bool, phase: str, round_number: int
-) -> str | None:
-    """Compare the paths that the specialist changed since `since` with the hotspot patterns of the stack.
+def _hotspot_stop(step: _Step, since: str, merge_base: bool, phase: str, round_number: int) -> str | None:
+    """Compare the paths that the specialist changed since `since` in the worktree of the step with the hotspot patterns of the stack.
 
     Return None when none matches, or the reason the step fails. A match is
     recorded as `hotspot-finding`. The caller stops the step before any gate
@@ -2004,6 +2002,8 @@ def _hotspot_stop(
     The change of a commit of the coordinator that a retry of the step recorded (see `coordinator_commits`) does not
     count (#225). Each other commit of the step counts.
     """
+    vcs, journal, ticket, worktree = step.run.vcs, step.journal, step.ticket.id, step.worktree
+    hotspots = step.stack.all_hotspots(step.run.config_paths)
     excluded = {commit for commit, _ in coordinator_commits(vcs, worktree, step_scans.step_events(journal.events, ticket))}
     if excluded:
         with vcs_errors():
@@ -2022,18 +2022,14 @@ def _hotspot_stop(
 
 @dataclass(frozen=True)
 class _Step:
-    """The state that the verifier step and the fix-up rounds of one ticket share."""
+    """The state that the specialist, the gates, the verifier step and the fix-up rounds of one ticket share.
 
-    workflow: Workflow
-    ticket: Ticket
-    adapter: Adapter
-    vcs: VersionControl
-    gates: GateRunner
-    roles: dict[str, tuple[str, str]]
-    repo: Path
-    state_dir: Path
-    run_id: str
+    `run` is the context of the run (#342), and `journal` its journal.
+    """
+
+    run: RunContext
     journal: Journal
+    ticket: Ticket
     # A step that verifies the chain of a stack (see `chain.ChainRun`) works on the branch and in the worktree of
     # the ticket at the tip of the chain, `anchor`, and verifies the tickets in `segments`. The `ticket` of such
     # a step is made for the stack: it holds the id of the last ticket of the stack and the text of all of them.
@@ -2042,15 +2038,15 @@ class _Step:
 
     @property
     def stack(self) -> Stack:
-        return self.workflow.stacks[self.ticket.stack]
+        return self.run.workflow.stacks[self.ticket.stack]
 
     @property
     def branch(self) -> str:
-        return ticket_branch(self.workflow, self.anchor or self.ticket)
+        return ticket_branch(self.run.workflow, self.anchor or self.ticket)
 
     @property
     def worktree(self) -> Path:
-        return self.state_dir / "worktrees" / self.run_id / (self.anchor or self.ticket).id
+        return self.run.worktree((self.anchor or self.ticket).id)
 
     @property
     def chain_fields(self) -> dict[str, object]:
@@ -2061,7 +2057,7 @@ class _Step:
 
     @property
     def run_dir(self) -> Path:
-        return self.state_dir / "runs" / self.run_id
+        return self.run.run_dir
 
 
 def _rebase_onto_run_branch(step: _Step) -> str | None:
@@ -2076,11 +2072,11 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
     worktree keep the state from before the rebase. A rebase that git refuses to
     start, or one that ended with a failed hook, leaves nothing to abort.
     """
-    ticket, run_branch = step.ticket, step.workflow.run_branch
-    onto = _check_run_branch(step.journal, step.vcs, step.repo, run_branch, ticket.id)
-    before = head_commit(step.vcs, step.worktree)
+    ticket, run_branch = step.ticket, step.run.workflow.run_branch
+    onto = _check_run_branch(step.journal, step.run.vcs, step.run.repo, run_branch, ticket.id)
+    before = head_commit(step.run.vcs, step.worktree)
     with vcs_errors():
-        rebase = step.vcs.rebase_onto(step.worktree, run_branch)
+        rebase = step.run.vcs.rebase_onto(step.worktree, run_branch)
     if rebase.status != REBASED:
         files = list(rebase.conflicts)
         step.journal.append(
@@ -2090,17 +2086,17 @@ def _rebase_onto_run_branch(step: _Step) -> str | None:
         if files:
             return f"rebase onto {run_branch} stopped with a conflict in {', '.join(files)}"
         return f"rebase onto {run_branch} failed: {rebase.detail}"
-    after = head_commit(step.vcs, step.worktree)
+    after = head_commit(step.run.vcs, step.worktree)
     step.journal.append(
         "rebase", ticket=ticket.id, result="rebased", onto_commit=onto, from_commit=before, to_commit=after, files=[]
     )
-    if not _commit_lines(step.vcs, step.repo, run_branch, step.branch):
+    if not _commit_lines(step.run.vcs, step.run.repo, run_branch, step.branch):
         return (
             f"branch {step.branch} holds no commit beyond {run_branch} after the rebase; "
             f"{run_branch} holds its work already"
         )
     # The rebase was the last step that can move HEAD, so the first gate uses `after` (#239).
-    outcomes = gate_outcomes(step.gates, step.vcs, step.stack, ticket.id, step.worktree, step.journal, 0, GATE_PHASE_REBASE, after)
+    outcomes = gate_outcomes(step, 0, GATE_PHASE_REBASE, after)
     red = [outcome.label for outcome in outcomes if not outcome.green]
     if red:
         return "gates red: " + "; ".join(red) + f" (after the rebase onto {run_branch})"
@@ -2140,7 +2136,7 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     fix-up round in `first_fixup`: the first pass is then the scoped verifier
     of the fix-up commit that the branch holds.
     """
-    mode = step.workflow.mode
+    mode = step.run.workflow.mode
     used_up = domain.rounds_used_up_reason(mode, first_round)
     if used_up:
         raise StepFailed(used_up)
@@ -2149,7 +2145,7 @@ def _accepted_commit(step: _Step, first_round: int = 0, first_fixup: tuple[str, 
     while True:
         # The fix-up and its gates are the last steps that can move the branch before the verifier: one read serves the
         # gates text, the brief and the verifier (#239).
-        verified = branch_tip(step.vcs, step.repo, step.branch)
+        verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
         gates_text = _engine_gates_text(step, verified)
         fixup_body = (
             None if findings_text is None
@@ -2210,7 +2206,7 @@ def _run_fixup(
     a valid report that says committed.
     """
     ticket = step.ticket
-    tier, model = _specialist_model(step.roles, step.workflow, ticket)
+    tier, model = _specialist_model(step.run.roles, step.run.workflow, ticket)
     findings_path = step.run_dir / "findings" / f"{ticket.id}.fixup-{round_number}.md"
     findings_path.parent.mkdir(parents=True, exist_ok=True)
     findings_path.write_text(findings)
@@ -2227,27 +2223,22 @@ def _run_fixup(
     )
     report_path = step.run_dir / "reports" / f"{ticket.id}.fixup-{round_number}.specialist.json"
     # The gates ran before the fix-up in a tree with no change that is not committed, so what it holds now is theirs.
-    leftovers = frozenset(_uncommitted_paths(step.vcs, step.worktree))
+    leftovers = frozenset(_uncommitted_paths(step.run.vcs, step.worktree))
     scratch = _scratch_directory(step.run_dir, ticket.id, ROLE_FIXUP)
     prompt = specialist_brief(
-        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots(project_config_paths(step.adapter)), step.stack.gates, report_path, rejected, findings_text,
+        ticket.id, ticket.text, step.worktree, step.stack.all_hotspots(step.run.config_paths), step.stack.gates, report_path, rejected, findings_text,
         red_gates=red_gates, notes=step.stack.specialist_notes, scratch=scratch,
     )
     stream = _start_agent(step.journal, ticket.id, ROLE_FIXUP, round_number, report_path)
     report_valid = _report_check(lambda: read_specialist_report(report_path, ticket.id))
-    result = _run_agent(
-        step.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number,
-        _request(
-            step.stack.specialist, step.stack, model, prompt, step.worktree, report_path, stream, report_valid, sealed=sealed,
-            environment=worktree_environment(step.vcs, step.worktree), scratch=scratch,
-        ),
-    )
+    session = _Session(step.stack.specialist, model, sealed, step.worktree, report_path, stream, scratch)
+    result = _run_agent(step.run.adapter, step.journal, ticket.id, ROLE_FIXUP, round_number, _request(step, session, prompt, report_valid))
     _journal_idle(step.journal, result, ticket.id, ROLE_FIXUP, round_number)
     _journal_timeout(step.journal, result, step.stack, ticket.id, ROLE_FIXUP, round_number)
     step.journal.append(
         "fixup-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(result.event_stream), **_refused_fields(result),
-        **_totals_fields(step.adapter, result.event_stream),
+        **_totals_fields(step.run.adapter, result.event_stream),
     )
     if not _session_done(result, report_valid):
         raise StepFailed(_ended_reason(result, "the fix-up specialist", step.stack))
@@ -2268,8 +2259,8 @@ def _run_fixup(
         raise StepFailed(unfinished)
     # The gates run next, and a gate runs in the worktree as it is (#176). A fix-up with no new commit is refused
     # by the brief generator (see `_checked_fixup_brief`), with a message of its own.
-    uncommitted = [path for path in _uncommitted_paths(step.vcs, step.worktree) if path not in leftovers]
-    if uncommitted and head_commit(step.vcs, step.worktree) != rejected:
+    uncommitted = [path for path in _uncommitted_paths(step.run.vcs, step.worktree) if path not in leftovers]
+    if uncommitted and head_commit(step.run.vcs, step.worktree) != rejected:
         raise StepFailed(_uncommitted_reason(uncommitted) + f"; no gate ran (after the fix-up of round {round_number})")
     return findings_text
 
@@ -2288,14 +2279,12 @@ def _checked_fixup_brief(step: _Step, round_number: int, rejected: str, findings
     of the brief when the engine ran the gates green (see `green_gates_text`).
     """
     ticket = step.ticket
-    stop = _hotspot_stop(
-        step.vcs, step.journal, ticket.id, step.stack.all_hotspots(project_config_paths(step.adapter)), step.worktree, rejected, False, GATE_PHASE_FIXUP, round_number
-    )
+    stop = _hotspot_stop(step, rejected, False, GATE_PHASE_FIXUP, round_number)
     if stop:
         raise StepFailed(stop)
     try:
         return fixup_brief(
-            step.vcs, step.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text,
+            step.run.vcs, step.run.repo, step.branch, rejected, findings_text, gate_commands=step.stack.gates, gates_text=gates_text,
             diff_limit=step.stack.verifier_diff_limit,
         )
     except BriefError as error:
@@ -2311,12 +2300,10 @@ def _fixup_gates(step: _Step, round_number: int) -> int:
     fix-up commit. No verifier runs before it. Raise `StepFailed`, whose reason names the red gates, when the gates are
     red after the last fix-up round of the mode.
     """
-    mode = step.workflow.mode
+    mode = step.run.workflow.mode
     while True:
-        tip = head_commit(step.vcs, step.worktree)
-        outcomes = gate_outcomes(
-            step.gates, step.vcs, step.stack, step.ticket.id, step.worktree, step.journal, round_number, GATE_PHASE_FIXUP, tip,
-        )
+        tip = head_commit(step.run.vcs, step.worktree)
+        outcomes = gate_outcomes(step, round_number, GATE_PHASE_FIXUP, tip)
         red = [outcome for outcome in outcomes if not outcome.green]
         if not red:
             return round_number
@@ -2383,10 +2370,10 @@ def _verify_round(
     ticket = step.ticket
     where = f"stack {ticket.stack}" if step.segments is not None else f"ticket {ticket.id}"
     pause_point(step.journal, ticket.id, PAUSED_BEFORE_VERIFIER, f"before the verifier of {where}", round=round_number, **step.chain_fields)
-    tier, model = step.roles["verifier"]
+    tier, model = step.run.roles["verifier"]
     mode = "full" if fixup_body is None else "fix-up"
     if verified is None:
-        verified = branch_tip(step.vcs, step.repo, step.branch)
+        verified = branch_tip(step.run.vcs, step.run.repo, step.branch)
     evidence = step.run_dir / "verifier" / ticket.id
     if round_number:
         evidence = evidence / f"fixup-{round_number}"
@@ -2401,7 +2388,7 @@ def _verify_round(
         report_path = scratch / "verdict.json"
         try:
             with vcs_errors():
-                step.vcs.make_verifier_copy(step.repo, copy, step.branch, step.workflow.run_branch)
+                step.run.vcs.make_verifier_copy(step.run.repo, copy, step.branch, step.run.workflow.run_branch)
             # Each verifier brief holds the verifier notes of the stack after the gates, before the working copy.
             notes = notes_section(step.stack.verifier_notes)
             # Each commit of the coordinator on the branch under verification is named, so the verifier checks it too (#225).
@@ -2410,9 +2397,9 @@ def _verify_round(
                 # A chain: the brief holds the tickets of the stack, each with its own diff, and the finding labels.
                 first_pass = (
                     chain_brief(
-                        step.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups, step.stack.verifier_diff_limit,
+                        step.run.vcs, copy, step.segments, step.stack.gates, gates_text, fixups, earlier_fixups, step.stack.verifier_diff_limit,
                     )
-                    + plan_change_section(_plan_change_note(step.journal, step.workflow, [s.ticket for s in step.segments], verifier=True))
+                    + plan_change_section(_plan_change_note(step.journal, step.run.workflow, [s.ticket for s in step.segments], verifier=True))
                     if fixup_body is None else fixup_body + finding_labels_section()
                 )
                 prompt = (
@@ -2421,8 +2408,8 @@ def _verify_round(
                 )
             elif fixup_body is None:
                 prompt = verifier_run_brief(
-                    step.vcs, copy, step.branch, step.workflow.run_branch, ticket.text, step.stack.gates, report_path,
-                    plan_change=_plan_change_note(step.journal, step.workflow, [ticket.id], verifier=True),
+                    step.run.vcs, copy, step.branch, step.run.workflow.run_branch, ticket.text, step.stack.gates, report_path,
+                    plan_change=_plan_change_note(step.journal, step.run.workflow, [ticket.id], verifier=True),
                     notes=step.stack.verifier_notes, gates_text=gates_text, coordinator=coordinator, scratch=own_scratch,
                     diff_limit=step.stack.verifier_diff_limit,
                 )
@@ -2434,7 +2421,7 @@ def _verify_round(
         except (EngineError, BriefError) as error:
             raise StepFailed(f"the verifier could not start: {error}") from None
         # The proof copy comes after `prepare`, so it holds what the commands made in the copy.
-        _run_prepare(step.gates, step.vcs, step.journal, step.stack, ticket.id, TREE_VERIFY_COPY, copy, round_number, step.repo)
+        _run_prepare(step, TREE_VERIFY_COPY, copy, round_number)
         # In a chain, only the retry of the ticket at the tip goes on after the stop (#261), so the message names it.
         sealed = _check_agent_file(
             step.journal, step.stack.verifier, ticket.id, ROLE_VERIFIER, round_number,
@@ -2442,7 +2429,7 @@ def _verify_round(
         )
         added = _make_proof_copy(copy)
         # The snapshot goes in `verify-start`, so a resume after a stop in the session can still compare the worktree (#192).
-        before = snapshot_worktree(step.vcs, step.worktree)
+        before = snapshot_worktree(step.run.vcs, step.worktree)
         step.journal.append(
             "verify-start", ticket=ticket.id, round=round_number, agent=step.stack.verifier, tier=tier, model=model,
             commit=verified, copy=str(copy), scratch=str(own_scratch), snapshot=before.to_record(), **step.chain_fields,
@@ -2452,17 +2439,12 @@ def _verify_round(
         # The check reads the report where the verifier writes it, in the scratch directory; `report_path` moves later.
         in_scratch = report_path
         report_valid = _report_check(lambda: read_verifier_report(in_scratch, mode))
-        result = _run_agent(
-            step.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number,
-            _request(
-                step.stack.verifier, step.stack, model, prompt, copy, report_path, stream, report_valid, added_directories=added,
-                sealed=sealed, environment=worktree_environment(step.vcs, step.worktree), scratch=own_scratch,
-            ),
-        )
+        session = _Session(step.stack.verifier, model, sealed, copy, report_path, stream, own_scratch, added)
+        result = _run_agent(step.run.adapter, step.journal, ticket.id, ROLE_VERIFIER, round_number, _request(step, session, prompt, report_valid))
         # The check runs at once, before the evidence is moved; the journal and the halt come after it.
         violation: InvariantViolation | None = None
         try:
-            check_worktree_unchanged(step.vcs, before)
+            check_worktree_unchanged(step.run.vcs, before)
         except InvariantViolation as found:
             violation = found
         # The copy and the second copy of a red proof go; the verdict report, the event stream and the other files
@@ -2472,7 +2454,7 @@ def _verify_round(
             if entry not in (copy, red_proof_copy(copy)):
                 shutil.move(str(entry), evidence / entry.name)
     finally:
-        step.vcs.stop_file_watcher(scratch / VERIFY_COPY_NAME)
+        step.run.vcs.stop_file_watcher(scratch / VERIFY_COPY_NAME)
         shutil.rmtree(scratch, ignore_errors=True)
         shutil.rmtree(own_scratch, ignore_errors=True)
     report_path = evidence / report_path.name
@@ -2484,7 +2466,7 @@ def _verify_round(
     step.journal.append(
         "verify-result", ticket=ticket.id, round=round_number, exit_status=result.exit_status, end_state=result.end_state,
         session_id=result.session_id, event_stream=str(stream), **_refused_fields(result),
-        **_totals_fields(step.adapter, stream),
+        **_totals_fields(step.run.adapter, stream),
     )
     if violation is not None:
         _journal_violation(step.journal, ticket.id, round_number, violation)
@@ -2533,10 +2515,10 @@ def _coordinator_of_step(step: _Step) -> list[tuple[str, tuple[str, ...]]]:
     if step.segments is not None and owner.id not in {segment.ticket for segment in step.segments}:
         return []
     own = step_scans.step_events(step.journal.events, owner.id)
-    branch, run_branch = f"refs/heads/{step.branch}", f"refs/heads/{step.workflow.run_branch}"
+    branch, run_branch = f"refs/heads/{step.branch}", f"refs/heads/{step.run.workflow.run_branch}"
     return [
-        (commit, paths) for commit, paths in coordinator_commits(step.vcs, step.repo, own)
-        if holds_commit(step.vcs, step.repo, commit, branch) and not holds_commit(step.vcs, step.repo, commit, run_branch)
+        (commit, paths) for commit, paths in coordinator_commits(step.run.vcs, step.run.repo, own)
+        if holds_commit(step.run.vcs, step.run.repo, commit, branch) and not holds_commit(step.run.vcs, step.run.repo, commit, run_branch)
     ]
 
 
@@ -2545,11 +2527,11 @@ def _advance_run_branch(step: _Step, verified: str) -> str | None:
 
     Return None when it moved, or the reason the step fails.
     """
-    run_branch = step.workflow.run_branch
-    run_tip = _check_run_branch(step.journal, step.vcs, step.repo, run_branch, step.ticket.id)
+    run_branch = step.run.workflow.run_branch
+    run_tip = _check_run_branch(step.journal, step.run.vcs, step.run.repo, run_branch, step.ticket.id)
     with vcs_errors():
         # The port moves the branch only while it is at `run_tip`, the tip that the check read.
-        moved = step.vcs.fast_forward_branch(step.repo, run_branch, verified, run_tip)
+        moved = step.run.vcs.fast_forward_branch(step.run.repo, run_branch, verified, run_tip)
     if not moved:
         return (
             f"run branch {run_branch} cannot fast-forward to {step.branch}: "
@@ -2604,7 +2586,7 @@ def _retry_ticket(step: _Step, plan: RetryPlan, failure: str, start_ref: str) ->
     report as if it said committed (see `_coordinator_completes`). After such a report of a fix-up specialist, the gates
     of the fix-up and its scoped verifier go on here, as after a report that says committed.
     """
-    workflow, ticket, vcs = step.workflow, step.ticket, step.vcs
+    workflow, ticket, vcs = step.run.workflow, step.ticket, step.run.vcs
     coordinator = plan.coordinator_fields
     if plan.restart:
         return _restart_step(step, failure, start_ref)
@@ -2616,28 +2598,22 @@ def _retry_ticket(step: _Step, plan: RetryPlan, failure: str, start_ref: str) ->
         return None
     if workflow.mode == domain.ECONOMY or plan.phase == RETRY_PHASE_SPECIALIST:
         step.journal.append("retry", ticket=ticket.id, phase=plan.phase, round=plan.round, reason=failure, **coordinator)
-        return _build_ticket(
-            workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
-            start_ref, list(plan.prior), retried=failure,
-        )
+        return _build_ticket(step.run, step.journal, ticket, start_ref, list(plan.prior), retried=failure)
     if plan.phase == RETRY_PHASE_GATES and plan.rejected is None:
         step.journal.append("retry", ticket=ticket.id, phase=RETRY_PHASE_GATES, round=plan.round, reason=failure, **coordinator)
-        return _build_ticket(
-            workflow, ticket, step.adapter, vcs, step.gates, step.roles, step.repo, step.state_dir, step.run_id, step.journal,
-            start_ref, list(plan.prior),
-        )
+        return _build_ticket(step.run, step.journal, ticket, start_ref, list(plan.prior))
     branch_ref = f"refs/heads/{step.branch}"
-    on_tip = holds_commit(vcs, step.repo, branch_tip(vcs, step.repo, workflow.run_branch), branch_ref)
-    fixup_held = plan.rejected is not None and holds_commit(vcs, step.repo, plan.rejected, branch_ref)
+    on_tip = holds_commit(vcs, step.run.repo, branch_tip(vcs, step.run.repo, workflow.run_branch), branch_ref)
+    fixup_held = plan.rejected is not None and holds_commit(vcs, step.run.repo, plan.rejected, branch_ref)
     goes_on = plan.phase if on_tip and (plan.rejected is None or fixup_held) else RETRY_PHASE_GATES
     if plan.phase == RETRY_PHASE_FIXUP and fixup_held:
         goes_on = RETRY_PHASE_FIXUP  # the fix-up of the round runs first, whether the branch holds the run branch tip or not
     if plan.coordinator is not None and goes_on in (RETRY_PHASE_VERIFIER, RETRY_PHASE_SCOPED_VERIFIER):
         goes_on = RETRY_PHASE_GATES  # the commit of the coordinator is a new tip: the gates run on it before a verifier
     step.journal.append("retry", ticket=ticket.id, phase=goes_on, round=plan.round, reason=failure, **coordinator)
-    made = _prepare_worktree(vcs, step.repo, step.worktree, step.branch, start_ref, step.state_dir / "hooks" / step.run_id / ticket.id)
+    made = _prepare_worktree(vcs, step.run.repo, step.worktree, step.branch, start_ref, step.run.hooks_dir(ticket.id))
     try:
-        _prepare_ticket_worktree(step.gates, step.vcs, step.journal, step.stack, ticket.id, step.worktree, made, step.repo)
+        _prepare_ticket_worktree(step, made)
         if plan.phase == RETRY_PHASE_FIXUP:
             # The branch holds no fix-up commit: the stop came before the fix-up session. Run that fix-up again.
             if plan.rejected is None or not fixup_held:
@@ -2682,7 +2658,7 @@ def _restart_step(step: _Step, failure: str, start_ref: str) -> str | None:
     rounds of the old step do not count (see `step_scans.step_events`). The `retry` event
     has `restart` and `failed_branch`, and a new `step-start` follows it.
     """
-    ticket, vcs, repo = step.ticket, step.vcs, step.repo
+    ticket, vcs, repo = step.ticket, step.run.vcs, step.run.repo
     branch = step.branch
     with vcs_errors():
         number = 1
@@ -2694,16 +2670,14 @@ def _restart_step(step: _Step, failure: str, start_ref: str) -> str | None:
         )
         if step.worktree.is_dir():
             vcs.remove_worktree(repo, step.worktree)
-        shutil.rmtree(step.state_dir / "hooks" / step.run_id / ticket.id, ignore_errors=True)
+        shutil.rmtree(step.run.hooks_dir(ticket.id), ignore_errors=True)
         vcs.prune_worktrees(repo)
         if vcs.branch_exists(repo, branch):
             # The old branch gets its new name first, so no commit is ever without a branch.
             vcs.create_branch(repo, failed_branch, branch)
             vcs.discard_branch(repo, branch)
     _archive_old_step(step.run_dir, ticket.id, number)
-    return _build_ticket(
-        step.workflow, ticket, step.adapter, vcs, step.gates, step.roles, repo, step.state_dir, step.run_id, step.journal, start_ref
-    )
+    return _build_ticket(step.run, step.journal, ticket, start_ref)
 
 
 def _archive_old_step(run_dir: Path, ticket_id: str, number: int) -> None:

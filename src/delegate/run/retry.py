@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ..ports.vcs import VcsError, VersionControl
 from . import domain, run_state, step_scans
+from .context import ResumeRequest
 from .errors import EngineError
 from .events import (
     ROLE_FIXUP, ROLE_SPECIALIST,
@@ -504,10 +505,10 @@ def _chain_fixup_plan(
 
 
 def retry_outcome(
-    workflow: Workflow, events: list[dict[str, object]], run_id: str, review: PlanReview, retry: str | None,
-    coordinator_commit: str | None, vcs: VersionControl, repo: Path, config_paths: Sequence[str],
+    workflow: Workflow, events: list[dict[str, object]], review: PlanReview, request: ResumeRequest, vcs: VersionControl, repo: Path,
+    config_paths: Sequence[str],
 ) -> tuple[str | None, str | None]:
-    """The message with which the rules of the retry (`retry_plan`) refuse the retry of `retry` (#261), and the line that
+    """The message with which the rules of the retry (`retry_plan`) refuse the retry of the resume `request` (#261), and the line that
     tells the phase of the retry that they accept (#269). One of the two is None, and both are None with no `retry`.
 
     The line is `retry <ticket>: phase <phase>`, and it ends with `, revives <tickets>` when the retry builds again other
@@ -516,6 +517,7 @@ def retry_outcome(
     the same text (#283). The hotspot check of a retry at the phase `chain` with no commit needs the repository too, so
     the resume makes it, not this function.
     """
+    run_id, retry, coordinator_commit = request.run_id, request.retry, request.coordinator_commit
     if retry is None:
         return None, None
     restart = review.check is not None and retry in review.check.restarted

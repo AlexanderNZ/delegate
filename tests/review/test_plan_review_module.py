@@ -14,6 +14,7 @@ import delegate
 from delegate import adapters
 from delegate.adapters.git import GitVersionControl
 from delegate.run import step_scans
+from delegate.run.context import ResumeRequest
 from delegate.run.dry_run import review_plan_change
 from delegate.run.plan_review import PlanReview, SkippedTicket, StackChange
 from delegate.run.workflow import load_workflow
@@ -39,7 +40,7 @@ def test_the_review_of_a_plan_change_names_the_added_ticket(tmp_path, scripted):
     workflow_path = repo / "workflow.toml"
     workflow = load_workflow(workflow_path, load_tiers(), adapters.registered_names())
 
-    review = review_plan_change(workflow, workflow_path, repo, run_id, GitVersionControl(), reviewed=("b",))
+    review = review_plan_change(workflow, workflow_path, repo, GitVersionControl(), ResumeRequest(run_id, reviewed=("b",)))
 
     assert isinstance(review, PlanReview)
     assert (review.old_order, review.new_order) == (["a", "b"], ["a", "b", "c"])

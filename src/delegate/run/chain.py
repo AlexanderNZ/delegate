@@ -6,7 +6,7 @@ retry runs it again (#209).
 
 The module imports no engine. The engine drives the steps (the gate run, the fix-up session, the verifier session, the checks
 of the run branch), and it gives them to `ChainRun` in `ChainSteps`. So the engine imports this module, and the module needs
-no import of the engine.
+no import of the engine. `ChainRun` takes the context of the run (`RunContext`, #342) and the journal.
 """
 
 from __future__ import annotations
@@ -16,17 +16,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
-from ..ports.gates import GateRunner
-from ..ports.harness import Adapter
 from ..ports.vcs import VersionControl
 from . import domain, run_state, step_scans
 from .brief import ChainSegment, GateLogCopy, green_gates_text
+from .context import RunContext
 from .errors import Rejected, StepFailed
 from .events import GATE_PHASE_CHAIN, RETRY_PHASE_CHAIN_FIXUP, ROLE_FIXUP, TRIGGER_GATES_RED, TRIGGER_REJECT
 from .journal import Journal
 from .reports import VerifierReport, map_findings
 from .vcs_access import branch_tip, holds_commit
-from .workflow import Stack, Ticket, Workflow, specialist_tier, strongest_tier, ticket_branch
+from .workflow import Stack, Ticket, specialist_tier, strongest_tier, ticket_branch
 
 
 class ChainRedo(NamedTuple):
@@ -81,10 +80,9 @@ def chain_text(tickets: list[Ticket]) -> str:
 class ChainStep(Protocol):
     """The state that one step of the chain shares: the engine's `_Step`. The chain reads these fields and no other."""
 
-    ticket: Ticket
-    vcs: VersionControl
-    gates: GateRunner
+    run: RunContext
     journal: Journal
+    ticket: Ticket
 
     @property
     def stack(self) -> Stack: ...
@@ -116,7 +114,7 @@ class ChainSteps:
     """The steps of the engine that the verification of a chain drives. The engine builds it, and `ChainRun` calls it.
 
     Each field has the signature of the engine function that it holds: `make_step` makes the step of a stack (`_Step`),
-    `run_gate` runs one gate (`gate_run.run_gate_with_output`), `copy_gate_logs`, `scratch_directory` and `red_gates_text` write the
+    `run_gate` runs one gate of the step (`gate_run.run_gate_with_output`), `copy_gate_logs`, `scratch_directory` and `red_gates_text` write the
     findings of red gates, `run_fixup` and `checked_fixup_brief` run a fix-up round and check its commit, `findings_text`
     writes the findings of a verdict, `verify_round` runs one verifier, `check_run_branch`, `check_verifier_stop` and
     `advance_run_branch` are the checks of the run branch, and `ends_the_run` and `halt_reason` sort an error that ends the run.
@@ -173,12 +171,10 @@ class ChainRun:
     """
 
     def __init__(
-        self, workflow: Workflow, order: list[Ticket], adapter: Adapter, vcs: VersionControl, gates: GateRunner,
-        roles: dict[str, tuple[str, str]], repo: Path, state_dir: Path, run_id: str, journal: Journal, built: list[str],
-        failed: list[str], failures: dict[str, str], steps: ChainSteps,
+        self, run: RunContext, journal: Journal, order: list[Ticket], built: list[str], failed: list[str], failures: dict[str, str],
+        steps: ChainSteps,
     ) -> None:
-        self.workflow, self.adapter, self.vcs, self.gates, self.roles, self.repo = workflow, adapter, vcs, gates, roles, repo
-        self.state_dir, self.run_id, self.journal = state_dir, run_id, journal
+        self.run, self.journal = run, journal
         self.chain = [ticket for ticket in order if ticket.id in built]
         self.built, self.failed, self.failures = built, failed, failures
         self.steps = steps
@@ -186,12 +182,12 @@ class ChainRun:
     def verify(self) -> list[str]:
         """Verify every stack of the chain and move the run branch. Return the findings that map to no ticket."""
         try:
-            run_branch = f"refs/heads/{self.workflow.run_branch}"
+            run_branch = f"refs/heads/{self.run.workflow.run_branch}"
             # The clean-up of a run that ended `built` deletes only a ticket branch that the run branch holds (see `_clean_up`).
             self.chain = [
                 ticket for ticket in self.chain
-                if self.vcs.branch_exists(self.repo, ticket_branch(self.workflow, ticket))
-                and not holds_commit(self.vcs, self.repo, f"refs/heads/{ticket_branch(self.workflow, ticket)}", run_branch)
+                if self.run.vcs.branch_exists(self.run.repo, ticket_branch(self.run.workflow, ticket))
+                and not holds_commit(self.run.vcs, self.run.repo, f"refs/heads/{ticket_branch(self.run.workflow, ticket)}", run_branch)
             ]
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket
@@ -225,14 +221,14 @@ class ChainRun:
         for ticket in self.chain:
             own = step_scans.events_of(events, ticket.id)
             base = str(own[step_scans.step_start_place(own)]["base_commit"])  # type: ignore[index]
-            tip = branch_tip(self.vcs, self.repo, ticket_branch(self.workflow, ticket))
+            tip = branch_tip(self.run.vcs, self.run.repo, ticket_branch(self.run.workflow, ticket))
             if fixups and ticket is self.chain[-1]:
                 tip = str(fixups[0]["rejected_commit"])
             segments[ticket.id] = ChainSegment(ticket.id, ticket.text, base, tip)
         return segments
 
     def _verify_stacks(self) -> list[str]:
-        self.steps.check_run_branch(self.journal, self.vcs, self.repo, self.workflow.run_branch, self.chain[-1].id)
+        self.steps.check_run_branch(self.journal, self.run.vcs, self.run.repo, self.run.workflow.run_branch, self.chain[-1].id)
         every_event = self.journal.events
         # The current pass of the verification of the chain: the events since the last retry or plan change (ADR 0009). A
         # retry at the chain fix-up (#209) goes on with the verification: its rounds and its verdicts still count.
@@ -242,9 +238,7 @@ class ChainRun:
             return []  # a resume after the run branch moved: nothing is left to verify
         stack_passes = {stack_pass.stack: stack_pass for stack_pass in chain_pass.stacks}
         tip_ticket = self.chain[-1]
-        self.steps.check_verifier_stop(
-            self.journal, self.vcs, self.state_dir / "worktrees" / self.run_id / tip_ticket.id, tip_ticket.id, events
-        )
+        self.steps.check_verifier_stop(self.journal, self.run.vcs, self.run.worktree(tip_ticket.id), tip_ticket.id, events)
         segments = self._segments(every_event, events)
         # The chain tip before the first fix-up of any stack. The fix-ups from here to the start of a stack are the
         # fix-ups of the stacks before it, and its full verifier sees those that change a file of its tickets (#93).
@@ -256,10 +250,10 @@ class ChainRun:
             stack_pass = stack_passes.get(name, run_state.StackPass(name, (), ()))
             verdicts = stack_pass.verdicts
             # A fix-up of the stack uses the strongest specialist tier of the tickets that the verification covers (#231).
-            tier = strongest_tier(specialist_tier(self.workflow, ticket) for ticket in tickets)
+            tier = strongest_tier(specialist_tier(self.run.workflow, ticket) for ticket in tickets)
             step = self.steps.make_step(
-                self.workflow, Ticket(tickets[-1].id, chain_text(tickets), name, [], tier), self.adapter, self.vcs, self.gates, self.roles,
-                self.repo, self.state_dir, self.run_id, self.journal, tip_ticket, tuple(segments[ticket.id] for ticket in tickets),
+                self.run, self.journal, Ticket(tickets[-1].id, chain_text(tickets), name, [], tier), tip_ticket,
+                tuple(segments[ticket.id] for ticket in tickets),
             )
             last = step
             if verdicts and domain.is_accepted(verdicts[-1]):
@@ -269,7 +263,7 @@ class ChainRun:
             except StepFailed as failed:
                 return self._reject(failed, tickets, stacks[position + 1 :])
         assert last is not None
-        reason = self.steps.advance_run_branch(last, branch_tip(self.vcs, self.repo, last.branch))
+        reason = self.steps.advance_run_branch(last, branch_tip(self.run.vcs, self.run.repo, last.branch))
         if reason:
             self._fail({ticket.id: reason for ticket in self.chain})
         return []
@@ -298,14 +292,14 @@ class ChainRun:
         `fixup-start`, so the round is not in `fixup_starts`. The verification first runs that fix-up again, on the same
         commit with the same findings, as the round that the stop cut off, and then goes on as after any fix-up.
         """
-        mode = self.workflow.mode
+        mode = self.run.workflow.mode
         limit = domain.fixup_round_limit(mode)
         round_number = len(fixup_starts)
         used_up = domain.rounds_used_up_reason(mode, round_number)
         if used_up:
             raise StepFailed(used_up)
         # The full verifier also sees each fix-up commit beyond this commit: the tip before the first fix-up of the stack.
-        start = str(fixup_starts[0]["rejected_commit"]) if fixup_starts else branch_tip(self.vcs, self.repo, step.branch)
+        start = str(fixup_starts[0]["rejected_commit"]) if fixup_starts else branch_tip(self.run.vcs, self.run.repo, step.branch)
         earlier = (chain_start, start) if chain_start != start else None
         rejected: str | None = None  # the commit that the last verifier rejected
         findings: list[str] = []
@@ -313,14 +307,8 @@ class ChainRun:
             rejected, findings, round_number = redo.rejected, redo.findings, redo.round
             self._fixup(step, round_number, redo.commit, redo.findings_text, redo.red_gates)
         while True:
-            tip = branch_tip(self.vcs, self.repo, step.branch)
-            outcomes = [
-                self.steps.run_gate(
-                    step.gates, step.vcs, gate, step.ticket.id, step.worktree, step.journal, round_number, GATE_PHASE_CHAIN, step.stack.gate_limit,
-                    step.stack.gate_names.get(gate),
-                )
-                for gate in step.stack.gates
-            ]
+            tip = branch_tip(self.run.vcs, self.run.repo, step.branch)
+            outcomes = [self.steps.run_gate(step, gate, round_number, GATE_PHASE_CHAIN) for gate in step.stack.gates]
             red = [outcome for outcome in outcomes if not outcome.green]
             if red:
                 if round_number >= limit:
@@ -356,7 +344,7 @@ class ChainRun:
         if isinstance(failed, Rejected):
             mapped, unmapped = map_findings(failed.findings, [ticket.id for ticket in tickets])
         reasons = {
-            ticket_id: domain.chain_rejection_reason(self.workflow.mode, findings) for ticket_id, findings in mapped.items()
+            ticket_id: domain.chain_rejection_reason(self.run.workflow.mode, findings) for ticket_id, findings in mapped.items()
         }
         if not reasons:
             reasons = {ticket.id: str(failed) for ticket in tickets}
