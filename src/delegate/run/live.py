@@ -38,13 +38,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import domain, output, run_state, status, status_model, status_picker, status_table
+from . import domain, feed_text, output, run_state, status, status_model, status_picker, status_table
 from .clock import Clock, utc_now
-from .events import JOURNAL_CHANGED
-from .journal import JournalError, crash_where, event_time
-
-# The text between two parts of a line of the feed.
-SEPARATOR: str = " · "
+from .feed_text import JOIN, SEPARATOR, Span, duration
+from .journal import JournalError, event_time
 
 # The least width of the track of the subject of the feed (components.md § Feed: `#id` 3).
 ID_CELLS: int = 3
@@ -73,24 +70,10 @@ IDLE_WARNING_MINUTES: float = 5
 # The seconds between two draws of a frame with a spinner, while the view waits for the next read of the journal (#147).
 SPIN_SECONDS: float = 0.125
 
-# A part of a line of the feed: the roles of its paint (see `output.styled`), and its text.
-Span = tuple[str, str]
-JOIN: Span = ("", SEPARATOR)
-
 
 def local_time(when: datetime) -> str:
     """The local time of the clock of this computer, as `HH:MM`."""
     return when.astimezone().strftime("%H:%M")
-
-
-def duration(seconds: float) -> str:
-    """A duration in the short form of the feed: `45s`, `36m`, or `10h42m`."""
-    whole = max(0, int(seconds))
-    if whole < 60:
-        return f"{whole}s"
-    if whole < 3600:
-        return f"{whole // 60}m"
-    return f"{whole // 3600}h{whole % 3600 // 60:02d}m"
 
 
 @dataclass
@@ -134,7 +117,6 @@ class _Waiting:
     subject: str
     spans: list[Span]
     gates: list[tuple[str, bool]] = field(default_factory=list)  # the text of each gate, and whether it is red
-    red: bool = False
 
 
 class LiveView:
@@ -195,11 +177,11 @@ class LiveView:
 
     def stall(self, minutes: float, last_event: dict[str, object] | None) -> None:
         self._flush_all()
-        self._add(self._now(), "", [("", f"{output.glyphs().failed} stall{SEPARATOR}no change for {minutes:g}m")], role="bad")
+        self._add(self._now(), "", feed_text.stall(minutes), role="bad")
 
     def time_limit(self, minutes: float) -> None:
         self._flush_all()
-        self._add(self._now(), "", [("", f"time limit{SEPARATOR}{minutes:g}m used{SEPARATOR}the run goes on")])
+        self._add(self._now(), "", feed_text.time_limit(minutes))
 
     def poll(self) -> None:
         columns, rows = self._size()
@@ -401,7 +383,7 @@ class LiveView:
         if problem is not None:
             # The run goes on past a problem (#222): a warning, in `warn`, and a mark on the row of its ticket.
             self._flush(ticket)
-            self._add(when, "", [("", f"{output.glyphs().failed} " + (f"{subject} " if subject else "") + problem)], role="warn")
+            self._add(when, "", feed_text.warning(subject, problem), role="warn")
             if "ticket" in event:
                 self._warned.add(ticket)
 
@@ -414,18 +396,12 @@ class LiveView:
             agent = self._agents.pop((ticket, role), None)
             ended = "timed out" if (ticket, role) in self._timed_out else str(event["end_state"])
             self._timed_out.discard((ticket, role))
-            spans: list[Span] = [("", f"{role} {ended}")]
-            if agent is not None:
-                spans += [JOIN, ("", duration((when - agent[0]).total_seconds()))]
-            tokens = self._result_tokens(event)
-            if tokens is not None:
-                spans += [JOIN, ("dim", tokens)]
+            seconds = (when - agent[0]).total_seconds() if agent is not None else None
+            spans = feed_text.agent_result(role, ended, seconds, self._result_tokens(event))
             self._wait(ticket, _Waiting(AGENT, when, self._chain_subject(ticket, subject), spans))
             return
         if kind in RESULT_OF_REPORT:
-            text = "report ok" if event["valid"] else "report not valid"
-            if event["valid"] and event.get("status") not in (None, "committed"):
-                text = f"report {event['status']}"
+            text = feed_text.report(event)
             waiting = self._waiting.get(ticket)
             if waiting is not None and waiting.kind == AGENT:
                 self._join(ticket, when, subject, [("", text)])
@@ -437,57 +413,35 @@ class LiveView:
             self._gate(event, kind, ticket, subject, when)
             return
         if kind == "verdict":
-            findings = len(event.get("findings") or [])  # type: ignore[arg-type]
-            if event["verdict"] == "ACCEPT":
-                spans = [("ok", output.glyphs().built), ("", " "), ("bold", "ACCEPT")]
-            else:
-                spans = [("warn bold", f"{event['verdict']}{SEPARATOR}{findings} finding{'s' if findings != 1 else ''}")]
-            chain = f"stack {event['stack']}" if "stack" in event else None
-            self._wait(ticket, _Waiting(VERDICT, when, chain or subject, spans))
+            self._wait(ticket, _Waiting(VERDICT, when, feed_text.verdict_subject(event) or subject, feed_text.verdict(event)))
             return
         if kind == "step-end":
-            state = str(event["state"])
-            text = state if state == status_model.BUILT or not event.get("reason") else f"{state}{SEPARATOR}{event['reason']}"
-            self._join(ticket, when, subject, [("", text)])
+            self._join(ticket, when, subject, [("", feed_text.step_end(event))])
             return
         if kind == "run-end":
             self._run_end(event, when)
             return
         self._flush(ticket)
-        if kind == "paused":
-            self._add(when, "", [("", self._paused(event))], role="warn")
-            return
-        if kind == "halted":
-            self._add(when, "", [("", self._halted(event))], role="bad")
-            return
-        if kind == "crashed":
-            self._add(when, "", [("", self._crashed(event))], role="bad")
-            return
-        chain = kind in ("verify-start", "fixup-start", "fixup-refused")
-        self._add(when, self._chain_subject(ticket, subject) if chain else subject, self._spans(kind, event), started=kind == "step-start")
+        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
+        role, spans = feed_text.own_line(kind, event, run_id)
+        if role:  # a pause, a halt and a crash are of the run, not of a ticket: they have no subject
+            subject = ""
+        elif kind in feed_text.CHAIN_KINDS:
+            subject = self._chain_subject(ticket, subject)
+        self._add(when, subject, spans, role=role, started=kind == "step-start")
 
     def _gate(self, event: dict[str, object], kind: str, ticket: str, subject: str, when: datetime) -> None:
         """Add the result of one gate to the line of the gates of its round, which waits for the next event."""
         command = str(event["command"])
         started = self._gates.pop((ticket, command), None)
-        red = kind == "gate-result" and not event["green"]
-        if kind == "gate-skip":
-            item = f"{output.gate_name_of(event)} skipped"
-        else:
-            item = output.gate_name_of(event) + (f" {duration((when - started).total_seconds())}" if started is not None else "")
-            item += (" timed out" if event.get("timed_out") else " red") if red else ""
+        item, red = feed_text.gate_item(event, kind, (when - started).total_seconds() if started is not None else None)
         waiting = self._waiting.get(ticket)
         if waiting is None or waiting.kind != GATES:
             waiting = _Waiting(GATES, when, subject, [])
             self._wait(ticket, waiting)
         waiting.gates.append((item, red))
-        waiting.red = waiting.red or red
         waiting.time = when
-        items: list[Span] = []
-        for index, (text, is_red) in enumerate(waiting.gates):
-            items += ([("dim", ", ")] if index else []) + [("bad" if is_red else "dim", text)]
-        verdict: Span = ("bad", "gates red") if waiting.red else ("ok", "gates green")
-        waiting.spans = [verdict, ("dim", " ("), *items, ("dim", ")")]
+        waiting.spans = feed_text.gates(waiting.gates)
 
     def _chain_subject(self, ticket: str, subject: str) -> str:
         return f"stack {self._chain[ticket]}" if ticket in self._chain else subject
@@ -499,89 +453,13 @@ class LiveView:
             if ticket != newest:
                 self._flush(ticket)
         start = event_time(self._events[0]) if self._events and self._events[0]["event"] == "run-start" else when
-        result = str(event["result"])
-        spans: list[Span] = [("ok bold" if result == status_model.BUILT else "bad", f"run {result}"), JOIN, ("", duration((when - start).total_seconds()))]
-        if event.get("reason"):
-            spans += [JOIN, ("", f"reason: {event['reason']}")]
         snap = self._snapshot()
+        tokens = None
         if snap is not None and snap.tokens_new is not None and snap.tokens_cache is not None:
-            spans += [JOIN, ("dim", status_model.format_token_counts(snap.tokens_new, snap.tokens_cache))]
+            tokens = status_model.format_token_counts(snap.tokens_new, snap.tokens_cache)
+        spans = feed_text.run_end(event, (when - start).total_seconds(), tokens)
         if newest is None:
             self._add(when, "", spans)
         else:
             waiting = self._waiting.pop(newest)
             self._add(when, waiting.subject, [*waiting.spans, JOIN, *spans])
-
-    def _paused(self, event: dict[str, object]) -> str:
-        """The line of a pause: where the run stopped, and the command that goes on with it."""
-        ticket, before = event.get("ticket"), event.get("before")
-        if before == "gate" and event.get("command"):
-            where = f"the gate {output.gate_name_of(event)} of ticket {ticket}"
-        elif before == "verifier":
-            where = "the verifier of " + (f"stack {event['stack']}" if event.get("stack") else f"ticket {ticket}")
-        else:
-            where = f"ticket {ticket}"
-        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
-        return f"paused{SEPARATOR}before {where}{SEPARATOR}go on with delegate run --resume {run_id}"
-
-    def _halted(self, event: dict[str, object]) -> str:
-        """The line of a halt: where the harness failed, its message, and the command that goes on with the run."""
-        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
-        where = f"the {event['role']} of ticket {event['ticket']}"
-        return f"halted{SEPARATOR}{where}{SEPARATOR}{event['message']}{SEPARATOR}go on with delegate run --resume {run_id}"
-
-    def _crashed(self, event: dict[str, object]) -> str:
-        """The line of a crash (#281): where it stopped the run, the error, the name of the file of its traceback, and the
-        command that goes on with the run. The live view cuts each path to its name (`output.without_paths`)."""
-        run_id = output.short_run_id(str(self._events[0].get("run_id", ""))) if self._events else ""
-        where = crash_where(event.get("ticket"), event.get("phase"))
-        parts = ["crashed", where, f"{event['error']}: {output.without_paths(str(event['message']))}"]
-        if event.get("traceback"):
-            parts.append(f"traceback {Path(str(event['traceback'])).name}")
-        again = f" --retry {event.get('ticket')}" if event.get("retry") else ""
-        return SEPARATOR.join([*parts, f"go on with delegate run --resume {run_id}{again}"])
-
-    def _spans(self, kind: str, event: dict[str, object]) -> list[Span]:
-        """The parts of the line of an event that has a line of its own. An event that this version does not know shows its name."""
-        if kind == "fixup-start":
-            return [("warn", f"fix-up round {event['round']} started")]
-        if kind == "continuation":
-            return [("warn", f"continuation {event['count']} of {event['limit']}"), JOIN, ("", str(event["trigger"]))]
-        return [("", self._text(kind, event))]
-
-    def _text(self, kind: str, event: dict[str, object]) -> str:
-        """The text of an event that has a line of its own, with no paint."""
-        if kind == "run-start":
-            count = len(event["tickets"])  # type: ignore[arg-type]
-            return f"run {event['run_id']} started{SEPARATOR}{event['mode']}{SEPARATOR}{count} ticket{'s' if count != 1 else ''}"
-        if kind == "resume":
-            return "run resumed"
-        if kind == "step-start":
-            return f"started{SEPARATOR}{event['agent']}"
-        if kind == "retry":
-            return f"retry at the {event['phase']}"
-        if kind == "stack-change":
-            return output.stack_change_line(event)
-        if kind == "continuation-limit":
-            return f"continuation limit {event['limit']} reached"
-        if kind == "hotspot-finding":
-            count = len(event["matches"])  # type: ignore[arg-type]
-            return f"hotspot finding{SEPARATOR}{count} path{'s' if count != 1 else ''}"
-        if kind == "rebase":
-            return f"rebase {event['result']}"
-        if kind == "verify-start":
-            if "tickets" in event:
-                tickets = ", ".join(f"#{t}" for t in event["tickets"])  # type: ignore[attr-defined]
-                return f"verifier started ({tickets})"
-            return "verifier started" if not event["round"] else f"scoped verifier started{SEPARATOR}round {event['round']}"
-        if kind == "invariant-violation":
-            if event.get("kind") == JOURNAL_CHANGED:
-                return "invariant violation: another writer changed the journal"
-            return "invariant violation: the verifier changed the worktree"
-        if kind == "fixup-refused":
-            return f"fix-up round {event['round']} refused"
-        if kind == "skip":
-            return f"skipped{SEPARATOR}{event['reason']}" if event.get("reason") else "skipped"
-        if kind == "unskip":
-            return f"not skipped{SEPARATOR}{event['outlook']}"
-        return kind
