@@ -679,3 +679,8 @@ def plan_order(workflow: Workflow) -> list[Ticket]:
     """
     by_id = {ticket.id: ticket for ticket in workflow.tickets}
     return [by_id[ticket_id] for ticket_id in domain.dependency_order([(t.id, t.blocked_by) for t in workflow.tickets])]
+
+
+def ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
+    """The branch of a ticket of a run: the run branch, a hyphen, and the id of the ticket."""
+    return f"{workflow.run_branch}-{ticket.id}"

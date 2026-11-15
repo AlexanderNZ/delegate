@@ -85,7 +85,7 @@ count against the fix-up limit: the resume runs that round again.
 
 A resume can change the plan of the run: add tickets after the built part, and
 change or remove tickets that have not started. The rules are in
-`domain.check_plan_change`, and `_review` applies them to the newest plan of the
+`domain.check_plan_change`, and `review_workflow` applies them to the newest plan of the
 run, from the journal. A refused change changes nothing. An accepted change
 writes `plan-change`, also goes on with a run that ended, and gives the brief of
 each later ticket the section "Plan change" (see `_plan_change_note`).
@@ -174,14 +174,13 @@ the run context imports `subprocess`.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import secrets
 import shutil
 import tempfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from traceback import format_exception
@@ -202,7 +201,7 @@ from .brief import (
 from .cleanup import TicketTree, clean_tickets, remove_empty_directories
 from .errors import EngineError
 from .events import (
-    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RESUME, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE, UNSKIP,
+    CRASH_PHASE_CHAIN, CRASH_PHASE_SETUP, CRASHED, JOURNAL_CHANGED, RUN_START, SCHEMA_VERSION, SETUP_PROBLEM, STACK_CHANGE, UNSKIP,
     ROLE_SPECIALIST, ROLE_FIXUP, ROLE_VERIFIER,
     GATE_PHASE_BUILD, GATE_PHASE_REBASE, GATE_PHASE_FIXUP, GATE_PHASE_CHAIN,
     TREE_WORKTREE, TREE_VERIFY_COPY, TREE_SEAL,
@@ -215,16 +214,17 @@ from .guards import (
     snapshot_worktree, WorktreeSnapshot,
 )
 from .host import host_name
-from .journal import EventObserver, Journal, JournalChanged, JournalError, abandoned_end, crash_where, plan_ids, read_events
+from .journal import EventObserver, Journal, JournalChanged, JournalError, crash_where, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
 from .probe import PROBE_TIER, DENIED, describe_tries, probe_guard, refusal, stream_path
+from .plan_review import PlanReview, SkippedTicket, configuration_record, plan_of, plan_record, recorded_configuration, review_workflow
 from .progress import Progress, restore_progress
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
 from .state_location import (
     CRASH_FILE_PREFIX, JOURNAL_NAME, PAUSE_REQUEST_NAME, SCRATCH_DIRECTORY, VERIFIER_SCRATCH_PREFIX, VERIFY_COPY_NAME, VERIFY_SCRATCH_PREFIX,
     StateLocation, locate_state, record_state_root,
 )
-from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, strongest_tier
+from .workflow import Stack, Ticket, Workflow, plan_order, specialist_tier, strongest_tier, ticket_branch
 
 # The journal keeps this many characters of the end of a gate's output.
 GATE_OUTPUT_TAIL_CHARS: int = 4000
@@ -561,7 +561,7 @@ def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None
         raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
     # A taken ticket branch is reported before a taken run branch: an earlier run leaves both, and the ticket names the step.
     for ticket in workflow.tickets:
-        branch = _ticket_branch(workflow, ticket)
+        branch = ticket_branch(workflow, ticket)
         with _vcs_errors():
             taken = vcs.branch_exists(repo, branch)
         if taken:
@@ -571,10 +571,6 @@ def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None
             f"run-branch {workflow.run_branch!r} exists already in the repository {repo}; an earlier run can leave it. "
             "Delete it or choose another run-branch"
         )
-
-
-def _ticket_branch(workflow: Workflow, ticket: Ticket) -> str:
-    return f"{workflow.run_branch}-{ticket.id}"
 
 
 def _journal_events(state_dir: Path, run_id: str, observers: Sequence[EventObserver] = ()) -> tuple[Journal, list[dict[str, object]]]:
@@ -588,305 +584,7 @@ def _journal_events(state_dir: Path, run_id: str, observers: Sequence[EventObser
     return journal, events
 
 
-def _check_same_run(workflow: Workflow, workflow_path: Path, run_start: dict[str, object], run_id: str) -> None:
-    """Refuse a resume when the workflow is not the one that the run started from. The message names the field.
-
-    The tickets can differ: the rules of a plan change decide (see `_review`).
-    """
-    now: dict[str, object] = {
-        "mode": workflow.mode, "adapter": workflow.adapter, "base_branch": workflow.base_branch, "run_branch": workflow.run_branch,
-    }
-    for name, value in now.items():
-        if run_start[name] != value:
-            raise EngineError(f"workflow {workflow_path} differs from run {run_id}: {name} was {run_start[name]!r}, is now {value!r}")
-
-
-def _configuration_record(workflow: Workflow) -> dict[str, object]:
-    """The configuration of the run as the journal records it, in the field `configuration` of `run-start` and of `resume` (#289).
-
-    The record holds each field of each stack except its name, and the top-level fields `ticket_start` and
-    `keep_worktrees`. It is canonical: the JSON form of the values, so a record that the journal gives back is equal to
-    the record of the same workflow. A new field of `Stack` goes into the record with no change here.
-    """
-    stacks = {name: {key: value for key, value in asdict(stack).items() if key != "name"} for name, stack in sorted(workflow.stacks.items())}
-    record = {"stacks": stacks, "ticket_start": workflow.ticket_start, "keep_worktrees": workflow.keep_worktrees}
-    return json.loads(json.dumps(record))
-
-
-def _recorded_configuration(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """The newest record of the configuration of a run: the `configuration` of the newest `resume` that has one, or else of
-    `run-start`, with each `stack-change` after it applied (#290). So a stack has the newest record of each of its fields.
-
-    None when the journal records none: an earlier version of the engine started the run.
-    """
-    record: dict[str, object] | None = None
-    for event in events:
-        if event["event"] in (RUN_START, RESUME) and "configuration" in event:
-            record = json.loads(json.dumps(event["configuration"]))
-        elif event["event"] == STACK_CHANGE and record is not None:
-            stack = record["stacks"].setdefault(event["stack"], {})  # type: ignore[attr-defined]
-            for name, change in event["changes"].items():  # type: ignore[attr-defined]
-                stack[name] = change["new"]
-    return record
-
-
-@dataclass(frozen=True)
-class StackChange:
-    """The deliberate change of one stack at a resume (#290): the stack, and the old and the new value of each changed field."""
-
-    stack: str
-    fields: dict[str, tuple[object, object]]
-
-    def event_fields(self) -> dict[str, object]:
-        """The fields of the `stack-change` event."""
-        return {"stack": self.stack, "changes": {name: {"old": old, "new": new} for name, (old, new) in self.fields.items()}}
-
-
-def _stack_changes(old: dict[str, object], new: dict[str, object]) -> list[StackChange]:
-    """Each stack whose fields differ from the record `old` to the record `new`, in the order of the names of the stacks.
-
-    A stack that only one record has is not a change: no ticket of the run used a new stack, and a ticket of a removed
-    stack is not in the plan. A field that `old` does not hold is not compared: a later version of the engine added it.
-    """
-    changes: list[StackChange] = []
-    old_stacks, new_stacks = old["stacks"], new["stacks"]
-    for name in sorted(old_stacks.keys() & new_stacks.keys()):  # type: ignore[attr-defined]
-        recorded, now = old_stacks[name], new_stacks[name]  # type: ignore[index]
-        fields = {key: (recorded[key], now.get(key)) for key in recorded if recorded[key] != now.get(key)}
-        if fields:
-            changes.append(StackChange(name, fields))
-    return changes
-
-
-def _check_same_configuration(
-    workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, stack_changed: bool = False,
-) -> tuple[StackChange, ...]:
-    """Refuse a resume when the configuration of a stack, or a top-level field of the record, differs from the newest record (#289).
-
-    The message names each stack with its changed fields, and each changed top-level field. A journal with no record
-    passes: the resume writes the record (see `_execute`). With `stack_changed` (`--stack-changed`, #290) a change of a
-    stack does not refuse the resume: the result holds each change, and the resume records it in `stack-change`. A change
-    of a top-level field still refuses it. The flag with no change of a stack is refused too, so a command does not carry it by habit.
-    """
-    recorded = _recorded_configuration(events)
-    now = _configuration_record(workflow)
-    stacks = [] if recorded is None else _stack_changes(recorded, now)
-    top = [] if recorded is None else [key for key in ("ticket_start", "keep_worktrees") if key in recorded and recorded[key] != now[key]]
-    named = [f"stack {change.stack!r}: {', '.join(change.fields)}" for change in stacks] + top
-    if top or (stacks and not stack_changed):
-        # A change of a stack can be meant, so the message names the flag. A change of a top-level field cannot be recorded.
-        meant = f"if the change of a stack is meant, go on with delegate run --resume {run_id} --stack-changed; otherwise " if not top else ""
-        raise EngineError(
-            f"workflow {workflow_path} changes the configuration of run {run_id}: {'; '.join(named)}; "
-            "the journal records the configuration under which the run checks its tickets, and a resume does not change it: "
-            f"{meant}put the recorded values back in the workflow file, or start a new run"
-        )
-    if stack_changed and not stacks:
-        raise EngineError(
-            f"--stack-changed: workflow {workflow_path} changes no stack of run {run_id}, so there is no change to record; "
-            "go on with the resume without the flag"
-        )
-    return tuple(stacks)
-
-
-def _plan_of(workflow: Workflow) -> list[domain.PlanTicket]:
-    """The plan of a workflow: each ticket in plan order, with its stack, its blockers, the SHA-256 of its text, and its tier."""
-    return [
-        domain.PlanTicket(t.id, t.stack, tuple(t.blocked_by), hashlib.sha256(t.text.encode()).hexdigest(), t.tier)
-        for t in plan_order(workflow)
-    ]
-
-
-def _plan_record(plan: list[domain.PlanTicket]) -> list[dict[str, object]]:
-    """The plan as the journal records it, in the field `plan` of `run-start` and of `plan-change`.
-
-    A ticket with no `tier` has no `tier` in the record, as in a journal from before #231.
-    """
-    return [
-        {"id": t.id, "stack": t.stack, "blocked_by": list(t.blocked_by), "text_sha256": t.text_sha256, **({"tier": t.tier} if t.tier else {})}
-        for t in plan
-    ]
-
-
-def _recorded_plan(events: list[dict[str, object]]) -> list[domain.PlanTicket] | None:
-    """The newest plan of a run: the plan of its newest `plan-change`, or else of `run-start`.
-
-    None when the journal records no plan: an earlier version of the engine wrote only the ticket ids.
-    """
-    records = [event["plan"] for event in events if event["event"] == "plan-change"] or [events[0].get("plan")]
-    if records[-1] is None:
-        return None
-    return [
-        domain.PlanTicket(
-            str(r["id"]), str(r["stack"]), tuple(str(b) for b in r["blocked_by"]), str(r["text_sha256"]),  # type: ignore[index, union-attr]
-            None if r.get("tier") is None else str(r["tier"]),  # type: ignore[union-attr]
-        )
-        for r in records[-1]  # type: ignore[union-attr]
-    ]
-
-
-@dataclass(frozen=True)
-class SkippedTicket:
-    """What a resume does with a ticket that the run skipped (#260): `text` says if its step runs, and why, in the words of the dry run."""
-
-    ticket: str
-    text: str
-
-
-@dataclass(frozen=True)
-class PlanReview:
-    """What a resume does with the plan of a run: the old and the new order, and the verdict of each rule of a plan change.
-
-    `check` is None when the tickets of the workflow are the newest plan of the
-    run. `missing` holds the later tickets that `--reviewed` does not cover.
-    `texts` holds the text of each added or changed ticket. `other` holds the
-    problems that are not a rule of the plan: an unknown id in `--reviewed`,
-    and the branch of a new ticket that exists already.
-    """
-
-    run_id: str
-    mode: str
-    old_order: list[str]
-    new_order: list[str]
-    check: domain.PlanCheck | None
-    missing: list[str] = field(default_factory=list)
-    texts: dict[str, str] = field(default_factory=dict)
-    other: list[str] = field(default_factory=list)
-    # What the resume does with each ticket that the run skipped, in plan order (#260). Only `review_plan_change` sets it.
-    skipped: tuple[SkippedTicket, ...] = ()
-    # The message that refuses the retry of `--retry`, or None when the engine accepts it (#261). Only `review_plan_change`
-    # sets it. It is not in `problems`: a resume refuses the retry with the same message after the plan change.
-    retry_refusal: str | None = None
-    # The line that tells the phase of the retry of `--retry` when the engine accepts it (#269). Only `review_plan_change` sets it.
-    retry_outlook: str | None = None
-    # The changes of stacks that `--stack-changed` lets the resume record (#290), one for each stack. Empty without the flag.
-    stack_changes: tuple[StackChange, ...] = ()
-    # The message with which another check of the resume (`_resume_checks`) refuses the resume, or None (#357): the run ended,
-    # the run branch moved or is gone, the start of the chain, the hotspots of the chain. Only `review_plan_change` sets it, and
-    # only when the rules of the plan and the rules of the retry accept: their refusals have their own fields.
-    resume_refusal: str | None = None
-
-    @property
-    def changed(self) -> bool:
-        return self.check is not None
-
-    def _rule_8(self) -> list[str]:
-        if not self.missing:
-            return []
-        names = ", ".join(repr(ticket) for ticket in self.missing)
-        return [
-            f"the plan change needs a review of the later tickets {names}: read each one against the added and changed tickets, "
-            f"change its text or its blocked-by where a precondition changed, then give --reviewed {','.join(self.check.later)} "  # type: ignore[union-attr]
-            "or --reviewed all"
-        ]
-
-    def problems(self) -> list[str]:
-        """Each message that refuses the resume, in the order of the rules."""
-        if self.check is None:
-            return list(self.other)
-        problems = [message for rule in sorted(self.check.problems) for message in self.check.problems[rule]]
-        return problems + self.other + self._rule_8()
-
-    def verdicts(self) -> list[tuple[int, str, str]]:
-        """The verdict of each rule of a plan change: its number, `ok` or `refused`, and the detail.
-
-        The problems in `other` are not rules of the plan: `problems` gives them.
-        """
-        check = self.check
-        assert check is not None
-        later = ", ".join(check.later)
-        notes = {
-            1: f"the built part is {', '.join(check.fixed) or 'empty'}",
-            2: f"added: {', '.join(check.added) or 'none'}",
-            3: "changed: " + (", ".join(f"{t} ({', '.join(f)})" for t, f in check.changed.items()) or "none"),
-            4: "no new ticket comes before a ticket that has started",
-            5: "each new ticket gets its own gates and verifier"
-            + (": the verification of the chain covers each built ticket whose work the run branch does not hold"
-               if self.mode == domain.ECONOMY else ""),
-            6: "the resume writes plan-change",
-            7: f"removed: {', '.join(check.removed) or 'none'}",
-            8: f"reviewed: {later}" if later else "no later ticket",
-            9: f"the briefs of {later} get the section" if later else "no brief gets the section",
-            10: "text of the retried ticket changes: " + ", ".join(check.restarted) if check.restarted else "no retried ticket changes its text",
-        }
-        found = {rule: list(messages) for rule, messages in check.problems.items()}
-        if self.missing:
-            found[8] = [f"needs --reviewed for {', '.join(self.missing)}"]
-        return [
-            (rule, "refused" if rule in found else "ok", "; ".join(found[rule]) if rule in found else notes[rule])
-            for rule in domain.PLAN_RULES
-        ]
-
-
-def _review(
-    workflow: Workflow, workflow_path: Path, events: list[dict[str, object]], run_id: str, reviewed: tuple[str, ...],
-    branch_exists: Callable[[str], bool], retry: str | None = None, stack_changed: bool = False,
-) -> PlanReview:
-    """Apply the rules of a plan change to the workflow and the journal of a run. Change nothing.
-
-    The workflow is compared with the newest plan of the run, not with
-    `run-start`. Raise EngineError when a field other than the tickets differs
-    (see `_check_same_run`), when the plan changed and the journal records
-    no plan to compare with, or when the owner abandoned the run (#201).
-
-    `retry` is the ticket of `--retry`. When the run state gives it as failed,
-    its text can change (rule 10): the retry starts it again. `stack_changed` is `--stack-changed`: the changes of stacks
-    that it lets the resume record are in `stack_changes` of the result (see `_check_same_configuration`).
-    """
-    abandoned = abandoned_end(events)
-    if abandoned is not None:
-        reason = f" ({abandoned['reason']})" if abandoned.get("reason") else ""
-        raise EngineError(f"run {run_id!r} cannot be resumed: it ended abandoned{reason}; start a new run")
-    _check_same_run(workflow, workflow_path, events[0], run_id)
-    stack_changes = _check_same_configuration(workflow, workflow_path, events, run_id, stack_changed)
-    old_order, new_plan = plan_ids(events), _plan_of(workflow)
-    new_order = [t.id for t in new_plan]
-    old = _recorded_plan(events)
-    if old is None:
-        if old_order != new_order:
-            raise EngineError(
-                f"workflow {workflow_path} differs from run {run_id}: tickets was {old_order!r}, is now {new_order!r}; "
-                "the journal of the run records no plan, because an earlier version of delegate started it, "
-                "so a plan change cannot be checked: start a new run"
-            )
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None, stack_changes=stack_changes)
-    if old == new_plan:
-        return PlanReview(run_id, workflow.mode, old_order, new_order, None, stack_changes=stack_changes)
-    started = {str(event["ticket"]) for event in events if event["event"] == "step-start"}
-    outcome = next((t.outcome for t in run_state.fold(events).tickets if t.id == retry), None)
-    check = domain.check_plan_change(
-        old, new_plan, started, retry if outcome == run_state.FAILED else None, _failed_chain(workflow, events, run_id)
-    )
-    other = [
-        f"--reviewed names {ticket!r}, which is not a ticket of the workflow"
-        for ticket in reviewed if ticket != domain.REVIEWED_ALL and ticket not in new_order
-    ]
-    for ticket in workflow.tickets:
-        branch = _ticket_branch(workflow, ticket)
-        if ticket.id in check.added and branch_exists(branch):
-            other.append(f"branch {branch!r} for the new ticket {ticket.id!r} exists already; delete it or give the ticket another id")
-    texts = {t.id: t.text for t in workflow.tickets if t.id in check.added or t.id in check.changed}
-    return PlanReview(
-        run_id, workflow.mode, old_order, new_order, check, domain.unreviewed(check.later, reviewed), texts, other, stack_changes=stack_changes
-    )
-
-
-def _failed_chain(workflow: Workflow, events: list[dict[str, object]], run_id: str) -> list[str]:
-    """The tickets that the verification of an `economy` chain failed, in plan order, or no ticket (#270).
-
-    Such a ticket failed, and its newest step has a `step-end` built before its newest `step-end` (see `_chain_failed`).
-    A retry of one of them can build it again: then it is not failed. In `assure` mode there is no chain.
-    """
-    if workflow.mode != domain.ECONOMY:
-        return []
-    failed = restore_progress(events, run_id, retrying=True).failed
-    return [
-        ticket_id for ticket_id in plan_ids(events)
-        if ticket_id in failed and _chain_failed(step_scans.step_events(events, ticket_id))
-    ]
-
-
-def _resume_events(state_dir: Path, run_id: str) -> list[dict[str, object]]:
+def resume_events(state_dir: Path, run_id: str) -> list[dict[str, object]]:
     """Read the journal of the run `run_id` for a resume, one time. Raise EngineError when it cannot be read or does not start with `run-start`."""
     try:
         events = read_events(state_dir / "runs" / run_id / JOURNAL_NAME, torn_tail=True)
@@ -897,53 +595,13 @@ def _resume_events(state_dir: Path, run_id: str) -> list[dict[str, object]]:
     return events
 
 
-def review_plan_change(
-    workflow: Workflow, workflow_path: Path, repo: Path, run_id: str, vcs: VersionControl, reviewed: tuple[str, ...] = (),
-    retry: str | None = None, *, location: StateLocation | None = None, coordinator_commit: str | None = None,
-    config_paths: Sequence[str] = (), stack_changed: bool = False,
-) -> PlanReview:
-    """Apply the rules of a plan change to the workflow and the run `run_id`, as a resume does, and change nothing.
-
-    `delegate run --resume <run-id> --dry-run` prints the result. `retry` is the
-    ticket of `--retry`: the text of a failed ticket that it starts again can
-    change (rule 10). Raise
-    EngineError when the run is unknown, or when the workflow differs from the
-    run in a field other than the tickets. `location` is the location that the command looked up (see `locate_state`),
-    or None to look it up here.
-
-    The result also holds what the resume does with each ticket that the run skipped (see `_skipped_outlook`).
-    `coordinator_commit` is the commit of `--coordinator-commit`, or None. With it, the review makes the checks of
-    the commit that the resume makes (`_coordinator_commit`), and a refusal has the text of the refusal of the resume
-    (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too. `stack_changed` is
-    `--stack-changed` (#290): a changed stack does not refuse the review, and the result holds each change.
-
-    When the rules of the plan and of the retry accept, the review also makes each other check of the resume that needs no
-    write (`_resume_checks`), and `resume_refusal` of the result holds the message of the resume when one refuses (#357).
-    """
-    location = location or locate_state(repo, vcs)
-    events = _resume_events(location.state_directory(run_id), run_id)
-    review = _plan_review(
-        workflow, workflow_path, location.top, run_id, vcs, events, reviewed, retry, coordinator_commit, config_paths, stack_changed
-    )
-    if review.problems() or review.retry_refusal is not None:
-        return review
-    try:
-        _resume_checks(
-            workflow, workflow_path, plan_order(workflow), vcs, location.top, run_id, events, reviewed, retry, coordinator_commit,
-            None, config_paths, stack_changed,
-        )
-    except EngineError as error:
-        return replace(review, skipped=(), retry_outlook=None, resume_refusal=str(error))
-    return review
-
-
-def _plan_review(
+def plan_review_with_outlook(
     workflow: Workflow, workflow_path: Path, top: Path, run_id: str, vcs: VersionControl, events: list[dict[str, object]],
     reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None, config_paths: Sequence[str], stack_changed: bool,
 ) -> PlanReview:
     """The review of the plan of `review_plan_change` from the events of the journal, with the outlook of the skipped tickets and of the retry."""
     with _vcs_errors():
-        review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry, stack_changed)
+        review = review_workflow(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(top, branch), retry, stack_changed)
     refusal, outlook = _retry_outcome(workflow, events, run_id, review, retry, coordinator_commit, vcs, top, config_paths)
     skipped = () if refusal is not None else _skipped_outlook(
         workflow, events, run_id, review, retry, coordinator_commit is not None, config_paths
@@ -1423,9 +1081,9 @@ def _economy_retry_plan(
     stop = None if restart else _chain_stop(prior)
     if stop is not None:
         return _chain_fixup_plan(workflow, progress, ticket_id, prior, stop)
-    if _chain_failed(prior) and not restart:
+    if step_scans.chain_failed(prior) and not restart:
         return _chain_retry_plan(workflow, progress, refused, ticket_id, prior, coordinator)
-    if _chain_failed(prior):
+    if step_scans.chain_failed(prior):
         raise EngineError(
             f"{refused}: the verification of the chain failed it, so a new text of the ticket cannot start it again; "
             "--retry with no new text goes on with the verification of the chain"
@@ -1441,11 +1099,6 @@ def _economy_retry_plan(
         return _RetryPlan(ticket_id, RETRY_PHASE_SPECIALIST, 0, prior, restart=True)
     phase = RETRY_PHASE_GATES if _specialist_committed(prior) else RETRY_PHASE_SPECIALIST
     return _RetryPlan(ticket_id, phase, 0, prior)
-
-
-def _chain_failed(prior: Sequence[dict[str, object]]) -> bool:
-    """True when the verification of the chain failed the step: the step has a `step-end` built before its newest `step-end`."""
-    return any(e["event"] == "step-end" and e["state"] == BUILT for e in prior)
 
 
 def _chain_retry_plan(
@@ -1474,7 +1127,7 @@ def _chain_retry_plan(
     order = plan_order(workflow)
     revive = tuple(
         ticket.id for ticket in order
-        if ticket.id != ticket_id and ticket.id in progress.failed and _chain_failed(step_scans.step_events(progress.events, ticket.id))
+        if ticket.id != ticket_id and ticket.id in progress.failed and step_scans.chain_failed(step_scans.step_events(progress.events, ticket.id))
     )
     chain = [ticket.id for ticket in order if ticket.id == ticket_id or ticket.id in revive or ticket.id in progress.built]
     if chain[-1] != ticket_id:
@@ -1516,7 +1169,7 @@ def _coordinator_commit(
         )
     ticket = next(ticket for ticket in workflow.tickets if ticket.id == plan.ticket)
     stack = workflow.stacks[ticket.stack]
-    branch = _ticket_branch(workflow, ticket)
+    branch = ticket_branch(workflow, ticket)
     try:
         commit = vcs.commit_of(repo, given)
     except VcsError as error:
@@ -1555,7 +1208,7 @@ def _check_chain_hotspots(
     ticket = next(ticket for ticket in workflow.tickets if ticket.id == plan.ticket)
     since = _step_since(plan.prior)
     with _vcs_errors():
-        tip = coordinator or _tip(vcs, repo, _ticket_branch(workflow, ticket))
+        tip = coordinator or _tip(vcs, repo, ticket_branch(workflow, ticket))
         excluded = {commit for commit, _ in _coordinator_commits(vcs, repo, plan.prior)} | ({coordinator} if coordinator else set())
         matches = hotspot_matches(_paths_without(vcs, repo, since, tip, True, excluded), workflow.stacks[ticket.stack].all_hotspots(config_paths))
     if not matches:
@@ -1668,12 +1321,12 @@ def check_start(
 
     Raise EngineError, which names the input at fault, when a check fails. A run branch in use is reported first: the
     run branch of a run that works exists. A new run needs its base branch, and a run branch and ticket branches that
-    do not exist. A resume needs the journal of the run, and the rules of a plan change (see `_review`), with the later
+    do not exist. A resume needs the journal of the run, and the rules of a plan change (see `review_workflow`), with the later
     tickets in `reviewed`, must accept the workflow. `run_workflow` does these checks before it takes the lock.
     `delegate run --detach` does them before it starts the run process, so a run that cannot start gives its error on
     stderr and exits non-zero, as in the foreground.
 
-    With `detach`, a resume also makes each other check that refuses a resume, a retry or a plan change (see `_resume_checks`):
+    With `detach`, a resume also makes each other check that refuses a resume, a retry or a plan change (see `resume_checks`):
     the run branch, and the retry of `retry` with its `coordinator_commit`. They change nothing: a refusal of the run process
     would be only in its log, and the journal would not show it (#240). The foreground run makes these checks after the lock.
 
@@ -1692,11 +1345,11 @@ def check_start(
         raise EngineError(str(error)) from None
     if resume:
         # One read of the journal serves the review and, with `detach`, the other checks of the resume.
-        events = _resume_events(location.state_directory(run_id), run_id)
-        review = _plan_review(workflow, workflow_path, repo, run_id, vcs, events, reviewed, retry, None, (), stack_changed)
+        events = resume_events(location.state_directory(run_id), run_id)
+        review = plan_review_with_outlook(workflow, workflow_path, repo, run_id, vcs, events, reviewed, retry, None, (), stack_changed)
         _refuse_plan_change(review, workflow_path, run_id)
         if detach:
-            _resume_checks(
+            resume_checks(
                 workflow, workflow_path, plan_order(workflow), vcs, repo, run_id, events, reviewed, retry, coordinator_commit, None,
                 project_config_paths(adapter), stack_changed,
             )
@@ -1746,7 +1399,7 @@ def run_workflow(
     that it printed before it started the run process. A resume uses the id `resume`, and ignores `run_id`.
 
     A resume with a workflow whose tickets differ from the newest plan of the run
-    is a plan change (see `_review` and `domain.check_plan_change`). `reviewed`
+    is a plan change (see `review_workflow` and `domain.check_plan_change`). `reviewed`
     holds the ids of the later tickets that the coordinator reviewed, or
     `all`. Raise EngineError, which names each ticket and field at fault, when
     the rules refuse the change. A plan change also goes on with a run that ended.
@@ -1828,7 +1481,7 @@ def _record_interrupt(state_dir: Path, run_id: str, observers: Sequence[EventObs
     return path
 
 
-def _resume_checks(
+def resume_checks(
     workflow: Workflow, workflow_path: Path, order: list[Ticket], vcs: VersionControl, repo: Path, run_id: str,
     events: list[dict[str, object]], reviewed: tuple[str, ...], retry: str | None, coordinator_commit: str | None,
     journal: Journal | None, config_paths: Sequence[str], stack_changed: bool = False,
@@ -1844,7 +1497,7 @@ def _resume_checks(
     if unresumable is not None:
         raise EngineError(f"run {run_id!r} cannot be resumed: {unresumable.reason}; start a new run")
     with _vcs_errors():
-        review = _review(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry, stack_changed)
+        review = review_workflow(workflow, workflow_path, events, run_id, reviewed, lambda branch: vcs.branch_exists(repo, branch), retry, stack_changed)
     # `check_start` made this review before the lock. It is made again here, because the journal can change before the lock.
     _refuse_plan_change(review, workflow_path, run_id)
     progress = restore_progress(events, run_id, retrying=retry is not None or review.changed)
@@ -1894,14 +1547,14 @@ def _execute(
         journal.append(
             RUN_START, run_id=run_id, workflow=str(workflow_path.resolve()), mode=workflow.mode, adapter=workflow.adapter,
             base_branch=workflow.base_branch, base_commit=run_base, run_branch=workflow.run_branch, tickets=[t.id for t in order],
-            plan=_plan_record(_plan_of(workflow)), schema=SCHEMA_VERSION,
-            agents=sealed, configuration=_configuration_record(workflow), repo=str(repo.resolve()), host=host_name(),
+            plan=plan_record(plan_of(workflow)), schema=SCHEMA_VERSION,
+            agents=sealed, configuration=configuration_record(workflow), repo=str(repo.resolve()), host=host_name(),
         )
         progress = Progress()
         was_skipped: dict[str, str | None] = {}
     else:
         journal, events = _journal_events(state_dir, run_id, observers)
-        review, progress, run_base, plan = _resume_checks(
+        review, progress, run_base, plan = resume_checks(
             workflow, workflow_path, order, vcs, repo, run_id, events, reviewed, retry, coordinator_commit, journal,
             project_config_paths(adapter), stack_changed,
         )
@@ -1919,12 +1572,12 @@ def _execute(
         # The checks passed. So the newest record differs from the workflow only where the check accepts it: a stack that only
         # one of them has, or a field that the record does not hold. Or the journal has no record at all (#289). The resume
         # then records the configuration, so the next resume compares with it.
-        configuration = _configuration_record(workflow)
+        configuration = configuration_record(workflow)
         # `--stack-changed` (#290): the change of each stack is in the journal before the `resume` event, and the record that the resume compares with.
         changes = [{"event": STACK_CHANGE, **change.event_fields()} for change in review.stack_changes]
         for change in review.stack_changes:
             journal.append(STACK_CHANGE, **change.event_fields())
-        configuration_fields = {} if _recorded_configuration([*events, *changes]) == configuration else {"configuration": configuration}
+        configuration_fields = {} if recorded_configuration([*events, *changes]) == configuration else {"configuration": configuration}
         journal.append(
             "resume", run_id=run_id, built=list(progress.built), failed=list(progress.failed),
             skipped=list(progress.skipped), open=progress.open_ticket, **agent_fields, **configuration_fields,
@@ -2087,7 +1740,7 @@ def _clean_up(
     stayed, and why.
     """
     worktrees_dir, hooks_dir = state_dir / "worktrees" / run_id, state_dir / "hooks" / run_id
-    trees = [TicketTree(worktrees_dir / ticket.id, _ticket_branch(workflow, ticket), hooks_dir / ticket.id) for ticket in order]
+    trees = [TicketTree(worktrees_dir / ticket.id, ticket_branch(workflow, ticket), hooks_dir / ticket.id) for ticket in order]
     result = clean_tickets(vcs, repo, trees, workflow.run_branch)
     remove_empty_directories(worktrees_dir, hooks_dir)
     journal.append("cleanup", **result.fields())
@@ -2124,10 +1777,10 @@ def _record_plan_change(journal: Journal, workflow: Workflow, check: domain.Plan
     A removed ticket leaves the run. A failed ticket that a retry starts again with a new text is in `retry_text`, with its old and its new `text_sha256`. A changed ticket that the run skipped is
     no longer skipped: the skip rule applies to it again, with its new blockers.
     """
-    plan = _plan_of(workflow)
+    plan = plan_of(workflow)
     journal.append(
         "plan-change", added=check.added, changed=list(check.changed), fields=check.changed, removed=check.removed,
-        order=[t.id for t in plan], reviewed=check.later, plan=_plan_record(plan),
+        order=[t.id for t in plan], reviewed=check.later, plan=plan_record(plan),
         **({"retry_text": {t: {"old": old, "new": new} for t, (old, new) in check.restarted.items()}} if check.restarted else {}),
     )
     _apply_plan_change(check, progress)
@@ -2210,7 +1863,7 @@ def _start_ref(
         if domain.starts_from_run_branch(workflow.mode, workflow.ticket_start, ticket.blocked_by):
             return workflow.run_branch
         return run_base
-    branch = _ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
+    branch = ticket_branch(workflow, next(ticket for ticket in order if ticket.id == predecessor))
     with _vcs_errors():
         return branch if vcs.branch_exists(repo, branch) else workflow.run_branch
 
@@ -2685,7 +2338,7 @@ def _build_ticket(
     """
     tier, model = _specialist_model(roles, workflow, ticket)
     stack = workflow.stacks[ticket.stack]
-    branch = _ticket_branch(workflow, ticket)
+    branch = ticket_branch(workflow, ticket)
     worktree = state_dir / "worktrees" / run_id / ticket.id
     hooks_dir = state_dir / "hooks" / run_id / ticket.id
     report_path = state_dir / "runs" / run_id / "reports" / f"{ticket.id}.specialist.json"
@@ -3056,7 +2709,7 @@ class _Step:
 
     @property
     def branch(self) -> str:
-        return _ticket_branch(self.workflow, self.anchor or self.ticket)
+        return ticket_branch(self.workflow, self.anchor or self.ticket)
 
     @property
     def worktree(self) -> Path:
@@ -3822,8 +3475,8 @@ class _ChainRun:
             # The clean-up of a run that ended `built` deletes only a ticket branch that the run branch holds (see `_clean_up`).
             self.chain = [
                 ticket for ticket in self.chain
-                if self.vcs.branch_exists(self.repo, _ticket_branch(self.workflow, ticket))
-                and not _holds(self.vcs, self.repo, f"refs/heads/{_ticket_branch(self.workflow, ticket)}", run_branch)
+                if self.vcs.branch_exists(self.repo, ticket_branch(self.workflow, ticket))
+                and not _holds(self.vcs, self.repo, f"refs/heads/{ticket_branch(self.workflow, ticket)}", run_branch)
             ]
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket
@@ -3857,7 +3510,7 @@ class _ChainRun:
         for ticket in self.chain:
             own = step_scans.events_of(events, ticket.id)
             base = str(own[step_scans.step_start_place(own)]["base_commit"])  # type: ignore[index]
-            tip = _tip(self.vcs, self.repo, _ticket_branch(self.workflow, ticket))
+            tip = _tip(self.vcs, self.repo, ticket_branch(self.workflow, ticket))
             if fixups and ticket is self.chain[-1]:
                 tip = str(fixups[0]["rejected_commit"])
             segments[ticket.id] = ChainSegment(ticket.id, ticket.text, base, tip)

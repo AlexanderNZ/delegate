@@ -7,7 +7,8 @@ functions are:
 * `events_of`, `step_events` and `step_start_place`: the events of a ticket, and those of its newest step;
 * `unanswered_stop`: the newest `agents-changed` that no `agent-start` follows (the stop of the agent check, #205);
 * `verify_commit_before`, `accepted_verdict` and `accepted_commits`: the commit of the `verify-start` before a verdict;
-* `advance_place` and `events_after_advance`: the place of the newest `run-branch-advance`, and the events after it.
+* `advance_place` and `events_after_advance`: the place of the newest `run-branch-advance`, and the events after it;
+* `chain_failed`: a step that the verification of an `economy` chain failed (#270, #338).
 
 A place is the index of an event in the list that the function got. A caller that slices the list gets a place in the slice.
 """
@@ -22,6 +23,9 @@ Event = dict[str, object]
 # The verdict that lets a branch through. The domain module holds the same value (`domain.ACCEPT`): a pure module imports no other
 # module, and a test checks that the two are equal.
 ACCEPT: str = "ACCEPT"
+
+# The state of a `step-end` of a built step. The run state holds the same value (`run_state.BUILT`).
+BUILT: str = "built"
 
 
 def events_of(events: Sequence[Event], ticket: str) -> list[Event]:
@@ -121,3 +125,8 @@ def advance_place(events: Sequence[Event]) -> int:
 def events_after_advance(events: Sequence[Event]) -> list[Event]:
     """The events after the newest `run-branch-advance`, or all the events when there is none."""
     return list(events[advance_place(events) + 1 :])
+
+
+def chain_failed(prior: Sequence[Event]) -> bool:
+    """True when the verification of the chain failed the step: the step has a `step-end` built before its newest `step-end`."""
+    return any(e["event"] == "step-end" and e["state"] == BUILT for e in prior)
