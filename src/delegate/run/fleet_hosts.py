@@ -48,9 +48,8 @@ def _remote(record: RunRecord, now: datetime) -> RunRow | None:
     The run is unreachable: its values are the last known. A run whose state is the result of a `run-end` ended when the record was written
     (`heard`), and it is not listed when that time is out of the window. A record with a time that cannot be read is not listed.
     """
-    try:
-        started, heard = datetime.fromisoformat(record.started), datetime.fromisoformat(record.heard)
-    except ValueError:
+    started, heard = record.started_time(), record.heard_time()
+    if started is None or heard is None:
         return None
     ended = record.state not in OPEN_STATES
     if ended and not in_window(heard, now):
@@ -239,13 +238,7 @@ def _last_known(name: str, records: Sequence[RunRecord], hosts: HostReads | None
     Each run is unreachable: dim, with no ETA, no tokens, no trend, no alert and no command. A run that ended before the window is not listed.
     """
     own = [record for record in records if record.host == name]
-    heard_times = []
-    for record in own:
-        try:
-            heard_times.append(datetime.fromisoformat(record.heard))
-        except ValueError:
-            continue
-    recorded = max(heard_times, default=None)
+    recorded = max((heard for heard in (record.heard_time() for record in own) if heard is not None), default=None)
     last = None if hosts is None else hosts.last(name)
     if last is not None and (recorded is None or last[0] >= recorded):
         heard, document = last

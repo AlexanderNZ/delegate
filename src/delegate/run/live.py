@@ -41,7 +41,7 @@ from pathlib import Path
 from . import domain, output, run_state, status, status_model, status_picker, status_table
 from .clock import Clock, utc_now
 from .events import JOURNAL_CHANGED
-from .journal import JournalError, crash_where
+from .journal import JournalError, crash_where, event_time
 
 # The text between two parts of a line of the feed.
 SEPARATOR: str = " · "
@@ -373,7 +373,7 @@ class LiveView:
 
     def _read(self, event: dict[str, object], problem: str | None) -> None:
         """Read one event: add the lines that it ends to the feed, and keep the line that waits for the next event."""
-        kind, when = str(event["event"]), datetime.fromisoformat(str(event["time"]))
+        kind, when = str(event["event"]), event_time(event)
         ticket = str(event.get("ticket", ""))
         subject = f"#{ticket}" if "ticket" in event else ""
         self._group(kind, event)
@@ -498,7 +498,7 @@ class LiveView:
         for ticket in list(self._waiting):
             if ticket != newest:
                 self._flush(ticket)
-        start = datetime.fromisoformat(str(self._events[0]["time"])) if self._events and self._events[0]["event"] == "run-start" else when
+        start = event_time(self._events[0]) if self._events and self._events[0]["event"] == "run-start" else when
         result = str(event["result"])
         spans: list[Span] = [("ok bold" if result == status_model.BUILT else "bad", f"run {result}"), JOIN, ("", duration((when - start).total_seconds()))]
         if event.get("reason"):

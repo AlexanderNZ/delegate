@@ -38,7 +38,7 @@ from pathlib import Path
 from ..ports.harness import Activity
 from ..ports.vcs import VersionControl
 from . import domain, output, run_state
-from .journal import ABANDONED, JournalError, abandon_note, crash_note, plan_ids, read_new_events, setup_problem_note
+from .journal import ABANDONED, JournalError, abandon_note, crash_note, event_time, plan_ids, read_new_events, setup_problem_note
 from .pause import pause_requested
 from .runs import RunsError, has_live_process, journal_of
 from .state_location import StateLocation
@@ -79,10 +79,6 @@ _PHASE_OF_CHAIN_EVENT: dict[str, str] = {
 _AGENT_RESULTS: frozenset[str] = frozenset({"adapter-result", "fixup-result", "verify-result"})
 
 
-def time_of(event: dict[str, object]) -> datetime:
-    return datetime.fromisoformat(str(event["time"]))
-
-
 def seconds_between(start: datetime, end: datetime) -> int:
     return max(0, int((end - start).total_seconds()))
 
@@ -119,9 +115,9 @@ def _ticket(
         if kind in ("step-start", "retry"):
             trace, fixup_round, continuation = None, 0, None
         if kind == "step-start":
-            started = started or time_of(event)
+            started = started or event_time(event)
         elif kind == "step-end":
-            ended, live, gate = ended or time_of(event), None, None
+            ended, live, gate = ended or event_time(event), None, None
             trace = None if event.get("traceback") is None else str(event["traceback"])
         elif kind == "retry":
             ended = None
@@ -181,7 +177,7 @@ def _agent_counts(
         if tokens is not None:
             tokens = (tokens[0] + found.tokens_new, tokens[1] + found.tokens_cache)
         if is_live:
-            idle = seconds_between(found.last_event or time_of(live), now)  # type: ignore[arg-type, union-attr]
+            idle = seconds_between(found.last_event or event_time(live), now)  # type: ignore[arg-type, union-attr]
     return (*tokens, idle) if tokens is not None else (None, None, idle)
 
 
@@ -272,7 +268,7 @@ def _chain(events: list[dict[str, object]], now: datetime) -> tuple[str | None, 
     for event in events:
         found = _chain_phase_of(event)
         if found is not None:
-            phase, started = found, started or time_of(event)
+            phase, started = found, started or event_time(event)
     return phase, seconds_between(started, now) if started else 0
 
 
@@ -336,7 +332,7 @@ def _chain_of(
         kind = str(event["event"])
         found = _chain_phase_of(event)
         if found is not None:
-            phase, started, verdict = found, started or time_of(event), None  # a phase after a verdict: the chain goes on
+            phase, started, verdict = found, started or event_time(event), None  # a phase after a verdict: the chain goes on
         if kind == "agent-start":
             live = event
         elif kind in _AGENT_RESULTS:
@@ -363,10 +359,10 @@ def _chain_of(
     accepted = verdict is not None and domain.is_accepted(str(verdict[1]["verdict"]))
     refused = verdict is not None and not accepted and any(position > verdict[0] for position in failures)
     if accepted:
-        state, ended = ACCEPTED, time_of(verdict[1])  # type: ignore[index]
+        state, ended = ACCEPTED, event_time(verdict[1])  # type: ignore[index]
     elif failed is not None or refused or run_ended:
         state = REJECTED
-        ended = time_of(failed if failed is not None else verdict[1] if verdict is not None else last_event)
+        ended = event_time(failed if failed is not None else verdict[1] if verdict is not None else last_event)
     else:
         state, ended = RUNNING, None
     running = state == RUNNING
@@ -513,9 +509,9 @@ def snapshot_at(
     at_stop = folded.status.kind in _CLOCK_STOPS
     live = at_stop or (folded.status.kind == run_state.ACTIVE and live_process)
     if at_stop:
-        now = time_of(stop)  # the clock of a run that ended, paused or halted stops at that event
+        now = event_time(stop)  # the clock of a run that ended, paused or halted stops at that event
     elif not live:
-        now = time_of(events[-1])  # and the clock of a stopped run at its newest event
+        now = event_time(events[-1])  # and the clock of a stopped run at its newest event
     now = now.replace(microsecond=0)
     # No agent and no gate works in a run that ended, paused, halted or stopped.
     stopped = at_stop or not live
@@ -545,7 +541,7 @@ def snapshot_at(
     state, note = _state(folded.status, live, pause_request, journal.parent.name, folded.unresumable)
     return Snapshot(
         run_id=str(start["run_id"]), state=state, time=now,
-        elapsed_seconds=seconds_between(time_of(start), now), tickets_total=len(tickets), tickets_ended=ended,
+        elapsed_seconds=seconds_between(event_time(start), now), tickets_total=len(tickets), tickets_ended=ended,
         percent=domain.percent_complete(units_ended, [t.phase for t in running if t.phase] + ([chain_phase] if chain_phase else []), units),
         eta=None if to_end is None or (to_end == 0 and unit_runs) or not live or (at_stop and not run_ended) else now + timedelta(seconds=to_end),
         tokens_new=None if activity is None else sum(t.tokens_new or 0 for t in tickets),

@@ -14,8 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import output
-from .journal import activity_files, last_change, plan_ids, read_new_events
-from .status import liveness, newest_blockers, seconds_between, snapshot_of, time_of
+from .journal import activity_files, event_time, last_change, plan_ids, read_new_events
+from .status import liveness, newest_blockers, seconds_between, snapshot_of
 from .status_model import RUNNING, Snapshot
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ def active_runs(journals: Sequence[Path], now: datetime) -> list[ActiveRun]:
         # The picker needs no tokens, so the snapshot reads no event stream.
         snap = snapshot_of(events, journal, lambda adapter: None, now)
         changed = datetime.fromtimestamp(last_change(journal, activity_files(events)), now.tzinfo)
-        found.append(ActiveRun(journal, snap, str(events[0]["run_branch"]), time_of(events[0]), seconds_between(changed, now)))
+        found.append(ActiveRun(journal, snap, str(events[0]["run_branch"]), event_time(events[0]), seconds_between(changed, now)))
     return sorted(found, key=lambda run: run.started, reverse=True)
 
 

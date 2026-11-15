@@ -53,6 +53,9 @@ TROUBLE_STATES: frozenset[str] = frozenset({"stopped", "halted"})
 # The states of a run that has an agent at work: only such a run can have an alert (#309).
 WORKING_STATES: frozenset[str] = frozenset({"running", "pausing"})
 
+# The states of a run that has no `run-end` and gets the word `resume` in the column `do`.
+RESUME_STATES: frozenset[str] = frozenset({"paused", "stopped", "halted"})
+
 # The kinds of an alert, and the words of the column `do` (copy deck W8.do.*).
 IDLE: str = "idle"
 FIXUP: str = "fix-up"
@@ -216,7 +219,7 @@ def next_command(run: RunFacts, alerted: bool) -> str | None:
         return WATCH
     if run.failed_start:
         return None
-    if run.state in ("paused", "stopped", "halted") and not run.ended:
+    if run.state in RESUME_STATES and not run.ended:
         return RESUME
     if run.state == "failed":
         return RETRY
@@ -235,18 +238,6 @@ def slip_seconds(eta: datetime | None, eta_then: datetime | None, started: datet
         return None
     slip = int((eta - eta_then).total_seconds())
     return slip if slip >= SLIP_LIMIT_SECONDS else None
-
-
-def built_times(events: Sequence[dict[str, object]]) -> list[datetime]:
-    """The time of each ticket that ended built (#310): the time of its first `step-end` with the state `built`.
-
-    A ticket counts once. A ticket that a `retry` revived has a later `step-end` built, and that one is not counted.
-    """
-    first: dict[object, datetime] = {}
-    for event in events:
-        if event.get("event") == "step-end" and event.get("state") == "built" and event.get("ticket") not in first:
-            first[event.get("ticket")] = datetime.fromisoformat(str(event["time"]))
-    return list(first.values())
 
 
 def trend_cells(times: Sequence[datetime], now: datetime) -> tuple[int, ...]:

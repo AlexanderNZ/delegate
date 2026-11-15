@@ -9,6 +9,7 @@ backend in `delegate.adapters` implements the interface, and the command-line dr
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 
@@ -34,6 +35,21 @@ class RunRecord:
     tickets_total: int
     eta: str | None
     heard: str
+
+    def started_time(self) -> datetime | None:
+        """The time of `started`, or None when the text is not an ISO 8601 time. A caller decides what a record with no time means."""
+        return _time_or_none(self.started)
+
+    def heard_time(self) -> datetime | None:
+        """The time of `heard`, or None when the text is not an ISO 8601 time. A caller decides what a record with no time means."""
+        return _time_or_none(self.heard)
+
+
+def _time_or_none(text: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 @runtime_checkable

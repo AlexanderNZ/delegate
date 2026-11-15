@@ -24,7 +24,7 @@ from typing import Protocol
 from . import output, run_state
 from .clock import Clock
 from .journal import (
-    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, last_change, read_new_events, setup_problem_note,
+    ACTIVITY_FIELDS, JournalError, before_after_end, crash_note, event_time, last_change, read_new_events, setup_problem_note,
 )
 
 # A part of a line and its paint role (`output.styled`). The empty role is the colour of the theme.
@@ -201,7 +201,7 @@ def ended_run(journal: Path) -> EndedRun | None:
         if problem is None and reason is not None and event["seq"] not in superseded:
             problem = f"ticket {event.get('ticket')}: {reason}"
     reason = str(end["reason"]) if end.get("reason") else None
-    return EndedRun(journal.parent.name, str(end["result"]), datetime.fromisoformat(str(end["time"])), problem, reason)
+    return EndedRun(journal.parent.name, str(end["result"]), event_time(end), problem, reason)
 
 
 @dataclass(frozen=True)
@@ -272,7 +272,7 @@ def newest_run(journal: Path) -> EndedRun | StoppedRun:
     found = run_state.fold(events).status
     halt, crash, setup = (found.event if found.kind == kind else None for kind in (run_state.HALTED, run_state.CRASHED, run_state.SETUP_PROBLEM))
     return StoppedRun(
-        journal.parent.name, datetime.fromisoformat(str(events[-1]["time"])), found.kind == run_state.PAUSED,
+        journal.parent.name, event_time(events[-1]), found.kind == run_state.PAUSED,
         None if halt is None else str(halt["message"]), None if crash is None else crash_note(dict(crash), journal.parent.name),
         None if setup is None else setup_problem_note(dict(setup), journal.parent.name),
     )

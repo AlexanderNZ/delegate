@@ -35,7 +35,7 @@ class RunRow:
     when no agent runs. `fixup` is the round and the limit of a fix-up round that runs now, or None. `trend` is the
     tickets that ended built in each hour of the window, oldest first (`fleet_rules.trend_cells`); `to_json` has it. `slip_seconds` is
     the slip of the ETA, or None when it does not show (`fleet_rules.slip_seconds`, #311); `to_json` has it too. `built` is the time of
-    each ticket that ended built (`fleet_rules.built_times`) and `last_event` is the time of the newest event of the journal, for the lane of the
+    each ticket that ended built (`fleet.built_times`) and `last_event` is the time of the newest event of the journal, for the lane of the
     timeline (#314); `to_json` leaves them out.
 
     `unreachable` is True for a run of another host, from its record in the run index (#317): its values are the last known, and `heard` is the time

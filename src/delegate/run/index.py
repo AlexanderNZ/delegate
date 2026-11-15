@@ -104,11 +104,8 @@ def _is_older(record: RunRecord, made: RunRecord, last_event: datetime) -> bool:
 
     The ETA and the time of the write are not compared: they change with the clock (#326).
     """
-    try:
-        heard = datetime.fromisoformat(record.heard)
-    except ValueError:
-        return True
-    if heard < last_event:
+    heard = record.heard_time()
+    if heard is None or heard < last_event:
         return True
     return replace(record, eta=None, heard="") != replace(made, eta=None, heard="")
 

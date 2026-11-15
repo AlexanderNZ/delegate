@@ -20,6 +20,7 @@ The run index is always on (#323). With an index, `fleet_of` writes the record o
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +35,18 @@ from .runs import RunsError, all_journals, failed_starts, machine_states
 from .state_location import repository_name
 from .status import snapshot_at, snapshot_of
 from .status_model import FAILED, PAUSING, RUNNING, ReaderOf
+
+
+def built_times(events: Sequence[dict[str, object]]) -> list[datetime]:
+    """The time of each ticket that ended built (#310): the time of its first `step-end` with the state `built`.
+
+    A ticket counts once. A ticket that a `retry` revived has a later `step-end` built, and that one is not counted.
+    """
+    first: dict[object, datetime] = {}
+    for event in events:
+        if event.get("event") == "step-end" and event.get("state") == "built" and event.get("ticket") not in first:
+            first[event.get("ticket")] = event_time(event)
+    return list(first.values())
 
 
 def _eta_then(events: list[dict[str, object]], journal: Path, now: datetime) -> datetime | None:
@@ -87,7 +100,7 @@ def fleet_of(
             except (JournalError, RunsError) as error:
                 unreadable.append((journal, str(error)))
                 continue
-            built_times = fleet_rules.built_times(events)
+            built_at = built_times(events)
             idle = [ticket.idle_seconds for ticket in snap.tickets if ticket.idle_seconds is not None]
             rounds = [t.fixup_round for t in snap.tickets if t.phase == domain.PHASE_FIXUP] + [
                 c.fixup_round for c in snap.chains if c.phase == domain.PHASE_FIXUP
@@ -97,7 +110,7 @@ def fleet_of(
                 snap.run_id, repo, host, snap.state, event_time(events[0]), None if end is None else event_time(end), snap.tickets_ended,
                 snap.tickets_total, eta, snap.tokens_new, snap.tokens_cache,
                 idle_seconds=max(idle) if idle else None, fixup=fixup,
-                trend=fleet_rules.trend_cells(built_times, now), slip_seconds=slip, built=tuple(built_times), last_event=event_time(events[-1]),
+                trend=fleet_rules.trend_cells(built_at, now), slip_seconds=slip, built=tuple(built_at), last_event=event_time(events[-1]),
             ))
         try:
             starts = failed_starts([state])

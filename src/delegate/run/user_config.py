@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .host import HOST_VARIABLE
+from .host import HOST_VARIABLE, short_host_name
 
 CONFIG_HOME_VARIABLE: str = "XDG_CONFIG_HOME"
 
@@ -66,8 +66,7 @@ def config_path(environment: Mapping[str, str]) -> Path:
 
 def machine_names(environment: Mapping[str, str]) -> frozenset[str]:
     """The names of this machine, in lower case: `localhost`, the host name, the short host name, and `DELEGATE_HOST` when it is set."""
-    full = socket.gethostname()
-    names = {"localhost", full, full.split(".", 1)[0], environment.get(HOST_VARIABLE, "")}
+    names = {"localhost", socket.gethostname(), short_host_name(), environment.get(HOST_VARIABLE, "")}
     return frozenset(name.lower() for name in names if name)
 
 

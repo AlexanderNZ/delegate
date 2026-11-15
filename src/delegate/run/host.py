@@ -9,6 +9,11 @@ import socket
 HOST_VARIABLE = "DELEGATE_HOST"
 
 
+def short_host_name() -> str:
+    """The short host name of this machine: the host name of the operating system up to its first `.`."""
+    return socket.gethostname().split(".", 1)[0]
+
+
 def host_name() -> str:
     """The name of this machine: `DELEGATE_HOST` when it is set and not empty, else the short host name.
 
@@ -17,4 +22,4 @@ def host_name() -> str:
     named = os.environ.get(HOST_VARIABLE)
     if named:
         return named
-    return socket.gethostname().split(".", 1)[0]
+    return short_host_name()
