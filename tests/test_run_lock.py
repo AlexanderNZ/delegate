@@ -23,10 +23,9 @@ from .support import HEAD, state_dir, ticket
 from .support import (
     event_names, finished_run, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
-from .test_run_crash import CRASH, raise_in_b
+from .support_run import CRASH, raise_in_b
 
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
-
 
 
 def nested_run(repo, *extra):

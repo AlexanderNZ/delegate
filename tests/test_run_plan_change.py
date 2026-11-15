@@ -18,10 +18,8 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import HEAD, state_dir, ticket
-from .support import event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report
-from .test_run_economy import ECONOMY
-from .test_run_pause import ECONOMY_HEAD, RUN_PAUSED, pause_during_the_specialist_of
+from .support import HEAD, state_dir, ticket, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report
+from .support_run import ECONOMY, ECONOMY_HEAD, RUN_PAUSED, pause_during_the_specialist_of
 
 
 def text_of(ticket_id: str) -> str:

@@ -14,7 +14,7 @@ import pytest
 from delegate.cli import delegate
 
 from ..support import HEAD, make_repo, read_journal, run_main, state_dir, ticket, ticket_of
-from ..test_run_setup_check import write_agents
+from ..support_run import write_agents
 
 GATE = "test -f feature.txt"
 REASON = "the guard has no rule for this command"

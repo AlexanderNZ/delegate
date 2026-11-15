@@ -16,19 +16,12 @@ import pytest
 from delegate.cli import delegate
 
 from .support import event_names, make_repo, read_journal, resume_main, run_main
+from .support_run import write_agents
 
 pytestmark = [pytest.mark.usefixtures("git_identity", "home"), pytest.mark.scripted_adapter(checks_setup=True)]
 
 GATE = "test -f feature.txt"
 REASON = "the guard has no rule for this command"
-
-
-def write_agents(repo: Path) -> None:
-    directory = repo / ".claude" / "agents"
-    directory.mkdir(parents=True, exist_ok=True)
-    for name in ("python-specialist", "python-verifier"):
-        (directory / f"{name}.md").write_text(f"---\nname: {name}\n---\nThe rules of {name}.\n")
-    (repo / ".git" / "info" / "exclude").write_text(".claude/\n")
 
 
 def start(repo: Path, capsys) -> tuple[int, str, str, list[dict[str, object]]]:

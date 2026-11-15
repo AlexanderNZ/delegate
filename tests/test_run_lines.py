@@ -27,7 +27,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import HEAD, Terminal, make_repo, read_journal, resume_main, run_main, state_dir, ticket, ticket_of
-from .test_run_pause import RUN_PAUSED
+from .support_run import RUN_PAUSED
 
 # An SGR sequence: the paint of a role.
 SGR = re.compile(r"\x1b\[[0-9;]*m")

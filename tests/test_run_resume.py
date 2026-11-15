@@ -20,6 +20,7 @@ from .support import HEAD, state_dir, ticket
 from .support import (
     event_names, finished_run, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
+from .support_run import cut_journal_after
 
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
 
@@ -28,22 +29,6 @@ def took_over_only(err: str, run_id: str) -> bool:
     """True when stderr holds only the note of a resume that took over the lock that the killed process of `run_id` left."""
     note = rf"delegate run: took over the lock of run/demo from run {run_id}, process \d+, which holds the lock no longer\n"
     return re.fullmatch(note, err) is not None
-
-
-def cut_journal_after(repo, run_id, event, ticket_id=None, nth=1):
-    """Keep the journal up to the nth matching event. This is the file that a kill right after the event leaves."""
-    path = journal_path(repo, run_id)
-    kept, seen = [], 0
-    for line in path.read_text().splitlines(keepends=True):
-        kept.append(line)
-        parsed = json.loads(line)
-        if parsed["event"] == event and (ticket_id is None or parsed.get("ticket") == ticket_id):
-            seen += 1
-            if seen == nth:
-                break
-    else:
-        raise AssertionError(f"fewer than {nth} {event} events")
-    path.write_text("".join(kept))
 
 
 def test_a_stopped_run_builds_the_remaining_tickets_on_resume_and_an_accepted_ticket_gets_no_new_adapter_invocation(tmp_path, capsys, scripted):
@@ -231,8 +216,6 @@ def test_a_resume_can_name_the_workflow_file_on_the_command_line(tmp_path, capsy
 
     assert code == 0 and took_over_only(err, run_id)
     assert [ticket_of(c) for c in scripted.calls] == ["b", "c"]
-
-
 
 
 def usage_error(*argv):

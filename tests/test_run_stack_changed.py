@@ -14,7 +14,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import journal_path, make_repo, read_journal_file, resume_main, run_main, ticket, ticket_of
-from .test_run_configuration_record import RUN_PAUSED, WORKFLOW, change_workflow, paused_run
+from .support_run_configuration import RUN_PAUSED, WORKFLOW, change_workflow, paused_run
 
 GATES = ('gates = ["ls *.txt"]', 'gates = ["true"]')
 THREE = WORKFLOW + ticket("c", ("b",))

@@ -10,10 +10,9 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import without_take_over
-from .support import WORKFLOW, event_names, git, make_repo, read_journal
+from .support import without_take_over, WORKFLOW, event_names, git, make_repo, read_journal
+from .support_run import ECONOMY
 
-ECONOMY = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')
 
 THREE_TICKETS = ECONOMY + '''
 [[tickets]]

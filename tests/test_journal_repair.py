@@ -14,7 +14,7 @@ from delegate.cli import delegate
 from delegate.run.journal import Journal, read_events
 
 from .support import HEAD, ticket, without_take_over
-from .test_run_resume import cut_journal_after
+from .support_run import cut_journal_after
 from .support import (
     bare_repo, finished_run, journal_path, make_repo, read_journal_file, resume_main, run_end, run_start, step_start, write_journal,
 )

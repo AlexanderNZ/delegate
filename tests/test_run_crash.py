@@ -14,10 +14,8 @@ from delegate.cli import delegate, run_command
 from delegate.ports.vcs import VcsError
 
 from .support import HEAD, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of, tree
-from .test_run_economy import ECONOMY
+from .support_run import ECONOMY, CRASH, raise_in_b
 
-
-CRASH = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
 
 # The exit status of `delegate run` after a halt, which a crash now shares, and the exit code of `delegate watch` for it.
 EXIT_HALTED = 4
@@ -84,11 +82,6 @@ def test_a_failure_of_git_after_the_specialist_session_leaves_the_step_open_and_
     assert [(e["ticket"], e["state"]) for e in resumed if e["event"] == "step-end"] == [("a", "built")]
     assert resumed[-1]["event"] == "run-end" and resumed[-1]["result"] == "built"
     assert "a.txt" in tree(repo, "run/demo")
-
-
-def raise_in_b(request):
-    if ticket_of(request) == "b":
-        raise RuntimeError("harness binary missing")
 
 
 def break_run_branch(request):

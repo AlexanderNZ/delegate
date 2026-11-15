@@ -22,8 +22,7 @@ from pathlib import Path
 import pytest
 
 from ..support import HEAD, make_repo, read_journal_file, resume_main, run_main, ticket, ticket_of
-from ..test_run_pause import pause, run_id_of
-from ..test_run_retry import as_an_earlier_version_ended_the_crash, end_with_no_verdict, first_run, healthy
+from ..support_run import pause, run_id_of, as_an_earlier_version_ended_the_crash, end_with_no_verdict, first_run, healthy
 
 pytestmark = pytest.mark.usefixtures("home")
 

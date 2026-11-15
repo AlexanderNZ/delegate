@@ -22,11 +22,9 @@ import pytest
 from delegate.cli import delegate
 
 from .support import HEAD, bare_repo, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, tree, write_journal
+from .support_run import ECONOMY_HEAD, RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of, status_json, status_lines
 
-ECONOMY_HEAD = HEAD.replace('mode = "assure"', 'mode = "economy"')
 
-# The exit code of `delegate run` for a run that paused, and of `delegate watch` at a `paused` event.
-RUN_PAUSED = 3
 WATCH_PAUSED = 7
 
 # A gate command that asks for a pause of its own run while it runs, as a second shell does. The worktree of a ticket
@@ -43,48 +41,8 @@ sys.exit(main(["pause", Path.cwd().parent.name, "--repo", str(Path.cwd())]))
 pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
 
 
-def run_id_of(repo) -> str:
-    (run_dir,) = (state_dir(repo) / "runs").iterdir()
-    return run_dir.name
-
-
 def start(repo, capsys) -> tuple[int, str, str]:
     return run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-
-
-def pause(repo, capsys, run_id: str) -> tuple[int, str, str]:
-    code = delegate.main(["pause", run_id, "--repo", str(repo)])
-    captured = capsys.readouterr()
-    return code, captured.out, captured.err
-
-
-def status_lines(repo, capsys, run_id: str) -> list[str]:
-    assert delegate.main(["status", run_id, "--repo", str(repo)]) == 0
-    return capsys.readouterr().out.splitlines()
-
-
-def status_json(repo, capsys, run_id: str) -> dict:
-    assert delegate.main(["status", run_id, "--repo", str(repo), "--json"]) == 0
-    return json.loads(capsys.readouterr().out)
-
-
-def pause_during_the_specialist_of(repo, capsys, scripted, ticket_id: str, seen: list | None = None) -> None:
-    """Ask for a pause from a second command while the specialist of `ticket_id` works.
-
-    `seen` gets the first line of `delegate status` and the state of `delegate status --json` after the request.
-    """
-
-    def request(request):
-        if ticket_of(request) != ticket_id:
-            return
-        code, out, err = pause(repo, capsys, run_id_of(repo))
-        assert (code, err) == (0, ""), err
-        assert "pause" in out
-        if seen is not None:
-            seen.append(status_lines(repo, capsys, run_id_of(repo))[0])
-            seen.append(status_json(repo, capsys, run_id_of(repo))["state"])
-
-    scripted.on_specialist = request
 
 
 def clear_calls(scripted) -> None:

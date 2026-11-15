@@ -30,7 +30,7 @@ from delegate.cli import brief
 from ..support import (
     WORKFLOW, ScriptedAdapter, commit_head, committed_repo, git, make_repo, resume_main, run_main, state_dir, ticket_of, valid_report,
 )
-from ..test_run_uncommitted import ForgetfulAdapter
+from ..support_run import ForgetfulAdapter
 
 GOLDEN = Path(__file__).parent / "golden_briefs"
 BRIEF_MODULE = Path(delegate.__file__).parent / "run" / "brief.py"

@@ -19,7 +19,7 @@ from delegate.run.workflow import WorkflowError, load_workflow
 from delegate.shared.tiers import load_tiers
 
 from .support import WORKFLOW, ScriptedAdapter, bare_repo, frames, make_repo, read_journal_file, write_project_agents
-from .test_run_gate_port import SpyGates
+from .support_run import SpyGates
 from .support_watch_live import PYTEST, Run, watch  # noqa: F401 - local_zone is a fixture, used by name
 
 # The commands of each case use the fake clock of the case (#297): the helpers of `test_watch_live` set it.

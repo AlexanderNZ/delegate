@@ -18,9 +18,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import HEAD, bare_repo, event_names, git, journal_path, live_lock, make_repo, read_journal_file, resume_main, run_end, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, write_journal
-from .test_run_pause import ECONOMY_HEAD, pause_during_the_specialist_of, run_id_of
-
-REASON = "the owner cancelled the work"
+from .support_run import run_id_of, REASON, a_paused_run, branches, worktrees
 
 
 pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})
@@ -35,27 +33,6 @@ def main(capsys, *argv: str) -> tuple[int, str, str]:
 def abandon(repo: Path, capsys, run_id: str, *extra: str, reason: str | None = REASON) -> tuple[int, str, str]:
     args = ["clean", "--abandon", run_id, *(["--reason", reason] if reason is not None else []), *extra, "--repo", str(repo)]
     return main(capsys, *args)
-
-
-def branches(repo: Path) -> set[str]:
-    return set(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split())
-
-
-def worktrees(repo: Path) -> set[Path]:
-    lines = git(repo, "worktree", "list", "--porcelain").splitlines()
-    return {Path(line.removeprefix("worktree ")).resolve() for line in lines if line.startswith("worktree ")}
-
-
-def a_paused_run(tmp_path, capsys, scripted) -> tuple[Path, str]:
-    """A run of tickets a and b that paused before b. Ticket a is built, so its worktree, branch and hooks are on the disk."""
-    repo = make_repo(tmp_path, ECONOMY_HEAD + ticket("a") + ticket("b"))
-    pause_during_the_specialist_of(repo, capsys, scripted, "a")
-    code, _, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    assert code == 3, err
-    run_id = run_id_of(repo)
-    hooks = state_dir(repo) / "hooks" / run_id
-    assert hooks.is_dir() and branches(repo) >= {"run/demo", "run/demo-a"} and len(worktrees(repo)) == 2
-    return repo, run_id
 
 
 def test_abandon_of_a_paused_run_records_the_reason_removes_what_the_run_left_and_keeps_the_run_branch(tmp_path, capsys, scripted):

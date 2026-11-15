@@ -25,58 +25,9 @@ from .support import (
     append_events, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, status_row,
     ticket_of, tree, valid_report,
 )
-from .test_run_pause import RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of, status_json, status_lines
+from .support_run import RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of, status_json, status_lines, SCOPED, as_an_earlier_version_ended_the_crash, end_with_no_verdict, first_run, healthy
 
 FINDING = "FINDING-5120 a.txt holds no header row"
-SCOPED = "## Findings under verification"
-
-
-def first_run(repo, capsys):
-    """Run `workflow.toml` of `repo` to its end. Return the exit code and the run id."""
-    code, out, err = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    return code, next(e for e in read_journal(out) if e["event"] == "run-start")["run_id"]
-
-
-def as_an_earlier_version_ended_the_crash(repo, run_id, unreached):
-    """Make the journal of a run that crashed what the engine of 1.19.2 and before wrote: no `crashed`, but a `step-end`
-    `failed`, a `skip` for each ticket in `unreached`, and a `run-end` `failed`. A crash now leaves the step open (#281).
-    Git holds the same state after both versions, so only the end of the journal differs.
-    """
-    path = journal_path(repo, run_id)
-    events = read_journal_file(repo, run_id)
-    crashed = events.pop()
-    assert crashed["event"] == "crashed"
-    path.write_text("".join(json.dumps(event) + "\n" for event in events))
-    ticket_id = crashed["ticket"]
-    built = [e["ticket"] for e in events if e["event"] == "step-end" and e["state"] == "built"]
-    reason = f"the run ended after ticket {ticket_id} crashed"
-    append_events(
-        path,
-        ("step-end", {"ticket": ticket_id, "state": "failed", "reason": f"crashed: {crashed['error']}: {crashed['message']}"}),
-        *[("skip", {"ticket": t, "blockers": [], "reason": reason}) for t in unreached],
-        ("run-end", {"result": "failed", "built": built, "failed": [ticket_id], "skipped": list(unreached)}),
-    )
-
-
-def end_with_no_verdict(scripted, scoped_only):
-    """The harness ends a verifier at its time limit: exit status -9, and no report. `scoped_only` limits it to the fix-up verifier."""
-
-    def time_limit(request):
-        killed = request.prompt.startswith(SCOPED) or not scoped_only
-        scripted.write_verifier_report = not killed
-        scripted.verifier_end_state, scripted.verifier_exit_status = ("failed", -9) if killed else ("finished", 0)
-
-    scripted.during_verifier = time_limit
-
-
-def healthy(scripted, *verdicts):
-    """From now on each verifier ends with a verdict: `verdicts` in turn. Forget the calls of the first run."""
-    scripted.during_verifier = None
-    scripted.write_verifier_report = True
-    scripted.verifier_end_state, scripted.verifier_exit_status = "finished", 0
-    scripted.verdict_sequence = list(verdicts)
-    for calls in (scripted.calls, scripted.continuation_calls, scripted.fixup_calls, scripted.verifier_calls):
-        calls.clear()
 
 
 def after_retry(events):

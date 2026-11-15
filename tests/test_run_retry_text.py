@@ -13,49 +13,15 @@ import hashlib
 import pytest
 
 
-from .support import HEAD, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
-
-RULING = "RULING-5202 add no new dependency."
-OLD_B = "Ticket b adds its file."
-NEW_B = f"Ticket b adds its file. {RULING}"
+from .support import git, read_journal_file, resume_main, state_dir, ticket_of
+from .support_run import NEW_B, OLD_B, RULING, failed_run, workflow_of, write
 
 
 def sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def workflow_of(b_text: str = OLD_B, b_blocked_by: tuple[str, ...] = (), a_text: str = "Ticket a adds its file.") -> str:
-    a = ticket("a").replace("Ticket a adds its file.", a_text)
-    b = ticket("b", b_blocked_by).replace(OLD_B, b_text)
-    return HEAD + a + b + ticket("c", ("b",))
-
-
 pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})
-
-
-def failed_run(tmp_path, capsys, scripted):
-    """A run whose ticket a is built, whose ticket b failed at its verifier, and whose ticket c was skipped. Return the repo and the run id."""
-
-    def time_limit(request):
-        killed = ticket_of(request) == "b"
-        scripted.write_verifier_report = not killed
-        scripted.verifier_end_state, scripted.verifier_exit_status = ("failed", -9) if killed else ("finished", 0)
-
-    scripted.during_verifier = time_limit
-    repo = make_repo(tmp_path, workflow_of())
-    code, _, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo))
-    assert code == 1
-    (run_dir,) = (state_dir(repo) / "runs").iterdir()
-    scripted.during_verifier = None
-    scripted.write_verifier_report = True
-    scripted.verifier_end_state, scripted.verifier_exit_status = "finished", 0
-    for calls in (scripted.calls, scripted.continuation_calls, scripted.fixup_calls, scripted.verifier_calls):
-        calls.clear()
-    return repo, run_dir.name
-
-
-def write(repo, text: str) -> None:
-    (repo / "workflow.toml").write_text(text)
 
 
 def test_a_retry_with_a_new_text_for_the_failed_ticket_starts_it_again_with_the_new_text_and_the_journal_holds_both_hashes(

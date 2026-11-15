@@ -9,58 +9,20 @@ specialist, on a real temporary git repository.
 """
 
 import json
-from dataclasses import dataclass
 
 import pytest
 
 from delegate import adapters
-from delegate.ports.harness import AdapterResult
 from delegate.adapters.git import GitVersionControl
 from delegate.adapters.shell import ShellGateRunner
 from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import ScriptedAdapter, WORKFLOW, commit_head, git, journal_path, kill_a_run, make_repo, read_journal_file, tree, valid_report
+from .support import WORKFLOW, git, journal_path, kill_a_run, make_repo, read_journal_file, tree, valid_report
+from .support_run import ForgetfulAdapter
 
 GATE = "test -f feature.txt"
-
-
-@dataclass
-class ForgetfulAdapter(ScriptedAdapter):
-    """A specialist that writes `feature.txt` and `other.txt`, and commits only `other.txt`.
-
-    Its report says `committed`. On each continuation it commits `feature.txt`
-    when `repair` is set, and else it does nothing.
-    """
-
-    repair: bool = True
-
-    def run(self, request):
-        if request.agent.endswith("verifier"):
-            return super().run(request)
-        if self.on_specialist is not None:
-            self.on_specialist(request)
-        is_continuation = "## Continuation" in request.prompt
-        (self.continuation_calls if is_continuation else self.calls).append(request)
-        if not is_continuation:
-            (request.cwd / "feature.txt").write_text("feature\n")
-            (request.cwd / "other.txt").write_text("other\n")
-            git(request.cwd, "add", "other.txt")
-            head, branch = commit_head(request.cwd, "-m", "work without feature.txt")
-        elif self.repair and len(self.continuation_calls) == 1:
-            git(request.cwd, "add", "feature.txt")
-            head, branch = commit_head(request.cwd, "-m", "add feature.txt")
-        elif self.repair:
-            (request.cwd / "done.txt").write_text("done\n")
-            git(request.cwd, "add", "done.txt")
-            head, branch = commit_head(request.cwd, "-m", "add done.txt")
-        else:
-            head, branch = git(request.cwd, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").split()
-        request.report_path.parent.mkdir(parents=True, exist_ok=True)
-        request.report_path.write_text(json.dumps(valid_report("a", branch, head)))
-        request.event_stream.write_text('{"type":"result"}\n')
-        return AdapterResult(0, "finished", self.session_id, request.event_stream)
 
 
 @pytest.fixture

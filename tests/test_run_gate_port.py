@@ -20,18 +20,7 @@ from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
 from .support import WORKFLOW, ScriptedAdapter, make_repo, read_journal_file, journal_path
-
-
-class SpyGates:
-    """A gate runner that records each call, and answers with `answer` or with the real shell."""
-
-    def __init__(self, answer: GateResult | None = None) -> None:
-        self._answer = answer
-        self.calls: list[tuple[str, str]] = []
-
-    def run(self, command, worktree, log=None, timeout=None, environment=None):
-        self.calls.append((command, worktree.name))
-        return self._answer if self._answer is not None else ShellGateRunner().run(command, worktree, log=log, timeout=timeout, environment=environment)
+from .support_run import SpyGates
 
 
 @pytest.fixture

@@ -258,7 +258,7 @@ def test_a_section_of_an_earlier_version_for_a_worktree_that_a_person_removed_go
 
 
 def test_the_git_commands_of_the_port_in_a_worktree_start_no_daemon_when_the_user_turns_fsmonitor_on(tmp_path, vcs, monkeypatch):
-    from .test_fsmonitor import GLOBAL_CONFIG, daemon_pid, why_no_daemon_can_start
+    from .support_fsmonitor import GLOBAL_CONFIG, daemon_pid, why_no_daemon_can_start
 
     reason = why_no_daemon_can_start()
     if reason is not None:

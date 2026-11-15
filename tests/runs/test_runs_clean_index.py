@@ -15,7 +15,7 @@ from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.cli import delegate
 
 from ..support import HEAD, make_repo, read_journal, run_main, ticket
-from ..test_clean_abandon import REASON, a_paused_run
+from ..support_run import REASON, a_paused_run
 
 
 pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abcx"})

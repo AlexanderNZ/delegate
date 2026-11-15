@@ -25,34 +25,9 @@ from .support import state_dir
 from .support import (
     WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main, write_project_agents,
 )
+from .support_run import WAIT_SECONDS, printed, wait_for_ends
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
-
-# The longest time that a test waits for a detached run to end.
-WAIT_SECONDS: float = 120.0
-
-
-def printed(out: str) -> tuple[str, Path]:
-    """The run id and the log path that `delegate run --detach` printed. Each must be on its own line, once."""
-    runs = re.findall(r"^run (\S+)$", out, flags=re.MULTILINE)
-    logs = re.findall(r"^log (.+)$", out, flags=re.MULTILINE)
-    assert (len(runs), len(logs)) == (1, 1), out
-    return runs[0], Path(logs[0])
-
-
-def wait_for_ends(log: Path, ends: int) -> str:
-    """The text of the log when it holds the summary line of `ends` runs of `delegate run`. Fail after `WAIT_SECONDS`.
-
-    The summary line `run <result> · ...` comes when a run ends (#119). The line `journal <path>` comes at the start.
-    """
-    deadline = time.monotonic() + WAIT_SECONDS
-    text = ""
-    while time.monotonic() < deadline:
-        text = log.read_text() if log.is_file() else ""
-        if len(re.findall(r"^run (?:built|failed|paused) ", text, flags=re.MULTILINE)) >= ends:
-            return text
-        time.sleep(0.2)
-    raise AssertionError(f"the detached run did not end in {WAIT_SECONDS} seconds; the log holds:\n{text}")
 
 
 def status_of(repo: Path, capsys, run_id: str) -> tuple[int, str, str]:

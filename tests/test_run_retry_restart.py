@@ -13,7 +13,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import HEAD, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
-from .test_run_retry_text import NEW_B, OLD_B, RULING, failed_run, workflow_of, write
+from .support_run import NEW_B, OLD_B, RULING, failed_run, workflow_of, write
 
 
 pytestmark = pytest.mark.scripted_adapter(files_by_ticket={t: {f"{t}.txt": f"{t}\n"} for t in "abc"})

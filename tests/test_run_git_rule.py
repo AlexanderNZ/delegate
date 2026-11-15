@@ -12,7 +12,7 @@ scripted adapter plays each agent and records the brief that it gets.
 import pytest
 
 
-from .test_run_report_rule import SCENARIOS, run_from_above
+from .support_run import SCENARIOS, run_from_above
 
 # A resumed session keeps the context of its first brief, and that brief holds the rule.
 BRIEFS = [scenario for scenario in SCENARIOS if scenario != "resumed continuation"]

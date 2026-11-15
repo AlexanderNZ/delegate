@@ -18,7 +18,7 @@ from delegate.cli import delegate
 
 from . import claude_fake
 from .support import NO_TIMEOUTS_WORKFLOW, make_repo, run_main, write_project_agents
-from .test_run_detach import printed, wait_for_ends
+from .support_run import printed, wait_for_ends
 
 pytestmark = [pytest.mark.usefixtures("home", "claude_stand_in"), pytest.mark.scripted_adapter()]  # the dry run checks the agent files and probes the guard
 

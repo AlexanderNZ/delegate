@@ -22,7 +22,7 @@ from delegate.ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, Re
 
 from . import git_processes
 from .support import commit_head, git, make_repo
-from .test_fsmonitor import alive, daemon_pid, why_no_daemon_can_start
+from .support_fsmonitor import alive, daemon_pid, why_no_daemon_can_start
 
 
 @pytest.fixture(autouse=True)
