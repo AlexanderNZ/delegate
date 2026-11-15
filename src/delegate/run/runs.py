@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,7 @@ from pathlib import Path
 from . import run_state
 from .errors import EngineError
 from .journal import JournalError, read_events, read_new_events
-from .lock import LockError, live_holder, live_holder_of_run
+from .lock import LOCK_SUFFIX, LockError, live_holder, live_holder_of_run
 from .state_location import JOURNAL_NAME, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from ..ports.vcs import VersionControl
 
@@ -93,6 +94,48 @@ def all_journals(states: list[Path]) -> list[Path]:
     return found
 
 
+@dataclass(frozen=True)
+class StateScan:
+    """What one scan of a state directory found (#350): the journals and the logs of its runs, and its lock files, each in the order of the paths."""
+
+    state: Path
+    journals: tuple[Path, ...] = ()
+    logs: tuple[Path, ...] = ()
+    locks: tuple[Path, ...] = ()
+
+
+def scan_state(state: Path) -> StateScan:
+    """Scan the state directory `state` one time: `runs/*/journal.jsonl`, `runs/*/run.log` and `locks/*.lock`.
+
+    `all_journals`, `failed_starts` and `live_holder_of_run` each look for one of the three, so a caller that needs more than one gives them this scan.
+    A directory that goes while the scan reads it is not in the scan.
+    """
+    journals: list[Path] = []
+    logs: list[Path] = []
+    for run_dir in _entries(state / "runs", directories=True):
+        for entry in _entries(run_dir):
+            if entry.name == JOURNAL_NAME:
+                journals.append(entry)
+            elif entry.name == LOG_NAME:
+                logs.append(entry)
+    locks = [entry for entry in _entries(state / "locks") if entry.name.endswith(LOCK_SUFFIX)]
+    return StateScan(state, tuple(sorted(journals)), tuple(sorted(logs)), tuple(sorted(locks)))
+
+
+def _entries(directory: Path, *, directories: bool = False) -> list[Path]:
+    """The entries of a directory, only its directories with `directories`, or none when it does not exist or goes while the call reads it."""
+    try:
+        with os.scandir(directory) as found:
+            return [directory / entry.name for entry in found if not directories or entry.is_dir()]
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+
+
+def machine_scans(root: Path) -> list[StateScan]:
+    """The scan of each state directory under the state root `root` (`machine_states`, `scan_state`), in the order of the names."""
+    return [scan_state(state) for state in machine_states(root)]
+
+
 def _no_run(repo: Path, states: list[Path]) -> RunsError:
     """The error of a repository with no journal; it names `runs` of each state directory."""
     return RunsError(f"no run found in {repo}: no journal under {' or '.join(str(state / 'runs') for state in states)}")
@@ -115,30 +158,33 @@ class FailedStart:
         return f"no run is active; the newest run {self.run_id} failed at start: {self.last_line}; log {self.log}"
 
 
-def failed_starts(states: list[Path]) -> list[FailedStart]:
+def failed_starts(states: list[Path], scans: Sequence[StateScan] | None = None) -> list[FailedStart]:
     """Each run of the state directories that failed at start, in the order of the names. `delegate runs` (#307) uses it too.
 
+    `scans` is the scan of each state directory (`scan_state`) when the caller has them: the call then lists no directory.
     Raise RunsError when a lock file cannot be read.
     """
     found: list[FailedStart] = []
-    logs = [(state, log) for state in states for log in sorted((state / "runs").glob(f"*/{LOG_NAME}"))]
-    for state, log in logs:
-        run_dir = log.parent
-        if (run_dir / JOURNAL_NAME).exists():
-            continue
-        try:
-            lines = [line.strip() for line in log.read_text(errors="replace").splitlines() if line.strip()]
-            changed = datetime.fromtimestamp(log.stat().st_mtime, timezone.utc)
-        except FileNotFoundError:
-            continue  # the run directory went while this function read it
-        if not lines:
-            continue  # the run process has not written to its log yet
-        try:
-            starting = live_holder_of_run(state, run_dir.name)
-        except LockError as error:
-            raise RunsError(str(error)) from None
-        if starting is None:
-            found.append(FailedStart(run_dir.name, log, lines[-1], changed))
+    scanned = [scan_state(state) for state in states] if scans is None else scans
+    for scan in scanned:
+        state = scan.state
+        for log in scan.logs:
+            run_dir = log.parent
+            if (run_dir / JOURNAL_NAME).exists():
+                continue
+            try:
+                lines = [line.strip() for line in log.read_text(errors="replace").splitlines() if line.strip()]
+                changed = datetime.fromtimestamp(log.stat().st_mtime, timezone.utc)
+            except FileNotFoundError:
+                continue  # the run directory went while this function read it
+            if not lines:
+                continue  # the run process has not written to its log yet
+            try:
+                starting = live_holder_of_run(state, run_dir.name, scan.locks)
+            except LockError as error:
+                raise RunsError(str(error)) from None
+            if starting is None:
+                found.append(FailedStart(run_dir.name, log, lines[-1], changed))
     return found
 
 
@@ -300,7 +346,7 @@ class Runs:
         return self.active[0] if self.active else self.newest
 
 
-def has_live_process(journal: Path) -> bool:
+def has_live_process(journal: Path, first: dict[str, object] | None = None) -> bool:
     """True when a process holds the lock of the run branch of `journal`, and the lock file names the run.
 
     Raise RunsError when its lock file cannot be read. Raise JournalError when the first line of the journal is not JSON,
@@ -308,17 +354,19 @@ def has_live_process(journal: Path) -> bool:
 
     The journal is `<state dir>/runs/<run id>/journal.jsonl`, so its path gives the state directory that holds the lock.
     `delegate status` uses the rule for the state of a run with no `run-end`: with no live process, the run is `stopped`.
+    A caller that read the first event already (`first`, #350) gives it, and the call does not open the journal.
     """
     state = journal.parents[2]
-    with journal.open() as handle:
-        line = handle.readline()
-    # `_start_time` checked that a complete first line is an event. A journal with no `run-start` names no run branch.
-    try:
-        first = json.loads(line) if line.endswith("\n") else {}
-    except json.JSONDecodeError as error:
-        raise JournalError(f"journal {journal}: line 1 is not valid JSON: {error}") from None
-    if not isinstance(first, dict):
-        raise JournalError(f"journal {journal}: line 1 is not an event")
+    if first is None:
+        with journal.open() as handle:
+            line = handle.readline()
+        # `_start_time` checked that a complete first line is an event. A journal with no `run-start` names no run branch.
+        try:
+            first = json.loads(line) if line.endswith("\n") else {}
+        except json.JSONDecodeError as error:
+            raise JournalError(f"journal {journal}: line 1 is not valid JSON: {error}") from None
+        if not isinstance(first, dict):
+            raise JournalError(f"journal {journal}: line 1 is not an event")
     branch = first.get("run_branch") if first.get("event") == "run-start" else None
     if branch is None:
         return False

@@ -6,7 +6,8 @@ adapter that each run names (`delegate.cli.status.stream_reader_of`, as `delegat
 
 With `--watch` (#313), the command redraws the view in place on the terminal, as `delegate watch` redraws its frame (`delegate.cli.screen`):
 once for each `POLL_SECONDS`, no alternate screen, no spinner, and the size of the terminal read again at each redraw. Each redraw reads each
-journal only from its last position (`JournalReads`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
+journal only from its last position (`JournalReads`), opens no journal that did not change (#350), lists the run index again only when its directory changed, and keeps the ETA of 2 hours ago of
+each run for a minute (`EtaMemory`). The command ends with Ctrl-C, SIGTERM or SIGHUP, as the live view of `delegate watch`
 does: the cursor shows again, and `delegate` prints `delegate: interrupted` and exits with 130. A journal that cannot be read goes on stderr
 once, before the first frame when the first read finds it, and else after the last frame, so no line of stderr breaks a frame.
 
@@ -32,7 +33,7 @@ import sys
 
 from ..adapters.ssh_hosts import SshHostReader
 from ..run import clock
-from ..run.fleet import fleet_of
+from ..run.fleet import EtaMemory, fleet_of
 from ..run.fleet_hosts import HostReads
 from ..run.fleet_model import ViewSettings
 from ..run.fleet_view import fleet_lines
@@ -113,6 +114,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
         return EXIT_ERROR
     the_clock = clock.current()
     screen, reads, hosts = Screen(sys.stdout), JournalReads(), _host_reads(settings, background=True)
+    etas = EtaMemory()
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -121,7 +123,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
             with stop_signals_as_ctrl_c():
                 while True:
                     found = fleet_of(
-                        settings.root, host_name(), utc_now(), stream_reader_of, reads, settings.index.index, not local, hosts, _view(settings, local),
+                        settings.root, host_name(), utc_now(), stream_reader_of, reads, settings.index.index, not local, hosts, _view(settings, local), etas,
                     )
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
                     reported.update(new)

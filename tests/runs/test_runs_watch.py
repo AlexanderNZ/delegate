@@ -10,6 +10,8 @@ the screen that the terminal shows after each synchronized update.
 
 from __future__ import annotations
 
+import builtins
+import io
 import json
 import sys
 from pathlib import Path
@@ -19,7 +21,7 @@ import pytest
 from delegate.cli import delegate
 
 from ..support import Terminal, fake_clock, final_screen, frames, without_titles
-from .journals import clock_time, working, write_run
+from .journals import built, clock_time, run_end, runs, working, write_run
 
 SHOW_CURSOR = "\x1b[?25h"
 INTERRUPTED = 130
@@ -259,3 +261,59 @@ def test_timeline_with_watch_redraws_the_lanes_in_place(machine, monkeypatch, ca
     assert sum(line.count("●") for line in second if " 3c98 " in line) == 1
     assert any(line.startswith("last 6h, to the latest ETA") for line in second)
     assert (code, err) == (INTERRUPTED, "delegate: interrupted\n")
+
+
+class OpenedFiles:
+    """The files that the code opens through `open`, `io.open` and so `Path.open`, `Path.read_text` and `Path.read_bytes`: the boundary of the file system."""
+
+    def __init__(self, monkeypatch) -> None:
+        self.paths: list[str] = []
+        real = io.open
+
+        def spy(file, *args, **kwargs):
+            self.paths.append(str(file))
+            return real(file, *args, **kwargs)
+
+        monkeypatch.setattr(io, "open", spy)
+        monkeypatch.setattr(builtins, "open", spy)
+
+    def of_kind(self, name: str) -> list[str]:
+        return [path for path in self.paths if path.endswith(name)]
+
+
+def test_a_redraw_with_no_change_opens_no_journal_and_no_record_file(machine, monkeypatch, capsys):
+    a_working_run(machine)
+    write_run(machine, "web-app", "1195", clock_time(10, 0), [*built("1", clock_time(10, 5), clock_time(10, 20)), run_end(clock_time(10, 30))], tickets=("1",))
+    write_run(machine, "old-app", "0a0a", clock_time(10, 0, days_back=3), [run_end(clock_time(10, 30, days_back=3))], tickets=("1",))
+    assert runs(capsys)[0] == 0  # writes the records of the two listed runs, so the first redraw of the watch reads them
+    opened = OpenedFiles(monkeypatch)
+    seen: list[list[str]] = []
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        seen.append(list(opened.paths))  # the files opened up to the end of this redraw
+        if len(waits) == 3:
+            ctrl_c()
+
+    fake_clock().on_sleep = sleep
+
+    watching(monkeypatch, capsys)
+
+    first, _, third = seen
+    assert len(opened.of_kind("journal.jsonl")) >= 3 and len(opened.of_kind(".json")) >= 2  # the first redraw reads them: the count is a count
+    assert [path for path in third[len(first):] if path.endswith(("journal.jsonl", ".json"))] == []  # the second and the third redraw read none
+
+
+def test_a_view_reads_each_record_file_of_the_index_once(machine, monkeypatch, capsys):
+    a_working_run(machine)
+    write_run(machine, "web-app", "1195", clock_time(10, 0), [*built("1", clock_time(10, 5), clock_time(10, 20)), run_end(clock_time(10, 30))], tickets=("1",))
+    code, _, _ = runs(capsys)  # writes the two records
+    records = sorted((machine / "index").glob("*.json"))
+    assert code == 0 and len(records) == 2
+    opened = OpenedFiles(monkeypatch)
+
+    code, _, _ = runs(capsys)
+
+    assert code == 0
+    assert sorted(opened.of_kind(".json")) == sorted(str(path) for path in records)  # one listing: two listings read each record twice

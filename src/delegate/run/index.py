@@ -22,11 +22,10 @@ from pathlib import Path
 
 from ..ports.index import RunIndex, RunIndexError, RunRecord
 from .events import CLEANUP, CRASHED, HALTED, INDEX_WARNING, INTERRUPTED, PAUSED, RESUME, RUN_END, RUN_START, SETUP_PROBLEM, STEP_END
-from . import run_state
 from .fleet_rules import in_window
 from .host import host_name
 from .journal import EventObserver, Journal, JournalError, JournalReads, event_time
-from .runs import RunsError, all_journals, machine_states
+from .runs import RunsError, StateScan, machine_scans
 from .state_location import repository_name
 from .status import snapshot_at, snapshot_of
 from .status_model import Snapshot
@@ -111,27 +110,55 @@ def _is_older(record: RunRecord, made: RunRecord, last_event: datetime) -> bool:
 
 
 def _unrecorded(
-    journals: Sequence[Path], repo: str, host: str, now: datetime, reads: JournalReads, recorded: dict[str, RunRecord],
+    scan: StateScan, repo: str, host: str, now: datetime, reads: JournalReads, recorded: dict[str, RunRecord], snapshots: dict[Path, Snapshot],
 ) -> list[RunRecord]:
     """The records to write for the journals of one repository: of each run that is listed, not cleaned, and has no record or an older one.
 
     A run that ended before the window is not listed (`fleet_rules.in_window`). A journal that cannot be read is skipped: `delegate runs` names it.
+    `snapshots` holds the snapshot that the caller made of a journal at `now`: the record takes the snapshot from it and makes none (#350).
     """
     found = []
-    for journal in journals:
+    for journal in scan.journals:
         try:
             events = reads.events(journal)
-            folded = run_state.fold(events)
+            folded = reads.folded(journal)
             end = folded.run_end
             if end is not None and not in_window(event_time(end), now):
                 continue
-            made = record_of(events, journal, Path(repo), now, host=host, snapshot=snapshot_of(events, journal, lambda adapter: None, now, folded=folded))
+            snap = snapshots.get(journal) or snapshot_of(events, journal, lambda adapter: None, now, folded=folded)
+            made = record_of(events, journal, Path(repo), now, host=host, snapshot=snap)
         except (JournalError, RunsError):
             continue
         old = recorded.get(made.run_id)
         if not cleaned(events) and (old is None or _is_older(old, made, event_time(events[-1]))):
             found.append(made)
     return found
+
+
+def backfill(
+    root: Path, host: str, now: datetime, index: RunIndex, reads: JournalReads | None = None, scans: Sequence[StateScan] | None = None,
+    snapshots: dict[Path, Snapshot] | None = None,
+) -> tuple[list[RunRecord], str | None]:
+    """`record_runs`, and the records that the index holds after the writes: the one listing of the index of a view (#350). The second value is the reason of the first failure, or None.
+
+    `scans` is the scan of each state directory under `root` (`runs.machine_scans`) when the caller has them, and `snapshots` is a snapshot that the caller made at `now` for
+    each journal (`fleet.fleet_of`); with None, the call scans and makes its own. When the index cannot be listed, the records are empty.
+    """
+    reads = JournalReads() if reads is None else reads
+    scanned = machine_scans(root) if scans is None else scans
+    snaps = {} if snapshots is None else snapshots
+    try:
+        recorded = {record.run_id: record for record in index.list_records()}
+    except RunIndexError as error:
+        return [], str(error)
+    try:
+        for scan in scanned:
+            for record in _unrecorded(scan, repository_name(scan.state), host, now, reads, recorded, snaps):
+                index.record(record)
+                recorded[record.run_id] = record
+    except RunIndexError as error:
+        return list(recorded.values()), str(error)
+    return list(recorded.values()), None
 
 
 def record_runs(root: Path, host: str, now: datetime, index: RunIndex, reads: JournalReads | None = None) -> str | None:
@@ -141,12 +168,4 @@ def record_runs(root: Path, host: str, now: datetime, index: RunIndex, reads: Jo
     stream and builds no view: each record is the one that `record_of` makes from the fold of the journal, so the write is safe at any time (ADR 0008). A run that failed at start has no journal, so it gets no
     record. A run that `delegate clean` cleaned gets none: the command forgot its record (#327). A lock file that cannot be read stops no record (#330).
     """
-    reads = JournalReads() if reads is None else reads
-    try:
-        recorded = {record.run_id: record for record in index.list_records()}
-        for state in machine_states(root):
-            for record in _unrecorded(all_journals([state]), repository_name(state), host, now, reads, recorded):
-                index.record(record)
-    except RunIndexError as error:
-        return str(error)
-    return None
+    return backfill(root, host, now, index, reads)[1]

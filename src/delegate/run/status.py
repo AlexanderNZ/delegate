@@ -478,14 +478,14 @@ def snapshot_of(
     The reader of the streams comes from `reader_of` once. When it gives None, the snapshot has no tokens and no activity.
     The two facts that the journal does not hold come from the disk: a live process that holds the lock of the run, and a
     pause request that waits. `snapshot_at` is the same snapshot with the two facts given. The lock is read only when its
-    answer decides the state (`asks`): the run state of the events is active. The events fold once: the fold answers the
+    answer decides the state (`asks`): the run state of the events is active. The check of the lock gets the first event, so it does not open the journal again (#350). The events fold once: the fold answers the
     question of the lock and goes to `snapshot_at`. A caller that has the fold of the events (`folded`) gives it, and the
     events fold no more.
     """
     folded = run_state.fold(events) if folded is None else folded
     asks = folded.status.kind == run_state.ACTIVE
     return snapshot_at(
-        events, journal, reader_of, now, live_process=asks and _has_live_process(journal), pause_request=pause_requested(journal),
+        events, journal, reader_of, now, live_process=asks and _has_live_process(journal, events[0] if events else None), pause_request=pause_requested(journal),
         folded=folded,
     )
 
@@ -565,10 +565,13 @@ def events_by_ticket(events: list[dict[str, object]], plan: list[str]) -> dict[s
     return owns
 
 
-def _has_live_process(journal: Path) -> bool:
-    """True when a process works on the run of `journal`. A lock file that cannot be read does not show that the process stopped."""
+def _has_live_process(journal: Path, first: dict[str, object] | None = None) -> bool:
+    """True when a process works on the run of `journal`. A lock file that cannot be read does not show that the process stopped.
+
+    `first` is the first event of the journal when the caller read it already (#350): the check does not open the journal.
+    """
     try:
-        return has_live_process(journal)
+        return has_live_process(journal, first)
     except RunsError:
         return True
 

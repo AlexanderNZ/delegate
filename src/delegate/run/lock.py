@@ -29,6 +29,7 @@ import fcntl
 import json
 import os
 import time
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,8 +57,12 @@ READ_SECONDS: float = 1.0
 _POLL_SECONDS: float = 0.01
 
 
+# The suffix of a lock file in the directory `locks` of a state directory.
+LOCK_SUFFIX: str = ".lock"
+
+
 def _lock_path(state_dir: Path, run_branch: str) -> Path:
-    return state_dir / "locks" / (quote(run_branch, safe="") + ".lock")
+    return state_dir / "locks" / (quote(run_branch, safe="") + LOCK_SUFFIX)
 
 
 def _parse(text: str, path: Path) -> LockHolder:
@@ -123,14 +128,17 @@ def live_holder(state_dir: Path, run_branch: str) -> LockHolder | None:
     return _held_by(_lock_path(state_dir, run_branch))
 
 
-def live_holder_of_run(state_dir: Path, run_id: str) -> LockHolder | None:
+def live_holder_of_run(state_dir: Path, run_id: str, locks: Sequence[Path] | None = None) -> LockHolder | None:
     """The holder of a lock of any run branch that names `run_id` while a process holds it, or None when there is none.
 
     A run takes its lock before it writes its journal, so a run with no journal yet has no run branch to look up.
+    `locks` is the lock files of the state directory when the caller scanned it already (`runs.scan_state`, #350): the call then lists no directory.
     Raise LockError when a lock file cannot be read.
     """
-    locks = state_dir / "locks"
-    for path in sorted(locks.glob("*.lock")) if locks.is_dir() else []:
+    if locks is None:
+        directory = state_dir / "locks"
+        locks = sorted(directory.glob(f"*{LOCK_SUFFIX}")) if directory.is_dir() else []
+    for path in locks:
         holder = _held_by(path)
         if holder is not None and holder.run_id == run_id:
             return holder

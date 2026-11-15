@@ -25,6 +25,7 @@ import contextlib
 import json
 import os
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -121,23 +122,51 @@ def event_time(event: dict[str, object]) -> datetime:
     return datetime.fromisoformat(str(event["time"]))
 
 
+@dataclass
+class _Seen:
+    """What `JournalReads` keeps for one journal: its events, the byte position after the last, the size and the modification time at the last read, and the fold."""
+
+    events: list[dict[str, object]] = field(default_factory=list)
+    offset: int = 0
+    signature: tuple[int, int] | None = None
+    fold: run_state.RunState | None = None
+    fold_of: int = 0
+
+
 class JournalReads:
-    """The events that a caller read from each journal so far, and the byte position after the last of them (#313).
+    """The events that a caller read from each journal so far, the byte position after the last of them, and the fold of the events (#313, #350).
 
     A new call of `events` for a journal reads only the bytes after that position, and adds the new events to the old ones. A journal
-    that cannot be read keeps its old position, so the next call reads from it again, not from the start.
+    that has the size and the modification time of the last call is not opened at all. A journal that cannot be read keeps its old position,
+    so the next call reads from it again, not from the start. `folded` keeps the fold of the events beside them, and folds again only when
+    the events grew.
     """
 
     def __init__(self) -> None:
-        self._seen: dict[Path, tuple[list[dict[str, object]], int]] = {}
+        self._seen: dict[Path, _Seen] = {}
 
     def events(self, journal: Path) -> list[dict[str, object]]:
         """All the events of the journal. Raise JournalError as `read_new_events` does."""
-        events, offset = self._seen.get(journal, ([], 0))
-        new, offset = read_new_events(journal, offset, len(events) + 1)
-        events.extend(new)
-        self._seen[journal] = (events, offset)
-        return events
+        seen = self._seen.setdefault(journal, _Seen())
+        try:
+            stat = journal.stat()
+        except FileNotFoundError:
+            raise JournalError(f"journal {journal} not found") from None
+        signature = (stat.st_size, stat.st_mtime_ns)
+        if signature == seen.signature:
+            return seen.events  # nothing changed since the last read: no open
+        new, seen.offset = read_new_events(journal, seen.offset, len(seen.events) + 1)
+        seen.events.extend(new)
+        seen.signature = signature
+        return seen.events
+
+    def folded(self, journal: Path) -> run_state.RunState:
+        """The run state of the events of the journal (`events` reads them). It folds again only when the events grew since the last call."""
+        events = self.events(journal)
+        seen = self._seen[journal]
+        if seen.fold is None or seen.fold_of != len(events):
+            seen.fold, seen.fold_of = run_state.fold(events), len(events)
+        return seen.fold
 
     def keep_only(self, journals: set[Path]) -> None:
         """Forget each journal that is not in `journals`: a run that was cleaned away."""
