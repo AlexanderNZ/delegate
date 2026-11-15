@@ -121,6 +121,8 @@ def replacements(root: Path) -> list[str]:
 
 def test_no_test_replaces_sleep_time_or_monotonic_of_the_module_time():
     found = replacements(TESTS)
+
+    assert Path(__file__).resolve() in TESTS.rglob("*.py")  # the scan reads this file, so it reads the tests
     assert not found, "\n".join(found)
 
 

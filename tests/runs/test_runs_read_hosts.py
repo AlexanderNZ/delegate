@@ -123,6 +123,7 @@ def test_the_legend_has_no_line_for_another_host_when_no_other_host_has_a_do_wor
 
     _, out, _ = runs(capsys)
 
+    assert next(line for line in out.splitlines() if "a41e" in line).split()[1:3] == ["docs-site", "a41e"]
     assert "on another host" not in out
 
 

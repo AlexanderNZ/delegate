@@ -13,12 +13,14 @@ from .pages import README, repository_root
 def test_the_root_of_a_short_package_path_has_no_readme():
     root = repository_root(Path("/build/source/tests/test_docs.py"))
 
+    assert root == Path("/build/source")
     assert not (root / "README.md").is_file()
 
 
 def test_the_root_of_a_path_with_no_directory_above_the_tests_has_no_readme():
     root = repository_root(Path("/tests/test_docs.py"))
 
+    assert root == Path("/")
     assert not (root / "README.md").is_file()
 
 

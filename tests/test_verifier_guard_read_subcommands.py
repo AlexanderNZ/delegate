@@ -167,7 +167,9 @@ def test_the_rendered_verifier_states_that_an_entry_with_a_star_is_a_prefix():
 
 def test_a_verifier_with_no_prefix_entry_states_no_prefix():
     claude_code, _opencode = _files(_declaration("tea issues"))
-    assert "is a prefix" not in split_frontmatter(claude_code["web-verifier.md"])[1]
+    body = split_frontmatter(claude_code["web-verifier.md"])[1]
+    assert "You are the web verifier." in body
+    assert "is a prefix" not in body
 
 
 def test_the_opencode_verifier_permits_no_read_command_of_either_form():

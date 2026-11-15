@@ -136,6 +136,7 @@ def test_each_committed_figure_file_matches_the_code(name, capsys):
     """The drift test of the figures. A change of a frame (a glyph, a column, a word) with no `delegate docs` fails it."""
     code, out, err = docs(capsys, "--root", str(ROOT), "--check")
 
+    assert (ROOT / ASSETS / name).is_file()
     assert str(ASSETS / name) not in err, "the figure differs from the code: run `delegate docs` and commit the result"
 
 

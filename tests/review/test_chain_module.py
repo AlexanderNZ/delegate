@@ -34,6 +34,7 @@ def test_the_chain_module_imports_no_engine():
         node.module for node in ast.walk(ast.parse((RUN / "chain.py").read_text())) if isinstance(node, ast.ImportFrom) and node.module
     }
 
+    assert "journal" in imported
     assert "engine" not in imported
 
 

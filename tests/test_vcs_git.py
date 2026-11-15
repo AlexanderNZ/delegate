@@ -225,6 +225,7 @@ def test_a_tag_is_not_a_branch(tmp_path, vcs):
     repo = make_repo(tmp_path)
     git(repo, "tag", "release")
 
+    assert vcs.branch_exists(repo, "main")
     assert not vcs.branch_exists(repo, "release")
 
 
@@ -466,6 +467,7 @@ def test_remove_worktree_removes_a_worktree_with_changes_that_were_not_committed
     vcs.ensure_worktree(repo, worktree, "feature", "main")
     (worktree / "loose.txt").write_text("loose\n")
     (worktree / "seed.txt").write_text("changed\n")
+    assert (worktree / "loose.txt").is_file()
 
     vcs.remove_worktree(repo, worktree)
 
@@ -528,6 +530,8 @@ def test_delete_branch_keeps_a_branch_that_the_holder_does_not_hold_and_leaves_n
 
 def test_discard_branch_deletes_a_branch_that_no_other_branch_holds(tmp_path, vcs):
     repo, _ = branch_with_work(tmp_path, vcs, "run/x-a")
+
+    assert vcs.branch_exists(repo, "run/x-a")
 
     vcs.discard_branch(repo, "run/x-a")
 
@@ -1395,6 +1399,7 @@ GIT_WORDS = (
 
 @pytest.mark.parametrize("word", GIT_WORDS)
 def test_the_port_does_not_name_a_git_word(word):
+    assert "versioncontrol" in PORT_TEXT.lower()  # the scan reads the port
     assert word not in PORT_TEXT.lower()
 
 

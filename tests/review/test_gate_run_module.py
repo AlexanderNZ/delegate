@@ -36,7 +36,10 @@ def test_the_engine_holds_no_definition_of_the_run_of_the_gates():
 
 
 def test_the_gate_run_module_imports_no_engine():
-    assert "engine" not in modules_imported_by(RUN / "gate_run.py")
+    imported = modules_imported_by(RUN / "gate_run.py")
+
+    assert "journal" in imported
+    assert "engine" not in imported
 
 
 def test_a_gate_log_gets_the_next_free_number_and_never_replaces_an_earlier_log(tmp_path):

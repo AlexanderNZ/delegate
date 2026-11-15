@@ -137,6 +137,7 @@ def test_the_legend_drops_under_100_columns(machine, capsys, monkeypatch):
 
     _, out, _ = runs(capsys)
 
+    assert [line.split()[-1] for line in out.splitlines() if line.startswith("│")] == ["-", "resume", "watch", "watch"]
     assert "delegate watch <run>" not in out
     assert "git merge" not in out
 

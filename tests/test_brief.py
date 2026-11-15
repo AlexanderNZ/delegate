@@ -127,10 +127,12 @@ def test_full_brief_has_the_task_the_diff_and_the_gates(scratch, capsys):
 def test_a_full_brief_never_selects_fix_up_mode(scratch, capsys):
     # The verifier reads its mode from the findings heading. A full brief that
     # carries that heading would put the verifier in the wrong mode.
-    _code, out, _err = _run(
+    code, out, _err = _run(
         capsys,
         ["full", "--repo", str(scratch.path), "--branch", "feat", "--task", "t"],
     )
+    assert code == 0
+    assert "## Task" in out
     assert "## Findings under verification" not in out
 
 
@@ -138,10 +140,12 @@ def test_full_brief_diff_holds_no_work_that_landed_on_the_base(scratch, capsys):
     # git diff base...branch is the three-dot form. The two-dot form reports
     # the base's later commits as removals, which reads as a deletion the
     # specialist never made.
-    _code, out, _err = _run(
+    code, out, _err = _run(
         capsys,
         ["full", "--repo", str(scratch.path), "--branch", "feat", "--task", "t"],
     )
+    assert code == 0
+    assert "+def answer():" in out
     assert "unrelated.py" not in out
 
 

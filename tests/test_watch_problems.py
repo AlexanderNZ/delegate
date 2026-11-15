@@ -249,6 +249,7 @@ def test_an_agent_with_no_refused_tool_writes_no_refused_field(tmp_path, capsys,
     _, _, _, events = build_then_watch(tmp_path, capsys, ScriptedAdapter())
 
     (result,) = [event for event in events if event["event"] == "adapter-result"]
+    assert result["end_state"] == "finished"
     assert "refused" not in result
 
 

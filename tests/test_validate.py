@@ -55,7 +55,9 @@ def test_opencode_agent_with_mode_subagent_fails(rendered, tiers):
 def test_opencode_agent_that_opencode_run_can_start_has_no_mode_finding(rendered, tiers, mode):
     p = rendered / "opencode" / "java-spring-verifier.md"
     _rewrite(p, "mode: all\n", f"mode: {mode}\n")
-    assert "SUBAGENT_MODE" not in _codes(validate_opencode_dir(rendered / "opencode", tiers))
+    codes = _codes(validate_opencode_dir(rendered / "opencode", tiers))
+    assert codes == []
+    assert "SUBAGENT_MODE" not in codes
 
 
 def test_invalid_model_fails_claude_code(rendered, tiers):
@@ -67,7 +69,9 @@ def test_invalid_model_fails_claude_code(rendered, tiers):
 def test_valid_model_passes_claude_code(rendered, tiers):
     p = rendered / "claude-code" / "java-spring-specialist.md"
     _rewrite(p, "name: java-spring-specialist\n", "name: java-spring-specialist\nmodel: sonnet\n")
-    assert "BAD_MODEL" not in _codes(validate_claude_code_dir(rendered / "claude-code", tiers))
+    codes = _codes(validate_claude_code_dir(rendered / "claude-code", tiers))
+    assert codes == []
+    assert "BAD_MODEL" not in codes
 
 
 def test_invalid_model_fails_opencode(rendered, tiers):
@@ -437,7 +441,9 @@ def test_opencode_guard_accepts_a_different_spelling_of_the_push_pattern(rendere
             {"bash": {"*": "allow", "git push *": "deny", "git -C * push *": "deny"}},
         ),
     )
-    assert "SPECIALIST_CAN_PUSH" not in _codes(validate_opencode_dir(rendered / "opencode", tiers))
+    codes = _codes(validate_opencode_dir(rendered / "opencode", tiers))
+    assert codes == []
+    assert "SPECIALIST_CAN_PUSH" not in codes
 
 
 def test_opencode_deny_on_a_different_git_command_is_not_a_push_guard(rendered, tiers):

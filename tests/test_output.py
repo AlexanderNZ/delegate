@@ -64,6 +64,7 @@ def test_no_role_sets_a_background_colour(monkeypatch, role):
     on_a_terminal(monkeypatch)
     params = [p for code in SGR.findall(paint(role, "x")) for p in code[2:-1].split(";") if p]
 
+    assert bool(params) == (role != "fg")  # each role but fg sets a foreground colour or a style
     assert not [p for p in params if 40 <= int(p) <= 49 or 100 <= int(p) <= 107]
 
 

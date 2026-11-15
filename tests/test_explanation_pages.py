@@ -434,6 +434,7 @@ def test_overview_lists_the_shape_page_among_the_explanation_pages():
 @outside_the_package
 def test_the_layout_diagram_has_no_arrow_from_adapters_to_run():
     text = (ROOT / "docs" / "reference" / "layout.md").read_text()
+    assert "adapters[Adapters] --> ports[Ports]\n" in text
     assert "adapters --> run\n" not in text
 
 

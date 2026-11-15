@@ -234,6 +234,7 @@ def test_the_validator_emits_exactly_the_finding_codes_that_it_documents():
 @pytest.mark.parametrize("section", reference.SECTIONS, ids=lambda section: section.name)
 def test_each_committed_generated_section_matches_the_code(section):
     """The one drift test of a section. A changed flag, exit code, guard command or finding code with no `delegate docs` fails it."""
+    assert (ROOT / section.page).read_text().count(f"<!-- generated:begin {section.id} -->") == 1
     assert section.name not in [stale.name for stale in reference.stale_sections(ROOT)], "run `delegate docs` and commit the result"
 
 

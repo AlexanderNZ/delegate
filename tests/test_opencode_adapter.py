@@ -191,6 +191,7 @@ def test_by_default_the_adapter_adds_no_configuration_to_the_harness(tmp_path, m
     adapters.get("opencode").run(request(tmp_path))
 
     (call,) = fake.calls()
+    assert call["argv"][call["argv"].index("--agent") + 1] == "python-specialist"
     assert "OPENCODE_CONFIG_CONTENT" not in call["env"]
 
 

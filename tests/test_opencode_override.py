@@ -56,6 +56,7 @@ def test_the_override_leaves_the_loaded_table_alone():
 
 def test_the_tier_map_does_not_extend_the_allowed_set_by_itself():
     tiers = load_tiers().with_opencode_override({"strong": "gateway/azure-claude-opus-5"}, [])
+    assert tiers.model_for("strong", "opencode") == "gateway/azure-claude-opus-5"
     assert "gateway/azure-claude-opus-5" not in tiers.allowed_models["opencode"]
 
 

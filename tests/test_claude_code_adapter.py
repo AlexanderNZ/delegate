@@ -663,8 +663,10 @@ def test_with_no_setting_of_the_host_the_command_has_no_settings_file_and_no_per
     adapters.get("claude-code").run(request(tmp_path))
 
     (call,) = fake.calls()
-    assert "--settings" not in call["argv"]
-    assert "--permission-mode" not in call["argv"]
+    argv = call["argv"]
+    assert argv[argv.index("--agent") + 1] == "delegate-seal-python-specialist:python-specialist"
+    assert "--settings" not in argv
+    assert "--permission-mode" not in argv
 
 
 def test_a_settings_file_of_the_host_that_does_not_exist_stops_the_adapter_and_starts_no_agent(tmp_path, monkeypatch):
