@@ -1692,8 +1692,10 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 # 1. It makes the text plain. It removes each backslash-newline, decodes each
 #    ANSI-C quote ($'...') into a double-quoted word, removes the "$" of each
 #    locale quote ($"..."), and reads ${IFS} and $IFS as a blank.
-# 2. It finds each git word: "git", also in quotes, with a backslash or a
-#    path before it ("git", 'git', gi''t, \git, /usr/bin/git). It reads the
+# 2. It finds each git word: "git" in any case (a file system that ignores
+#    case runs "GIT"), also in quotes, with a backslash or a path before it
+#    ("git", 'git', gi''t, \git, /usr/bin/git). It does not find a git word
+#    with a variable or a glob inside it (gi${X}t, /usr/bin/gi?). It reads the
 #    words after it (W): a quoted part, an escaped character, or a run of
 #    characters that is not a space, a quote or a shell operator. It steps
 #    over each redirection (R: 2>&1, >/dev/null, 2> file, <file, &>file). It
@@ -1711,7 +1713,7 @@ def verifier_bash_permission(gates: tuple[str, ...] = ()) -> dict[str, str]:
 # - Exit 4: an option is "-c core.hooksPath..." (in any case) or
 #   "--config-env". A setting on the command line wins over each
 #   configuration file, so it can turn off the pre-push hook of the engine.
-# - Exit 3: the subcommand is push, send-pack or http-push; an option
+# - Exit 3: the subcommand is push, send-pack or http-push (in any case); an option
 #   "-c alias.<name>=..." names one of them; the text has the dashed binary
 #   git-push, git-send-pack or git-http-push (with any path before it); or the
 #   raw text matches the pattern of the guard before #359, which is a floor:
@@ -1738,19 +1740,19 @@ _GIT_PUSH_SCRIPT = "; ".join((
     r'W=r"(?:\x27[^\x27]*\x27|\x22(?:\\.|[^\x22\\])*\x22|\\.|[^\s\x27\x22\\;&|<>()])+"',
     r'R=r"[0-9]*(?:[<>]&[0-9-]+|(?:&>>?|>>?\|?|<<<|<<-?|<>|<)[ \t]*"+W+")"',
     r'O=r"(?:(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source))\x00[^\x00]*\x00|-[^\x00]*\x00)"',
-    r'P=r"(?:push|send-pack|http-push)"',
+    r'P=r"(?i:push|send-pack|http-push)"',
     r'S=lambda x:"\x00".join(re.sub(r"[\x27\x22\\]","",t) for t in re.findall(r"(?:"+R+r")|("+W+r")",x) if t)+"\x00"',
-    r'K=r"(?<![\w.-])[\x27\x22\\]*g[\x27\x22\\]*i[\x27\x22\\]*t[\x27\x22]*(?![\w.-])"',
+    r'K=r"(?<![\w.-])[\x27\x22\\]*[gG][\x27\x22\\]*[iI][\x27\x22\\]*[tT][\x27\x22]*(?![\w.-])"',
     r'G=[(S(m.group(1)),c[m.end():],c[m.start():]) for m in re.finditer(K+r"((?:[ \t]*"+R+r"|[ \t]+"+W+r")*)",c)]',
     r'M=lambda s:re.match(O+r"*[^\x00-][^\x00]*\x00",s)',
     r'Y=r"[$\x60{}*?\[]"',
     r'U=lambda s,a:bool(re.search(Y,M(s).group(0)) if M(s) else re.search(Y,s) or re.match(r"[ \t]*<?\(",a))',
-    r'N=lambda t:re.search(r"push|send-pack|(?i:hookspath)|config-env",re.sub(r"[\x27\x22\\{},]","",t))',
+    r'N=lambda t:re.search(r"(?i:push|send-pack|hookspath|config-env)",re.sub(r"[\x27\x22\\{},]","",t))',
     # The start of each command word that is a substitution or a variable.
     r'V=[m.end() for m in re.finditer(r"(?:^|[;&|\n(\x60{}]|\$\(|\b(?:then|do|else|elif|if|while|until|exec|command|env|nohup|time|sudo|xargs|eval)\b)'
     r'[ \t]*(?:\w+=\S*[ \t]+)*(?=[\x22\x27]?[$\x60])",c)]',
     r'sys.exit(4 if any(re.match(O+r"*?(?:-c\x00(?i:core\.hookspath)|--config-env[=\x00])",s) for s,a,t in G) '
-    r'else 3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b",r) or re.search(r"(?<![\w.-])git-"+P+r"(?![\w.-])",c) '
+    r'else 3 if re.search(r"\bgit(\s+-C\s+\S+)?\s+push\b",r) or re.search(r"(?<![\w.-])(?i:git)-"+P+r"(?![\w.-])",c) '
     r'or any(re.match(O+r"*"+P+r"\x00",s) or re.match(O+r"*?-c\x00(?i:alias\.)[^\x00]*"+P,s) for s,a,t in G) '
     r'else 5 if any(U(s,a) and N(t) for s,a,t in G) or any(N(c[k:]) for k in V) else 0)',
 ))
@@ -1784,7 +1786,8 @@ GIT_PUSH_HOOK = (
 #: quote ($'...'), a brace before the push, and the dashed binaries. The map
 #: does not add a wider "*git push*" pattern (ADR 0002), so a push in a
 #: substitution of another command, or with a git word that the patterns do
-#: not name (gi''t, \git, a path), passes OpenCode.
+#: not name (gi''t, a path, "Git" in another mixed case), passes OpenCode.
+#: The glob is case-sensitive, so the map denies the upper case "GIT" only.
 SPECIALIST_OPENCODE_BASH: dict[str, str] = {
     "*": "allow",
     "git push*": "deny",
@@ -1808,6 +1811,7 @@ SPECIALIST_OPENCODE_BASH: dict[str, str] = {
     "git-send-pack*": "deny",
     "git-http-push*": "deny",
     "$(git --exec-path)/git-*": "deny",
+    "GIT *": "deny",
     "git *-c *core.hooksPath*": "deny",
     "git *-c *core.hookspath*": "deny",
     "git *--config-env*": "deny",

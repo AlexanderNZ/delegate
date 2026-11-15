@@ -185,6 +185,7 @@ def test_opencode_specialist_catch_all_precedes_every_push_deny(rendered):
         ("git-send-pack*", "deny"),
         ("git-http-push*", "deny"),
         ("$(git --exec-path)/git-*", "deny"),
+        ("GIT *", "deny"),
         ("git *-c *core.hooksPath*", "deny"),
         ("git *-c *core.hookspath*", "deny"),
         ("git *--config-env*", "deny"),

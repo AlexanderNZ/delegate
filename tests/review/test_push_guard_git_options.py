@@ -160,6 +160,16 @@ QUOTING = (
     "eval $'git -c core.hooks\\x50ath=/dev/null \\x70ush origin HEAD:refs/heads/x'",
 )
 
+#: The git word in another case: on a file system that ignores case (macOS), `GIT` runs git, and `git-PUSH` runs git-push.
+OTHER_CASE = (
+    "GIT push --no-verify origin HEAD:refs/heads/x",
+    "GIT -c core.hooksPath=/dev/null push origin HEAD:refs/heads/x",
+    "Git push origin HEAD",
+    "git PUSH origin HEAD",
+    "/usr/libexec/git-core/GIT-PUSH origin HEAD",
+    "git-Send-Pack ../remote.git HEAD",
+)
+
 #: B4: the dashed binary of a command that pushes, with any path before it.
 DASHED = (
     "$(git --exec-path)/git-push --no-verify origin HEAD:refs/heads/x",
@@ -430,7 +440,7 @@ def refuses(hook: str, command: str) -> bool:
 def test_the_claude_code_guard_never_allows_a_command_that_the_guard_before_359_refused(claude_code_hook):
     commands = (
         *PROBES, *PUSH_AFTER_OPTIONS, *HOOKS_OFF, *CLAUDE_CODE_ONLY, *DYNAMIC_BEFORE_THE_SUBCOMMAND, *OTHER_PUSH_COMMANDS,
-        *REDIRECTIONS, *GIT_WORDS, *QUOTING, *DASHED,
+        *REDIRECTIONS, *GIT_WORDS, *QUOTING, *DASHED, *OTHER_CASE, *NOT_SEEN,
     )
     refused_before = [command for command in commands if refuses(GUARD_BEFORE_359, command)]
 
@@ -477,7 +487,7 @@ def test_the_claude_code_guard_passes_a_read_with_a_substitution_or_a_variable_t
     assert (r.returncode, r.stderr) == (0, "")
 
 
-@pytest.mark.parametrize("command", [*REDIRECTIONS, *GIT_WORDS, *QUOTING, *DASHED])
+@pytest.mark.parametrize("command", [*REDIRECTIONS, *GIT_WORDS, *QUOTING, *DASHED, *OTHER_CASE])
 def test_the_claude_code_guard_refuses_a_push_hidden_by_a_redirection_a_quoted_git_word_shell_quoting_or_a_dashed_binary(
     claude_code_hook, command
 ):
@@ -506,6 +516,8 @@ OPENCODE_DENIES = (
     "$(git --exec-path)/git-push --no-verify origin HEAD:refs/heads/x",
     "git-push origin HEAD",
     "git-send-pack ../remote.git HEAD",
+    "GIT push --no-verify origin HEAD:refs/heads/x",
+    "GIT -c core.hooksPath=/dev/null push origin HEAD:refs/heads/x",
     "git `echo push` origin HEAD",
     "git -c alias.p=push p origin HEAD",
     "\\git -c core.hooksPath=/dev/null push origin HEAD",
@@ -515,3 +527,17 @@ OPENCODE_DENIES = (
 @pytest.mark.parametrize("command", OPENCODE_DENIES)
 def test_the_opencode_guard_denies_each_form_that_an_anchored_glob_can_match(opencode_permission, command):
     assert opencode_bash_action(opencode_permission, command) == "deny"
+
+
+#: Forms that the hook does not see, as the limits page says: a variable or a glob inside the git word. The guard is a first line,
+#: and the pre-push hook of the engine is the guard that holds. If the hook comes to refuse one of them, move it to a refusal list.
+NOT_SEEN = (
+    "gi${NOPE}t -c core.hooksPath=/dev/null push origin HEAD:refs/heads/x",
+    "/usr/bin/gi? -c core.hooksPath=/dev/null push origin HEAD:refs/heads/x",
+)
+
+
+@pytest.mark.parametrize("command", NOT_SEEN)
+def test_the_claude_code_guard_does_not_see_a_variable_or_a_glob_inside_the_git_word(claude_code_hook, command):
+    # A recorded limit: the docs name these forms, so a doc that claims more than the hook does fails review, not this test.
+    assert not refuses(claude_code_hook, command)
