@@ -23,9 +23,10 @@ terminal.
 
 The time since the last activity of an agent is in the live tail of its row and at the end of its line (#147,
 `status.liveness`). When the frame has paint, an agent that is active shows a spinner, and the view draws the frame
-again from the snapshot that it has after each `SPIN_SECONDS` of the wait between two reads of the journal: the spinner
-steps one frame at each draw. The wait between two reads stays the same. A frame with no spinner is drawn once for each
-read. With no paint, there is no spinner: the line gives `active <time> ago`, as a snapshot.
+again after each `SPIN_SECONDS` of the wait between two reads of the journal: the spinner steps one frame at each draw.
+A draw between two reads composes nothing (#351): the view keeps the lines of the newest frame with `SPIN_CELL` in the
+place of each spinner, and puts the next frame of the spinner in those cells. The wait between two reads stays the same.
+A frame with no spinner is drawn once for each read. With no paint, there is no spinner: the line gives `active <time> ago`, as a snapshot.
 
 The view reads the event streams only through the reader that the command gives (the `activity` method of the adapter
 of the run), so this module never imports an adapter.
@@ -69,6 +70,10 @@ IDLE_WARNING_MINUTES: float = 5
 
 # The seconds between two draws of a frame with a spinner, while the view waits for the next read of the journal (#147).
 SPIN_SECONDS: float = 0.125
+
+# The cell of the spinner in a composed frame, until a draw puts the frame of the spinner in its place (#351). It is a character
+# of the private use area, one cell wide as each frame of the spinner, and no text of a frame holds it.
+SPIN_CELL: str = "\ue000"
 
 
 def local_time(when: datetime) -> str:
@@ -155,6 +160,16 @@ class LiveView:
         self._at: datetime | None = None
         self._spin = 0  # the frame of the spinner of the next draw
         self._spinning = False  # the newest frame has a spinner
+        # The lines of the newest frame with `SPIN_CELL` in the place of the spinner, and the size that they fit (#351): a spin
+        # puts its frame of the spinner in these lines, and composes nothing.
+        self._template: list[str] = []
+        self._template_size: tuple[int, int] | None = None
+        self._on_snapshot: Callable[[status_model.Snapshot | None], None] | None = None
+
+    def on_snapshot(self, callback: Callable[[status_model.Snapshot | None], None]) -> None:
+        """Call `callback` with the snapshot of each poll, after the poll makes it and before the poll draws, so the command
+        makes no second snapshot for the title (#351). The snapshot is None when the journal does not start with `run-start`."""
+        self._on_snapshot = callback
 
     def _now(self) -> datetime:
         """The time of the clock, in UTC."""
@@ -185,19 +200,28 @@ class LiveView:
 
     def poll(self) -> None:
         columns, rows = self._size()
-        self._draw(self.frame(columns, rows, final=False))
+        lines = self.frame(columns, rows, final=False)
+        if self._on_snapshot is not None:
+            self._on_snapshot(self._snap)
+        self._draw(lines)
         self._spin += 1
 
     def wait(self, seconds: float) -> None:
         """Wait for the next read of the journal. While the frame has a spinner, draw it again after each `SPIN_SECONDS`
-        of the wait, from the snapshot of the newest frame, so the spinner steps. The last part of the wait has no draw:
-        the next poll draws."""
+        of the wait, so the spinner steps. A spin composes no table: it puts the next frame of the spinner in the cells of the
+        spinner of the newest frame (#351), and `draw` writes the lines that changed. A new size of the terminal composes the
+        frame again. The last part of the wait has no draw: the next poll draws."""
         left = seconds
         while self._spinning and left > SPIN_SECONDS:
             self._clock.sleep(SPIN_SECONDS)
             left -= SPIN_SECONDS
-            columns, rows = self._size()
-            self._draw(self._compose(columns, rows, final=False))
+            size = self._size()
+            if size != self._template_size:
+                self._draw(self._compose(*size, final=False))
+            else:
+                frames = output.spinner()
+                glyph = frames[self._spin % len(frames)]
+                self._draw([line.replace(SPIN_CELL, glyph) for line in self._template])
             self._spin += 1
         self._clock.sleep(left)
 
@@ -231,7 +255,7 @@ class LiveView:
         known = rows > 0
         room = max(0, rows - 1)
         snap = self._snap
-        spin = self._spin if output.colour_on() else None
+        spin = SPIN_CELL if output.colour_on() else None
         feed = [*self._feed, *(_Line(w.time, w.subject, w.spans) for w in self._waiting.values())]
         if not final and snap is not None:
             feed += self._running(snap, spin)
@@ -251,12 +275,15 @@ class LiveView:
         # The spinner shows for an agent that is active: in the live tail of its row, and at the end of its line.
         idle = [t.idle_seconds for t in snap.tickets if t.idle_seconds is not None] if snap is not None and not final else []
         self._spinning = spin is not None and any(status.liveness(seconds, self._idle_limit, spin)[0] == "now" for seconds in idle)
-        return [output.cut(line, width) for line in [*block, *divider, *lines]]
+        self._template = [output.cut(line, width) for line in [*block, *divider, *lines]]
+        self._template_size = (columns, rows)
+        frames = output.spinner()
+        return [line.replace(SPIN_CELL, frames[self._spin % len(frames)]) for line in self._template]
 
-    def _running(self, snap: status_model.Snapshot, spin: int | None) -> list[_Line]:
+    def _running(self, snap: status_model.Snapshot, spin: int | str | None) -> list[_Line]:
         """A line for each agent that runs now: its role, the time since it started, its tokens in `dim` when the run has a
         reader of the event streams, and the time since its last activity (`status.liveness`). `spin` is the frame of the
-        spinner, or None when the frame has no paint."""
+        spinner (the text of its cell in a composed frame, `SPIN_CELL`), or None when the frame has no paint."""
         now = self._at or self._now()
         idle = {t.id: t.idle_seconds for t in snap.tickets}
         lines = []

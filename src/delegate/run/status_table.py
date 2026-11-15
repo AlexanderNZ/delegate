@@ -179,7 +179,7 @@ class _Row:
 
 def view_lines(
     snap: Snapshot, links: Sequence[PlanLink], width: int, height: int | None = None, idle_limit: int | None = None,
-    spin: int | None = None, warned: frozenset[str] = frozenset(),
+    spin: int | str | None = None, warned: frozenset[str] = frozenset(),
 ) -> list[str]:
     """The lines of the live view of a snapshot: the run line, a blank line, and the ticket table, each cut to `width`.
 
@@ -376,7 +376,7 @@ def _fold_line(snap: Snapshot, fold: _Fold, names: list[str], widths: list[int],
 
 def _rows(
     snap: Snapshot, links: Sequence[PlanLink], idle_limit: int | None, glyph: output.Glyphs, live: bool,
-    facts: dict[str, dict[str, str]] | None = None, spin: int | None = None, warned: frozenset[str] = frozenset(),
+    facts: dict[str, dict[str, str]] | None = None, spin: int | str | None = None, warned: frozenset[str] = frozenset(),
 ) -> list[_Row]:
     """The rows of the ticket table in plan order: one row for each ticket, and under the row of a running ticket a
     sub-row for each phase after its first.
@@ -419,7 +419,7 @@ def _rows(
 
 
 def _chain_row(
-    snap: Snapshot, chain: ChainSnapshot, rail: str, idle_limit: int | None, glyph: output.Glyphs, live: bool, spin: int | None
+    snap: Snapshot, chain: ChainSnapshot, rail: str, idle_limit: int | None, glyph: output.Glyphs, live: bool, spin: int | str | None
 ) -> dict[str, str]:
     """The cells of the chain row of one stack of an `economy` run (#196), by the name of the column.
 
@@ -535,7 +535,7 @@ def _idle(seconds: int, quiet: str, idle_limit: int | None, glyph: output.Glyphs
     return quiet
 
 
-def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Glyphs, spin: int | None) -> str:
+def _activity_tail(ticket: TicketSnapshot, idle_limit: int | None, glyph: output.Glyphs, spin: int | str | None) -> str:
     """The live tail of the row of a running ticket: its continuations, and the activity of its agent (`liveness`)."""
     parts = []
     if ticket.continuation is not None:

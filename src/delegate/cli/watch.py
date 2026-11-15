@@ -49,7 +49,7 @@ import sys
 from pathlib import Path
 
 from ..adapters.git import GitVersionControl
-from ..run import clock, live, run_state, status, status_picker, watch
+from ..run import clock, live, run_state, status, status_model, status_picker, watch
 from ..run.journal import JournalError, setup_problem_note
 from ..run.output import cut, short_run_id, styled
 from ..run.runs import FailedStart, RunsError, journal_of, journal_of_run, runs_of
@@ -142,7 +142,9 @@ class _Titled:
     """A sink that sets the title of the terminal, then tells each call to the sink that it wraps.
 
     At each poll the title gives the percentage and the local time of the ETA of the snapshot of the events so far. The
-    title is set before the sink draws, so a frame of the live view holds no title. At the end the title gives the
+    live view makes that snapshot for its frame, and the title takes it from the view (`LiveView.on_snapshot`): a poll
+    makes one snapshot (#351). Another sink has no snapshot, so the title makes its own. The title is set before the sink
+    draws, so a frame of the live view holds no title. At the end the title gives the
     result of the run, or the reason that the watch ended before the run: `problem`, `verdict`, `stall` or `time limit`.
     """
 
@@ -151,6 +153,9 @@ class _Titled:
         self._name = f"delegate watch{SEPARATOR}{short_run_id(journal.parent.name)}"
         self._events: list[dict[str, object]] = []
         self._result: str | None = None
+        self._from_view = isinstance(sink, live.LiveView)
+        if isinstance(sink, live.LiveView):
+            sink.on_snapshot(self._set_progress)
 
     def event(self, event: dict[str, object], reported: bool, problem: str | None) -> None:
         self._events.append(event)
@@ -179,8 +184,9 @@ class _Titled:
         self._sink.interrupted()
 
     def poll(self) -> None:
-        self._title.set(self._progress())
-        self._sink.poll()
+        if not self._from_view:
+            self._title.set(self._progress())
+        self._sink.poll()  # the live view calls `_set_progress` with its snapshot before it draws
 
     def wait(self, seconds: float) -> None:
         self._sink.wait(seconds)
@@ -195,6 +201,14 @@ class _Titled:
             # The title needs no tokens, so the snapshot reads no event stream.
             snap = status.snapshot_of(self._events, self._journal, lambda adapter: None, utc_now())
         except JournalError:
+            return self._title_of(None)
+        return self._title_of(snap)
+
+    def _set_progress(self, snap: status_model.Snapshot | None) -> None:
+        self._title.set(self._title_of(snap))
+
+    def _title_of(self, snap: status_model.Snapshot | None) -> str:
+        if snap is None:
             return self._name
         eta = live.local_time(snap.eta) if snap.eta else "-"
         return f"{self._name}{SEPARATOR}{snap.percent}%{SEPARATOR}ETA {eta}"

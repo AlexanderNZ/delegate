@@ -660,12 +660,13 @@ def snapshot_of_journal(journal: Path, reader_of: ReaderOf, now: datetime) -> Sn
     return snapshot_of(events, journal, reader_of, now)
 
 
-def liveness(seconds: int, idle_limit: int | None, spin: int | None) -> tuple[str, str]:
+def liveness(seconds: int, idle_limit: int | None, spin: int | str | None) -> tuple[str, str]:
     """The paint role and the text of the time since the last activity of an agent (#147).
 
     At `idle_limit` seconds or more, it is the warning `⚠ idle <time>` in `warn`. Else, with no `spin`, it is the text
     of a snapshot: `active <time> ago` in `now`. A live view that animates gives the frame of its spinner in `spin`:
     under `_QUIET_SECONDS`, the text is that frame of the spinner, in `now`, and after it `quiet <time>` in `dim`.
+    `spin` can also be the text of the cell of the spinner, which the view puts in the place of each frame (#351).
     """
     if idle_limit is not None and seconds >= idle_limit:
         return "warn", f"{output.glyphs().idle} idle {format_duration(seconds)}"
@@ -673,7 +674,7 @@ def liveness(seconds: int, idle_limit: int | None, spin: int | None) -> tuple[st
         return "now", f"active {format_duration(seconds)} ago"
     if seconds < _QUIET_SECONDS:
         frames = output.spinner()
-        return "now", frames[spin % len(frames)]
+        return "now", spin if isinstance(spin, str) else frames[spin % len(frames)]
     return "dim", f"quiet {format_duration(seconds)}"
 
 
