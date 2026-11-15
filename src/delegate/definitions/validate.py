@@ -7,6 +7,7 @@ declaration that produced it, so hand-written files get the same judgement.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -304,7 +305,192 @@ def _opencode_blocks_push(fm: dict) -> bool:
     return all(opencode_bash_action(permission, probe) == "deny" for probe in PUSH_PROBES)
 
 
-def validate_claude_code_dir(d: Path, tiers: Tiers) -> list[Finding]:
+def _claude_code_name(f: Path, fm: dict, findings: list[Finding]):
+    """The name of a Claude Code agent is its `name` key. A file with no name is documentation, so the loop skips it."""
+    name = fm.get("name")
+    if not name:
+        findings.append(Finding("MISSING_NAME", f.name, "no name; Claude Code treats the file as documentation"))
+        return None
+    if not NAME_RE.match(str(name)) or ":" in str(name):
+        findings.append(Finding("NAME_INVALID", f.name, f"name {name!r} must not start with '-' or contain ':'"))
+    return name
+
+
+def _opencode_name(f: Path, fm: dict, findings: list[Finding]):
+    """OpenCode names a Markdown agent by its filename."""
+    return f.stem
+
+
+def _claude_code_effort_findings(fm: dict, fname: str, tiers: Tiers) -> list[Finding]:
+    if "effort" in fm and fm["effort"] not in tiers.effort_levels:
+        return [Finding("BAD_EFFORT", fname, f"effort {fm['effort']!r} is not one of {tiers.effort_levels}")]
+    return []
+
+
+def _opencode_effort_findings(fm: dict, fname: str, tiers: Tiers) -> list[Finding]:
+    if "variant" in fm and fm["variant"] not in tiers.opencode_variants:
+        return [Finding("BAD_EFFORT", fname, f"variant {fm['variant']!r} is not one of {tiers.opencode_variants}")]
+    return []
+
+
+def _claude_code_shape_findings(fm: dict, fname: str) -> list[Finding]:
+    return []
+
+
+def _opencode_shape_findings(fm: dict, fname: str) -> list[Finding]:
+    out: list[Finding] = []
+    if fm.get("mode") == "subagent":
+        out.append(Finding(
+            "SUBAGENT_MODE", fname,
+            "mode is 'subagent', so `opencode run --agent` refuses the agent and runs its default agent; use mode: all",
+        ))
+    if "tools" in fm and isinstance(fm["tools"], str):
+        out.append(Finding("BAD_TYPE", fname, "tools must be a map; a string aborts OpenCode config load"))
+    return out
+
+
+def _claude_code_permission_findings(fm: dict, fname: str) -> list[Finding]:
+    return []
+
+
+def _opencode_permission_findings(fm: dict, fname: str) -> list[Finding]:
+    permission = fm.get("permission")
+    return _shadowed_rules(permission, fname) if isinstance(permission, dict) else []
+
+
+def _claude_code_verifier_findings(fm: dict, fname: str) -> list[Finding]:
+    findings: list[Finding] = []
+    tools = _tools_list(fm.get("tools"))
+    if not tools:
+        findings.append(Finding("VERIFIER_NOT_READONLY", fname, "verifier has no tools allowlist, so it inherits write tools"))
+    # Bash on a verifier is legal only beside the guard hook. Without
+    # the guard the verifier has a full shell, so both findings fire.
+    guarded = _claude_code_guarded(fm, "Bash", VERIFIER_GUARD_MARKER)
+    if "Bash" in tools and not guarded:
+        findings.append(Finding("VERIFIER_BASH_UNGUARDED", fname, f"verifier lists Bash with no PreToolUse hook on Bash that carries {VERIFIER_GUARD_MARKER!r}"))
+    # Write on a verifier is legal only beside the Write guard, which
+    # keeps each Write in a temp directory.
+    write_guarded = _claude_code_guarded(fm, "Write", VERIFIER_WRITE_GUARD_MARKER)
+    write_tools = CLAUDE_CODE_WRITE_TOOLS - ({"Bash"} if guarded else set()) - ({"Write"} if write_guarded else set())
+    bad = sorted(set(tools) & write_tools)
+    if bad:
+        unguarded = f"; Write needs a PreToolUse hook on Write that carries {VERIFIER_WRITE_GUARD_MARKER!r}" if "Write" in bad else ""
+        findings.append(Finding("VERIFIER_WRITE_TOOL", fname, f"verifier lists write-capable tools {bad}{unguarded}"))
+    return findings
+
+
+def _opencode_verifier_findings(fm: dict, fname: str) -> list[Finding]:
+    findings: list[Finding] = []
+    perm = fm.get("permission")
+    if not isinstance(perm, dict) or not perm:
+        findings.append(Finding("VERIFIER_NOT_READONLY", fname, "verifier has no permission map"))
+        return findings
+    first_key, first_val = next(iter(perm.items()))
+    if first_key != "*" or first_val != "deny":
+        findings.append(Finding("VERIFIER_NOT_READONLY", fname, 'the first permission rule must be "*": deny; the last matching rule wins'))
+    outside = False
+    for t in sorted(OPENCODE_WRITE_TOOLS):
+        v = perm.get(t)
+        if t in OPENCODE_FILE_WRITE_TOOLS and _opencode_outside_only(v):
+            # A file write outside the project only. The
+            # external_directory check below keeps it in a temp
+            # directory.
+            outside = outside or any(a == "allow" for a in v.values())
+            continue
+        if t == "bash" and isinstance(v, dict):
+            # A guarded bash map: its own catch-all deny first, then
+            # read patterns. The probes resolve the map the way
+            # OpenCode does, so the spelling of a pattern is free.
+            keys = list(v)
+            if not keys or keys[0] != "*" or v[keys[0]] != "deny":
+                findings.append(Finding("VERIFIER_WRITE_TOOL", fname, 'the verifier bash map must open with "*": deny; the last matching rule wins'))
+            for probe in VERIFIER_BASH_WRITE_PROBES:
+                if opencode_bash_action(perm, probe) in ("allow", "ask"):
+                    findings.append(Finding("VERIFIER_WRITE_TOOL", fname, f"the verifier bash map permits {probe!r}"))
+            continue
+        if v == "allow" or v == "ask" or (isinstance(v, dict) and any(x in ("allow", "ask") for x in v.values())):
+            findings.append(Finding("VERIFIER_WRITE_TOOL", fname, f"verifier permits {t!r}; build read-only from deny, never ask"))
+    if outside and not _opencode_temp_only(perm.get("external_directory")):
+        findings.append(Finding(
+            "VERIFIER_WRITE_TOOL", fname,
+            "the verifier writes outside the project, and its external_directory map does not open with "
+            '"*": deny and allow only temp prefixes, so it can write outside a temp directory',
+        ))
+    return findings
+
+
+@dataclass(frozen=True)
+class HarnessRules:
+    """The rules that only one harness has. `validate_dir` runs one loop and asks these rules at each step.
+
+    The order of the steps is the order of the findings of a file, so a rule
+    that a harness lacks is a function that finds nothing, not a missing step.
+    """
+
+    #: The key of this harness in the tier table (`tiers.allowed_models`).
+    tiers_key: str
+    #: The frontmatter keys that the harness knows.
+    keys: frozenset[str]
+    #: The name of an agent, from the file. `None` skips the file.
+    name_of: Callable[[Path, dict, list[Finding]], object]
+    description_message: str
+    unknown_key_message: str
+    #: The check of the effort: `effort` on Claude Code, `variant` on OpenCode.
+    effort_findings: Callable[[dict, str, Tiers], list[Finding]]
+    #: The checks of the shape of the values, after the effort.
+    shape_findings: Callable[[dict, str], list[Finding]]
+    #: The checks of the permission map, after the duplicate name.
+    permission_findings: Callable[[dict, str], list[Finding]]
+    blocks_push: Callable[[dict], bool]
+    push_message: str
+    verifier_findings: Callable[[dict, str], list[Finding]]
+    #: Claude Code loads each description into the context, so only it has a budget.
+    has_description_budget: bool
+
+
+HARNESS_RULES: dict[str, HarnessRules] = {
+    "claude-code": HarnessRules(
+        tiers_key="claude-code",
+        keys=frozenset(CLAUDE_CODE_KEYS),
+        name_of=_claude_code_name,
+        description_message="name without description; the harness skips the file",
+        unknown_key_message="{key!r} is not a Claude Code agent frontmatter field; it is inert",
+        effort_findings=_claude_code_effort_findings,
+        shape_findings=_claude_code_shape_findings,
+        permission_findings=_claude_code_permission_findings,
+        blocks_push=_claude_code_blocks_push,
+        push_message="no PreToolUse hook on Bash blocks git push, so the specialist can push",
+        verifier_findings=_claude_code_verifier_findings,
+        has_description_budget=True,
+    ),
+    "opencode": HarnessRules(
+        tiers_key="opencode",
+        keys=frozenset(OPENCODE_KEYS),
+        name_of=_opencode_name,
+        description_message="OpenCode agents need a description for routing",
+        unknown_key_message="{key!r} is not an OpenCode agent field; it is swept into provider options",
+        effort_findings=_opencode_effort_findings,
+        shape_findings=_opencode_shape_findings,
+        permission_findings=_opencode_permission_findings,
+        blocks_push=_opencode_blocks_push,
+        push_message="no permission.bash deny covers git push, so the specialist can push",
+        verifier_findings=_opencode_verifier_findings,
+        has_description_budget=False,
+    ),
+}
+
+
+def validate_dir(d: Path, tiers: Tiers, harness: str) -> list[Finding]:
+    """Validate the agent files of one directory against the rules of one harness.
+
+    The loop is the same for each harness: the frontmatter, the name, the
+    description, the unknown keys, the model, the effort, the duplicate name,
+    the specialist that can push, the verifier, then the twins and the budget.
+    `HARNESS_RULES[harness]` holds what differs.
+    """
+    if harness not in HARNESS_RULES:
+        raise ValueError(f"unknown harness {harness!r}; use one of {sorted(HARNESS_RULES)}")
+    rules = HARNESS_RULES[harness]
     d = Path(d)
     findings: list[Finding] = []
     seen: dict[str, str] = {}
@@ -314,121 +500,38 @@ def validate_claude_code_dir(d: Path, tiers: Tiers) -> list[Finding]:
         if err:
             findings.append(Finding("BAD_FRONTMATTER", f.name, err))
             continue
-        name = fm.get("name")
-        if not name:
-            findings.append(Finding("MISSING_NAME", f.name, "no name; Claude Code treats the file as documentation"))
+        name = rules.name_of(f, fm, findings)
+        if name is None:
             continue
-        if not NAME_RE.match(str(name)) or ":" in str(name):
-            findings.append(Finding("NAME_INVALID", f.name, f"name {name!r} must not start with '-' or contain ':'"))
         if not fm.get("description"):
-            findings.append(Finding("MISSING_DESCRIPTION", f.name, "name without description; the harness skips the file"))
+            findings.append(Finding("MISSING_DESCRIPTION", f.name, rules.description_message))
         desc_chars += len(str(fm.get("description", "")))
-        unknown = set(fm) - CLAUDE_CODE_KEYS
-        for k in sorted(unknown):
-            findings.append(Finding("UNKNOWN_KEY", f.name, f"{k!r} is not a Claude Code agent frontmatter field; it is inert"))
-        if "model" in fm and fm["model"] not in tiers.allowed_models["claude-code"]:
+        for k in sorted(set(fm) - rules.keys):
+            findings.append(Finding("UNKNOWN_KEY", f.name, rules.unknown_key_message.format(key=k)))
+        if "model" in fm and fm["model"] not in tiers.allowed_models[rules.tiers_key]:
             findings.append(Finding("BAD_MODEL", f.name, f"model {fm['model']!r} is not in the tier table's allowed set"))
-        if "effort" in fm and fm["effort"] not in tiers.effort_levels:
-            findings.append(Finding("BAD_EFFORT", f.name, f"effort {fm['effort']!r} is not one of {tiers.effort_levels}"))
+        findings.extend(rules.effort_findings(fm, f.name, tiers))
+        findings.extend(rules.shape_findings(fm, f.name))
         if name in seen:
             findings.append(Finding("DUPLICATE_NAME", f.name, f"name {name!r} also declared by {seen[name]}"))
         seen.setdefault(str(name), f.name)
-        if str(name).endswith("-specialist") and not _claude_code_blocks_push(fm):
-            findings.append(Finding("SPECIALIST_CAN_PUSH", f.name, "no PreToolUse hook on Bash blocks git push, so the specialist can push"))
+        findings.extend(rules.permission_findings(fm, f.name))
+        if str(name).endswith("-specialist") and not rules.blocks_push(fm):
+            findings.append(Finding("SPECIALIST_CAN_PUSH", f.name, rules.push_message))
         if str(name).endswith("-verifier"):
-            tools = _tools_list(fm.get("tools"))
-            if not tools:
-                findings.append(Finding("VERIFIER_NOT_READONLY", f.name, "verifier has no tools allowlist, so it inherits write tools"))
-            # Bash on a verifier is legal only beside the guard hook. Without
-            # the guard the verifier has a full shell, so both findings fire.
-            guarded = _claude_code_guarded(fm, "Bash", VERIFIER_GUARD_MARKER)
-            if "Bash" in tools and not guarded:
-                findings.append(Finding("VERIFIER_BASH_UNGUARDED", f.name, f"verifier lists Bash with no PreToolUse hook on Bash that carries {VERIFIER_GUARD_MARKER!r}"))
-            # Write on a verifier is legal only beside the Write guard, which
-            # keeps each Write in a temp directory.
-            write_guarded = _claude_code_guarded(fm, "Write", VERIFIER_WRITE_GUARD_MARKER)
-            write_tools = CLAUDE_CODE_WRITE_TOOLS - ({"Bash"} if guarded else set()) - ({"Write"} if write_guarded else set())
-            bad = sorted(set(tools) & write_tools)
-            if bad:
-                unguarded = f"; Write needs a PreToolUse hook on Write that carries {VERIFIER_WRITE_GUARD_MARKER!r}" if "Write" in bad else ""
-                findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"verifier lists write-capable tools {bad}{unguarded}"))
+            findings.extend(rules.verifier_findings(fm, f.name))
     findings.extend(_pair_findings(set(seen), str(d)))
-    if desc_chars > tiers.description_budget_chars:
+    if rules.has_description_budget and desc_chars > tiers.description_budget_chars:
         findings.append(Finding("DESCRIPTION_BUDGET", str(d), f"combined descriptions are {desc_chars} chars; budget is {tiers.description_budget_chars}"))
     return findings
 
 
+def validate_claude_code_dir(d: Path, tiers: Tiers) -> list[Finding]:
+    return validate_dir(d, tiers, "claude-code")
+
+
 def validate_opencode_dir(d: Path, tiers: Tiers) -> list[Finding]:
-    d = Path(d)
-    findings: list[Finding] = []
-    seen: dict[str, str] = {}
-    for f in sorted(d.glob("*.md")):
-        fm, _body, err = split_frontmatter(f.read_text())
-        if err:
-            findings.append(Finding("BAD_FRONTMATTER", f.name, err))
-            continue
-        name = f.stem  # OpenCode names a Markdown agent by its filename
-        if not fm.get("description"):
-            findings.append(Finding("MISSING_DESCRIPTION", f.name, "OpenCode agents need a description for routing"))
-        for k in sorted(set(fm) - OPENCODE_KEYS):
-            findings.append(Finding("UNKNOWN_KEY", f.name, f"{k!r} is not an OpenCode agent field; it is swept into provider options"))
-        if "model" in fm and fm["model"] not in tiers.allowed_models["opencode"]:
-            findings.append(Finding("BAD_MODEL", f.name, f"model {fm['model']!r} is not in the tier table's allowed set"))
-        if "variant" in fm and fm["variant"] not in tiers.opencode_variants:
-            findings.append(Finding("BAD_EFFORT", f.name, f"variant {fm['variant']!r} is not one of {tiers.opencode_variants}"))
-        if fm.get("mode") == "subagent":
-            findings.append(Finding(
-                "SUBAGENT_MODE", f.name,
-                "mode is 'subagent', so `opencode run --agent` refuses the agent and runs its default agent; use mode: all",
-            ))
-        if "tools" in fm and isinstance(fm["tools"], str):
-            findings.append(Finding("BAD_TYPE", f.name, "tools must be a map; a string aborts OpenCode config load"))
-        if name in seen:
-            findings.append(Finding("DUPLICATE_NAME", f.name, f"name {name!r} also declared by {seen[name]}"))
-        seen.setdefault(name, f.name)
-        perm_any = fm.get("permission")
-        if isinstance(perm_any, dict):
-            findings.extend(_shadowed_rules(perm_any, f.name))
-        if name.endswith("-specialist") and not _opencode_blocks_push(fm):
-            findings.append(Finding("SPECIALIST_CAN_PUSH", f.name, "no permission.bash deny covers git push, so the specialist can push"))
-        if name.endswith("-verifier"):
-            perm = fm.get("permission")
-            if not isinstance(perm, dict) or not perm:
-                findings.append(Finding("VERIFIER_NOT_READONLY", f.name, "verifier has no permission map"))
-            else:
-                first_key, first_val = next(iter(perm.items()))
-                if first_key != "*" or first_val != "deny":
-                    findings.append(Finding("VERIFIER_NOT_READONLY", f.name, 'the first permission rule must be "*": deny; the last matching rule wins'))
-                outside = False
-                for t in sorted(OPENCODE_WRITE_TOOLS):
-                    v = perm.get(t)
-                    if t in OPENCODE_FILE_WRITE_TOOLS and _opencode_outside_only(v):
-                        # A file write outside the project only. The
-                        # external_directory check below keeps it in a temp
-                        # directory.
-                        outside = outside or any(a == "allow" for a in v.values())
-                        continue
-                    if t == "bash" and isinstance(v, dict):
-                        # A guarded bash map: its own catch-all deny first, then
-                        # read patterns. The probes resolve the map the way
-                        # OpenCode does, so the spelling of a pattern is free.
-                        keys = list(v)
-                        if not keys or keys[0] != "*" or v[keys[0]] != "deny":
-                            findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, 'the verifier bash map must open with "*": deny; the last matching rule wins'))
-                        for probe in VERIFIER_BASH_WRITE_PROBES:
-                            if opencode_bash_action(perm, probe) in ("allow", "ask"):
-                                findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"the verifier bash map permits {probe!r}"))
-                        continue
-                    if v == "allow" or v == "ask" or (isinstance(v, dict) and any(x in ("allow", "ask") for x in v.values())):
-                        findings.append(Finding("VERIFIER_WRITE_TOOL", f.name, f"verifier permits {t!r}; build read-only from deny, never ask"))
-                if outside and not _opencode_temp_only(perm.get("external_directory")):
-                    findings.append(Finding(
-                        "VERIFIER_WRITE_TOOL", f.name,
-                        "the verifier writes outside the project, and its external_directory map does not open with "
-                        '"*": deny and allow only temp prefixes, so it can write outside a temp directory',
-                    ))
-    findings.extend(_pair_findings(set(seen), str(d)))
-    return findings
+    return validate_dir(d, tiers, "opencode")
 
 
 def _shadowed_rules(perm: dict, fname: str) -> list[Finding]:
