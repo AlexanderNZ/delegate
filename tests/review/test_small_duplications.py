@@ -7,12 +7,15 @@ operating system) is patched. The expected values come from the ticket and from 
 from __future__ import annotations
 
 import json
+import re
 import socket
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
+import delegate
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.ports.index import RunRecord
 from delegate.run import fleet_rules, host, status_model, user_config
@@ -117,3 +120,17 @@ def test_the_backfill_keeps_a_record_as_new_as_its_journal(tmp_path):
     assert record_runs(root, "laptop", NOW, index) is None
 
     assert json.loads((tmp_path / "index" / f"{run_id}.json").read_text()) == first
+
+
+#: A parse of the `time` of an event on one line: `fromisoformat(...["time"]...)`.
+INLINE_EVENT_TIME = re.compile(r"fromisoformat\(.*\[\s*[\x27\x22]time[\x27\x22]\s*\]")
+
+
+def test_only_the_journal_module_parses_the_time_of_an_event():
+    # The one helper is `journal.event_time`. A module that parses `event["time"]` itself can drift from it.
+    source = Path(delegate.__file__).parent
+    found = sorted(
+        str(path.relative_to(source)) for path in source.rglob("*.py") if INLINE_EVENT_TIME.search(path.read_text())
+    )
+
+    assert found == ["run/journal.py"]

@@ -34,7 +34,7 @@ from pathlib import Path
 
 from . import run_state
 from .errors import EngineError
-from .journal import JournalError, read_events, read_new_events
+from .journal import JournalError, event_time, read_events, read_new_events
 from .lock import LOCK_SUFFIX, LockError, live_holder, live_holder_of_run
 from .state_location import JOURNAL_NAME, STATE_ROOT_VARIABLE, StateLocation, StateRootError, default_state_root, locate_state
 from ..ports.vcs import VersionControl
@@ -54,7 +54,7 @@ def _start_time(journal: Path) -> datetime:
     if not line.endswith("\n"):
         return datetime.min.replace(tzinfo=timezone.utc)
     try:
-        return datetime.fromisoformat(json.loads(line)["time"])
+        return event_time(json.loads(line))
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         raise RunsError(f"journal {journal}: the first line is not an event with a time") from None
 

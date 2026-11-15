@@ -46,7 +46,7 @@ from xml.sax.saxutils import escape
 from ..cli.status import stream_reader_of
 from ..cli.watch import PROMPT
 from ..run import live, output, run_state, status, status_picker, status_table, watch
-from ..run.journal import ACTIVITY_FIELDS, read_new_events
+from ..run.journal import ACTIVITY_FIELDS, event_time, read_new_events
 from ..run.lock import run_lock
 from ..run.state_location import JOURNAL_NAME
 
@@ -222,7 +222,7 @@ def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Pat
                 path.write_text("")  # a gate log: the code reads only its time
         if run_state.fold(events).status.kind == run_state.ACTIVE:
             locks.enter_context(run_lock(state, str(events[0]["run_branch"]), source.stem))
-        newest = datetime.fromisoformat(str(events[-1]["time"])).timestamp()
+        newest = event_time(events[-1]).timestamp()
         for path in [journal, *files]:
             os.utime(path, (newest, newest))
         journals.append(journal)
