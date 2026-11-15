@@ -32,7 +32,7 @@ import shutil
 import sys
 
 from ..adapters.ssh_hosts import SshHostReader
-from ..run import clock
+from ..run import clock, status
 from ..run.fleet import EtaMemory, fleet_of
 from ..run.fleet_hosts import HostReads
 from ..run.fleet_model import ViewSettings
@@ -115,6 +115,8 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
     the_clock = clock.current()
     screen, reads, hosts = Screen(sys.stdout), JournalReads(), _host_reads(settings, background=True)
     etas = EtaMemory()
+    # One reader of each adapter for all the redraws, so a stream that grew is read from its last place (#352).
+    reader_of = status.caching(stream_reader_of)
     reported: set[str] = set()  # the lines of the journals that cannot be read, so each goes on stderr once
     late: list[str] = []
     first = True
@@ -123,7 +125,7 @@ def _watch(settings: MachineSettings, timeline: bool, local: bool) -> int:
             with stop_signals_as_ctrl_c():
                 while True:
                     found = fleet_of(
-                        settings.root, host_name(), utc_now(), stream_reader_of, reads, settings.index.index, not local, hosts, _view(settings, local), etas,
+                        settings.root, host_name(), utc_now(), reader_of, reads, settings.index.index, not local, hosts, _view(settings, local), etas,
                     )
                     new = [line for line in found.unreadable_lines("delegate runs") if line not in reported]
                     reported.update(new)

@@ -299,3 +299,38 @@ def test_a_view_reads_each_record_file_of_the_index_once(machine, monkeypatch, c
 
     assert code == 0
     assert sorted(opened.of_kind(".json")) == sorted(str(path) for path in records)  # one listing: two listings read each record twice
+
+
+def claude_event(step: int) -> str:
+    """One event of a `claude-code` stream: step n has 3n new tokens and 100n cache reads."""
+    usage = {"input_tokens": step, "cache_creation_input_tokens": 0, "output_tokens": 2 * step, "cache_read_input_tokens": 100 * step}
+    return json.dumps({"type": "assistant", "message": {"id": f"msg_{step}", "usage": usage}, "timestamp": f"2026-10-08T14:0{step}:00.000Z"})
+
+
+def test_a_redraw_after_the_stream_of_an_agent_grew_reads_only_the_new_bytes_of_the_stream(machine, monkeypatch, capsys, tmp_path):
+    # #352: the reader of the adapter keeps its place in the stream from redraw to redraw. A full read in the second redraw
+    # would meet the damaged old line, and the row would show no tokens.
+    stream = tmp_path / "a.stream.jsonl"
+    start = json.dumps({"type": "system", "subtype": "init", "note": "p" * 600})
+    stream.write_text("\n".join([start, claude_event(1), claude_event(2)]) + "\n")
+    started = (clock_time(14, 0), "agent-start", {"ticket": "1", "role": "specialist", "round": 0, "event_stream": str(stream)})
+    write_run(machine, "delegate", "3c98", clock_time(13, 0), [working("1", clock_time(14, 0)), started], adapter="claude-code", lock=True)
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 1:
+            lines = stream.read_bytes().split(b"\n")
+            lines[1] = b"x" * len(lines[1])  # the old line of step 1, with the same size, so the start of the file stays
+            stream.write_bytes(b"\n".join(lines) + claude_event(3).encode() + b"\n")
+        else:
+            ctrl_c()
+
+    fake_clock().on_sleep = sleep
+
+    _, out, _ = watching(monkeypatch, capsys, columns=160)
+
+    first, second = frames(out)
+    totals = [next(line for line in frame if " new · " in line) for frame in (first, second)]
+    assert "9 new · 300 cache" in totals[0]  # steps 1 and 2
+    assert "18 new · 600 cache" in totals[1], totals[1]  # steps 1 to 3: step 1 from the first read, step 3 from the new bytes
