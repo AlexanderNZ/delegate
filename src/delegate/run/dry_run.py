@@ -34,7 +34,7 @@ def review_plan_change(
 
     The result also holds what the resume does with each ticket that the run skipped (see `engine._skipped_outlook`).
     `coordinator_commit` is the commit of `--coordinator-commit`, or None. With it, the review makes the checks of
-    the commit that the resume makes (`engine._coordinator_commit`), and a refusal has the text of the refusal of the resume
+    the commit that the resume makes (`retry.check_coordinator_commit`), and a refusal has the text of the refusal of the resume
     (#283). `config_paths` are the project configuration paths of the adapter, which are hotspots too. `stack_changed` is
     `--stack-changed` (#290): a changed stack does not refuse the review, and the result holds each change.
 

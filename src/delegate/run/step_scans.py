@@ -8,7 +8,8 @@ functions are:
 * `unanswered_stop`: the newest `agents-changed` that no `agent-start` follows (the stop of the agent check, #205);
 * `verify_commit_before`, `accepted_verdict` and `accepted_commits`: the commit of the `verify-start` before a verdict;
 * `advance_place` and `events_after_advance`: the place of the newest `run-branch-advance`, and the events after it;
-* `chain_failed`: a step that the verification of an `economy` chain failed (#270, #338).
+* `chain_failed`: a step that the verification of an `economy` chain failed (#270, #338);
+* `specialist_done` and `specialist_reports`: a valid report of the specialist after its last spawn (#339).
 
 A place is the index of an event in the list that the function got. A caller that slices the list gets a place in the slice.
 """
@@ -130,3 +131,19 @@ def events_after_advance(events: Sequence[Event]) -> list[Event]:
 def chain_failed(prior: Sequence[Event]) -> bool:
     """True when the verification of the chain failed the step: the step has a `step-end` built before its newest `step-end`."""
     return any(e["event"] == "step-end" and e["state"] == BUILT for e in prior)
+
+
+def specialist_reports(prior: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    """The `report-validation` events of the step when a valid report of the specialist came after its last spawn, else none."""
+    return [e for e in prior if e["event"] == "report-validation"] if specialist_done(list(prior)) else []
+
+
+def specialist_done(prior: list[dict[str, object]]) -> bool:
+    """True when the journal shows a valid specialist report after the last time the specialist was spawned."""
+    spawned = valid = -1
+    for index, event in enumerate(prior):
+        if event["event"] in ("step-start", "continuation"):
+            spawned = index
+        elif event["event"] == "report-validation" and event["valid"]:
+            valid = index
+    return valid > spawned

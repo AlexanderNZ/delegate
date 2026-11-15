@@ -65,13 +65,14 @@ from ..run import status, status_model
 from ..run.domain import START_RUN_BRANCH
 from ..run.domain import PLAN_RULES
 from ..run.dry_run import review_plan_change
-from ..run.engine import RetryHint, RunInterrupted, check_start, new_run_id, project_config_paths, retry_hints, run_workflow
+from ..run.engine import RunInterrupted, check_start, new_run_id, project_config_paths, run_workflow
 from ..run.errors import EngineError
 from ..run.host import host_name
 from ..run.index import index_observers, record_runs
 from ..run.output import glyphs, short_run_id, styled
 from ..run.plan_review import PlanReview
 from ..run.quality import quality_checks
+from ..run.retry import RetryHint, retry_hints
 from ..run.runs import LOG_NAME, RunsError, journal_of, locate, repository_of_run, run_id_of
 from ..run.state_location import StateLocation, StateRootError, locate_state, record_state_root, workflow_of_run
 from ..run.user_config import UserConfigError, config_path
