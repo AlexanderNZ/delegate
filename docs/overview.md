@@ -196,6 +196,8 @@ The engine records the run in the journal: one line for each event, appended and
 
 I made it this way for three reasons. A run that stops, after Ctrl-C or a kill, can [**resume**](glossary.md#resume) from the journal at the first ticket that is not complete, and it never builds a finished ticket again. So can a run that I stop overnight with a [**pause**](glossary.md#pause): it waits for the next step boundary, so it cuts off no agent. The resume can also carry a [**plan change**](glossary.md#plan-change): a new ticket, or a change to a ticket that has not started. The built part of the run stays as it is. `delegate status` and `delegate watch` read the journal, so I can see where a run is, and `watch` exits when the run needs me. And the journal is the record of the evidence: what ran, in which order, with which result. It's also the first place to look when a model falls short, because every REJECT and every fix-up round is in it.
 
+`delegate runs` is for the case of more than one run. It shows in one view each run of each repository on this machine, and of each host of the configuration file. I use it to find a run, and then I give its id to `status` or `watch`. See [the reference of `delegate runs`](reference/runs.md) and [how to see the runs of more than one host](how-to/see-the-runs-of-more-than-one-host.md).
+
 ## What delegate is not
 
 - *Not a model router.* It does not read a ticket and choose a model for it. A workflow names tiers, and the tier table maps each tier to a model. The choice stays with me, in one file.

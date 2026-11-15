@@ -35,6 +35,37 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
 09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s ago
 ```
 
+`delegate status` shows one run, and `delegate watch` follows one run. `delegate runs` lists each run of each repository on this machine in one table. It also lists the runs of the hosts of your configuration file. This is `delegate runs` with three repositories and two hosts. The text under the figure is the same frame with no colour. [The reference of `delegate runs`](https://alexandernz.github.io/delegate/reference/runs/) says what each column means.
+
+![The output of delegate runs: a table of the runs of two hosts, with the fleet lines above it and the legend under it. The text below gives the same frame.](docs/assets/terminal/runs-table-light.svg#gh-light-mode-only)
+![The output of delegate runs: a table of the runs of two hosts, with the fleet lines above it and the legend under it. The text below gives the same frame.](docs/assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner
+runs  3 of 4 reachable  ███████░░░░░░░░░ 47%  11/23 ended  ETA 16:32 · 1 with no ETA  570k new · 6.6M cache
+09:20–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all  ▂▃▃▇▂ speeding up
+
+host       repo  run   state        ended  ETA    slip   new  cache  trend   alert          do
+laptop                              11/23  16:32        570k   6.6M
+│          docs  c91d  paused       2/6                  83k   923k      ▄▄                 resume
+│          web   b72e  running      3/9    16:32        198k   2.3M     ▄▇   fix-up 1/2     watch
+│          api   a3f1  running      6/8    14:50        289k   3.4M   ▄▇▄▇   ⚠ idle 6m40s   watch
+
+ci-runner              unreachable                                           heard 47m ago  check host
+│                      ssh cannot reach ci-runner: Connection timed out
+│          api   5d02  running      3/10
+
+ended
+laptop     web   d104  built        4/4                 182k   2.1M  ▄▇▄                    merge
+laptop     docs  e7a2  failed       5/5                 122k   1.5M   ▇                     retry
+
+watch       delegate watch <run>
+resume      delegate run --resume <run>
+retry       delegate run --resume <run> --retry <ticket>
+merge       git merge --ff-only <run branch>
+check host  ssh <host>; on another host, put ssh <host> in front of each command
+```
+
 ## Docs
 
 The docs are at **[alexandernz.github.io/delegate](https://alexandernz.github.io/delegate/)**, built from [`docs/`](docs/overview.md). Start with [the overview](docs/overview.md): the problem, the idea, the team and the loop from a ticket to a merge. Then follow [the tutorial](docs/tutorial.md) from install to one verified ticket. To write the workflow of a real run, follow [how to write a workflow for a run](docs/how-to/write-a-workflow-for-a-run.md). Each term is in [the glossary](docs/glossary.md).

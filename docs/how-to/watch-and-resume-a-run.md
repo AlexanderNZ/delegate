@@ -51,6 +51,8 @@ When the run starts, the command prints three lines: `run <run id>`, `journal <p
 
 ### 2. See the state
 
+If you do not know the id of the run, or its repository, run `delegate runs` first. It lists each run of each repository on this machine, with the short id of each run. See [`delegate runs`](../reference/runs.md).
+
 In a second terminal, in the same repository, read the state of the run. With no run id, `status` and `watch` read the one [**active run**](../glossary.md#active-run).
 
 ```bash

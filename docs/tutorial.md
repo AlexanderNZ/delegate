@@ -165,6 +165,43 @@ run 7c1e  running  ██░░░░░░░░░░░░░░ 18%  2/11 en
 09:24  #103  specialist running · 4m · 20k new · 315k cache · active 38s ago
 ```
 
+To find a run when you do not know its id, run `delegate runs` from any directory. It lists each run of each repository on this machine in one table.
+
+```bash
+delegate runs
+```
+
+The figure shows a larger case: the runs of three repositories. Your run is one row of the table. The row has the name of your repository, the short run id `a1b2`, and the state of the run. The text under the figure is the same output with no colour. See [the reference of `delegate runs`](reference/runs.md).
+
+![The output of delegate runs: a table of the runs of two hosts, with the fleet lines above it and the legend under it. The text below gives the same frame.](assets/terminal/runs-table-light.svg#gh-light-mode-only)
+![The output of delegate runs: a table of the runs of two hosts, with the fleet lines above it and the legend under it. The text below gives the same frame.](assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner
+runs  3 of 4 reachable  ███████░░░░░░░░░ 47%  11/23 ended  ETA 16:32 · 1 with no ETA  570k new · 6.6M cache
+09:20–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all  ▂▃▃▇▂ speeding up
+
+host       repo  run   state        ended  ETA    slip   new  cache  trend   alert          do
+laptop                              11/23  16:32        570k   6.6M
+│          docs  c91d  paused       2/6                  83k   923k      ▄▄                 resume
+│          web   b72e  running      3/9    16:32        198k   2.3M     ▄▇   fix-up 1/2     watch
+│          api   a3f1  running      6/8    14:50        289k   3.4M   ▄▇▄▇   ⚠ idle 6m40s   watch
+
+ci-runner              unreachable                                           heard 47m ago  check host
+│                      ssh cannot reach ci-runner: Connection timed out
+│          api   5d02  running      3/10
+
+ended
+laptop     web   d104  built        4/4                 182k   2.1M  ▄▇▄                    merge
+laptop     docs  e7a2  failed       5/5                 122k   1.5M   ▇                     retry
+
+watch       delegate watch <run>
+resume      delegate run --resume <run>
+retry       delegate run --resume <run> --retry <ticket>
+merge       git merge --ff-only <run branch>
+check host  ssh <host>; on another host, put ssh <host> in front of each command
+```
+
 To stop the run at its next step boundary, use `delegate pause a1b2`. The run then stops, and `delegate run` exits 3. Ctrl-C stops the run at once, and the command exits 130. After either one, `delegate run --resume a1b2` goes on with the run.
 
 If the verdict is [**REJECT**](glossary.md#reject), the engine starts a [**fix-up**](glossary.md#fix-up) round. The specialist adds a new commit, and a new verifier checks it. The limit is two rounds. The reference page for `delegate run` has the details.

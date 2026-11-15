@@ -14,6 +14,8 @@ Both commands find the journal in the state directory of the repository, in `run
 
 Each command takes the full run id, or its short id: the part after the last `-`, as `abcd` of `20261016T030000Z-abcd`. When more than one run has the short id, the command does nothing. It prints an error that names each run with that short id, and exits 2.
 
+If you do not know the id of a run, or its repository, run [`delegate runs`](runs.md). It lists each run of each repository on this machine, with the short id of each run.
+
 ### Where the commands look for a run
 
 With `--repo`, a command looks for the run only in the state directory of that repository. With a run id and no `--repo`, a command looks first in the state directory of the repository of the current directory. When the current directory is in no git repository, or that repository has no such run, the command looks in each state directory under the state root of this machine: `DELEGATE_STATE_ROOT`, or else `$XDG_STATE_HOME/delegate` (`~/.local/state/delegate`). Each repository has one directory there. So you can ask for a run of any repository from any directory. One match shows that run, as if `--repo` named its repository. When more than one run has the short id, the command exits 2, and the message names each full run id. When no run matches, the command exits 2, and the message names the state root. A run that started before #200 and is in `<git common dir>/delegate` is found only through `--repo` or from its repository. With no run id, the commands look only in the repository of `--repo` or of the current directory.

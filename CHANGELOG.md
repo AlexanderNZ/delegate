@@ -10,6 +10,10 @@ An entry starts with the subsection `### Consumer impact` when the release needs
 
 - `delegate docs` writes three terminal figures of `delegate runs` (#372): the table at 120 columns (`runs-table`, frame W8), `--timeline` at 120 columns (`runs-timeline`, W9), and the table at 80 columns (`runs-fit`, E15). The code renders each one from fixture journals of three repositories with a fixed clock, with no `ssh`: the second host is `unreachable` with the runs of its last answer, from a fixture of the store of last answers. `docs/reference/runs.md` shows each figure with the same frame as plain text under it, and `docs/how-to/see-the-runs-of-more-than-one-host.md` shows the table at the step that runs `delegate runs`.
 
+### Changed
+
+- The docs show `delegate runs` in figures and on the entry pages (#373). The README, the tutorial and the overview name the command. The README and the tutorial show the figure W8. The reference of `delegate status` and `delegate watch`, and the how-to of watch and resume, send the reader to the command to find a run.
+
 ## [1.22.0] - 2026-11-15
 
 ### Consumer impact

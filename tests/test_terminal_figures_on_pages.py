@@ -32,9 +32,9 @@ DOCS = ROOT / "docs"
 # Each page that shows a figure: the figures in the order of the page, each with the heading of the section that holds
 # it. The README and the overview show the live view near the top, before their first section.
 PLACES: dict[str, list[tuple[str, str]]] = {
-    "README.md": [("watch-live", "# delegate")],
+    "README.md": [("watch-live", "# delegate"), ("runs-table", "# delegate")],
     "docs/overview.md": [("watch-live", "# Start here")],
-    "docs/tutorial.md": [("watch-live", "## 7. Run the ticket")],
+    "docs/tutorial.md": [("watch-live", "## 7. Run the ticket"), ("runs-table", "## 7. Run the ticket")],
     "docs/reference/status-and-watch.md": [
         ("status-table", "## `delegate status`"),
         ("watch-picker", "### The run picker"),
