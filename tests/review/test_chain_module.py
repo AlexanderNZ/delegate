@@ -3,7 +3,8 @@
 `delegate.run.chain` holds `ChainRun`, which runs the gates and the verifiers at the end of a chain, and `chain_redo`, which
 finds the chain fix-up that the agent check stopped. The engine imports the module and holds none of them, and the module
 imports no engine: the engine gives it the steps that it drives (`ChainSteps`). The behaviour of the chain has its own tests
-(`test_economy.py`, `test_chain_fixup_retry.py`); these cases check the place of the code and the rule of `chain_redo`.
+(`test_run_economy.py`, `test_run_economy_gates.py`, and the retries of a chain in `test_run_retry.py` and `test_run_agents.py`);
+these cases check the place of the code and the rule of `chain_redo`.
 """
 
 from __future__ import annotations

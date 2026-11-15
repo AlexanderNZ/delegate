@@ -3,7 +3,7 @@
 `delegate.run.context` holds `RunContext`, the frozen value of the things that do not change during a run, and
 `ResumeRequest`, what a resume asks for. `run_workflow` keeps its public parameters and makes the context. The functions
 of the engine and of the modules moved out of it take the context and their own values. The behaviour of the run has its
-own tests (`test_run_*.py`, `test_economy.py`); these cases check the length of each parameter list and the frozen value.
+own tests (`test_run_*.py`, for example `test_run_economy.py`); these cases check the length of each parameter list and the frozen value.
 """
 
 from __future__ import annotations
