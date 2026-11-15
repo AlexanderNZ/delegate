@@ -1,4 +1,4 @@
-"""The terminal figures of the docs: frames of `delegate watch` and `delegate status` as SVG files (#138).
+"""The terminal figures of the docs: frames of `delegate watch`, `delegate status` and `delegate runs` as SVG files (#138, #372).
 
 `delegate docs` (in `delegate.docs.reference`) writes two files for each figure of `FIGURES` under `ASSETS`: one
 for the light scheme and one for the dark scheme of the docs theme. The two files differ only in the colours of their
@@ -18,6 +18,11 @@ on, a UTF-8 locale and the UTC time zone:
 * `status`: the lines of `delegate status` (`delegate.run.status_table.render`), with the same reader.
 * `picker`: the run picker of `delegate watch` with more than one active run (`delegate.run.status_picker.picker_lines`),
   cut to the width, and the prompt.
+* `runs` and `timeline`: the lines of `delegate runs` and of `delegate runs --timeline` (`delegate.run.fleet.fleet_of` and
+  `delegate.run.fleet_view.fleet_lines`), as `delegate.cli.runs` calls them (#372). The journals of a figure of `runs` are in
+  `SOURCE/<figure>/<repository>/`, and the render makes one state directory for each repository under one state root. It
+  names this machine `HOST`. `SOURCE/<figure>/last-answers/` is the store of last answers of this machine: the host in it is
+  read with no `ssh`, and its read fails, so the view shows it as `unreachable` with the runs of its last answer.
 
 The path of the temporary state directory shows as `STATE_DIRECTORY` in a frame. The SVG writer uses the standard library only.
 It reads the SGR codes of each line, and writes one `<text>` row for each line, with one `<tspan>` for each run of
@@ -29,6 +34,7 @@ is `font-weight` 600, and faint is the `dim` colour. The colours are the tokens 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import math
@@ -36,6 +42,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -45,8 +52,14 @@ from xml.sax.saxutils import escape
 
 from ..cli.status import stream_reader_of
 from ..cli.watch import PROMPT
+from ..ports.hosts import Unreachable
 from ..run import live, output, run_state, status, status_picker, status_table, watch
+from ..run.fleet import fleet_of
+from ..run.fleet_hosts import HostReads
+from ..run.fleet_model import ViewSettings
+from ..run.fleet_view import fleet_lines
 from ..run.journal import ACTIVITY_FIELDS, event_time, read_new_events
+from ..run.last_answers import LAST_ANSWERS_NAME, LastAnswers
 from ..run.lock import run_lock
 from ..run.state_location import JOURNAL_NAME
 
@@ -61,15 +74,26 @@ ASSETS: str = "docs/assets/terminal"
 # directory of a repository under it (#206).
 STATE_DIRECTORY: str = "~/.local/state/delegate/project-3f9a1c0b7d42"
 
+# The commands of the figures of `delegate runs`: the table and the timeline.
+FLEET_COMMANDS: tuple[str, ...] = ("runs", "timeline")
+
 # The environment of the terminal of a figure: a UTF-8 locale and the UTC time zone.
 LOCALE: str = "C.UTF-8"
 ZONE: str = "UTC"
+
+# The name of this machine in the figures of `delegate runs`, the other host of their store of last answers, and the configuration file that their
+# header line names (#372). The names are neutral.
+HOST: str = "laptop"
+OTHER_HOST: str = "ci-runner"
+CONFIG: Path = Path("/home/me/.config/delegate/config.toml")
 
 
 @dataclass(frozen=True)
 class Figure:
     """One figure: its name, the frame of the design that it shows, its title and its description, the command that
-    renders it (`watch`, `status` or `picker`), the columns and the rows of the terminal, and the time of the clock."""
+    renders it (`watch`, `status`, `picker`, `runs` or `timeline`), the columns and the rows of the terminal, and the time
+    of the clock. `source` is the name of the directory of its journals under `SOURCE`, when it is not the name of the figure:
+    the figures of `delegate runs` share the journals of one fleet (#372)."""
 
     name: str
     frame: str
@@ -79,10 +103,16 @@ class Figure:
     columns: int
     rows: int
     now: str
+    source: str = ""
+
+    @property
+    def directory(self) -> Path:
+        return SOURCE / (self.source or self.name)
 
     @property
     def journals(self) -> list[Path]:
-        return sorted((SOURCE / self.name).glob("*.jsonl"))
+        """The journals of the figure, in the order of their paths: `<name>/*.jsonl`, and for `delegate runs` `<name>/<repository>/*.jsonl`."""
+        return sorted([*self.directory.glob("*.jsonl"), *self.directory.glob("*/*.jsonl")])
 
     def path(self, scheme: str) -> str:
         return f"{ASSETS}/{self.name}-{scheme}.svg"
@@ -127,6 +157,30 @@ FIGURES: tuple[Figure, ...] = (
         "gate of 3. The built rows in the middle fold into one row with their totals, the pending rows at the end fold "
         "into one row, and the running ticket and the pending rows nearest to it stay.",
         "watch", 120, 24, "2026-03-02T13:06:46+00:00",
+    ),
+    Figure(
+        "runs-table", "W8", "delegate runs: the runs of two hosts and of three repositories",
+        "The header line, the two fleet lines and the table of the runs of two hosts. The first row of the host laptop "
+        "holds the totals of its three runs that have not ended. The run of web has a fix-up round, the run of api has an "
+        "agent that is idle for 6m40s, and the run of docs is paused, so each has its word in the column do. The host "
+        "ci-runner is unreachable: its row says that its last answer came 47 minutes ago, and under it are the reason and "
+        "its last-known run. The group ended holds two runs of laptop that ended, one built and one failed. The legend "
+        "gives the command of each word of the column do.",
+        "runs", 120, 40, "2026-03-02T14:20:00+00:00", "runs",
+    ),
+    Figure(
+        "runs-timeline", "W9", "delegate runs --timeline: one lane for each run",
+        "The same runs as the table, with time across. The lane all shows the tickets that ended in each cell of the "
+        "last 6 hours, the column of now, and the projection to the latest ETA. Each other lane shows the life of one "
+        "run, a mark where each ticket ended, the end of a run that ended, and the projection of a run that runs. The "
+        "footer gives the command to see a run in detail.",
+        "timeline", 120, 40, "2026-03-02T14:20:00+00:00", "runs",
+    ),
+    Figure(
+        "runs-fit", "E15", "delegate runs at 80 columns",
+        "The table of the same runs on a terminal of 80 columns and 24 rows. The bar and the legend are gone, and so are "
+        "the columns new, cache, trend and slip. The header line is cut to the width.",
+        "runs", 80, 24, "2026-03-02T14:20:00+00:00", "runs",
     ),
 )
 
@@ -202,31 +256,45 @@ def _tzset() -> None:
         time.tzset()
 
 
+def _stage_journal(source: Path, state: Path, locks: contextlib.ExitStack) -> Path:
+    """Copy the journal `source` into the state directory `state`, with the files that it names. Return the copy. `locks` holds the lock
+    of the run when it works."""
+    run = state / "runs" / source.stem
+    run.mkdir(parents=True)
+    journal = run / JOURNAL_NAME
+    journal.write_text(source.read_text().replace("$RUN", json.dumps(str(run))[1:-1]))
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    files = {Path(str(event[name])) for event in events for name in ACTIVITY_FIELDS if name in event}
+    for path in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = SOURCE / "streams" / path.name
+        if path.parent.name == "reports" and stream.is_file():
+            shutil.copyfile(stream, path)
+        else:
+            path.write_text("")  # a gate log: the code reads only its time
+    if run_state.fold(events).status.kind == run_state.ACTIVE:
+        locks.enter_context(run_lock(state, str(events[0]["run_branch"]), source.stem))
+    newest = event_time(events[-1]).timestamp()
+    for path in [journal, *files]:
+        os.utime(path, (newest, newest))
+    return journal
+
+
 def _stage(figure: Figure, state: Path, locks: contextlib.ExitStack) -> list[Path]:
     """Copy the journals of a figure into the state directory `state`, with the files that they name. Return the
     journals, in the order of their names. `locks` holds the lock of each run that works."""
-    journals = []
+    return [_stage_journal(source, state, locks) for source in figure.journals]
+
+
+def _stage_fleet(figure: Figure, root: Path, locks: contextlib.ExitStack) -> None:
+    """Copy the journals of a figure of `delegate runs` into the state root `root`: one state directory for each repository, named
+    `<repository>-<key>` with a key of 12 hex digits, and the store of last answers of the figure. `locks` holds the lock of each run that works."""
     for source in figure.journals:
-        run = state / "runs" / source.stem
-        run.mkdir(parents=True)
-        journal = run / JOURNAL_NAME
-        journal.write_text(source.read_text().replace("$RUN", json.dumps(str(run))[1:-1]))
-        events = [json.loads(line) for line in journal.read_text().splitlines()]
-        files = {Path(str(event[name])) for event in events for name in ACTIVITY_FIELDS if name in event}
-        for path in files:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            stream = SOURCE / "streams" / path.name
-            if path.parent.name == "reports" and stream.is_file():
-                shutil.copyfile(stream, path)
-            else:
-                path.write_text("")  # a gate log: the code reads only its time
-        if run_state.fold(events).status.kind == run_state.ACTIVE:
-            locks.enter_context(run_lock(state, str(events[0]["run_branch"]), source.stem))
-        newest = event_time(events[-1]).timestamp()
-        for path in [journal, *files]:
-            os.utime(path, (newest, newest))
-        journals.append(journal)
-    return journals
+        repository = source.parent.name
+        _stage_journal(source, root / f"{repository}-{hashlib.sha256(repository.encode()).hexdigest()[:12]}", locks)
+    store = figure.directory / LAST_ANSWERS_NAME
+    if store.is_dir():
+        shutil.copytree(store, root / LAST_ANSWERS_NAME)
 
 
 @dataclass(frozen=True)
@@ -269,12 +337,31 @@ def _picker(figure: Figure, journals: list[Path], now: datetime) -> list[str]:
     return [*(output.cut(line, figure.columns) for line in lines), PROMPT]
 
 
+class _NoSsh:
+    """The host reader of a figure of `delegate runs`: it starts no `ssh`, and each host is unreachable. The view then shows the last answer of
+    the host in the store of the figure, as it does for a host that `ssh` cannot reach."""
+
+    def read_runs(self, host: str, timeout_seconds: float, stop: threading.Event | None = None) -> Unreachable:
+        return Unreachable(f"ssh cannot reach {host}: Connection timed out")
+
+
+def _fleet(figure: Figure, root: Path, now: datetime) -> list[str]:
+    """The lines of `delegate runs`, or of `delegate runs --timeline`, as `delegate.cli.runs` prints them, for the runs under the state root `root`."""
+    view = ViewSettings(config=CONFIG, hosts=(OTHER_HOST,))
+    with HostReads(_NoSsh(), store=LastAnswers(root / LAST_ANSWERS_NAME)) as hosts:
+        found = fleet_of(root, HOST, now, stream_reader_of, hosts=hosts, view=view)
+    return fleet_lines(found, figure.columns, figure.rows, figure.command == "timeline")
+
+
 def frame_lines(figure: Figure, colour: bool = True) -> list[str]:
     """The lines of the frame of a figure as the command prints them: with the SGR codes of the roles, or with
     `NO_COLOR` set when `colour` is false. The path of the temporary state directory shows as `STATE_DIRECTORY`."""
     now = datetime.fromisoformat(figure.now)
     with tempfile.TemporaryDirectory() as temporary, _terminal(colour), contextlib.ExitStack() as locks:
         state = Path(temporary).resolve() / "state"
+        if figure.command in FLEET_COMMANDS:
+            _stage_fleet(figure, state, locks)
+            return [line.replace(str(state), STATE_DIRECTORY) for line in _fleet(figure, state, now)]
         journals = _stage(figure, state, locks)
         if figure.command == "watch":
             lines = _watch(figure, journals[0], now)

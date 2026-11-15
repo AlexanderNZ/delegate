@@ -59,6 +59,37 @@ config /home/me/.config/delegate/config.toml · the index of this machine only �
 
 The table has one group for each host. The runs of a host that answered are live, and they are in the sums. See [the other hosts](../reference/runs.md#the-other-hosts).
 
+The figure below shows the view of a viewer with one host in the key `hosts`: `ci-runner`. `ssh` cannot reach it, so its row says `unreachable` and `heard 47m ago`, and under it are the reason and its last-known run. The text under the figure is the same output with no colour.
+
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-light.svg#gh-light-mode-only)
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner
+runs  3 of 4 reachable  ███████░░░░░░░░░ 47%  11/23 ended  ETA 16:32 · 1 with no ETA  570k new · 6.6M cache
+09:20–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all  ▂▃▃▇▂ speeding up
+
+host       repo  run   state        ended  ETA    slip   new  cache  trend   alert          do
+laptop                              11/23  16:32        570k   6.6M
+│          docs  c91d  paused       2/6                  83k   923k      ▄▄                 resume
+│          web   b72e  running      3/9    16:32        198k   2.3M     ▄▇   fix-up 1/2     watch
+│          api   a3f1  running      6/8    14:50        289k   3.4M   ▄▇▄▇   ⚠ idle 6m40s   watch
+
+ci-runner              unreachable                                           heard 47m ago  check host
+│                      ssh cannot reach ci-runner: Connection timed out
+│          api   5d02  running      3/10
+
+ended
+laptop     web   d104  built        4/4                 182k   2.1M  ▄▇▄                    merge
+laptop     docs  e7a2  failed       5/5                 122k   1.5M   ▇                     retry
+
+watch       delegate watch <run>
+resume      delegate run --resume <run>
+retry       delegate run --resume <run> --retry <ticket>
+merge       git merge --ff-only <run branch>
+check host  ssh <host>; on another host, put ssh <host> in front of each command
+```
+
 ## When a host is unreachable
 
 The row of the host says `unreachable`. The row under it gives the reason. Its runs are the runs of its last answer, dim, with `heard <duration> ago`. A host that never answered has only its row and its reason.

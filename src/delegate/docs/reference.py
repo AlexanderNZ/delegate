@@ -21,7 +21,7 @@ and plural forms. And it writes `docs/javascripts/glossary.js`, a map from each
 form to the anchor of its entry, so the site links each term to the glossary.
 
 And it writes the terminal figures of `delegate.docs.figures`: two SVG files for
-each frame of `watch` and `status`, which the code renders from the journals in the
+each frame of `watch`, `status` and `runs`, which the code renders from the journals in the
 package source.
 """
 
@@ -200,8 +200,11 @@ def figures_table() -> str:
     source = figures.SOURCE_IN_REPOSITORY
     for figure in figures.FIGURES:
         paths = " ".join(f"`{figure.path(scheme)}`" for scheme in figures.SCHEMES)
-        command = {"watch": "`delegate watch`", "status": "`delegate status`", "picker": "`delegate watch`, the run picker"}[figure.command]
-        journals = ", ".join(f"`{source}/{figure.name}/{journal.name}`" for journal in figure.journals)
+        command = {
+            "watch": "`delegate watch`", "status": "`delegate status`", "picker": "`delegate watch`, the run picker",
+            "runs": "`delegate runs`", "timeline": "`delegate runs --timeline`",
+        }[figure.command]
+        journals = ", ".join(f"`{source}/{journal.relative_to(figures.SOURCE).as_posix()}`" for journal in figure.journals)
         clock = figure.now.removesuffix("+00:00").replace("T", " ")
         rows.append(f"| {paths} | {figure.frame} | {command} | {figure.columns} × {figure.rows}, {clock} | {journals} |")
     return "\n".join(rows)

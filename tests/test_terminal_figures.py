@@ -1,7 +1,7 @@
-"""`delegate docs` writes the terminal frames of `watch` and `status` as SVG figures, and checks that they are current (#138).
+"""`delegate docs` writes the terminal frames of `watch`, `status` and `runs` as SVG figures, and checks that they are current (#138, #372).
 
 A figure is a frame that the code renders from a journal in the package source, with a fixed clock, a fixed width and
-a fixed height, on the path of `delegate watch` and `delegate status` with the SGR codes on. The command writes two
+a fixed height, on the path of `delegate watch`, `delegate status` and `delegate runs` with the SGR codes on. The command writes two
 files for each figure under `docs/assets/terminal/`, one for the light scheme and one for the dark scheme of the docs
 theme, as the other figures of the docs (`tests/svg.py`). `delegate docs --check` names each figure file that differs
 from the code.
@@ -32,8 +32,9 @@ from .svg import SVG, accessibility_problems, parse, without_colours
 ROOT = repository_root(Path(__file__))
 ASSETS = Path("docs") / "assets" / "terminal"
 
-# The figures of the ticket and of its plan change: frames 3a, 2b, 1i, 1d, the paused frame, and 3b.
-NAMES = ["watch-live", "watch-picker", "status-table", "watch-fixup", "watch-paused", "watch-fit"]
+# The figures of the ticket and of its plan change: frames 3a, 2b, 1i, 1d, the paused frame, and 3b, then the frames W8, W9 and E15 of
+# `delegate runs` (#372).
+NAMES = ["watch-live", "watch-picker", "status-table", "watch-fixup", "watch-paused", "watch-fit", "runs-table", "runs-timeline", "runs-fit"]
 FILES = [f"{name}-{scheme}.svg" for name in NAMES for scheme in ("light", "dark")]
 
 outside_the_package = pytest.mark.skipif(
@@ -163,6 +164,73 @@ def test_the_rows_of_each_figure_are_the_lines_of_the_frame_that_the_code_prints
         assert rows_of(ROOT / ASSETS / f"{name}-{scheme}.svg") == shown
 
 
+def frame_of(name: str) -> list[str]:
+    """The plain lines of the figure `name`, as the code prints them with `NO_COLOR` set."""
+    return figures.frame_lines(next(f for f in figures.FIGURES if f.name == name), colour=False)
+
+
+def test_the_table_figure_of_runs_shows_the_fleet_lines_the_hosts_the_ended_group_and_the_legend():
+    # W8: `delegate runs` at 120 columns, with the clock at 14:20.
+    frame = frame_of("runs-table")
+    host = next(i for i, line in enumerate(frame) if line.startswith("ci-runner"))
+    ended = frame.index("ended")
+
+    assert frame[1].startswith("runs  3 of 4 reachable  ") and "11/23 ended" in frame[1]
+    assert frame[2].startswith("09:20–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all")
+    assert any(line.startswith("host") and line.split()[-2:] == ["alert", "do"] for line in frame)
+    assert any(line.startswith("laptop ") and "11/23" in line for line in frame)  # the totals row of this machine
+    assert any("⚠ idle 6m40s" in line and line.endswith("watch") for line in frame)  # a run in trouble, with its alert and its do word
+    assert any("fix-up 1/2" in line and line.endswith("watch") for line in frame)
+    assert "unreachable" in frame[host] and "heard 47m ago" in frame[host] and frame[host].endswith("check host")
+    assert re.fullmatch(r"│ +ssh cannot reach ci-runner: .+", frame[host + 1])  # the reason, under the row of the host
+    assert [line.split()[0] for line in frame[ended + 1:ended + 3]] == ["laptop", "laptop"]  # the host is in the column host
+    assert [line.split()[-1] for line in frame[ended + 1:ended + 3]] == ["merge", "retry"]
+    assert frame[-5:] == [
+        "watch       delegate watch <run>",
+        "resume      delegate run --resume <run>",
+        "retry       delegate run --resume <run> --retry <ticket>",
+        "merge       git merge --ff-only <run branch>",
+        "check host  ssh <host>; on another host, put ssh <host> in front of each command",
+    ]
+
+
+def test_the_timeline_figure_of_runs_shows_the_lane_all_a_lane_for_each_run_the_column_of_now_and_the_footer():
+    # W9: `delegate runs --timeline` at 120 columns.
+    frame = frame_of("runs-timeline")
+    first = next(i for i, line in enumerate(frame) if line.startswith("all "))
+    lanes = [line for line in frame[first + 1:-2] if line.strip()]
+
+    assert frame[first - 2].startswith("last 6h, to the latest ETA") and frame[first - 2].split()[-4:] == ["ended", "ETA", "state", "alert"]
+    assert sum(line.startswith("all ") for line in frame) == 1
+    assert len(lanes) == 6  # the five runs of this machine, and the last-known run of the other host
+    assert [state in line.split() for state, line in zip(["paused", "running", "running", "built", "failed", "unreachable"], lanes)] == [True] * 6
+    assert all("┊" in line or "▶" in line for line in frame[first:first + 6])  # the column of now in the lane all and in each lane of this machine
+    assert "one cell is 10m" in frame[2]
+    assert frame[-1] == "detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>"
+
+
+def test_the_figure_of_runs_at_80_columns_has_dropped_the_bar_the_legend_and_the_columns_new_cache_trend_and_slip():
+    # E15: `delegate runs` at 80 columns.
+    frame = frame_of("runs-fit")
+    header = next(line for line in frame if line.startswith("host"))
+
+    assert max(len(line) for line in frame) <= 80
+    assert header.split() == ["host", "repo", "run", "state", "ended", "ETA", "alert", "do"]
+    assert not any("█" in line or "░" in line for line in frame)
+    assert not any(word in header.split() for word in ("slip", "new", "cache", "trend"))
+    assert not any("delegate watch <run>" in line for line in frame)  # no legend under 100 columns
+
+
+def test_the_figures_of_runs_use_neutral_names_and_start_no_process(monkeypatch):
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: pytest.fail("a figure of runs started a process"))
+
+    frames = {name: "\n".join(frame_of(name)) for name in ("runs-table", "runs-timeline", "runs-fit")}
+
+    assert {path.name for path in (figures.SOURCE / "runs").iterdir()} == {"api", "web", "docs", "last-answers"}
+    assert all("ci-runner" in frame for frame in frames.values())  # the host that ssh cannot reach, read from the store of last answers
+    assert "unreachable" in frames["runs-table"] and "unreachable" in frames["runs-timeline"]
+
+
 def test_the_frame_with_colour_is_the_frame_with_no_colour_and_the_sgr_codes_of_the_roles():
     for figure in figures.FIGURES:
         painted = figures.frame_lines(figure, colour=True)
@@ -198,7 +266,7 @@ def test_a_figure_has_a_title_that_names_the_frame_a_monospace_font_and_no_scrip
     for name in FILES:
         text = (ROOT / ASSETS / name).read_text()
         root = ET.fromstring(text)
-        assert root.findtext(f"{SVG}title").startswith(("delegate watch", "delegate status")), name
+        assert root.findtext(f"{SVG}title").startswith(("delegate watch", "delegate status", "delegate runs")), name
         assert "Noto Sans Mono" in text and "ui-monospace, monospace" in text, name
         assert "<script" not in text and "href" not in text and "url(" not in text, name
 

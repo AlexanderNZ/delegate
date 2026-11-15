@@ -43,6 +43,12 @@ PLACES: dict[str, list[tuple[str, str]]] = {
         ("watch-paused", "### The live view"),
         ("watch-fit", "### The live view"),
     ],
+    "docs/reference/runs.md": [
+        ("runs-table", "## The table"),
+        ("runs-fit", "## Fit to the terminal"),
+        ("runs-timeline", "## The option `--timeline`"),
+    ],
+    "docs/how-to/see-the-runs-of-more-than-one-host.md": [("runs-table", "## 5. Read the view")],
 }
 
 FRAGMENTS = {"light": "#gh-light-mode-only", "dark": "#gh-dark-mode-only"}
@@ -174,6 +180,17 @@ def test_each_figure_on_a_page_names_its_light_and_its_dark_file_and_both_exist(
     assert [alt for alt in item.alts if not alt.strip()] == []
     assert len(set(item.alts)) == 1  # the two lines are one figure, with one description
     assert [scheme for scheme in FRAGMENTS if not (ROOT / figure(name).path(scheme)).is_file()] == []
+
+
+@outside_the_package
+@pytest.mark.parametrize(("page", "index"), OCCURRENCES)
+def test_the_alt_text_of_each_figure_says_what_the_frame_shows_and_points_to_the_text_under_it(page, index):
+    name, _ = PLACES[page][index]
+    alt = occurrence(page, index).alts[0]
+    command = {"watch": "delegate watch", "picker": "delegate watch", "status": "delegate status", "runs": "delegate runs", "timeline": "delegate runs"}
+
+    assert command[figure(name).command] in alt, alt
+    assert alt.endswith("The text below gives the same frame."), alt
 
 
 @outside_the_package

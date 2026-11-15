@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 656 338" width="656" height="338" role="img" aria-labelledby="runs-fit-title runs-fit-desc" font-family="'Noto Sans Mono', ui-monospace, monospace" font-size="13" xml:space="preserve">
+  <title id="runs-fit-title">delegate runs at 80 columns (frame E15)</title>
+  <desc id="runs-fit-desc">The table of the same runs on a terminal of 80 columns and 24 rows. The bar and the legend are gone, and so are the columns new, cache, trend and slip. The header line is cut to the width.</desc>
+  <style>
+    .bg { fill: #f5f3f0; }
+    .fg { fill: #2a2522; }
+    .dim { fill: #6d6863; }
+    .plan { fill: #215da5; }
+    .ok { fill: #207029; }
+    .now { fill: #006a77; }
+    .warn { fill: #775800; }
+    .bad { fill: #9a3936; }
+  </style>
+  <rect class="bg" x="0" y="0" width="656" height="338" rx="4"/>
+  <text y="29"><tspan x="16" class="dim">config /home/me/.config/delegate/config.toml · the index of this machine only · </tspan></text>
+  <text y="47"><tspan x="16" class="fg">runs  3 of 4 reachable  47%  11/23 ended  ETA 16:32 · 1 with no ETA</tspan></text>
+  <text y="65"><tspan x="16" class="dim">09:20–14:20</tspan><tspan x="101.8" class="fg">  </tspan><tspan x="117.4" class="warn">⚠ 1 in trouble</tspan><tspan x="226.6" class="fg">  </tspan><tspan x="242.2" class="dim">speeding up</tspan></text>
+  <text y="83"></text>
+  <text y="101"><tspan x="16" class="dim">host</tspan><tspan x="47.2" class="fg">       </tspan><tspan x="101.8" class="dim">repo</tspan><tspan x="133" class="fg">  </tspan><tspan x="148.6" class="dim">run</tspan><tspan x="172" class="fg">   </tspan><tspan x="195.4" class="dim">state</tspan><tspan x="234.4" class="fg">        </tspan><tspan x="296.8" class="dim">ended</tspan><tspan x="335.8" class="fg">  </tspan><tspan x="351.4" class="dim">ETA</tspan><tspan x="374.8" class="fg">    </tspan><tspan x="406" class="dim">alert</tspan><tspan x="445" class="fg">          </tspan><tspan x="523" class="dim">do</tspan></text>
+  <text y="119"><tspan x="16" class="fg">laptop                              11/23  16:32</tspan></text>
+  <text y="137"><tspan x="16" class="plan">│</tspan><tspan x="23.8" class="fg">          docs  </tspan><tspan x="148.6" class="fg" font-weight="600">c91d</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="warn">paused</tspan><tspan x="242.2" class="fg">       2/6                          resume</tspan></text>
+  <text y="155"><tspan x="16" class="plan">│</tspan><tspan x="23.8" class="fg">          web   </tspan><tspan x="148.6" class="fg" font-weight="600">b72e</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="now" font-weight="600">running</tspan><tspan x="250" class="fg">      3/9    16:32  </tspan><tspan x="406" class="warn">fix-up 1/2</tspan><tspan x="484" class="fg">     watch</tspan></text>
+  <text y="173"><tspan x="16" class="plan">│</tspan><tspan x="23.8" class="fg">          api   </tspan><tspan x="148.6" class="fg" font-weight="600">a3f1</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="now" font-weight="600">running</tspan><tspan x="250" class="fg">      6/8    14:50  </tspan><tspan x="406" class="warn">⚠ idle 6m40s</tspan><tspan x="499.6" class="fg">   watch</tspan></text>
+  <text y="191"></text>
+  <text y="209"><tspan x="16" class="fg">ci-runner              </tspan><tspan x="195.4" class="warn">unreachable</tspan><tspan x="281.2" class="fg">                </tspan><tspan x="406" class="warn">heard 47m ago</tspan><tspan x="507.4" class="fg">  check host</tspan></text>
+  <text y="227"><tspan x="16" class="plan">│</tspan><tspan x="23.8" class="fg">                      </tspan><tspan x="195.4" class="warn">ssh cannot reach ci-runner: Connection timed out</tspan></text>
+  <text y="245"><tspan x="16" class="plan">│</tspan><tspan x="23.8" class="fg">          </tspan><tspan x="101.8" class="dim">api</tspan><tspan x="125.2" class="fg">   </tspan><tspan x="148.6" class="dim">5d02</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="dim">running</tspan><tspan x="250" class="fg">      </tspan><tspan x="296.8" class="dim">3/10</tspan></text>
+  <text y="263"></text>
+  <text y="281"><tspan x="16" class="dim">ended</tspan></text>
+  <text y="299"><tspan x="16" class="fg">laptop     web   </tspan><tspan x="148.6" class="fg" font-weight="600">d104</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="ok" font-weight="600">built</tspan><tspan x="234.4" class="fg">        </tspan><tspan x="296.8" class="dim">4/4</tspan><tspan x="320.2" class="fg">                          merge</tspan></text>
+  <text y="317"><tspan x="16" class="fg">laptop     docs  </tspan><tspan x="148.6" class="fg" font-weight="600">e7a2</tspan><tspan x="179.8" class="fg">  </tspan><tspan x="195.4" class="bad" font-weight="600">failed</tspan><tspan x="242.2" class="fg">       </tspan><tspan x="296.8" class="dim">5/5</tspan><tspan x="320.2" class="fg">                          retry</tspan></text>
+</svg>

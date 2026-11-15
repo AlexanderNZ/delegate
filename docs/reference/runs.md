@@ -54,6 +54,37 @@ config /home/me/.config/delegate/config.toml · the index of this machine only �
 
 The header line is followed by the two [**fleet**](../glossary.md#fleet) lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
 
+In a terminal with a UTF-8 locale, the table has the glyphs and the colours of the figure below. The text under the figure is the same output with no colour. The figure shows two hosts: this machine, `laptop`, and `ci-runner`, which `ssh` cannot reach, so its last answer shows.
+
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-light.svg#gh-light-mode-only)
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner
+runs  3 of 4 reachable  ███████░░░░░░░░░ 47%  11/23 ended  ETA 16:32 · 1 with no ETA  570k new · 6.6M cache
+09:20–14:20  ⚠ 1 in trouble  trend: tickets ended an hour, last 6h · all  ▂▃▃▇▂ speeding up
+
+host       repo  run   state        ended  ETA    slip   new  cache  trend   alert          do
+laptop                              11/23  16:32        570k   6.6M
+│          docs  c91d  paused       2/6                  83k   923k      ▄▄                 resume
+│          web   b72e  running      3/9    16:32        198k   2.3M     ▄▇   fix-up 1/2     watch
+│          api   a3f1  running      6/8    14:50        289k   3.4M   ▄▇▄▇   ⚠ idle 6m40s   watch
+
+ci-runner              unreachable                                           heard 47m ago  check host
+│                      ssh cannot reach ci-runner: Connection timed out
+│          api   5d02  running      3/10
+
+ended
+laptop     web   d104  built        4/4                 182k   2.1M  ▄▇▄                    merge
+laptop     docs  e7a2  failed       5/5                 122k   1.5M   ▇                     retry
+
+watch       delegate watch <run>
+resume      delegate run --resume <run>
+retry       delegate run --resume <run> --retry <ticket>
+merge       git merge --ff-only <run branch>
+check host  ssh <host>; on another host, put ssh <host> in front of each command
+```
+
 The runs that ended in the window are not under their host. They are in one group after the hosts, with the header `ended` in `dim`. Each row of the group has its host in the column `host`, in place of the rail. The group has no totals row. A host that has only runs that ended has no group of its own.
 
 ### The fleet lines
@@ -232,6 +263,31 @@ The command reads the size of the terminal: `COLUMNS` and `LINES`, else the size
 
 **Width.** Under 100 columns, the bar and the legend drop. Then, while the widest line of the table is wider than the terminal, the columns drop in this order: `new` and `cache`, then `trend`, then `slip`, then `repo`. The first fleet line drops its token sums when it is wider than the terminal, and the second fleet line drops the words and the sparkline of the trend when it is wider than the terminal. The trend word stays. Each line is then cut to the width.
 
+The figure below shows the table of the same runs at 80 columns and 24 rows. The text under it is the same output with no colour.
+
+![The output of delegate runs at 80 columns: the table of the same runs after the columns new, cache, trend and slip drop, with no bar and no legend. The text below gives the same frame.](../assets/terminal/runs-fit-light.svg#gh-light-mode-only)
+![The output of delegate runs at 80 columns: the table of the same runs after the columns new, cache, trend and slip drop, with no bar and no legend. The text below gives the same frame.](../assets/terminal/runs-fit-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only ·
+runs  3 of 4 reachable  47%  11/23 ended  ETA 16:32 · 1 with no ETA
+09:20–14:20  ⚠ 1 in trouble  speeding up
+
+host       repo  run   state        ended  ETA    alert          do
+laptop                              11/23  16:32
+│          docs  c91d  paused       2/6                          resume
+│          web   b72e  running      3/9    16:32  fix-up 1/2     watch
+│          api   a3f1  running      6/8    14:50  ⚠ idle 6m40s   watch
+
+ci-runner              unreachable                heard 47m ago  check host
+│                      ssh cannot reach ci-runner: Connection timed out
+│          api   5d02  running      3/10
+
+ended
+laptop     web   d104  built        4/4                          merge
+laptop     docs  e7a2  failed       5/5                          retry
+```
+
 **Height.** When the lines are more than the lines of the terminal, less one line for the prompt, the rows fold in two stages. The command goes to the next stage only when the lines still do not fit:
 
 1. The group `ended` folds to one row for each host, with the glyph of the first state and the count of each state, for example `✓ 1 built` or `✗ 1 failed`. The name of the host is in the column `host`, and the text starts in the column `state`. A run that ended is out of the totals, so the totals do not change. The legend then holds only the words of the rows that show.
@@ -244,6 +300,30 @@ A host with an alert or a command does not fold to its totals row. When the line
 ## The option `--timeline`
 
 `delegate runs --timeline` shows the same two fleet lines, and then one lane for each run in place of the table. A lane shows the time of a run across the window, the last 6 hours, and on to the latest ETA of the runs. It shows the same runs in the same order as the table. `--timeline` can be used with `--watch`, and it cannot be used with `--json`.
+
+The figure below shows the lanes of the same runs as the table at 120 columns. The text under it is the same output with no colour.
+
+![The output of delegate runs --timeline: the fleet lines, the lane all, and one lane for each run over the last 6 hours, with a mark where each ticket ended, the column of now, the projection to the ETA, and the footer. The text below gives the same frame.](../assets/terminal/runs-timeline-light.svg#gh-light-mode-only)
+![The output of delegate runs --timeline: the fleet lines, the lane all, and one lane for each run over the last 6 hours, with a mark where each ticket ended, the column of now, the projection to the ETA, and the footer. The text below gives the same frame.](../assets/terminal/runs-timeline-dark.svg#gh-dark-mode-only)
+
+```text
+config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner
+runs  3 of 4 reachable  ███████░░░░░░░░░ 47%  11/23 ended  ETA 16:32 · 1 with no ETA  570k new · 6.6M cache
+09:20–14:20  ⚠ 1 in trouble  speeding up  ● a ticket ended · ░ to the ETA · one cell is 10m
+
+last 6h, to the latest ETA                                                 ended  ETA    state        alert
+
+all                             ▄   ▄   ▄   ▇  ▄▄ ▄▄ ▄▄    ┊░░░░░░░░░░░░░  11/23  16:32
+laptop     docs  c91d                           ──●───●    ┊               2/6           paused
+│          web   b72e                    ───●──●───●───────▶░░░░░░░░░░░░░  3/9    16:32  running      fix-up 1/2
+│          api   a3f1        ───●───●───●───●───●────●─────▶░░░            6/8    14:50  running      ⚠ idle 6m40s
+│          web   d104   ───●──●───●──✓                     ┊               4/4           built
+│          docs  e7a2      ───●──●─✗                       ┊               5/5           failed
+
+ci-runner  api   5d02                ──────────────────    ┊               3/10          unreachable  heard 47m ago
+
+detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>
+```
 
 ### The lanes
 

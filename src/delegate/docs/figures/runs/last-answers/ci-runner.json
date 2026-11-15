@@ -1,0 +1,39 @@
+{
+  "heard": "2026-03-02T13:33:00+00:00",
+  "document": {
+    "format": 1,
+    "host": "ci-runner",
+    "time": "2026-03-02T13:33:00+00:00",
+    "window_seconds": 21600,
+    "runs": [
+      {
+        "run_id": "20260302T104500Z-5d02",
+        "repo": "api",
+        "host": "ci-runner",
+        "state": "running",
+        "started": "2026-03-02T10:45:00+00:00",
+        "ended": null,
+        "tickets_ended": 3,
+        "tickets_total": 10,
+        "eta": "2026-03-02T16:40:00+00:00",
+        "tokens_new": 640000,
+        "tokens_cache": 9100000,
+        "alert": null,
+        "do": null,
+        "trend": [
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        "slip_seconds": null,
+        "idle_seconds": null,
+        "fixup_round": null,
+        "fixup_limit": null,
+        "failed_start": false
+      }
+    ]
+  }
+}
