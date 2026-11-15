@@ -244,7 +244,7 @@ A process that SIGKILL ends cannot release the lock of its run branch, and it ca
 
 A lock that a process holds stays. A lock file that no process holds is free, also when it names another run id or a process id that another process uses now: `--break-lock` is not necessary. See [the run lock](../reference/run.md#the-run-lock).
 
-A run that the [**invariant**](../glossary.md#invariant) check halted cannot be resumed, also with `--retry`: start a new run. The same is true for a run that halted with `run-branch-moved`. A commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
+A run that the [**invariant**](../glossary.md#invariant) check ended cannot be resumed, also with `--retry`: start a new run. The same is true for a run that ended with `run-branch-moved`. A commit that the engine did not advance to is on the run branch. See [the run branch check](../reference/run.md#the-run-branch-check). A run that has a `run-end` can be resumed only with `--retry`, or with a change of its tickets. See [the plan change](../reference/run.md#the-plan-change).
 
 ### 3. Retry after a failed verification of the tickets
 

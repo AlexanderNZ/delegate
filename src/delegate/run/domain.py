@@ -142,9 +142,12 @@ def skip_reason(blocked_by: Sequence[str], built: Collection[str], failed: Colle
     return "blocked by " + "; ".join(f"{blocker}, which {'failed' if blocker in failed else 'was skipped'}" for blocker in blockers)
 
 
-def unreached_reason(ticket_id: str, halted: bool) -> str:
-    """The reason to skip a ticket that the run did not reach: the run ended at `ticket_id`, which halted it or crashed."""
-    return f"the run ended after ticket {ticket_id} {'halted the run' if halted else 'crashed'}"
+def unreached_reason(ticket_id: str, for_good: bool) -> str:
+    """The reason to skip a ticket that the run did not reach: the run ended at `ticket_id`, which crashed or ended it for good.
+
+    A run that ended for good cannot be resumed (#358): an invariant violation or a moved run branch ended it.
+    """
+    return f"the run ended after ticket {ticket_id} {'ended it for good: it cannot be resumed' if for_good else 'crashed'}"
 
 
 def skipped_because_of(ticket_id: str, tickets: Sequence[tuple[str, Sequence[str]]], skipped: Mapping[str, str]) -> list[str]:
@@ -163,7 +166,7 @@ def skipped_because_of(ticket_id: str, tickets: Sequence[tuple[str, Sequence[str
     for other, blocked_by in tickets:
         if other not in skipped:
             continue
-        if causes & set(blocked_by) or skipped[other] == unreached_reason(ticket_id, halted=False):
+        if causes & set(blocked_by) or skipped[other] == unreached_reason(ticket_id, for_good=False):
             causes.add(other)
             found.append(other)
     return found

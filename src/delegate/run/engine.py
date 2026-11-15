@@ -36,7 +36,7 @@ writes `run-branch-moved` and ends the run as an invariant violation does: the r
 
 The engine records the HEAD and the status of the worktree of the ticket before
 and after each verifier run (see `guards.py`). A difference is an invariant
-violation: the journal records it with the changes, and the run halts. Before
+violation: the journal records it with the changes, and the run ends for good. Before
 each verifier run, the engine also makes the proof copy beside the temporary
 copy: the tree of the copy with no `.git` entry, where the verifier breaks a
 check for a red proof. The engine removes both copies after every verifier run.
@@ -1055,7 +1055,7 @@ def _execute(
             for unreached in order[position + 1 :]:
                 if unreached.id in complete:
                     continue  # a retry: the ticket ended in the run before
-                skipped[unreached.id] = domain.unreached_reason(ticket.id, True)
+                skipped[unreached.id] = domain.unreached_reason(ticket.id, for_good=True)
                 journal.append("skip", ticket=unreached.id, blockers=[], reason=skipped[unreached.id])
             break
         journal.append("step-end", ticket=ticket.id, state=FAILED if reason else BUILT, reason=reason)

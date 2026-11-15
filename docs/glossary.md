@@ -628,7 +628,7 @@ See [what a run does](reference/run.md#what-a-run-does).
 
 ## Worktree invariant
 
-The worktree invariant is the check that the verifier left the real worktree as it was: the same HEAD and the same status. A difference is an invariant violation, and the run halts, whatever the verdict.
+The worktree invariant is the check that the verifier left the real worktree as it was: the same HEAD and the same status. A difference is an invariant violation, and the run ends for good, whatever the verdict: it cannot be resumed.
 
 Not: unchanged-worktree check, invariant check.
 

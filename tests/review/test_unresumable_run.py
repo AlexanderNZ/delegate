@@ -12,15 +12,15 @@ import json
 import re
 
 from delegate.cli import delegate
-from delegate.run import run_state
+from delegate.run import events, run_state
 
 from ..run_state.journals import built, ev, journal, started
-from ..support import HEAD, git, kill_a_run, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
+from ..support import HEAD, git, journal_path, kill_a_run, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
 
 TWO = HEAD + ticket("a") + ticket("b", ("a",))
 
 VIOLATION = ev("invariant-violation", ticket="a", round=0, worktree="/w/a", changes=["added oops.txt"])
-JOURNAL_CHANGED = ev("invariant-violation", kind="journal-changed", journal="/j/journal.jsonl", offset=4096, size_written=4096)
+JOURNAL_CHANGED = ev("invariant-violation", kind=events.JOURNAL_CHANGED, journal="/j/journal.jsonl", offset=4096, size_written=4096)
 MOVED = ev("run-branch-moved", ticket=None, run_branch="run/demo", expected="a" * 40, found="b" * 40)
 HALTED = ev("halted", ticket="a", role="verifier", message="the harness failed")
 
@@ -63,6 +63,16 @@ def test_the_run_state_of_a_journal_with_a_moved_run_branch_says_that_the_run_ca
     assert state.unresumable is not None
     assert state.unresumable.event["event"] == "run-branch-moved"
     assert state.unresumable.event["found"] == "b" * 40
+
+
+def test_the_run_state_reads_the_kind_of_a_change_of_the_journal_that_the_engine_writes():
+    # The run state is a pure module, so it keeps its own copy of the kind `journal-changed` of the events module.
+    state = run_state.fold(journal(started("a"), JOURNAL_CHANGED))
+
+    assert state.unresumable is not None
+    assert state.unresumable.reason == (
+        "an invariant violation ended the run: another writer changed the journal /j/journal.jsonl at byte 4096"
+    )
 
 
 def test_the_run_state_of_a_journal_with_a_failure_of_the_harness_or_no_stop_can_be_resumed():
@@ -133,3 +143,25 @@ def test_status_of_a_run_that_a_moved_run_branch_ended_shows_that_it_cannot_be_r
     assert document["state"] == "failed"
     assert document["note"].startswith("cannot be resumed: the run branch run/demo is at")
     assert document["note"].endswith("start a new run")
+
+
+def test_status_of_a_run_killed_between_the_invariant_violation_and_the_run_end_shows_that_it_cannot_be_resumed(
+    tmp_path, capsys, scripted
+):
+    # A kill between the two writes leaves a journal with `invariant-violation` and no `run-end`. The run state has the
+    # fact, so the note does not tell the person to resume the run, which the resume then refuses.
+    repo = make_repo(tmp_path, TWO)
+    run_id = violated_run(repo, capsys, scripted)
+    path = journal_path(repo, run_id)
+    lines = path.read_text().splitlines(keepends=True)
+    cut = next(n for n, line in enumerate(lines) if json.loads(line)["event"] == "invariant-violation") + 1
+    path.write_text("".join(lines[:cut]))
+    capsys.readouterr()
+
+    assert delegate.main(["status", run_id, "--repo", str(repo), "--json"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["state"] == "stopped"
+    assert re.fullmatch(r"cannot be resumed: an invariant violation ended the run at ticket 'a'.*; start a new run", document["note"])
+    assert "--resume" not in document["note"]
+    code, _, err = resume_main(repo, capsys, run_id)
+    assert code == 1 and "cannot be resumed" in err

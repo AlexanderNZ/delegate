@@ -593,17 +593,20 @@ def _state(
     a pause request waits and the run is live, `running` while it is live, or `stopped` when it has no live process. The
     note of a halted run is `_halt_note`. The note of a stopped run is `_stopped_note`, or `journal.crash_note` when a crash
     stopped it (#281), or `journal.setup_problem_note` when the check of the setup stopped it (#296). The note of an
-    abandoned run is `journal.abandon_note`: the state and the reason (#201). The note of a run that ended and cannot be
-    resumed (`unresumable`, #358) is `_unresumable_note`: it comes before the note of a pause request, which no resume removes. Otherwise it is `_PAUSE_REQUEST_NOTE` when a pause request
+    abandoned run is `journal.abandon_note`: the state and the reason (#201). The note of a run that cannot be resumed
+    (`unresumable`, #358) is `_unresumable_note` in each state but abandoned and live, also when a kill came between the
+    `invariant-violation` and the `run-end`: it comes before each note that tells the person to resume the run, and before
+    the note of a pause request, which no resume removes. Otherwise it is `_PAUSE_REQUEST_NOTE` when a pause request
     waits and the run has no live process, and None otherwise.
     """
     kind, event = stop.kind, stop.event
+    fact = _unresumable_note(unresumable) if unresumable is not None else None
     if kind == run_state.HALTED:
-        return HALTED, _halt_note(event)  # type: ignore[arg-type]
+        return HALTED, fact or _halt_note(event)  # type: ignore[arg-type]
     if kind in (run_state.ENDED, run_state.PAUSED):
         note = _PAUSE_REQUEST_NOTE if requested else None
-        if kind == run_state.ENDED and unresumable is not None and event["result"] != ABANDONED:  # type: ignore[index]
-            note = _unresumable_note(unresumable)
+        if fact is not None and not (kind == run_state.ENDED and event["result"] == ABANDONED):  # type: ignore[index]
+            note = fact
         if kind == run_state.PAUSED:
             return PAUSED, note
         if event["result"] == ABANDONED:  # type: ignore[index]
@@ -611,6 +614,8 @@ def _state(
         return str(event["result"]), note  # type: ignore[index]
     if live:
         return (PAUSING, None) if requested else (RUNNING, None)
+    if fact is not None:
+        return STOPPED, fact
     removes = "; the resume removes the pause request that waits" if requested else ""
     if kind == run_state.CRASHED:
         return STOPPED, crash_note(event, run_id) + removes  # type: ignore[arg-type]

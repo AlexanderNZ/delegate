@@ -801,7 +801,7 @@ end.
    changed field, before `resume`. A later resume compares with it, so it
    needs no flag. The flag with no change of a stack is refused. A change of
    `ticket-start` or `keep-worktrees` is never accepted: start a new run.
-   An invariant violation halts a run for good: a resume, a plan change and a
+   An invariant violation ends a run for good: a resume, a plan change and a
    retry of that run are refused. Start a new run.
 
 ### See the runs of each host
@@ -868,7 +868,7 @@ The journal records each change as `plan-change`. `delegate status` counts the
 new tickets. A refused resume writes no journal line, starts no agent, and
 exits 1 with the ticket and the field at fault. With `--detach`, the command
 applies these rules before it starts the run process. A plan change is refused
-for a run that an invariant violation halted: start a new run.
+for a run that an invariant violation ended: start a new run.
 
 ## Tell the owner before you change the course of a run
 

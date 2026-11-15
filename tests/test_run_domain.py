@@ -133,12 +133,13 @@ def test_the_blockers_that_are_not_built_keep_their_order():
     assert domain.unbuilt_blockers(["c", "a", "b"], built=["a"]) == ["c", "b"]
 
 
-def test_a_ticket_after_a_halted_run_is_skipped_for_that_reason():
-    assert domain.unreached_reason("t1", halted=True) == "the run ended after ticket t1 halted the run"
+def test_a_ticket_after_a_run_that_cannot_be_resumed_is_skipped_for_that_reason():
+    # One meaning of halted (#358): a halted run goes on at a resume, so a run that ended for good is not called halted.
+    assert domain.unreached_reason("t1", for_good=True) == "the run ended after ticket t1 ended it for good: it cannot be resumed"
 
 
 def test_a_ticket_after_a_crashed_step_is_skipped_for_that_reason():
-    assert domain.unreached_reason("t1", halted=False) == "the run ended after ticket t1 crashed"
+    assert domain.unreached_reason("t1", for_good=False) == "the run ended after ticket t1 crashed"
 
 
 # The start of a ticket in each mode
