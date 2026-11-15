@@ -364,6 +364,10 @@ class OpenCodeAdapter:
         action = opencode_bash_action(permission, command) if isinstance(permission, dict) else "allow"
         return None if action == "allow" else f"its permission.bash map resolves the command to {action or 'no rule'}"
 
+    def harness_version(self) -> str | None:
+        """None: the adapter has no guard probe (`probes_guard` is false), so it keeps no probe and needs no version (#346)."""
+        return None
+
     def activity(self, stream: Path) -> Activity:
         new = cache = 0
         last = None

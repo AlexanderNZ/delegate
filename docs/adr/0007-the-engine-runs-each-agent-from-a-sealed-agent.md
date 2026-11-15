@@ -53,3 +53,22 @@ The `claude-code` adapter refuses a version before 2.1.287, the version of the m
 - On OpenCode, the resolution of the sealed agent was measured, and the enforcement of its permission map in a session was not measured. Measured on OpenCode 1.15.10 with `opencode debug agent`: the prompt of the sealed agent replaces the prompt of a project agent of the same name, and its permission rules come after the rules of the tree. No model answered in 90 seconds, so no session showed that the harness refuses a tool call that the map denies. This is decision D-e of issue 213. Measure it again when a model answers, and add the date and the version here.
 - The rule depends on the version of the harness. Measure it again when a new version changes how it reads a plugin, a setting or a hook.
 - The preload of the `skills` of an agent did not work under `--agent` in any case that issue 213 measured, so the load-time blocks of a context skill do not run in an engine session. Issue 215 follows this.
+
+## Amendment (#346): a denied probe is kept for 24 hours
+
+### Context
+
+The guard probe started one harness session for each verifier at each start, each resume and each dry run. On the machine of the measurement, the median time from `run-start` to the first `step-start` was 25.7 seconds, 16 seconds for each probe, and up to 169 seconds for a run with three resumes. A dry run and the run that follows it a minute later each made the probes.
+
+### Decision
+
+The reason of the probe stays: a guard that does not run writes nothing, so a probe must see it deny. But the result depends only on the sealed agent and on the harness.
+
+- **The key.** The engine keeps a denied probe on the machine, in `guard-probes/` of the state root. The key is the SHA-256 of the seal of the verifier and the version of the harness, which the adapter gives with `harness_version`. The SHA-256 of the seal comes from the handle and from the name and the SHA-256 of each file of the seal, with the name relative to the seal directory, so a seal of the same agent in another directory has the same SHA-256.
+- **24 hours.** A probe with the same key in the 24 hours after the kept result starts no session. The journal records the probe as `denied`, with the `source` `remembered` and the `kept_time` of the kept result.
+- **What runs the probe.** A new seal, a new harness version, or a kept result of 24 hours or more runs the probe. An adapter that gives no version keeps no result.
+- **Only a denial.** A result other than `denied` is never kept, so a guard that did not deny is probed at each start.
+
+### Consequences
+
+A change of the guard that is outside the seal and outside the version of the harness, for example a change of the host that stops the hooks, shows at the next probe after the 24 hours, not at the next start. To probe again at once, remove `guard-probes/` of the state root.

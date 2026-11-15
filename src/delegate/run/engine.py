@@ -141,7 +141,8 @@ A run starts no agent session before the guard probe of each verifier shows a de
 `run-start` or `resume` and before the first step, the engine starts one probe session for each verifier whose seal has no
 denied `guard-probe` yet, and the journal records the result. A result other than `denied` raises an `EngineError` that
 names the agent, the result and the limits page. The run has no `run-end`, and a resume probes again. A resume that seals
-nothing, with a denied probe for each verifier, probes nothing (see `_probe_guards`).
+nothing, with a denied probe for each verifier, probes nothing (see `_probe_guards`). A denied probe of the same seal and
+harness version in the last 24 hours, kept on the machine, starts no session (#346, see `probe_memory.py`).
 
 A failure of the harness halts the run. An `AdapterError` from `Adapter.run` is a
 failure of the harness, not of the work: a harness that is not logged in, a CLI
@@ -218,7 +219,8 @@ from .guards import (
 from .host import host_name
 from .journal import EventObserver, Journal, JournalChanged, JournalError, crash_where, read_events
 from .lock import LockError, LockHolder, check_free, run_lock
-from .probe import PROBE_TIER, DENIED, describe_tries, probe_guard, refusal, stream_path
+from .probe import PROBE_TIER, DENIED, describe_tries, refusal, remembered_or_probed, stream_path
+from .probe_memory import memory_of
 from .plan_review import PlanReview, SkippedTicket, configuration_record, plan_of, plan_record, recorded_configuration, review_workflow
 from .progress import Progress, restore_progress
 from .reports import ReportError, SpecialistReport, VerifierReport, map_findings, read_specialist_report, read_verifier_report, verdict_in_text
@@ -1322,6 +1324,10 @@ def _probe_guards(run: RunContext, journal: Journal) -> None:
     result other than `denied` raises an `EngineError` that names the agent, the result, the limits page and the command
     that goes on. A resume probes again, because no denied probe follows the newest seal. A failure of the harness or of
     the repository of the probe is an `EngineError` too, and the journal gets no event for it.
+
+    A denied probe of the same seal and the same harness version in the last 24 hours starts no session (#346,
+    `probe_memory.py`): the journal gets `guard-probe` with the result `denied`, the `source` `remembered` and the
+    `kept_time` of the kept result, and no event stream.
     """
     adapter, vcs, tiers, workflow, run_dir, run_id = run.adapter, run.vcs, run.tiers, run.workflow, run.run_dir, run.run_id
     if not getattr(adapter, "probes_guard", False):
@@ -1339,6 +1345,7 @@ def _probe_guards(run: RunContext, journal: Journal) -> None:
         raise EngineError(f"the tier table has no {adapter.tier_column!r} column for tier {PROBE_TIER!r}, which the guard probe needs") from None
     except ValueError:
         raise EngineError(f"the tier table has no tier {PROBE_TIER!r}, which the guard probe needs") from None
+    memory = memory_of(adapter)
     for entry in pending:
         agent = str(entry["agent"])
         sealed, change = check_agent(recorded, agent)
@@ -1352,9 +1359,12 @@ def _probe_guards(run: RunContext, journal: Journal) -> None:
             continue  # the entry comes from the record, so this cannot happen
         stream = stream_path(run_dir, agent)
         try:
-            probe = probe_guard(adapter, vcs, sealed, model, stream)
+            probe = remembered_or_probed(adapter, vcs, sealed, model, stream, memory)
         except (AdapterError, VcsError) as error:
             raise EngineError(f"the guard probe of the verifier {agent!r} could not run: {error}") from None
+        if probe.kept_time is not None:
+            journal.append("guard-probe", agent=probe.agent, handle=probe.handle, result=probe.result, source="remembered", kept_time=probe.kept_time)
+            continue
         tries = [{"result": t.result, "event_stream": str(t.event_stream)} for t in probe.tries]
         journal.append("guard-probe", agent=probe.agent, handle=probe.handle, result=probe.result, event_stream=str(probe.event_stream), tries=tries)
         if probe.result != DENIED:

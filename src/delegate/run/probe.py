@@ -29,6 +29,10 @@ model one more chance. The event stream shows the cause: a session that ended `f
 hold no error and no refusal for the probe command. Any other `inconclusive` cause, `ran` and `denied` do not run again.
 Each try is in `Probe.tries`, and the journal and the dry run name each try.
 
+A denied probe is kept on the machine for 24 hours, by the seal of the verifier and the version of the harness (#346,
+`probe_memory.py`). `remembered_or_probed` gives the kept result when one counts, and starts no session for it. The
+`Probe` of a kept result has the time of that result in `kept_time`, no event stream and no try.
+
 The module asks the port for the repository and the adapter for the session. It starts no process itself. `delegate.cli`
 uses it for the dry run, and the engine uses it at the start of a run.
 """
@@ -43,6 +47,7 @@ from pathlib import Path
 
 from ..ports.harness import FINISHED, Adapter, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import VersionControl
+from .probe_memory import ProbeMemory
 
 # The file that the command makes, the command, and the tier of the session.
 PROBE_FILE = "delegate-guard-probe"
@@ -97,13 +102,16 @@ class Probe:
     """The result of one guard probe: the agent, its handle, `denied`, `ran` or `inconclusive`, and the event stream of the last session.
 
     `tries` holds each session in order. It holds two when the first session made no call of the probe command (#299).
+    A probe whose result comes from a kept result (#346) has the time of that result in `kept_time`, no event stream and
+    no try.
     """
 
     agent: str
     handle: str
     result: str
-    event_stream: Path
+    event_stream: Path | None
     tries: tuple[Try, ...] = ()
+    kept_time: str | None = None
 
 
 def stream_path(run_directory: Path, agent: str) -> Path:
@@ -163,6 +171,16 @@ def probe_guard(adapter: Adapter, vcs: VersionControl, sealed: SealedAgent, mode
         if result != INCONCLUSIVE or not _made_no_call(session):
             break
     return Probe(sealed.agent, sealed.handle, tries[-1].result, tries[-1].event_stream, tuple(tries))
+
+
+def remembered_or_probed(adapter: Adapter, vcs: VersionControl, sealed: SealedAgent, model: str, stream: Path, memory: ProbeMemory) -> Probe:
+    """The kept denied probe of `sealed` when one counts now, else the result of `probe_guard`, which `memory` keeps when it is `denied` (#346)."""
+    kept = memory.kept_time(sealed)
+    if kept is not None:
+        return Probe(sealed.agent, sealed.handle, DENIED, None, (), kept)
+    probe = probe_guard(adapter, vcs, sealed, model, stream)
+    memory.keep(sealed, probe.result)
+    return probe
 
 
 def _session(adapter: Adapter, vcs: VersionControl, sealed: SealedAgent, model: str, stream: Path) -> tuple[str, AdapterResult]:

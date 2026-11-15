@@ -389,14 +389,21 @@ class AgentsChanged(TypedDict):
 
 
 class GuardProbe(TypedDict):
-    """The result of a guard probe (#219): the verifier, its handle, `denied`, `ran` or `inconclusive`, and the event stream of the session."""
+    """The result of a guard probe (#219): the verifier, its handle, `denied`, `ran` or `inconclusive`, and the event stream of the session.
+
+    A probe whose result comes from a kept denied probe (#346) has `source` `remembered` and the `kept_time` of the kept
+    result, and no `event_stream` and no `tries`: it started no session.
+    """
 
     agent: str
     handle: str
     result: str
-    event_stream: str
+    event_stream: NotRequired[str]
     # Each session of the probe, in order (#299): a session that made no call of the probe command is followed by one more session.
     tries: NotRequired[list[dict[str, str]]]
+    # Only for a kept result (#346): `remembered`, and the time of the kept result, as ISO 8601 text.
+    source: NotRequired[str]
+    kept_time: NotRequired[str]
 
 
 class SetupProblem(TypedDict):

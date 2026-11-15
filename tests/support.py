@@ -262,7 +262,8 @@ class ScriptedAdapter:
     when the agent has no entry; a list gives one outcome for each session of the agent, and its last outcome repeats): `denied` ends the session with an error result of the probe command in
     `command_errors` that holds the text of a guard that denied the command, `ran` writes the file `delegate-guard-probe`
     into the working directory, `refused` ends the session with an error result that a permission mode of the host gave, and `inconclusive` ends the session with a text that tells of no command. `probe_commits` holds the number of commits of the working directory of each probe, and
-    `probe_gone` is true when the engine removed the directory of the last probe.
+    `probe_gone` is true when the engine removed the directory of the last probe. `harness_version` gives `version`, the
+    version of the harness for the kept result of a denied probe (#346): None, the default, keeps no result.
 
     `report_checks` holds, for each request, the role (`specialist`, `fix-up`
     or `verifier`), the `idle_timeout` of the request, and the answer of its
@@ -328,6 +329,10 @@ class ScriptedAdapter:
     probe_calls: list[AdapterRequest] = field(default_factory=list)
     probe_commits: list[int] = field(default_factory=list)
     sealed_tools: dict[str, tuple[McpTool, ...]] = field(default_factory=dict)
+    version: str | None = None
+
+    def harness_version(self) -> str | None:
+        return self.version
 
     @property
     def probe_gone(self) -> bool:

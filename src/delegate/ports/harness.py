@@ -270,6 +270,11 @@ class Adapter(Protocol):
     other than a denial ends the run. An adapter whose harness cannot run an agent from its seal outside the repository
     leaves it false, and an adapter that does not have the attribute counts as false.
 
+    `harness_version` gives the version of the harness, as text, or None when the adapter cannot tell it (#346). The
+    engine keeps a denied guard probe on the machine for 24 hours, by the seal of the verifier and this version, so a
+    later probe of the same seal on the same version starts no session. An adapter that gives None, or that does not
+    have the method, keeps no probe, and each probe runs.
+
     `project_config_paths` holds the paths, relative to the root of a tree, that the harness loads as project
     configuration from its working directory (#273): a directory ends with `/`. A verifier works in a copy of the
     tree under review, so a file at one of these paths in a specialist commit would load in the blind verifier. The
@@ -299,3 +304,5 @@ class Adapter(Protocol):
     def permits(self, sealed: SealedAgent, command: str) -> str | None: ...
 
     def activity(self, stream: Path) -> Activity: ...
+
+    def harness_version(self) -> str | None: ...

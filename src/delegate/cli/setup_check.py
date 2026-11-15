@@ -13,7 +13,9 @@ the stack (`Adapter.permits`). The temporary directory goes away when the check 
 After that, for each stack with no problem, the check runs the guard probe of the sealed verifier (#219, `run/probe.py`)
 when the adapter has `probes_guard`: a short session on the tier `cheap` that must show a denial of the command
 `touch delegate-guard-probe`. A result other than `denied` is a problem of the stack. One verifier that two stacks name
-is probed once.
+is probed once. A denied probe of the same seal and harness version in the last 24 hours starts no session (#346,
+`run/probe_memory.py`), and its line names the time of the kept result. A denied probe of the dry run is kept, so the run
+that follows it starts no probe session either.
 
 An adapter with no check (for example a scripted adapter of a test) gets one line that says the check was skipped.
 This module is in `cli/`, because it reads the run context (the workflow).
@@ -28,7 +30,8 @@ from pathlib import Path
 from ..ports.harness import Adapter, AdapterError, SealedAgent
 from ..ports.vcs import VcsError, VersionControl
 from ..run.agents import unpermitted_gates
-from ..run.probe import DENIED, PROBE_TIER, Probe, describe_tries, probe_guard, refusal
+from ..run.probe import DENIED, PROBE_TIER, Probe, describe_tries, refusal, remembered_or_probed
+from ..run.probe_memory import ProbeMemory, memory_of
 from ..run.workflow import Stack, Workflow
 from ..shared.tiers import Tiers
 
@@ -45,7 +48,7 @@ def check_setup(workflow: Workflow, adapter: Adapter, repo: Path, tiers: Tiers, 
     """Check the agent files, the verifier gates and the guard of each stack of `workflow`, through `adapter`.
 
     `repo` is the project directory. `tiers` gives the model of the guard probe, and `vcs` makes its repository. The check
-    changes nothing outside temporary directories that it removes.
+    changes nothing outside temporary directories that it removes, except the kept result of a denied probe (#346).
     """
     result = SetupCheck()
     if not getattr(adapter, "checks_setup", False):
@@ -53,6 +56,7 @@ def check_setup(workflow: Workflow, adapter: Adapter, repo: Path, tiers: Tiers, 
         return result
     with tempfile.TemporaryDirectory(prefix="delegate-setup-check-") as scratch:
         probed: dict[str, Probe | None] = {}  # the probe of each verifier, so that a verifier of two stacks runs one probe
+        memory = memory_of(adapter)
         for stack in workflow.stacks.values():
             problems, sealed = _stack_problems(workflow.adapter, adapter, stack, repo, Path(scratch) / stack.name)
             if problems:
@@ -62,23 +66,28 @@ def check_setup(workflow: Workflow, adapter: Adapter, repo: Path, tiers: Tiers, 
             if sealed is None or not getattr(adapter, "probes_guard", False):
                 continue
             if stack.verifier not in probed:
-                probed[stack.verifier] = _probe(adapter, tiers, vcs, sealed, Path(scratch) / f"{stack.name}-probe.stream.jsonl", stack, result)
+                stream = Path(scratch) / f"{stack.name}-probe.stream.jsonl"
+                probed[stack.verifier] = _probe(adapter, tiers, vcs, sealed, stream, stack, result, memory)
             probe = probed[stack.verifier]
             if probe is None:
                 continue
             tries = describe_tries(probe)
-            if probe.result == DENIED:
+            if probe.result == DENIED and probe.kept_time is not None:
+                result.lines.append(f"stack {stack.name}: guard probe denied (remembered from {probe.kept_time})")
+            elif probe.result == DENIED:
                 result.lines.append(f"stack {stack.name}: guard probe denied" + (f" ({tries})" if tries else ""))
             else:
                 result.problems.append(f"stack {stack.name}: {refusal(stack.verifier, probe.result, tries)}")
     return result
 
 
-def _probe(adapter: Adapter, tiers: Tiers, vcs: VersionControl, sealed: SealedAgent, stream: Path, stack: Stack, result: SetupCheck) -> Probe | None:
-    """The guard probe of the sealed verifier, or `None` after a problem that the function added to `result`."""
+def _probe(
+    adapter: Adapter, tiers: Tiers, vcs: VersionControl, sealed: SealedAgent, stream: Path, stack: Stack, result: SetupCheck, memory: ProbeMemory,
+) -> Probe | None:
+    """The guard probe of the sealed verifier, or its kept result in `memory`, or `None` after a problem that the function added to `result`."""
     try:
         model = tiers.model_for(PROBE_TIER, adapter.tier_column)
-        return probe_guard(adapter, vcs, sealed, model, stream)
+        return remembered_or_probed(adapter, vcs, sealed, model, stream, memory)
     except (KeyError, ValueError):
         result.problems.append(f"stack {stack.name}: the tier table has no model of the tier {PROBE_TIER!r} for the guard probe")
     except (AdapterError, VcsError) as error:

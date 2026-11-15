@@ -411,6 +411,11 @@ class ClaudeCodeAdapter:
             refused_commands=_refused_commands(events),
         )
 
+    def harness_version(self) -> str | None:
+        """The version that `claude --version` names, as `<major>.<minor>.<patch>`, or None when it names none (#346)."""
+        found = _version()
+        return None if found is None else ".".join(map(str, found))
+
     def agent_paths(self, agent: str, source: Path) -> tuple[Path, ...]:
         """The paths where the harness looks for the agent file: the project directory of `source`, then the user directory."""
         return tuple(directory / f"{agent}.md" for directory in (source / AGENT_DIRECTORY, Path.home() / AGENT_DIRECTORY))
@@ -657,29 +662,38 @@ _VERSIONS: dict[tuple[str, int, int, int], tuple[int, int, int] | None] = {}
 def _check_version() -> None:
     """Raise AdapterError when `claude --version` names a version before the minimum.
 
-    The command runs once for each `claude` file in a process (#345): a seal of an agent, a resume and a dry run share the answer.
     A harness that is not installed, or whose output has no version, is no refusal here: the session fails with its own
-    error when it starts. A run that fails or times out is not kept, so the next seal asks again.
+    error when it starts.
     """
-    environment = process_environment()
-    executable = shutil.which(COMMAND, path=environment.get("PATH"))
-    identity = _identity(executable)
-    if identity is not None and identity in _VERSIONS:
-        found = _VERSIONS[identity]
-    else:
-        try:
-            done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=environment)
-        except (OSError, subprocess.TimeoutExpired):
-            return
-        match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)
-        found = tuple(int(part) for part in match.groups()) if match else None
-        if identity is not None:
-            _VERSIONS[identity] = found
+    found = _version()
     if found is not None and found < MINIMUM_VERSION:
         raise AdapterError(
             f"Claude Code {'.'.join(map(str, found))} is older than {'.'.join(map(str, MINIMUM_VERSION))}, "
             "the first version that the sealed agent was measured on; update Claude Code"
         )
+
+
+def _version() -> tuple[int, int, int] | None:
+    """The version that `claude --version` names, or None when the command is not installed or its output has no version.
+
+    The command runs once for each `claude` file in a process (#345): a seal of an agent, a resume, a dry run and the
+    version of the kept guard probe (#346) share the answer. A run that fails or times out is not kept, so the next call
+    asks again.
+    """
+    environment = process_environment()
+    executable = shutil.which(COMMAND, path=environment.get("PATH"))
+    identity = _identity(executable)
+    if identity is not None and identity in _VERSIONS:
+        return _VERSIONS[identity]
+    try:
+        done = subprocess.run([COMMAND, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT, env=environment)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", done.stdout)
+    found = (int(match[1]), int(match[2]), int(match[3])) if match else None
+    if identity is not None:
+        _VERSIONS[identity] = found
+    return found
 
 
 def _identity(executable: str | None) -> tuple[str, int, int, int] | None:
