@@ -192,7 +192,7 @@ from ..ports.gates import GateRunner
 from ..ports.harness import Adapter, AdapterError, AdapterRequest, AdapterResult, SealedAgent
 from ..ports.vcs import REBASED, VcsError, VersionControl
 from ..shared.tiers import Tiers
-from . import domain, run_state
+from . import domain, run_state, step_scans
 from .agents import agent_names, check_agent, denied_agents, recorded_agents, seal_agents, unpermitted_gates, verifier_mcp_tools
 from .brief import (
     BriefError, ChainSegment, GateLogCopy, chain_brief, continuation_brief, coordinator_section, finding_labels_section, fixup_brief,
@@ -470,12 +470,12 @@ def _crash_phase(events: Sequence[dict[str, object]], ticket_id: str) -> str:
 
     A ticket with no `step-start` crashed before its step started: the phase is `setup`.
     """
-    own = [e for e in events if e.get("ticket") == ticket_id]
-    starts = [index for index, e in enumerate(own) if e["event"] == "step-start"]
-    if not starts:
+    own = step_scans.events_of(events, ticket_id)
+    start = step_scans.step_start_place(own)
+    if start is None:
         return CRASH_PHASE_SETUP
     phase = domain.PHASE_SPECIALIST
-    for event in own[starts[-1] :]:
+    for event in own[start:]:
         kind = str(event["event"])
         if kind == "agent-start":
             phase = CRASH_PHASE_OF_ROLE.get(str(event.get("role")), phase)
@@ -536,9 +536,9 @@ def _expected_tip(events: list[dict[str, object]]) -> str | None:
 
     Return None for the journal of an engine that did not record `base_commit` (1.2.0 and before) and has no advance yet.
     """
-    for event in reversed(events):
-        if event["event"] == "run-branch-advance":
-            return str(event["to_commit"])
+    place = step_scans.advance_place(events)
+    if place >= 0:
+        return str(events[place]["to_commit"])
     base = events[0].get("base_commit") if events else None
     return None if base is None else str(base)
 
@@ -565,15 +565,7 @@ def _accepted_unrecorded(events: list[dict[str, object]]) -> list[str]:
     The engine moves the run branch first and writes `run-branch-advance` after it, so a stop between the two leaves a tip
     that the journal does not record yet. A resume closes such a step (see `_recover_advance`).
     """
-    last = max((index for index, e in enumerate(events) if e["event"] == "run-branch-advance"), default=-1)
-    accepted: list[str] = []
-    commit: str | None = None
-    for event in events[last + 1 :]:
-        if event["event"] == "verify-start":
-            commit = str(event["commit"])
-        elif event["event"] == "verdict" and commit is not None and domain.is_accepted(str(event["verdict"])):
-            accepted.append(commit)
-    return accepted
+    return step_scans.accepted_commits(step_scans.events_after_advance(events))
 
 
 def _check_run_branch_at_resume(
@@ -929,7 +921,7 @@ def _failed_chain(workflow: Workflow, events: list[dict[str, object]], run_id: s
     failed = restore_progress(events, run_id, retrying=True).failed
     return [
         ticket_id for ticket_id in plan_ids(events)
-        if ticket_id in failed and _chain_failed(_ticket_events(events, ticket_id))
+        if ticket_id in failed and _chain_failed(step_scans.step_events(events, ticket_id))
     ]
 
 
@@ -1258,17 +1250,6 @@ class _CoordinatorCommit:
     paths: tuple[str, ...]
 
 
-def _ticket_events(events: Sequence[dict[str, object]], ticket_id: str) -> list[dict[str, object]]:
-    """The journal events of the newest step of `ticket_id`: its events from its last `step-start`.
-
-    A retry with a new text starts the ticket again (see `_restart_step`), so the journal of such a ticket holds
-    more than one step. The rounds, the verdicts and the reports of the steps before the last one are history.
-    """
-    own = [event for event in events if event.get("ticket") == ticket_id]
-    starts = [index for index, event in enumerate(own) if event["event"] == "step-start"]
-    return own[starts[-1] :] if starts else own
-
-
 def _retry_plan(
     workflow: Workflow, progress: Progress, run_id: str, ticket_id: str, restart: bool = False, coordinator: bool = False,
     config_paths: Sequence[str] = (),
@@ -1330,7 +1311,7 @@ def _retry_plan(
         raise EngineError(f"{refused}: its step is open; --resume without --retry goes on with it")
     if ticket_id not in progress.failed:
         raise EngineError(f"{refused}: its step did not start; --retry goes on only with a step that failed")
-    prior = tuple(_ticket_events(progress.events, ticket_id))
+    prior = tuple(step_scans.step_events(progress.events, ticket_id))
     if workflow.mode == domain.ECONOMY:
         return _economy_retry_plan(workflow, progress, refused, ticket_id, prior, restart, coordinator)
     if restart:
@@ -1357,7 +1338,7 @@ def _retry_plan(
     last = prior[verdicts[-1]]
     if domain.is_accepted(str(last["verdict"])):
         raise EngineError(f"{refused}: its verifier accepted it, and the step failed after the verdict: {progress.failures[ticket_id]}")
-    rejected = str(prior[max(index for index in starts if index < verdicts[-1])]["commit"])
+    rejected = step_scans.verify_commit_before(prior, verdicts[-1])
     findings = tuple(str(finding) for finding in last["findings"])  # type: ignore[union-attr]
     if starts[-1] > verdicts[-1]:
         return _RetryPlan(ticket_id, RETRY_SCOPED_VERIFIER, round_number, prior, rejected, findings)
@@ -1417,10 +1398,8 @@ def _stopped_before_specialist(prior: tuple[dict[str, object], ...]) -> bool:
     `assure` mode also spawns one after a report of the specialist that says partial or blocked and names no hotspot
     (#284), and after a new text of the ticket (see `_restart_step`).
     """
-    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
-    if not stops or prior[stops[-1]]["role"] != ROLE_SPECIALIST:
-        return False
-    return not any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :])
+    stop = step_scans.unanswered_stop(prior)
+    return stop is not None and prior[stop]["role"] == ROLE_SPECIALIST
 
 
 def _stopped_before_fixup(prior: tuple[dict[str, object], ...], round_number: int) -> bool:
@@ -1429,10 +1408,8 @@ def _stopped_before_fixup(prior: tuple[dict[str, object], ...], round_number: in
     The step then holds no work of that session: the branch holds the rejected commit, and the journal holds no
     `fixup-start` of the round (see `_run_fixup`). A retry of `assure` mode can run the fix-up of the round again.
     """
-    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
-    if not stops or prior[stops[-1]]["role"] != ROLE_FIXUP or prior[stops[-1]]["round"] != round_number:
-        return False
-    return not any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :])
+    stop = step_scans.unanswered_stop(prior)
+    return stop is not None and prior[stop]["role"] == ROLE_FIXUP and prior[stop]["round"] == round_number
 
 
 def _chain_stop(prior: tuple[dict[str, object], ...]) -> dict[str, object] | None:
@@ -1441,12 +1418,8 @@ def _chain_stop(prior: tuple[dict[str, object], ...]) -> dict[str, object] | Non
     The stop is the newest `agents-changed` of the step, for the role `fix-up`, and no agent started after it. The
     chain verification wrote it with the ticket that ends the stack (see `_ChainRun`), and failed the tickets of the stack.
     """
-    stops = [index for index, e in enumerate(prior) if e["event"] == "agents-changed"]
-    if not stops or prior[stops[-1]]["role"] != ROLE_FIXUP:
-        return None
-    if any(e["event"] == "agent-start" for e in prior[stops[-1] + 1 :]):
-        return None
-    return prior[stops[-1]]
+    stop = step_scans.unanswered_stop(prior)
+    return prior[stop] if stop is not None and prior[stop]["role"] == ROLE_FIXUP else None
 
 
 def _refused(ticket_id: str, run_id: str) -> str:
@@ -1540,13 +1513,13 @@ def _chain_retry_plan(
     order = plan_order(workflow)
     revive = tuple(
         ticket.id for ticket in order
-        if ticket.id != ticket_id and ticket.id in progress.failed and _chain_failed(_ticket_events(progress.events, ticket.id))
+        if ticket.id != ticket_id and ticket.id in progress.failed and _chain_failed(step_scans.step_events(progress.events, ticket.id))
     )
     chain = [ticket.id for ticket in order if ticket.id == ticket_id or ticket.id in revive or ticket.id in progress.built]
     if chain[-1] != ticket_id:
         where = "put the commit of the coordinator on its branch, and " if coordinator else ""
         raise EngineError(f"{refused}: ticket {chain[-1]!r} is at the tip of the chain; {where}retry it with --retry {chain[-1]}")
-    stopped = next((other for other in revive if _chain_stop(tuple(_ticket_events(progress.events, other))) is not None), None)
+    stopped = next((other for other in revive if _chain_stop(tuple(step_scans.step_events(progress.events, other))) is not None), None)
     if stopped is not None and not coordinator:
         raise EngineError(
             f"{refused}: the agent check stopped the chain before the fix-up of ticket {stopped!r}; "
@@ -1663,7 +1636,7 @@ def _paths_without(vcs: VersionControl, path: Path, since: str, until: str | Non
 def _coordinator_commits(vcs: VersionControl, repo: Path, own: Sequence[dict[str, object]]) -> list[tuple[str, tuple[str, ...]]]:
     """Each commit of the coordinator of a step, as the branch holds it now, with its paths, oldest first (#225).
 
-    `own` are the journal events of the step (see `_ticket_events`). A `retry` with `coordinator_commit` records each
+    `own` are the journal events of the step (see `step_scans.step_events`). A `retry` with `coordinator_commit` records each
     one. A rebase onto the run branch writes the commits of the step again, so the engine follows each commit through
     each rebase after its `retry`: the commit at the same place in the list of the commits of the step. When the rebase
     changed the number of the commits, the commit is not followed, and the hotspot check counts its paths again.
@@ -2026,7 +1999,7 @@ def _execute(
             if before.get(ticket.id) != skip:
                 journal.append("skip", ticket=ticket.id, blockers=domain.unbuilt_blockers(ticket.blocked_by, built), reason=skip)
             continue
-        prior = _ticket_events(progress.events, ticket.id) if ticket.id == progress.open_ticket else None
+        prior = step_scans.step_events(progress.events, ticket.id) if ticket.id == progress.open_ticket else None
         start = _start_ref(workflow, order, built, ticket, run_base, vcs, repo)
         try:
             _pause_point(journal, ticket.id, PAUSED_BEFORE_STEP, f"before the step of ticket {ticket.id}")
@@ -2767,10 +2740,10 @@ def _build_ticket(
         specialist_done, continuations, verify_rounds = False, 0, 0
         completed = False
     else:
-        advances = [e for e in prior if e["event"] == "run-branch-advance"]
-        if advances:
+        advance = step_scans.advance_place(prior)
+        if advance >= 0:
             # The run branch holds the commit already. Only the step-end is missing.
-            landed = str(advances[-1]["to_commit"])
+            landed = str(prior[advance]["to_commit"])
             if not _holds(vcs, repo, landed, f"refs/heads/{workflow.run_branch}"):
                 raise EngineError(f"run branch {workflow.run_branch} does not hold commit {landed}, which the journal says it advanced to")
             return None
@@ -2785,7 +2758,7 @@ def _build_ticket(
             continuations = sum(1 for e in prior if e["event"] == "continuation")
         else:
             specialist_done, continuations = _specialist_committed(tuple(prior)), 0
-        completed = _coordinator_completes(_ticket_events(journal.events, ticket.id))
+        completed = _coordinator_completes(step_scans.step_events(journal.events, ticket.id))
         # A verifier run that ended with no verdict does not count against the fix-up limit; a red-gate fix-up round does.
         verify_rounds = _rounds_used(prior)
         rebases = [e for e in prior if e["event"] == "rebase" and e["result"] == "rebased"]
@@ -2818,7 +2791,7 @@ def _build_ticket(
 def _coordinator_completes(own: Sequence[dict[str, object]]) -> bool:
     """True when a retry at the gates with a commit of the coordinator came after the last spawn of the specialist (#264).
 
-    `own` are the journal events of the step (see `_ticket_events`). In `assure` mode such a retry goes on with a step
+    `own` are the journal events of the step (see `step_scans.step_events`). In `assure` mode such a retry goes on with a step
     whose specialist reported partial or blocked because the work needs a hotspot (see `_retry_plan`): the commit of the
     coordinator completes the work, so the report of that session does not fail the step. A new session of the
     specialist writes a new report, which counts as it is.
@@ -2837,13 +2810,10 @@ def _recover_advance(workflow: Workflow, ticket: Ticket, vcs: VersionControl, re
     recovered when the newest verdict of the step is ACCEPT and the run branch holds the commit of the `verify-start`
     of that verdict. The event has `recovered: true`. Return False, and write nothing, in any other case.
     """
-    verdicts = [index for index, e in enumerate(prior) if e["event"] == "verdict"]
-    if not verdicts or not domain.is_accepted(str(prior[verdicts[-1]]["verdict"])):
+    found = step_scans.accepted_verdict(prior)
+    if found is None:
         return False
-    starts = [e for e in prior[: verdicts[-1]] if e["event"] == "verify-start"]
-    if not starts:
-        return False
-    accepted = str(starts[-1]["commit"])
+    accepted = found.commit
     run_branch = workflow.run_branch
     if not _holds(vcs, repo, accepted, f"refs/heads/{run_branch}"):
         return False
@@ -2866,21 +2836,16 @@ def _recover_chain_advance(workflow: Workflow, vcs: VersionControl, repo: Path, 
     does. The verification of the chain then finds the work on the run branch, and starts no agent. In any other case,
     and for a journal with no recorded tip, write nothing.
     """
-    last = max((index for index, e in enumerate(events) if e["event"] == "run-branch-advance"), default=-1)
-    since = events[last + 1 :]
-    verdicts = [index for index, e in enumerate(since) if e["event"] == "verdict"]
-    if not verdicts or not domain.is_accepted(str(since[verdicts[-1]]["verdict"])):
-        return
-    starts = [e for e in since[: verdicts[-1]] if e["event"] == "verify-start"]
+    found = step_scans.accepted_verdict(step_scans.events_after_advance(events))
     from_commit = _expected_tip(events)
-    if not starts or from_commit is None:
+    if found is None or from_commit is None:
         return
-    accepted = str(starts[-1]["commit"])
+    accepted = found.commit
     run_branch = workflow.run_branch
     if not _holds(vcs, repo, accepted, f"refs/heads/{run_branch}"):
         return
     journal.append(
-        "run-branch-advance", ticket=str(since[verdicts[-1]]["ticket"]), run_branch=run_branch, from_commit=from_commit,
+        "run-branch-advance", ticket=str(found.verdict["ticket"]), run_branch=run_branch, from_commit=from_commit,
         to_commit=accepted, recovered=True,
     )
 
@@ -3088,7 +3053,7 @@ def _hotspot_stop(
     The change of a commit of the coordinator that a retry of the step recorded (see `_coordinator_commits`) does not
     count (#225). Each other commit of the step counts.
     """
-    excluded = {commit for commit, _ in _coordinator_commits(vcs, worktree, _ticket_events(journal.events, ticket))}
+    excluded = {commit for commit, _ in _coordinator_commits(vcs, worktree, step_scans.step_events(journal.events, ticket))}
     if excluded:
         with _vcs_errors():
             paths = _paths_without(vcs, worktree, since, None, merge_base, excluded)
@@ -3616,7 +3581,7 @@ def _coordinator_of_step(step: _Step) -> list[tuple[str, tuple[str, ...]]]:
     owner = step.anchor or step.ticket
     if step.segments is not None and owner.id not in {segment.ticket for segment in step.segments}:
         return []
-    own = _ticket_events(step.journal.events, owner.id)
+    own = step_scans.step_events(step.journal.events, owner.id)
     branch, run_branch = f"refs/heads/{step.branch}", f"refs/heads/{step.workflow.run_branch}"
     return [
         (commit, paths) for commit, paths in _coordinator_commits(step.vcs, step.repo, own)
@@ -3763,7 +3728,7 @@ def _restart_step(step: _Step, failure: str, start_ref: str) -> str | None:
     then made again at `start_ref`, the base of the step as the first
     `step-start` took it, and the engine builds the ticket as a new step: a new
     specialist with the new text, the gates and the verifier for the mode. The
-    rounds of the old step do not count (see `_ticket_events`). The `retry` event
+    rounds of the old step do not count (see `step_scans.step_events`). The `retry` event
     has `restart` and `failed_branch`, and a new `step-start` follows it.
     """
     ticket, vcs, repo = step.ticket, step.vcs, step.repo
@@ -3824,25 +3789,21 @@ def _chain_redo(events: list[dict[str, object]], ticket: str, stack: str) -> _Ch
 
     `events` are the journal events since the last retry that is not a retry at the chain fix-up. `ticket` ends the stack.
     The stop is the newest `agents-changed` of that ticket, for the role `fix-up`, with no `agent-start` after it, and a
-    `retry` with the phase `chain-fixup` after it (see `_chain_stop`). The event holds the commit, the findings file and the
+    `retry` with the phase `chain-fixup` after it (see `step_scans.unanswered_stop`). The event holds the commit, the findings file and the
     trigger of the stopped fix-up. The state of the verifier comes from the last `verdict` of the stack.
     """
-    own = [(index, e) for index, e in enumerate(events) if e.get("ticket") == ticket]
-    stops = [(index, e) for index, e in own if e["event"] == "agents-changed" and e["role"] == ROLE_FIXUP]
-    if not stops:
+    index = step_scans.unanswered_stop(events, role=ROLE_FIXUP, ticket=ticket)
+    if index is None:
         return None
-    index, stop = stops[-1]
-    after = [e for _, e in own if _ > index]
-    if any(e["event"] == "agent-start" for e in after) or not any(
-        e["event"] == "retry" and e.get("phase") == RETRY_CHAIN_FIXUP for e in after
-    ):
+    stop = events[index]
+    after = step_scans.events_of(events[index + 1 :], ticket)
+    if not any(e["event"] == "retry" and e.get("phase") == RETRY_CHAIN_FIXUP for e in after):
         return None
     verdicts = [i for i, e in enumerate(events[:index]) if e["event"] == "verdict" and e.get("stack") == stack]
     rejected: str | None = None
     findings: list[str] = []
     if verdicts and not domain.is_accepted(str(events[verdicts[-1]]["verdict"])):
-        starts = [e for e in events[: verdicts[-1]] if e["event"] == "verify-start" and e.get("stack") == stack]
-        rejected, findings = str(starts[-1]["commit"]), [str(f) for f in events[verdicts[-1]]["findings"]]  # type: ignore[union-attr]
+        rejected, findings = step_scans.verify_commit_before(events, verdicts[-1], stack), [str(f) for f in events[verdicts[-1]]["findings"]]  # type: ignore[union-attr]
     return _ChainRedo(
         int(stop["round"]), str(stop["rejected_commit"]), Path(str(stop["findings_file"])).read_text(),  # type: ignore[call-overload]
         stop["trigger"] == TRIGGER_GATES_RED, rejected, findings,
@@ -3933,7 +3894,8 @@ class _ChainRun:
         fixups = [e for e in since_retry if e["event"] == "fixup-start" and "stack" in e]
         segments: dict[str, ChainSegment] = {}
         for ticket in self.chain:
-            base = [str(e["base_commit"]) for e in events if e["event"] == "step-start" and e["ticket"] == ticket.id][-1]
+            own = step_scans.events_of(events, ticket.id)
+            base = str(own[step_scans.step_start_place(own)]["base_commit"])  # type: ignore[index]
             tip = _tip(self.vcs, self.repo, _ticket_branch(self.workflow, ticket))
             if fixups and ticket is self.chain[-1]:
                 tip = str(fixups[0]["rejected_commit"])

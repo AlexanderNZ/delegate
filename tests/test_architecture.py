@@ -37,6 +37,8 @@ The rule, in words:
   import `dataclasses` and `datetime` too, for the plain values of a run. `PURE_MODULES` lists each pure module.
 * The run state, `run/run_state.py`, is the one fold of the journal of a run (ADR 0009). It is as pure as the domain module,
   and it may import `dataclasses` for its frozen values.
+* The scans of the events of a step, `run/step_scans.py` (#360), are as pure as the domain module. They may import `typing`
+  (already allowed) for a named tuple.
 
 The rules are in `FORBIDDEN`, the one place to change when a later ticket grows
 the rule. The test reads the import statements with the `ast` module of the
@@ -104,10 +106,13 @@ DOMAIN_ALLOWED = {"__future__", "collections.abc", "typing"}
 FLEET_RULES_MODULE = "run/fleet_rules.py"
 # The run state (#319), the one fold of the journal that the engine and the views decide from, is pure too. It holds its values in frozen dataclasses.
 RUN_STATE_MODULE = "run/run_state.py"
+# The scans of the events of a step (#360), which the engine calls, are pure too.
+STEP_SCANS_MODULE = "run/step_scans.py"
 PURE_MODULES = {
     DOMAIN_MODULE: DOMAIN_ALLOWED,
     FLEET_RULES_MODULE: DOMAIN_ALLOWED | {"dataclasses", "datetime"},
     RUN_STATE_MODULE: DOMAIN_ALLOWED | {"dataclasses"},
+    STEP_SCANS_MODULE: DOMAIN_ALLOWED,
 }
 
 
