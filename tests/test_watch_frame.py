@@ -29,6 +29,7 @@ import pytest
 from .support import TITLE, bare_repo, frames
 from .support_watch_live import PYTEST, START, Run
 from .support_watch_frame import BLOCKED_BY, Clock, SEVEN, built, ends_at_first_poll, in_the_verifier, painted_frames, specialist_and_gates, verifier_starts, watch
+from .support_watch_frame import terminal_of_a_person  # noqa: F401 - the fixture is autouse: the zone NZT-13 and a UTF-8 locale
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
