@@ -25,88 +25,20 @@ from pathlib import Path
 
 import pytest
 
-from delegate.cli import delegate
 
-from .support import TITLE, Terminal, bare_repo, fake_clock, frames, screens
-from .test_watch_live import PYTEST, START, Run
+from .support import TITLE, bare_repo, frames
+from .support_watch_live import PYTEST, START, Run
+from .support_watch_frame import BLOCKED_BY, Clock, SEVEN, built, ends_at_first_poll, in_the_verifier, painted_frames, specialist_and_gates, verifier_starts, watch
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
 
-# The ticket ids and the blockers of the frames of the design (screen-map.md): 72 after 66, 67 after 72, 70 after 69,
-# and 71 after 70.
-BLOCKED_BY: dict[str, tuple[str, ...]] = {"72": ("66",), "67": ("72",), "70": ("69",), "71": ("70",)}
+
 EARLY = ["59", "60", "61", "62", "64", "65"]
-SEVEN = ["66", "72", "67", "68", "69", "70", "71"]
+
 
 # An SGR sequence: the paint of a role.
 SGR = re.compile(r"\x1b\[[0-9;]*m")
-
-
-@pytest.fixture(autouse=True)
-def terminal_of_a_person(monkeypatch):
-    """A UTF-8 locale, colour on, and the local time zone 13 hours east of UTC: the run starts at 16:00 local time."""
-    monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setenv("TZ", "NZT-13")
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
-
-
-class Clock:
-    """The clock of the commands (the `clock` fixture, `support.FakeClock`), in seconds after START. A case moves it."""
-
-    def __init__(self, seconds: float) -> None:
-        self._fake = fake_clock()
-        self.seconds = seconds
-
-    @property
-    def seconds(self) -> float:
-        return self._seconds
-
-    @seconds.setter
-    def seconds(self, value: float) -> None:
-        self._seconds = value
-        self._fake.at = (START + timedelta(seconds=value)).timestamp()
-
-
-def built(run: Run, ticket: str, start: float) -> None:
-    """A ticket that is built in 600 seconds: the specialist, the gate pytest, and a verifier that accepts."""
-    run.step_start(start, ticket)
-    run.agent(start, start + 300, ticket, "specialist", run.stream(f"{ticket}.specialist.stream.jsonl"))
-    run.report(start + 300, ticket)
-    run.gate(start + 300, start + 360, ticket, PYTEST)
-    run.verify(start + 360, start + 600, ticket)
-    run.add(start + 600, "step-end", ticket=ticket, state="built", reason=None)
-
-
-def verifier_starts(run: Run, start: float, ticket: str, round_number: int = 0) -> None:
-    """The verifier of a ticket starts. Its event stream is not there yet: the harness has not opened it."""
-    run.add(start, "verify-start", ticket=ticket, round=round_number, agent="python-verifier", tier="verifier", model="m",
-            commit="1" * 40, copy=str(run.dir / "copy"))
-    run.add(start, "agent-start", ticket=ticket, role="verifier", round=round_number,
-            event_stream=str(run.dir / "reports" / f"{ticket}.verifier-{round_number}.stream.jsonl"))
-
-
-def specialist_and_gates(run: Run, ticket: str, start: float) -> None:
-    run.step_start(start, ticket)
-    run.agent(start, start + 300, ticket, "specialist", run.stream(f"{ticket}.specialist.stream.jsonl"))
-    run.report(start + 300, ticket)
-    run.gate(start + 300, start + 360, ticket, PYTEST)
-
-
-def in_the_verifier(repo: Path, built_first: list[str]) -> Run:
-    """The tickets of `built_first` are built, 600 seconds each, and ticket 70 is in the verifier since 360 seconds."""
-    tickets = [*built_first, "70", "71"]
-    run = Run(repo, *tickets, run_id="20261016T030000Z-abcd", blocked_by=BLOCKED_BY)
-    for index, ticket in enumerate(built_first):
-        built(run, ticket, index * 600)
-    start = len(built_first) * 600
-    specialist_and_gates(run, "70", start)
-    verifier_starts(run, start + 360, "70")
-    return run
 
 
 def in_a_fixup(repo: Path) -> Run:
@@ -125,31 +57,6 @@ def fixup_starts(run: Run, ticket: str, start: float) -> None:
     run.add(start, "fixup-start", ticket=ticket, round=1, rejected_commit="1" * 40, findings_file=str(run.dir / "findings" / "f.md"),
             agent="python-specialist", tier="strong", model="m")
     run.add(start, "agent-start", ticket=ticket, role="fix-up", round=1, event_stream=str(run.dir / "reports" / f"{ticket}.fixup.stream.jsonl"))
-
-
-def watch(repo: Path, monkeypatch, run_id: str, *extra: str, out: io.StringIO | None = None, columns: int = 120, rows: int = 24,
-          sleep=None) -> tuple[int, str]:
-    """Run `delegate watch <run_id>` on a terminal of `columns` and `rows`. A wait that `sleep` does not handle fails the case."""
-    out = Terminal() if out is None else out
-    monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setenv("COLUMNS", str(columns))
-    monkeypatch.setenv("LINES", str(rows))
-
-    def no_wait(seconds: float) -> None:
-        raise AssertionError("watch waited, but the run has no more events")
-
-    fake_clock().on_sleep = sleep or no_wait
-    code = delegate.main(["watch", run_id, "--repo", str(repo), *extra])
-    return code, out.getvalue()
-
-
-def ends_at_first_poll(run: Run):
-    """A wait that ends the run, so the watch draws the frame of the poll, then the last frame."""
-
-    def sleep(seconds: float) -> None:
-        run.add(9000, "run-end", result="failed", built=[], failed=[], skipped=[])
-
-    return sleep
 
 
 def first_frame(repo: Path, monkeypatch, run: Run, columns: int, rows: int = 24) -> list[str]:
@@ -583,11 +490,6 @@ def test_after_an_unskip_the_frame_shows_the_ticket_as_pending_with_no_reason_an
     assert "  3  │   · c     pending" in frame
     assert "blocked by" not in "\n".join(frame)
     assert frame[-1] == "16:33  #c   not skipped · runs again if b is built earlier in this resume", "\n".join(frame)
-
-
-def painted_frames(out: str) -> list[list[str]]:
-    """The frames as the terminal gets them, with the paint of each role, and with no other control sequence."""
-    return screens(out)
 
 
 def test_each_part_of_the_frame_has_the_paint_of_its_role(tmp_path, monkeypatch):

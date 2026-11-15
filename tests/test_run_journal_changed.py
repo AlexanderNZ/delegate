@@ -157,7 +157,6 @@ def test_a_journal_that_another_writer_cut_is_put_back_and_the_offset_is_where_t
     assert [e["seq"] for e in events] == list(range(1, len(events) + 1))
 
 
-
 class WritesInTheProbe(ScriptedAdapter):
     """A scripted adapter whose guard probe session also appends a line to the journal of the run."""
 
@@ -286,7 +285,7 @@ def test_a_new_run_of_three_tickets_reads_its_journal_no_time(tmp_path, capsys, 
 
 def test_delegate_watch_shows_a_journal_change_as_a_change_of_the_journal_and_not_of_the_worktree(tmp_path, monkeypatch, clock):
     from .support import bare_repo, frames
-    from .test_watch_live import Run, ticket_a_is_built, watch
+    from .support_watch_live import Run, ticket_a_is_built, watch
 
     repo = bare_repo(tmp_path)
     run = Run(repo, "a", "b")

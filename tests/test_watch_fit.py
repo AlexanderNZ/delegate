@@ -26,9 +26,8 @@ from delegate.cli import delegate
 from delegate.run.status_model import format_duration, format_tokens
 
 from .support import bare_repo, frames
-from .test_watch_frame import Clock, ends_at_first_poll, painted_frames, terminal_of_a_person, watch  # noqa: F401
-from .test_watch_live import PYTEST, START, Run
-from .test_watch_plan_table import START_CELL, line_of
+from .support_watch_frame import Clock, ends_at_first_poll, painted_frames, terminal_of_a_person, watch, START_CELL, line_of  # noqa: F401
+from .support_watch_live import PYTEST, START, Run
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

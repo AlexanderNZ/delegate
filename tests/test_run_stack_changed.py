@@ -171,7 +171,7 @@ def test_delegate_status_shows_one_line_that_names_the_stack_and_the_fields(tmp_
 
 def test_delegate_watch_shows_one_feed_line_that_names_the_stack_and_the_fields(tmp_path, monkeypatch, clock):
     from .support import bare_repo, frames
-    from .test_watch_live import Run, ticket_a_is_built, watch
+    from .support_watch_live import Run, ticket_a_is_built, watch
 
     repo = bare_repo(tmp_path)
     run = Run(repo, "a")

@@ -128,16 +128,6 @@ def test_the_wait_of_a_git_command_with_a_time_limit_is_not_a_wait_of_the_watch(
     assert clock.waits == [0.02]  # the one wait of the watch, of `--poll-seconds 0.02`
 
 
-@pytest.fixture
-def twelve_hours_east(monkeypatch):
-    """Set the local time zone of the process to a fixed zone 12 hours east of UTC, and set it back after the case."""
-    monkeypatch.setenv("TZ", "XYZ-12")
-    time.tzset()
-    yield timedelta(hours=12)
-    monkeypatch.undo()
-    time.tzset()
-
-
 def local_end_time(path, offset: timedelta) -> str:
     """The time of the run-end event of a journal, in the zone `offset` east of UTC, as the line of watch gives it."""
     run_end_event = [json.loads(line) for line in path.read_text().splitlines()][-1]

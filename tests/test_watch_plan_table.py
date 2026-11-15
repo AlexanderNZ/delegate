@@ -21,18 +21,12 @@ from datetime import timedelta
 import pytest
 
 from .support import bare_repo, frames
-from .test_watch_frame import Clock, built, ends_at_first_poll, painted_frames, terminal_of_a_person, watch  # noqa: F401
-from .test_watch_live import PYTEST, START, Run
+from .support_watch_frame import Clock, built, ends_at_first_poll, painted_frames, terminal_of_a_person, watch, START_CELL, WIDTH, line_of  # noqa: F401
+from .support_watch_live import PYTEST, START, Run
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
 
-# The cell where each track starts: `#` 3, rail 2, `plan` 6, `state` 10, `phase` 13, `after` 8, `used` 7, `new` 5,
-# `cache` 6, and the live tail, with 2 cells between two tracks.
-START_CELL: dict[str, int] = {
-    "#": 0, "rail": 5, "plan": 9, "state": 17, "phase": 29, "after": 44, "used": 54, "new": 63, "cache": 70, "tail": 78,
-}
-WIDTH: dict[str, int] = {"#": 3, "used": 7, "new": 5, "cache": 6}
 
 # Frame 3a: a chain of 11 tickets, each after the row above. 127 and 130 are built, and 128 is in its specialist.
 CHAIN_3A: list[str] = ["127", "130", "128", "131", "132", "133", "134", "135", "136", "137", "129"]
@@ -46,16 +40,6 @@ def chain(tickets: list[str]) -> dict[str, tuple[str, ...]]:
 def at_cell(line: str, cell: int, text: str) -> bool:
     """True when `text` starts at `cell` of the line, after a space or at the start of the line."""
     return line[cell:cell + len(text)] == text and (cell == 0 or line[cell - 1] == " ")
-
-
-def line_of(**cells: str) -> str:
-    """The line that has each text on its design track: a number ends at the last cell of its track, other text starts
-    at the first cell. The keyword `rail` is the rail, and `tail` the live tail."""
-    line = ""
-    for name, text in sorted(cells.items(), key=lambda item: START_CELL[item[0]]):
-        cell = START_CELL[name] + WIDTH[name] - len(text) if name in WIDTH else START_CELL[name]
-        line = line.ljust(cell) + text
-    return line
 
 
 def right_in_track(line: str, track: str, text: str) -> bool:

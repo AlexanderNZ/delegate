@@ -1,5 +1,7 @@
 import os
 import subprocess
+import time
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -258,6 +260,30 @@ def scripted(request, git_identity):
     adapters.register(name, adapter)
     yield adapter
     adapters.unregister(name)
+
+
+@pytest.fixture
+def twelve_hours_east(monkeypatch):
+    """Set the local time zone of the process to a fixed zone 12 hours east of UTC, and set it back after the case."""
+    monkeypatch.setenv("TZ", "XYZ-12")
+    time.tzset()
+    yield timedelta(hours=12)
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.fixture
+def local_zone(monkeypatch):
+    """Set the local time zone of the process to a POSIX zone, and set it back after the case. The locale is UTF-8."""
+
+    def set_zone(zone: str) -> None:
+        monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
+        monkeypatch.setenv("TZ", zone)
+        time.tzset()
+
+    yield set_zone
+    monkeypatch.undo()
+    time.tzset()
 
 
 # The environment variables of a host that change how the engine works: where it keeps its state (#97), and what

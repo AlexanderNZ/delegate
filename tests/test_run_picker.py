@@ -18,25 +18,14 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import (
-    Terminal, append_events, bare_repo, fake_clock, final_screen, frames, live_lock, run_end, run_start, step_end,
-    step_start, without_titles, write_journal,
-)
-from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
-from .test_watch_active import POLL, local_start, two_active_runs
+from .support import Terminal, bare_repo, final_screen, frames, live_lock, run_end, run_start, step_start, write_journal
+from .support_watch_frame import local_start, two_active_runs, Keyboard, ends_at_the_first_wait, on_a_terminal
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
 
 # The prompt of the picker. The reader types the answer after it, on the same line.
 PROMPT = "watch which? [1] "
-
-
-class Keyboard(io.StringIO):
-    """A standard input that is a terminal. Each line of `typed` is one answer of the reader."""
-
-    def isatty(self) -> bool:
-        return True
 
 
 class CtrlC(Keyboard):
@@ -56,35 +45,6 @@ class Unread(Keyboard):
 def since(path, offset) -> str:
     """The `since` cell of a run that started today: the local time of its `run-start` event, as `HH:MM`."""
     return local_start(path, offset)[-5:]
-
-
-def ends_at_the_first_wait(monkeypatch, *journals):
-    """At the first wait of the poll loop, each journal gets the end of its running ticket and a `run-end`."""
-    done: list[bool] = []
-
-    def wait(seconds: float) -> None:
-        if not done:
-            done.append(True)
-            for journal, ticket in journals:
-                append_events(journal, step_end(ticket), run_end("built", [ticket]))
-
-    fake_clock().on_sleep = wait
-
-
-def on_a_terminal(repo, monkeypatch, stdin, *extra, stdout=None):
-    """Run `delegate watch` with no run id, with the given standard input, and standard output to a terminal of 200 columns.
-
-    Return the exit code, the output with no title sequence, and the error output.
-    """
-    out, err = stdout if stdout is not None else Terminal(), io.StringIO()
-    monkeypatch.setattr(sys, "stdin", stdin)
-    monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(sys, "stderr", err)
-    monkeypatch.setenv("COLUMNS", "200")
-    monkeypatch.setenv("LINES", "50")
-    monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
-    code = delegate.main(["watch", "--repo", str(repo), *POLL, *extra])
-    return code, without_titles(out.getvalue()), err.getvalue()
 
 
 def test_on_a_terminal_watch_prints_the_active_runs_newest_first_and_the_prompt_and_enter_follows_the_newest(

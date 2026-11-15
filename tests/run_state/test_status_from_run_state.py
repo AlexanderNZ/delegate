@@ -11,7 +11,7 @@ import pytest
 from delegate.run import run_state
 
 from ..support import bare_repo, frozen, read_journal_file
-from ..test_status_snapshot import Run, snapshot, utf8_locale  # noqa: F401 - the fixture is autouse
+from ..support_status import Run, snapshot, utf8_locale  # noqa: F401 - the fixture is autouse
 
 pytestmark = pytest.mark.usefixtures("clock")
 

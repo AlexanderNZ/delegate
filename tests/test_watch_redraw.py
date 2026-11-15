@@ -20,9 +20,7 @@ import shutil
 import pytest
 
 from .support import CONTROL, bare_repo, without_titles
-from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
-from .test_watch_frame import SEVEN, Clock, in_the_verifier, terminal_of_a_person, watch  # noqa: F401 - a fixture
-from .test_watch_liveness import ROW_OF_70, SPINNER, VERIFIER_START, watch_waits
+from .support_watch_frame import SEVEN, Clock, in_the_verifier, terminal_of_a_person, watch, ROW_OF_70, SPINNER, VERIFIER_START, watch_waits  # noqa: F401 - a fixture
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

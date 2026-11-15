@@ -26,8 +26,8 @@ from delegate.cli import delegate
 
 from .pages import outside_the_package, repository_root
 from .support import Terminal, bare_repo, frozen, without_titles
-from .test_watch_frame import built, specialist_and_gates, verifier_starts
-from .test_watch_live import PYTEST, START, Run, at
+from .support_watch_frame import built, specialist_and_gates, verifier_starts
+from .support_watch_live import PYTEST, START, Run, at
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

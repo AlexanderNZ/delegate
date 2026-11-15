@@ -13,9 +13,8 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, ScriptedAdapter, append_events, bare_repo, frames, make_repo, read_journal, write_journal
-from .support import fake_clock, run_end, run_start, step_end, step_start
-from .test_watch_live import PYTEST, Run, at, local_zone, watch  # noqa: F401 - a fixture, used by name
+from .support import NO_TIMEOUTS_WORKFLOW as WORKFLOW, ScriptedAdapter, append_events, bare_repo, frames, make_repo, read_journal, write_journal, fake_clock, run_end, run_start, step_end, step_start
+from .support_watch_live import PYTEST, Run, at, watch  # noqa: F401 - a fixture, used by name
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

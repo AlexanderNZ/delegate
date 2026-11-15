@@ -26,23 +26,15 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import bare_repo, fake_clock, frames, live_lock
-from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
-from .test_run_picker import Keyboard, ends_at_the_first_wait, on_a_terminal
-from .test_watch_active import two_active_runs
-from .test_watch_frame import SEVEN, Clock, in_the_verifier, watch
+from .support import bare_repo, fake_clock, live_lock
+from .support_watch_frame import Keyboard, ends_at_the_first_wait, on_a_terminal, two_active_runs, ROW_OF_70, SPINNER, watch_waits
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
 
-# The frames of the spinner (tokens.md), and its ASCII frames for a locale that is not UTF-8.
-SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
 ASCII_SPINNER = ["|", "/", "-", "\\"]
 
-# The verifier of ticket 70 starts at 3360 seconds (`in_the_verifier`), and its stream is not there yet, so the time
-# since its last activity is the time since its start. The row of 70 is the line 8 of a frame.
-VERIFIER_START = 3360
-ROW_OF_70 = 8
 
 # An SGR sequence: the paint of a role.
 SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -58,26 +50,6 @@ def terminal_of_a_person(monkeypatch):
     yield
     monkeypatch.undo()
     time.tzset()
-
-
-def watch_waits(tmp_path, monkeypatch, idle: float, waits: int = 1, *extra: str) -> tuple[list[list[str]], list[float], str]:
-    """Watch a run whose verifier had no activity for `idle` seconds. The wait number `waits` ends the run.
-
-    Return the frames, the seconds of each wait, and the output as the terminal gets it.
-    """
-    repo = bare_repo(tmp_path)
-    run = in_the_verifier(repo, SEVEN[:5])
-    Clock(VERIFIER_START + idle)
-    seconds: list[float] = []
-
-    def sleep(wait: float) -> None:
-        seconds.append(wait)
-        if len(seconds) == waits:
-            run.add(9000, "run-end", result="failed", built=[], failed=[], skipped=[])
-
-    code, out = watch(repo, monkeypatch, run.dir.name, *extra, sleep=sleep)
-    assert code == 1
-    return frames(out), seconds, out
 
 
 def tail(line: str) -> str:

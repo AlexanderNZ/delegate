@@ -12,7 +12,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
@@ -22,13 +22,10 @@ from .support import (
     append_events, bare_repo, fake_clock, journal_path, live_lock, run_end, run_start, stale_lock, step_end, step_start,
     write_journal,
 )
-from .test_watch import twelve_hours_east  # noqa: F401 - a fixture
+from .support_watch_frame import POLL, two_active_runs
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
-
-# The time limit ends a watch that follows a run with no end, so a case fails and does not wait.
-POLL = ["--poll-seconds", "0.02", "--max-minutes", "0.1"]
 
 
 def main(capsys, *argv):
@@ -43,25 +40,6 @@ def watch(repo, capsys, *extra):
 
 def status(repo, capsys, *extra):
     return main(capsys, "status", "--repo", str(repo), *extra)
-
-
-def local_start(path, offset: timedelta) -> str:
-    """The time of the run-start event of a journal, in the zone `offset` east of UTC, as `YYYY-MM-DD HH:MM`."""
-    first = json.loads(path.read_text().splitlines()[0])
-    assert first["event"] == "run-start"
-    return (datetime.fromisoformat(first["time"]).replace(tzinfo=None) + offset).strftime("%Y-%m-%d %H:%M")
-
-
-def two_active_runs(repo):
-    """Two runs that go on, on two run branches, each with no lock yet. Their journals were last changed 2 hours ago."""
-    first = write_journal(
-        repo, "r-assure", run_start("r-assure", "a", "b", run_branch="run/one"), step_start("a"), step_end("a"), step_start("b"),
-    )
-    second = write_journal(repo, "r-economy", run_start("r-economy", "x", mode="economy", run_branch="run/two"), step_start("x"))
-    then = time.time() - 7200 - 10  # 10 seconds more, so a slow case still shows 2h00m
-    for journal in (first, second):
-        os.utime(journal, (then, then))
-    return first, second
 
 
 def test_watch_without_a_run_id_follows_the_one_active_run_when_a_newer_run_ended(tmp_path, capsys, monkeypatch):
