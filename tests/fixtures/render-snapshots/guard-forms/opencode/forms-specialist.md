@@ -13,6 +13,21 @@ permission:
     git -* send-pack*: deny
     git http-push*: deny
     git -* http-push*: deny
+    git *>* push*: deny
+    git *<* push*: deny
+    git$*push*: deny
+    git $*push*: deny
+    git *$'*: deny
+    git *{push*: deny
+    git `*: deny
+    git *-c *alias.*push*: deny
+    \git*push*: deny
+    '"git"*push*': deny
+    '''git''*push*': deny
+    git-push*: deny
+    git-send-pack*: deny
+    git-http-push*: deny
+    $(git --exec-path)/git-*: deny
     git *-c *core.hooksPath*: deny
     git *-c *core.hookspath*: deny
     git *--config-env*: deny
