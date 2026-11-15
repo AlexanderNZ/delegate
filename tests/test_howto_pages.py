@@ -56,7 +56,8 @@ def test_every_relative_link_reaches_a_file_and_a_heading(page):
         file = (HOW_TO / path).resolve() if path else HOW_TO / page
         if not file.is_file():
             broken.append(target)
-        elif anchor and anchor not in anchors(file.read_text()):
+        # Only a Markdown page has headings. The fragment of an image (`#gh-dark-mode-only`) selects a colour scheme.
+        elif anchor and file.suffix == ".md" and anchor not in anchors(file.read_text()):
             broken.append(target)
     assert broken == []
 

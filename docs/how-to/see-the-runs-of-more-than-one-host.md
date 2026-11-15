@@ -61,8 +61,8 @@ The table has one group for each host. The runs of a host that answered are live
 
 The figure below shows the view of a viewer with one host in the key `hosts`: `ci-runner`. `ssh` cannot reach it, so its row says `unreachable` and `heard 47m ago`, and under it are the reason and its last-known run. The text under the figure is the same output with no colour.
 
-![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-light.svg#gh-light-mode-only)
-![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent, then the unreachable host ci-runner with its last-known run, then the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent. Then come the unreachable host ci-runner with its last-known run, the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-light.svg#gh-light-mode-only)
+![The output of delegate runs: the fleet lines and the table of the runs of two hosts. The host laptop has a paused run, a run with a fix-up round and a run with an idle agent. Then come the unreachable host ci-runner with its last-known run, the group of two runs that ended, and the legend. The text below gives the same frame.](../assets/terminal/runs-table-dark.svg#gh-dark-mode-only)
 
 ```text
 config /home/me/.config/delegate/config.toml · the index of this machine only · hosts ci-runner

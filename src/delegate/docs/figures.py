@@ -84,7 +84,7 @@ ZONE: str = "UTC"
 # The name of this machine in the figures of `delegate runs`, the other host of their store of last answers, and the configuration file that their
 # header line names (#372). The names are neutral.
 HOST: str = "laptop"
-OTHER_HOST: str = "ci-runner"
+FIGURE_OTHER_HOST: str = "ci-runner"
 CONFIG: Path = Path("/home/me/.config/delegate/config.toml")
 
 
@@ -347,7 +347,7 @@ class _NoSsh:
 
 def _fleet(figure: Figure, root: Path, now: datetime) -> list[str]:
     """The lines of `delegate runs`, or of `delegate runs --timeline`, as `delegate.cli.runs` prints them, for the runs under the state root `root`."""
-    view = ViewSettings(config=CONFIG, hosts=(OTHER_HOST,))
+    view = ViewSettings(config=CONFIG, hosts=(FIGURE_OTHER_HOST,))
     with HostReads(_NoSsh(), store=LastAnswers(root / LAST_ANSWERS_NAME)) as hosts:
         found = fleet_of(root, HOST, now, stream_reader_of, hosts=hosts, view=view)
     return fleet_lines(found, figure.columns, figure.rows, figure.command == "timeline")
