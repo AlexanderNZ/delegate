@@ -106,16 +106,31 @@ def test_the_specialist_gets_a_fixup_brief_in_the_same_worktree_and_the_findings
     assert Path(start["findings_file"]).read_text() == f"- {FINDING}\n- A second finding.\n"
 
 
-def test_each_round_spawns_a_new_verifier_in_a_new_copy_and_a_verifier_session_is_never_resumed(tmp_path, capsys, scripted):
+def test_each_round_spawns_a_new_verifier_in_a_reset_copy_and_a_verifier_session_is_never_resumed(tmp_path, capsys, scripted):
+    # One copy serves all the rounds of the ticket, and the engine resets it before a later round (#349).
     scripted.verdict_sequence = ["REJECT", "REJECT", "ACCEPT"]
     scripted.verdict_findings = [FINDING]
+    scripted.supports_resume = True  # the engine could resume a session of this adapter, but never one of a verifier
+    seen: list[set[str]] = []
+
+    def leave_a_file(request):
+        copy = request.cwd
+        seen.append({p.name for p in copy.iterdir() if p.name != ".git"})
+        (copy / f"left-by-round-{len(seen)}.txt").write_text("untracked\n")
+
+    scripted.during_verifier = leave_a_file
     repo = make_repo(tmp_path)
 
     code, out, err = run(repo, capsys)
 
     assert (code, err) == (0, "")
     assert len(scripted.verifier_calls) == 3 and len(scripted.fixup_calls) == 2
-    assert len({str(call.cwd) for call in scripted.verifier_calls}) == 3
+    assert all(call.resume_session is None for call in scripted.verifier_calls)
+    # Each later round sees the commit of its fix-up, and no file that a verifier of an earlier round left.
+    assert [files >= {"feature.txt"} for files in seen] == [True, True, True]
+    assert ["fixup-1.txt" in files for files in seen] == [False, True, True]
+    assert ["fixup-2.txt" in files for files in seen] == [False, False, True]
+    assert [sorted(f for f in files if f.startswith("left-by-round-")) for files in seen] == [[], [], []]
     assert not any(call.cwd.exists() for call in scripted.verifier_calls)
     events = read_journal(out)
     results = [e for e in events if e["event"] == "verify-result"]

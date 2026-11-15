@@ -224,10 +224,13 @@ def test_a_reject_gets_one_fixup_round_as_a_new_commit_on_the_chain_tip_and_a_fr
     reject_once(scripted)
     repo = make_repo(tmp_path, THREE_TICKETS)
     rejected = None
+    seen: list[set[str]] = []
 
     def note_tip(request):
         nonlocal rejected
         rejected = rejected or tip(repo, "run/demo-c")
+        seen.append({p.name for p in request.cwd.iterdir() if p.name != ".git"})
+        (request.cwd / "left-by-the-first-verifier.txt").write_text("untracked\n")
 
     scripted.during_verifier = note_tip
 
@@ -239,13 +242,20 @@ def test_a_reject_gets_one_fixup_round_as_a_new_commit_on_the_chain_tip_and_a_fr
     assert fixup.cwd.name == "c" and "## Findings to fix" in fixup.prompt and FINDING_B in fixup.prompt
     assert tip(repo, "run/demo-c~1") == rejected  # the fix-up is one new commit on top of the rejected tip
     first, second = scripted.verifier_calls
-    assert first.cwd != second.cwd and "## Findings under verification" not in first.prompt
+    assert "## Findings under verification" not in first.prompt
+    # The second verifier is a new session in the copy of the chain, reset after the first round (#349): it sees the
+    # commit of the fix-up and no file that the first verifier left.
+    assert (first.resume_session, second.resume_session) == (None, None)
+    assert ["fixup-1.txt" in files for files in seen] == [False, True]
+    assert ["left-by-the-first-verifier.txt" in files for files in seen] == [False, False]
+    assert seen[1] >= {"feature.txt", "b.txt"}
     assert second.prompt.startswith("## Findings under verification") and FINDING_B in second.prompt
     delta = second.prompt.split("## Delta")[1].split("## Gates")[0]
     assert "+++ b/fixup-1.txt" in delta and "+++ b/b.txt" not in delta  # the delta holds the fix-up only
     assert tip(repo, "run/demo") == tip(repo, "run/demo-c")
     events = read_journal(out)
     assert [e["verdict"] for e in events if e["event"] == "verdict"] == ["REJECT", "ACCEPT"]
+    assert len({e["session_id"] for e in events if e["event"] == "verify-result"}) == 2
     assert [e["event"] for e in events if e["event"] in ("fixup-start", "fixup-report")] == ["fixup-start", "fixup-report"]
 
 
