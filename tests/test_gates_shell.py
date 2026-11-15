@@ -15,7 +15,7 @@ import pytest
 from delegate.adapters.shell import ShellGateRunner
 from delegate.ports.gates import GateResult, GateRunner
 
-from .support import is_gone
+from .support import is_gone, poll_until
 
 
 def test_the_shell_backend_is_a_gate_runner():
@@ -117,9 +117,7 @@ def test_an_interrupt_during_a_gate_ends_every_process_of_the_gate_including_a_b
     command = f"sleep 300 & echo $! > '{pid_file}'; wait"
 
     def interrupt_when_the_child_runs():
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and not (pid_file.is_file() and pid_file.read_text().endswith("\n")):
-            time.sleep(0.05)
+        poll_until(lambda: pid_file.is_file() and pid_file.read_text().endswith("\n"), 30)
         os.kill(os.getpid(), signal.SIGINT)  # a real signal, which cuts a blocked wait of the main thread
 
     watcher = threading.Thread(target=interrupt_when_the_child_runs, daemon=True)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +12,7 @@ from delegate.cli import delegate
 from delegate.ports.gates import GateResult
 from delegate.ports.harness import AdapterResult
 
-from .support import HEAD, ScriptedAdapter, WORKFLOW, append_events, commit_head, git, journal_path, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket, ticket_of, valid_report
+from .support import HEAD, ScriptedAdapter, WORKFLOW, append_events, commit_head, git, journal_path, make_repo, poll_until, read_journal, read_journal_file, run_main, state_dir, ticket, ticket_of, valid_report
 
 
 REASON = "the owner cancelled the work"
@@ -125,14 +124,15 @@ def wait_for_ends(log: Path, ends: int) -> str:
 
     The summary line `run <result> · ...` comes when a run ends (#119). The line `journal <path>` comes at the start.
     """
-    deadline = time.monotonic() + WAIT_SECONDS
-    text = ""
-    while time.monotonic() < deadline:
-        text = log.read_text() if log.is_file() else ""
-        if len(re.findall(r"^run (?:built|failed|paused) ", text, flags=re.MULTILINE)) >= ends:
-            return text
-        time.sleep(0.2)
-    raise AssertionError(f"the detached run did not end in {WAIT_SECONDS} seconds; the log holds:\n{text}")
+
+    def text() -> str:
+        return log.read_text() if log.is_file() else ""
+
+    def ended() -> bool:
+        return len(re.findall(r"^run (?:built|failed|paused) ", text(), flags=re.MULTILINE)) >= ends
+
+    assert poll_until(ended, WAIT_SECONDS), f"the detached run did not end in {WAIT_SECONDS:g} seconds; the log holds:\n{text()}"
+    return text()
 
 
 ECONOMY = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')

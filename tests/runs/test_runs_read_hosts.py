@@ -21,7 +21,7 @@ import pytest
 
 from delegate.run import fleet_hosts
 
-from ..support import Terminal, fake_clock, frames
+from ..support import Terminal, fake_clock, frames, poll_until
 from .journals import clock_time, runs
 from ..support_runs import every_kind, failed_start, index, record, this_machine, two_other_hosts, ctrl_c, watching, document, reason_of, run_of
 
@@ -34,15 +34,15 @@ def table_width(monkeypatch) -> None:
 def group_is_gone(group: int, seconds: float = 1.0) -> bool:
     """True when no process of the process group `group` is alive. A process that a signal ended can stay a zombie until its parent, or init, collects it,
     so the check waits up to `seconds` for that. A group that holds only zombies gives PermissionError on macOS."""
-    deadline = time.monotonic() + seconds
-    while True:
+
+    def absent() -> bool:
         try:
             os.killpg(group, 0)
         except (ProcessLookupError, PermissionError):
             return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.02)
+        return False
+
+    return poll_until(absent, seconds, 0.02)
 
 
 def row_of(lines: list[str], start: str) -> list[str]:
@@ -405,9 +405,7 @@ def test_sigint_during_a_read_that_hangs_exits_130_in_less_than_one_second_and_n
     process = subprocess.Popen(
         [sys.executable, "-c", ON_A_TERMINAL, "runs"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
-    deadline = time.monotonic() + 20
-    while not ssh.pids and time.monotonic() < deadline and process.poll() is None:
-        time.sleep(0.02)
+    poll_until(lambda: ssh.pids or process.poll() is not None, 20)
     assert ssh.pids, "the read of build-host did not start"
     time.sleep(0.2)  # the shim waits in `sleep 30`
 

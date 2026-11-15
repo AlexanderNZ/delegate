@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from . import claude_fake
-from .support import state_dir
+from .support import state_dir, wait_for
 from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file, write_project_agents
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
@@ -73,13 +73,6 @@ WAIT_SECONDS: float = 120.0
 STOP_SECONDS: float = 10.0
 
 
-def wait_until(condition, what: str) -> None:
-    deadline = time.monotonic() + WAIT_SECONDS
-    while not condition():
-        assert time.monotonic() < deadline, f"{what} did not happen in {WAIT_SECONDS} seconds"
-        time.sleep(0.1)
-
-
 def stop_with_sigint(tmp_path: Path, monkeypatch, hold_in: str) -> tuple[Path, str, float, list[int]]:
     """Start a detached run whose `hold_in` session stays open, send SIGINT to the run process, and wait for it to end.
 
@@ -105,9 +98,9 @@ def stop_with_sigint(tmp_path: Path, monkeypatch, hold_in: str) -> tuple[Path, s
     subprocess.run(["sh", "-c", command], env={**os.environ, **GIT_IDENTITY}, check=True, stdin=subprocess.DEVNULL)
     pids: list[int] = []
     try:
-        wait_until(lambda: started.is_file() and "run " in started.read_text(), "the start of the detached run")
+        wait_for(lambda: started.is_file() and "run " in started.read_text(), "the start of the detached run", WAIT_SECONDS)
         run_id = re.search(r"^run (\S+)$", started.read_text(), flags=re.MULTILINE).group(1)
-        wait_until(lambda: pids_file.is_file() and len(pids_file.read_text().split()) == 2, f"the {hold_in} session")
+        wait_for(lambda: pids_file.is_file() and len(pids_file.read_text().split()) == 2, f"the {hold_in} session", WAIT_SECONDS)
         pids = [int(pid) for pid in pids_file.read_text().split()]
         (lock,) = (state_dir(repo) / "locks").glob("*.lock")
         engine = int(json.loads(lock.read_text())["pid"])

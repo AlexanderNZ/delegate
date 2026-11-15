@@ -10,14 +10,13 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
 from . import claude_fake
 from .support import state_dir
-from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file, write_project_agents
+from .support import GIT_IDENTITY, WORKFLOW, event_names, is_gone, make_repo, read_journal_file, wait_for, write_project_agents
 
 CLAUDE_CODE = WORKFLOW.replace('adapter = "scripted"', 'adapter = "claude-code"')
 
@@ -33,13 +32,6 @@ def start_run(repo: Path) -> subprocess.Popen[str]:
     )
 
 
-def wait_until(condition, what: str) -> None:
-    deadline = time.monotonic() + WAIT_SECONDS
-    while not condition():
-        assert time.monotonic() < deadline, f"{what} did not happen in {WAIT_SECONDS} seconds"
-        time.sleep(0.1)
-
-
 @pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGHUP])
 def test_a_signal_stops_the_run_as_ctrl_c_does_and_no_process_of_the_harness_stays_alive(tmp_path, monkeypatch, stop_signal):
     child_pid = tmp_path / "child.pid"
@@ -50,7 +42,7 @@ def test_a_signal_stops_the_run_as_ctrl_c_does_and_no_process_of_the_harness_sta
     engine = start_run(repo)
     harness = child = None
     try:
-        wait_until(lambda: fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit(), "the start of the harness")
+        wait_for(lambda: fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit(), "the start of the harness", WAIT_SECONDS)
         harness, child = fake.calls()[0]["pid"], int(child_pid.read_text())
 
         engine.send_signal(stop_signal)

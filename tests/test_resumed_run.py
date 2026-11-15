@@ -2,16 +2,15 @@
 
 `delegate run --resume <id>` of a run that ended appends `resume` and `retry` events after the old `run-end`. The run
 then works again, so the old `run-end` does not end it, and the retried ticket runs again. A case writes the journal
-with the journal class of the engine, and a case that follows a live run appends from a second thread.
+with the journal class of the engine, and a case that follows a live run appends between two polls of `watch`, with `on_each_wait`.
 """
 
 import json
-import threading
 import time
 
 from delegate.cli import delegate
 
-from .support import append_events, bare_repo, hold_lock, run_end, run_start, state_and_verdict, step_end, step_start, write_journal
+from .support import append_events, bare_repo, hold_lock, on_each_wait, run_end, run_start, state_and_verdict, step_end, step_start, write_journal
 
 POLL = ["--poll-seconds", "0.02"]
 
@@ -63,18 +62,13 @@ def test_status_json_of_a_resumed_run_that_had_ended_gives_the_run_and_the_retri
     assert snap["percent"] < 100
 
 
-def test_watch_of_a_resumed_run_goes_past_the_old_run_end_and_exits_with_the_result_of_the_new_one(tmp_path, capsys):
+def test_watch_of_a_resumed_run_goes_past_the_old_run_end_and_exits_with_the_result_of_the_new_one(tmp_path, capsys, clock):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", *ENDED_THEN_RESUMED)
 
-    def append_later():
-        time.sleep(0.2)
-        append_events(path, step_end("a"), run_end("built", ["a"]))
+    on_each_wait(lambda: append_events(path, step_end("a"), run_end("built", ["a"])))
 
-    writer = threading.Thread(target=append_later)
-    writer.start()
     code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
-    writer.join()
 
     ends = [line for line in out.splitlines() if line.split()[2:3] == ["run-end"]]
     assert code == 0
@@ -82,18 +76,13 @@ def test_watch_of_a_resumed_run_goes_past_the_old_run_end_and_exits_with_the_res
     assert "result=built" in ends[-1]
 
 
-def test_watch_from_a_position_after_the_old_run_end_follows_the_resumed_run(tmp_path, capsys):
+def test_watch_from_a_position_after_the_old_run_end_follows_the_resumed_run(tmp_path, capsys, clock):
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", *ENDED_THEN_RESUMED)
 
-    def append_later():
-        time.sleep(0.2)
-        append_events(path, step_end("a"), run_end("built", ["a"]))
+    on_each_wait(lambda: append_events(path, step_end("a"), run_end("built", ["a"])))
 
-    writer = threading.Thread(target=append_later)
-    writer.start()
     code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "--from", "7", "r1")
-    writer.join()
 
     ends = [line for line in out.splitlines() if line.split()[2:3] == ["run-end"]]
     assert code == 0
@@ -133,7 +122,7 @@ def test_watch_of_a_resumed_run_that_never_ended_follows_the_run_past_its_old_pr
     assert "watch: problem" not in out
 
 
-def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_the_old_run_end(tmp_path, capsys):
+def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_the_old_run_end(tmp_path, capsys, clock):
     repo = bare_repo(tmp_path)
     verdict = ("verdict", {"ticket": "a", "round": 0, "mode": "full", "verdict": "REJECT", "findings": ["x"], "report": "/w/v.json"})
     path = write_journal(
@@ -141,14 +130,9 @@ def test_watch_until_verdict_of_a_resumed_run_does_not_exit_at_a_verdict_before_
         run_end("failed", [], ["a"]), resume("a"), retry("a"),
     )
 
-    def append_later():
-        time.sleep(0.2)
-        append_events(path, ("verdict", {**verdict[1], "verdict": "ACCEPT", "findings": []}))
+    on_each_wait(lambda: append_events(path, ("verdict", {**verdict[1], "verdict": "ACCEPT", "findings": []})))
 
-    writer = threading.Thread(target=append_later)
-    writer.start()
     code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "--until", "verdict", "r1")
-    writer.join()
 
     assert code == 4
     assert "ACCEPT" in out and "REJECT" not in out.split("resume", 1)[1]
@@ -180,7 +164,7 @@ def test_watch_of_a_resumed_run_that_ended_again_exits_with_the_result_of_its_la
     assert "result=built" in [line for line in out.splitlines() if line.split()[2:3] == ["run-end"]][-1]
 
 
-def test_watch_of_a_resumed_run_does_not_exit_at_the_old_problem_of_a_ticket_that_the_resume_does_not_retry(tmp_path, capsys):
+def test_watch_of_a_resumed_run_does_not_exit_at_the_old_problem_of_a_ticket_that_the_resume_does_not_retry(tmp_path, capsys, clock):
     # The history before the first `resume` after the `run-end` holds the problems of each ticket, also of a ticket that
     # no `retry` follows: ticket b failed before the run ended, and the resumed run retries only a.
     repo = bare_repo(tmp_path)
@@ -189,14 +173,9 @@ def test_watch_of_a_resumed_run_does_not_exit_at_the_old_problem_of_a_ticket_tha
         step_end("b", "failed", "boomB"), run_end("failed", [], ["a", "b"]), resume("a", "b"), retry("a"), agent_start("a"),
     )
 
-    def append_later():
-        time.sleep(0.2)
-        append_events(path, step_end("a"), run_end("failed", ["a"], ["b"]))
+    on_each_wait(lambda: append_events(path, step_end("a"), run_end("failed", ["a"], ["b"])))
 
-    writer = threading.Thread(target=append_later)
-    writer.start()
     code, out = main(capsys, "watch", "--repo", str(repo), *POLL, "--max-minutes", "1", "r1")
-    writer.join()
 
     assert code == 1
     assert "watch: problem" not in out

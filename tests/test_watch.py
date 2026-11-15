@@ -3,7 +3,7 @@
 A case calls `delegate.main(["watch", ...])` against a real temporary git
 repository. A journal is written with the journal class of the engine, one event
 at a time, as a run in progress writes it; a case that follows a live run appends
-from a second thread while `watch` polls. A case that needs a real run uses the
+between two polls of `watch`, with `on_each_wait`. A case that needs a real run uses the
 scripted adapter, which is removed before `watch` starts, so no case has an
 adapter installed when `watch` runs.
 """
@@ -11,8 +11,6 @@ adapter installed when `watch` runs.
 import json
 import os
 import shutil
-import threading
-import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -20,7 +18,7 @@ import pytest
 from delegate.cli import delegate
 
 from .support import (
-    append_events, bare_repo, committed_repo, fake_clock, live_lock, run_end, run_start, step_end, step_start, write_journal,
+    append_events, bare_repo, committed_repo, fake_clock, live_lock, on_each_wait, run_end, run_start, step_end, step_start, write_journal,
     write_journal_in_state_root,
 )
 
@@ -69,15 +67,12 @@ def test_watch_prints_events_as_they_are_appended_and_exits_when_the_run_ends(tm
     repo = bare_repo(tmp_path)
     path = write_journal(repo, "r1", run_start("r1", "a"))
 
-    def append_later():
-        for events in ([step_start("a")], [step_end("a")], [run_end("built", ["a"])]):
-            time.sleep(0.15)
-            append_events(path, *events)
+    on_each_wait(
+        lambda: append_events(path, step_start("a")), lambda: append_events(path, step_end("a")),
+        lambda: append_events(path, run_end("built", ["a"])),
+    )
 
-    writer = threading.Thread(target=append_later)
-    writer.start()
     code, out, err = watch(repo, capsys, "r1")
-    writer.join()
 
     assert (code, err) == (0, "")
     assert [line.split()[2] for line in out.splitlines()[:4]] == ["run-start", "step-start", "step-end", "run-end"]
@@ -301,17 +296,15 @@ def test_watch_waits_for_the_end_of_a_line_that_is_half_written_and_does_not_fai
     second_line = done.read_text().splitlines()[1]  # the run-end event, with seq 2
     half = len(second_line) // 2
 
-    def finish_the_line():
+    def write(text: str) -> None:
         with path.open("a") as handle:
-            handle.write(second_line[:half])
-        time.sleep(0.2)
-        with path.open("a") as handle:
-            handle.write(second_line[half:] + "\n")
+            handle.write(text)
 
-    writer = threading.Thread(target=finish_the_line)
-    writer.start()
+    # The first half is there at the first read, and the rest comes before the next poll.
+    write(second_line[:half])
+    on_each_wait(lambda: write(second_line[half:] + "\n"))
+
     code, out, err = watch(repo, capsys, "r1")
-    writer.join()
 
     assert (code, err) == (0, "")
     assert [line.split()[2] for line in out.splitlines()[:2]] == ["run-start", "run-end"]

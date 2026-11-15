@@ -12,7 +12,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -21,7 +20,7 @@ from delegate.cli import delegate
 
 from .support import HEAD, state_dir, ticket
 from .support import (
-    event_names, finished_run, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
+    event_names, finished_run, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree, wait_for,
 )
 from .support_run import CRASH, raise_in_b
 
@@ -161,16 +160,20 @@ def test_of_several_processes_that_take_one_stale_lock_at_the_same_time_one_only
     state = tmp_path / "state"
     (state / "locks").mkdir(parents=True)
     (state / "locks" / "run%2Fdemo.lock").write_text(json.dumps({"run_id": "r1", "pid": os.getpid()}))
-    go = tmp_path / "go"
+    go, release = tmp_path / "go", tmp_path / "release"
+    ready = [tmp_path / f"ready-{number}" for number in range(6)]
     children = [
         subprocess.Popen(
-            [sys.executable, "-c", RACE_SCRIPT, str(state), "run/demo", "r1", str(go)],
+            [sys.executable, "-c", RACE_SCRIPT, str(state), "run/demo", "r1", str(go), str(release), str(marker)],
             cwd=ROOT, env=child_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
-        for _ in range(6)
+        for marker in ready
     ]
-    time.sleep(1.0)  # each child starts and waits for the go file
+    wait_for(lambda: all(marker.exists() for marker in ready), "the start of each child", 60)
     go.write_text("")
+    # The child that got the lock holds it until the release, so each other child is refused and ends first.
+    wait_for(lambda: sum(child.poll() is not None for child in children) == 5, "the end of the five children that are refused", 60)
+    release.write_text("")
     results = [child.communicate(timeout=60) for child in children]
 
     assert [err for _, err in results if err] == []
@@ -179,19 +182,22 @@ def test_of_several_processes_that_take_one_stale_lock_at_the_same_time_one_only
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# A child process that waits for a go file, then takes the lock of a run branch for a run id and holds it for 3 seconds.
+# A child process that touches its ready file, waits for a go file, then takes the lock of a run branch for a run id and
+# holds it until the release file exists.
 RACE_SCRIPT = """\
 import sys, time
 from pathlib import Path
 from delegate.run.lock import LockError, run_lock
 
-go = Path(sys.argv[4])
+go, release = Path(sys.argv[4]), Path(sys.argv[5])
+Path(sys.argv[6]).write_text("")
 while not go.exists():
     time.sleep(0.005)
 try:
     with run_lock(Path(sys.argv[1]), sys.argv[2], sys.argv[3]):
         print("got", flush=True)
-        time.sleep(3)
+        while not release.exists():
+            time.sleep(0.005)
 except LockError:
     print("refused", flush=True)
 """

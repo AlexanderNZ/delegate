@@ -559,19 +559,37 @@ def without_take_over(err: str) -> str:
     return "".join(line for line in err.splitlines(keepends=True) if not TAKE_OVER_NOTE.fullmatch(line.rstrip("\n")))
 
 
-def is_gone(pid: int, seconds: float = 10.0) -> bool:
-    """True when no process has the id `pid`, also after a wait of `seconds` for the end of a process that got a signal."""
-    import time
+def poll_until(condition: Callable[[], object], seconds: float = 30.0, interval: float = 0.01) -> bool:
+    """True as soon as `condition()` is true, checked each `interval` seconds. False when `seconds` pass first.
 
+    A test waits with this for a fact that it can observe (a journal line, a pid file, a lock, the end of a process),
+    never for a fixed time. The condition is checked once more at the limit, so a fact that comes late is not lost.
+    """
     deadline = time.monotonic() + seconds
     while True:
+        if condition():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
+def wait_for(condition: Callable[[], object], what: str, seconds: float = 120.0, interval: float = 0.01) -> None:
+    """Wait with `poll_until`, and fail with `<what> did not happen in <seconds> seconds` when the limit passes."""
+    assert poll_until(condition, seconds, interval), f"{what} did not happen in {seconds:g} seconds"
+
+
+def is_gone(pid: int, seconds: float = 10.0) -> bool:
+    """True when no process has the id `pid`, also after a wait of `seconds` for the end of a process that got a signal."""
+
+    def absent() -> bool:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.05)
+        return False
+
+    return poll_until(absent, seconds)
 
 
 def state_dir(repo: Path) -> Path:
@@ -934,6 +952,22 @@ class FakeClock:
         self._monotonic += seconds
         if self.on_sleep is not None:
             self.on_sleep(seconds)
+
+
+def on_each_wait(*steps: Callable[[], None]) -> None:
+    """Make the n-th wait of the commands of the case (the fake clock) run `steps[n]`. A later wait runs nothing.
+
+    A step is what the run does between two polls of `delegate watch`: it appends events to the journal, or it writes a
+    part of a line. The case needs no thread and no real wait, and the order of the steps and the polls does not change.
+    """
+    pending = iter(steps)
+
+    def step(seconds: float) -> None:
+        next_step = next(pending, None)
+        if next_step is not None:
+            next_step()
+
+    fake_clock().on_sleep = step
 
 
 def fake_clock() -> FakeClock:

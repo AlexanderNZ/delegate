@@ -23,7 +23,7 @@ import pytest
 from . import claude_fake
 from .support import state_dir
 from .support import (
-    WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main, write_project_agents,
+    WORKFLOW, event_names, git, journal_path, live_lock, make_repo, read_journal_file, run_main, wait_for, write_project_agents,
 )
 from .support_run import WAIT_SECONDS, printed, wait_for_ends
 
@@ -190,22 +190,15 @@ def test_a_detached_run_holds_the_lock_in_its_own_process_and_a_kill_of_that_pro
     code, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
     assert code == 0
     run_id, _ = printed(out)
-    deadline = time.monotonic() + WAIT_SECONDS
-    while not (fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit()):
-        assert time.monotonic() < deadline, "the harness did not start"
-        time.sleep(0.1)
+    wait_for(lambda: fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit(), "the start of the harness", WAIT_SECONDS)
     harness, child = fake.calls()[0]["pid"], int(child_pid.read_text())
     (lock,) = (state_dir(repo) / "locks").glob("*.lock")
     engine = int(json.loads(lock.read_text())["pid"])
     try:
         running = status_of(repo, capsys, run_id)
         os.kill(engine, signal.SIGKILL)
-        deadline = time.monotonic() + WAIT_SECONDS
-        while True:
-            stopped = status_of(repo, capsys, run_id)
-            if ": stopped " in stopped[1] or time.monotonic() >= deadline:
-                break
-            time.sleep(0.1)
+        wait_for(lambda: ": stopped " in status_of(repo, capsys, run_id)[1], "the stop of the run", WAIT_SECONDS, 0.1)
+        stopped = status_of(repo, capsys, run_id)
     finally:
         for pid in (engine, harness, child):
             with contextlib.suppress(ProcessLookupError):

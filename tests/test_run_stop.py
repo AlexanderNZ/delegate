@@ -25,7 +25,7 @@ from delegate.cli import delegate
 from delegate.cli import stop as stop_command
 
 from . import claude_fake
-from .support import state_dir
+from .support import state_dir, wait_for
 from .support import (
     WORKFLOW, bare_repo, event_names, is_gone, journal_path, make_repo, read_journal_file, run_end, run_main, run_start,
     write_project_agents,
@@ -56,13 +56,6 @@ def stop(repo: Path, capsys, *args: str) -> tuple[int, str, str]:
     return code, captured.out, captured.err
 
 
-def wait_until(condition, what: str) -> None:
-    deadline = time.monotonic() + WAIT_SECONDS
-    while not condition():
-        assert time.monotonic() < deadline, f"{what} did not happen in {WAIT_SECONDS} seconds"
-        time.sleep(0.1)
-
-
 def reap_in_background(repo: Path) -> None:
     """Wait for the process that holds the lock, as the parent of a run process does.
 
@@ -90,7 +83,7 @@ def test_stop_ends_a_detached_run_now_and_a_resume_goes_on_with_the_step(tmp_pat
     code, out, _ = run_main(capsys, str(repo / "workflow.toml"), "--repo", str(repo), "--detach")
     assert code == 0
     run_id = next(line.split()[1] for line in out.splitlines() if line.startswith("run "))
-    wait_until(lambda: fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit(), "the start of the harness")
+    wait_for(lambda: fake.calls() and child_pid.is_file() and child_pid.read_text().isdigit(), "the start of the harness", WAIT_SECONDS)
     harness, child = fake.calls()[0]["pid"], int(child_pid.read_text())
     reap_in_background(repo)
     try:
