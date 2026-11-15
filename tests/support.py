@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from collections.abc import Callable, Iterator, Mapping
 import dataclasses
 from dataclasses import dataclass, field
@@ -610,6 +611,39 @@ def ticket_of(request: AdapterRequest) -> str:
     match = re.search(r"Ticket (\w+)", request.prompt)
     assert match is not None, request.prompt
     return match.group(1)
+
+
+# Every stack gate lists the text files of the worktree, so the gate output shows what the tree held.
+GATE_LISTING = 'gates = ["ls *.txt"]'
+
+# The head of `WORKFLOW`, with no ticket and with the gate `GATE_LISTING`. A case adds its tickets with `ticket`.
+HEAD = WORKFLOW.split("[[tickets]]")[0].replace('gates = ["test -f feature.txt"]', GATE_LISTING)
+
+# The line that gives each ticket without `blocked-by` the base of the run as its start. Put it before the first table.
+BASE_BRANCH_START = 'ticket-start = "base-branch"\n'
+
+# The start time of the runs of the cases of `status` and `watch`.
+START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
+
+
+def warned(err: str) -> list[str]:
+    """The ids of the checks that print a warning on stderr at the start of a run (#247), one for each line of `err`.
+
+    A workflow with `BASE_BRANCH_START` and two tickets with no `blocked-by` gets the warning `ticket-start`.
+    """
+    prefix = "delegate run: warn "
+    return [line.removeprefix(prefix).split(":")[0] if line.startswith(prefix) else line for line in err.splitlines()]
+
+
+def ticket(ticket_id: str, blocked_by: tuple[str, ...] = ()) -> str:
+    """The text of a ticket of a workflow: the table `[[tickets]]` of `ticket_id`, with the ids of its blockers."""
+    blockers = ", ".join(f'"{b}"' for b in blocked_by)
+    return f'\n[[tickets]]\nid = "{ticket_id}"\ntext = "Ticket {ticket_id} adds its file."\nstack = "python"\nblocked-by = [{blockers}]\n'
+
+
+def frozen(monkeypatch, seconds: float) -> None:
+    """Set the wall time of the fake clock to `START` plus `seconds`. The case needs the `clock` fixture."""
+    fake_clock().at = (START + timedelta(seconds=seconds)).timestamp()
 
 
 def tree(repo: Path, branch: str) -> list[str]:

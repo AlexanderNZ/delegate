@@ -20,8 +20,7 @@ from delegate.run.plan_review import PlanReview, SkippedTicket, StackChange
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from ..support import kill_a_run, make_repo
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, kill_a_run, make_repo, ticket
 
 ENGINE = Path(delegate.__file__).parent / "run" / "engine.py"
 MOVED = {"PlanReview", "SkippedTicket", "StackChange", "review_plan_change"}

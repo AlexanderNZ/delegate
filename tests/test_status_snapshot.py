@@ -23,12 +23,10 @@ from delegate import adapters
 from delegate.cli import delegate
 
 from . import claude_fake, opencode_fake
-from .support import Terminal, bare_repo, fake_clock, frames, hold_lock, journal_path, status_row
+from .support import START, Terminal, bare_repo, fake_clock, frames, frozen, hold_lock, journal_path, status_row
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")
-
-START = datetime(2026, 10, 16, 3, 0, 0, tzinfo=timezone.utc)
 
 
 def at(seconds: float) -> str:
@@ -77,10 +75,6 @@ class Run:
 def utf8_locale(monkeypatch):
     """A UTF-8 locale, so the frames of `watch` have the Unicode glyph set (`delegate.run.output.glyphs`)."""
     monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
-
-
-def frozen(monkeypatch, seconds: float) -> None:
-    fake_clock().at = (START + timedelta(seconds=seconds)).timestamp()
 
 
 def snapshot(repo: Path, capsys, *extra: str) -> dict:

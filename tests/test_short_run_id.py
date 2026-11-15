@@ -15,13 +15,11 @@ import json
 
 from delegate.cli import delegate
 
-from .support import without_take_over
-from .support import state_dir
+from .support import HEAD, state_dir, ticket, without_take_over
 from .support import (
     bare_repo, journal_path, kill_a_run, live_lock, make_repo, read_journal_file, resume_main, run_end, run_start, step_end,
     step_start, write_journal,
 )
-from .test_run_multi import HEAD, ticket
 
 RUN_ID = "20261016T030000Z-ab12"
 SHORT = "ab12"

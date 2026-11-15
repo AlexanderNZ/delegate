@@ -20,11 +20,10 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import without_take_over
+from .support import BASE_BRANCH_START, HEAD, ticket, warned, without_take_over
 from .support import (
     ScriptedAdapter, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, ticket_of, tree,
 )
-from .test_run_multi import BASE_BRANCH_START, HEAD, ticket, warned
 
 # The subject of the commits that the scripted specialist makes.
 SPECIALIST_WORK = "scripted work (python-specialist)"

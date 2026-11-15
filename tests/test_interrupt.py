@@ -18,12 +18,11 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import fake_clock, state_dir
+from .support import HEAD, fake_clock, state_dir, ticket
 from .support import (
     TITLE, Terminal, bare_repo, event_names, frames, journal_path, live_lock, make_repo, read_journal, read_journal_file,
     resume_main, run_start, step_start, ticket_of, without_titles, write_journal,
 )
-from .test_run_multi import HEAD, ticket
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

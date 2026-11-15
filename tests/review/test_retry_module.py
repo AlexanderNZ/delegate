@@ -20,8 +20,7 @@ from delegate.run.retry import RetryHint, retry_hints, retry_plan
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from ..support import journal_path, make_repo, read_journal_file, run_main, state_dir
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, journal_path, make_repo, read_journal_file, run_main, state_dir, ticket
 
 ENGINE = Path(delegate.__file__).parent / "run" / "engine.py"
 MOVED = {

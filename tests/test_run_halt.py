@@ -13,9 +13,7 @@ import shutil
 
 from delegate.ports.harness import AdapterError
 
-from .support import state_dir
-from .support import event_names, make_repo, read_journal_file, resume_main, run_main, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, event_names, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 
 CHAIN = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c", ("b",))
 

@@ -13,8 +13,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 from .test_run_retry_text import NEW_B, OLD_B, RULING, failed_run, workflow_of, write
 
 

@@ -19,12 +19,11 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import state_dir
+from .support import HEAD, state_dir, ticket
 from .support import (
     ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree, valid_report,
 )
 from .test_run_economy import ECONOMY
-from .test_run_multi import HEAD, ticket
 from .test_run_pause import ECONOMY_HEAD, RUN_PAUSED, pause_during_the_specialist_of
 
 

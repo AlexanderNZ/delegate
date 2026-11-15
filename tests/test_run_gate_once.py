@@ -18,8 +18,7 @@ from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import committed_repo, event_names, git, kill_a_run, make_repo, read_journal_file, state_dir, tree
-from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
+from .support import BASE_BRANCH_START, HEAD, committed_repo, event_names, git, kill_a_run, make_repo, read_journal_file, state_dir, ticket, tree
 
 GATE = "ls *.txt"
 

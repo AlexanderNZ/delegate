@@ -14,8 +14,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from ..support import ScriptedAdapter, make_repo, read_journal, run_main, state_dir, ticket_of
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, ScriptedAdapter, make_repo, read_journal, run_main, state_dir, ticket, ticket_of
 from ..test_run_setup_check import write_agents
 
 GATE = "test -f feature.txt"

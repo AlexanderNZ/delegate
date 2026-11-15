@@ -14,8 +14,7 @@ import pytest
 
 from delegate import adapters
 
-from .support import ScriptedAdapter, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket_of
-from .test_run_multi import HEAD
+from .support import HEAD, ScriptedAdapter, make_repo, read_journal, read_journal_file, run_main, state_dir, ticket_of
 
 ECONOMY_HEAD = HEAD.replace('mode = "assure"', 'mode = "economy"')
 

@@ -15,8 +15,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import journal_path, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, journal_path, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 
 RUN_PAUSED = 3
 

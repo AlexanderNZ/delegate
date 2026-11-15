@@ -20,7 +20,7 @@ from .support import (
     ScriptedAdapter, bare_repo, committed_repo, make_repo, read_journal, run_end, run_start, status_row, step_end, step_start, write_journal,
     write_journal_in_state_root,
 )
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ticket
 
 # A time of the journal: the time of the newest event of a ticket, in the column `last event`.
 TIME = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+\+00:00"

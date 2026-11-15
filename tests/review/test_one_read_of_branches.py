@@ -15,8 +15,7 @@ import pytest
 
 from delegate.cli import delegate
 
-from ..support import WORKFLOW, committed_repo, git, read_journal_file, run_end, run_start, step_end, step_start, write_journal
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, WORKFLOW, committed_repo, git, read_journal_file, run_end, run_start, step_end, step_start, ticket, write_journal
 
 NAMES = [f"t{number:02d}" for number in range(20)]
 

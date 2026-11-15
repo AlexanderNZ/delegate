@@ -20,12 +20,11 @@ from delegate.run.engine import run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import state_dir
+from .support import HEAD, state_dir, ticket
 from .support import (
     append_events, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, status_row,
     ticket_of, tree, valid_report,
 )
-from .test_run_multi import HEAD, ticket
 from .test_run_pause import RUN_PAUSED, pause, pause_during_the_specialist_of, run_id_of, status_json, status_lines
 
 FINDING = "FINDING-5120 a.txt holds no header row"

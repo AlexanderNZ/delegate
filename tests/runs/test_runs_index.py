@@ -12,8 +12,7 @@ from datetime import datetime
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.ports.index import RunRecord
 
-from ..support import event_names, make_repo, read_journal, resume_main, run_main, ticket_of
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, event_names, make_repo, read_journal, resume_main, run_main, ticket, ticket_of
 from delegate.ports.harness import AdapterError
 
 RECORD_FIELDS = {"run_id", "host", "repo", "started", "state", "tickets_ended", "tickets_total", "eta", "heard"}

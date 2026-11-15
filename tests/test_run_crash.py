@@ -13,10 +13,8 @@ from delegate.adapters.git import GitVersionControl
 from delegate.cli import delegate, run_command
 from delegate.ports.vcs import VcsError
 
-from .support import state_dir
-from .support import event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree
+from .support import HEAD, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of, tree
 from .test_run_economy import ECONOMY
-from .test_run_multi import HEAD, ticket
 
 
 CRASH = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")

@@ -14,9 +14,7 @@ from delegate.run.engine import RunInterrupted, run_workflow
 from delegate.run.workflow import load_workflow
 from delegate.shared.tiers import load_tiers
 
-from .support import state_dir
-from .support import ScriptedAdapter, git, make_repo, read_journal_file
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, git, make_repo, read_journal_file, state_dir, ticket
 
 PLAN = HEAD + ticket("a") + ticket("b", ("a",))
 

@@ -22,9 +22,8 @@ from delegate import adapters
 from delegate.ports.harness import AdapterError
 from delegate.run.lock import live_holder_of_run
 
-from .support import ScriptedAdapter, event_names, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir, ticket_of
+from .support import HEAD, ScriptedAdapter, event_names, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 from .test_run_agents import TAMPERED, make_repo as make_sealed_repo, seal_file
-from .test_run_multi import HEAD, ticket
 
 pytestmark = pytest.mark.usefixtures("git_identity")
 

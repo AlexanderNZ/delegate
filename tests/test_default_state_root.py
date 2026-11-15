@@ -20,12 +20,11 @@ from delegate import adapters
 from delegate.cli import delegate
 from delegate.run.journal import Journal
 
-from .support import without_take_over
+from .support import HEAD, ticket, without_take_over
 from .support import (
     ScriptedAdapter, event_names, kill_a_run, live_lock, make_repo, read_journal, resume_main, run_end, run_start, step_end,
     step_start, write_journal,
 )
-from .test_run_multi import HEAD, ticket
 
 ROOT_VARIABLE: str = "DELEGATE_STATE_ROOT"
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")

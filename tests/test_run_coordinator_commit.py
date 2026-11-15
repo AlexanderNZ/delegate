@@ -22,7 +22,7 @@ from .support import (
     commit_head, event_names, git, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, state_dir,
     tree, valid_report,
 )
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ticket
 
 # The gate is red until the hotspot LICENSE holds the render that the code gives.
 RENDER_GATE = 'gates = ["grep -qx rendered LICENSE"]'

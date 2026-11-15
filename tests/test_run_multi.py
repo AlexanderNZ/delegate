@@ -6,37 +6,13 @@ a different file for each ticket, so the run branch shows which tickets landed.
 """
 
 import json
-from pathlib import Path
 
 import pytest
 
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal, valid_report
-
-# Every stack gate lists the text files of the worktree, so the gate output shows what the tree held.
-GATE_LISTING = 'gates = ["ls *.txt"]'
-
-HEAD = WORKFLOW.split("[[tickets]]")[0].replace('gates = ["test -f feature.txt"]', GATE_LISTING)
-
-
-# The line that gives each ticket without `blocked-by` the base of the run as its start. Put it before the first table.
-BASE_BRANCH_START = 'ticket-start = "base-branch"\n'
-
-
-def warned(err: str) -> list[str]:
-    """The ids of the checks that print a warning on stderr at the start of a run (#247), one for each line of `err`.
-
-    A workflow with `BASE_BRANCH_START` and two tickets with no `blocked-by` gets the warning `ticket-start`.
-    """
-    prefix = "delegate run: warn "
-    return [line.removeprefix(prefix).split(":")[0] if line.startswith(prefix) else line for line in err.splitlines()]
-
-
-def ticket(ticket_id: str, blocked_by: tuple[str, ...] = ()) -> str:
-    blockers = ", ".join(f'"{b}"' for b in blocked_by)
-    return f'\n[[tickets]]\nid = "{ticket_id}"\ntext = "Ticket {ticket_id} adds its file."\nstack = "python"\nblocked-by = [{blockers}]\n'
+from .support import BASE_BRANCH_START, GATE_LISTING, HEAD, ScriptedAdapter, event_names, git, make_repo, read_journal, ticket, tree, valid_report, warned
 
 
 @pytest.fixture(autouse=True)
@@ -59,10 +35,6 @@ def run(repo, capsys, *extra):
     code = delegate.main(["run", str(repo / "workflow.toml"), "--repo", str(repo), *extra])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
-
-
-def tree(repo: Path, branch: str) -> list[str]:
-    return git(repo, "ls-tree", "-r", "--name-only", branch).split()
 
 
 def of_ticket(events, ticket_id):

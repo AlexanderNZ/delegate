@@ -22,10 +22,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import state_dir
-from .support import bare_repo, run_start, stale_lock, write_journal
-from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, ticket_of, tree
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, bare_repo, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, tree, write_journal
 
 ECONOMY_HEAD = HEAD.replace('mode = "assure"', 'mode = "economy"')
 

@@ -25,7 +25,7 @@ import pytest
 from delegate.cli import delegate
 
 from .pages import outside_the_package, repository_root
-from .support import Terminal, bare_repo, fake_clock, without_titles
+from .support import Terminal, bare_repo, frozen, without_titles
 from .test_watch_frame import built, specialist_and_gates, verifier_starts
 from .test_watch_live import PYTEST, START, Run, at
 
@@ -46,10 +46,6 @@ def utf8_locale(monkeypatch):
     """A UTF-8 locale, so the table has the Unicode glyph set, and no `NO_COLOR` in the environment."""
     monkeypatch.setenv("LC_ALL", "en_NZ.UTF-8")
     monkeypatch.delenv("NO_COLOR", raising=False)
-
-
-def frozen(monkeypatch, seconds: float) -> None:
-    fake_clock().at = (START + timedelta(seconds=seconds)).timestamp()
 
 
 def status(repo: Path, capsys, *extra: str) -> str:

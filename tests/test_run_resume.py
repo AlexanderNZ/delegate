@@ -16,11 +16,10 @@ import shutil
 
 from delegate.cli import delegate
 
-from .support import state_dir
+from .support import HEAD, state_dir, ticket
 from .support import (
     event_names, finished_run, git, journal_path, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket_of, tree,
 )
-from .test_run_multi import HEAD, ticket
 
 THREE = HEAD + ticket("a") + ticket("b", ("a",)) + ticket("c")
 

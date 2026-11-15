@@ -15,8 +15,7 @@ from delegate.cli import delegate
 from delegate.run import run_state
 
 from ..run_state.journals import built, ev, journal, started
-from ..support import git, kill_a_run, make_repo, read_journal_file, resume_main, run_main, state_dir
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, git, kill_a_run, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
 
 TWO = HEAD + ticket("a") + ticket("b", ("a",))
 

@@ -14,8 +14,7 @@ from pathlib import Path
 
 from delegate.ports.harness import AdapterError
 
-from ..support import event_names, git, make_repo, read_journal, resume_main, run_main, ticket_of
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, event_names, git, make_repo, read_journal, resume_main, run_main, ticket, ticket_of
 from .test_runs_config import config_file
 
 TWO_TICKETS = HEAD + ticket("a") + ticket("b", ("a",))

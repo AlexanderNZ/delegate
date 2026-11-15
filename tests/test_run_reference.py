@@ -16,8 +16,7 @@ from delegate.run.reports import (
     SPECIALIST_OPTIONAL, SPECIALIST_REQUIRED, SPECIALIST_STATUSES, VERIFIER_REQUIRED, VERIFIER_VERDICTS,
 )
 
-from .support import state_dir
-from .support import CLEANED_WORKFLOW, ScriptedAdapter, make_repo, read_journal, valid_report
+from .support import CLEANED_WORKFLOW, ScriptedAdapter, make_repo, read_journal, state_dir, valid_report
 from .pages import repository_root
 
 ROOT = repository_root(Path(__file__))
@@ -67,7 +66,7 @@ def test_the_reference_lists_every_event_of_a_real_journal_with_each_of_its_fiel
 
 @outside_the_package
 def test_the_reference_lists_the_skip_and_the_conflict_events_of_a_multi_ticket_run_with_each_of_their_fields(tmp_path, capsys, monkeypatch):
-    from .test_run_multi import BASE_BRANCH_START, HEAD, ticket
+    from .support import BASE_BRANCH_START, HEAD, ticket
 
     for key, value in (("NAME", "Scratch"), ("EMAIL", "scratch@example.invalid")):
         monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
@@ -184,7 +183,7 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
 
     adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}, "b": {"b.txt": "b\n"}}))
     try:
-        from .test_run_multi import HEAD, ticket
+        from .support import HEAD, ticket
 
         repo = make_repo(tmp_path, HEAD + ticket("a") + ticket("b", ("a",)))
         run_id, _ = kill_a_run(repo, 3)
@@ -204,7 +203,7 @@ def test_the_reference_lists_the_resume_event_of_a_real_resumed_journal_with_eac
 @outside_the_package
 def test_the_reference_lists_the_retry_event_of_a_real_retried_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
     from .support import read_journal_file, resume_main, run_main
-    from .test_run_multi import HEAD, ticket
+    from .support import HEAD, ticket
 
     # The first verifier ends with no report, so the step fails; the retry runs that verifier again.
     adapter = ScriptedAdapter(write_verifier_report=False)
@@ -230,7 +229,7 @@ def test_the_reference_lists_the_retry_event_of_a_real_retried_journal_with_each
 @outside_the_package
 def test_the_reference_lists_the_plan_change_event_of_a_real_journal_with_each_of_its_fields(tmp_path, capsys, git_identity):
     from .support import read_journal_file, resume_main
-    from .test_run_multi import HEAD, ticket
+    from .support import HEAD, ticket
 
     adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}, "b": {"b.txt": "b\n"}}))
     try:
@@ -259,7 +258,7 @@ def test_the_reference_lists_the_lock_broken_event_of_a_real_journal_with_each_o
 
     adapters.register("scripted", ScriptedAdapter(files_by_ticket={"a": {"a.txt": "a\n"}}))
     try:
-        from .test_run_multi import HEAD, ticket
+        from .support import HEAD, ticket
 
         repo = make_repo(tmp_path, HEAD + ticket("a"))
         run_id, _ = kill_a_run(repo, 1)

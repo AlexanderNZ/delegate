@@ -16,8 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ..support import event_names, make_repo, read_journal, run_main
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, event_names, make_repo, read_journal, run_main, ticket
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
 
 TWO_TICKETS = HEAD + ticket("a") + ticket("b", ("a",))

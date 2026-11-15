@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..support import (
     git, journal_path, kill_a_run, make_repo, read_journal_file, resume_main, run_main, state_dir, tree, without_take_over,
 )
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, ticket
 
 TWO = HEAD + ticket("a") + ticket("b", ("a",))
 

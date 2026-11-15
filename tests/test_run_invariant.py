@@ -15,9 +15,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import state_dir
-from .support import ScriptedAdapter, WORKFLOW, event_names, git, make_repo, read_journal
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, WORKFLOW, ScriptedAdapter, event_names, git, make_repo, read_journal, state_dir, ticket
 
 
 @pytest.fixture(autouse=True)

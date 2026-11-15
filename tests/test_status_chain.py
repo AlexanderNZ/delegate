@@ -17,8 +17,8 @@ import pytest
 
 from delegate.cli import delegate
 
-from .support import Terminal, bare_repo, fake_clock, frames
-from .test_status_snapshot import START, Run, claude, frozen, snapshot, utf8_locale  # noqa: F401 - the fixture is autouse
+from .support import Terminal, bare_repo, fake_clock, frames, frozen
+from .test_status_snapshot import START, Run, claude, snapshot, utf8_locale  # noqa: F401 - the fixture is autouse
 
 # The commands of each case use the fake clock of the case (#297): its helpers set it.
 pytestmark = pytest.mark.usefixtures("clock")

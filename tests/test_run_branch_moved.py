@@ -9,9 +9,7 @@ the run as it halts for an invariant violation.
 
 import pytest
 
-from .support import without_take_over
-from .support import WORKFLOW, event_names, git, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, tree
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, WORKFLOW, event_names, git, kill_a_run, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket, tree, without_take_over
 
 ECONOMY = WORKFLOW.replace('mode = "assure"', 'mode = "economy"')
 TWO = HEAD + ticket("a") + ticket("b", ("a",))

@@ -19,8 +19,7 @@ from delegate.cli import delegate
 from delegate.run import events as schema
 
 from .pages import repository_root
-from .support import finished_run, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, finished_run, journal_path, make_repo, read_journal, read_journal_file, resume_main, run_main, ticket
 
 ROOT = repository_root(Path(__file__))
 REFERENCE = ROOT / "docs" / "reference" / "run.md"

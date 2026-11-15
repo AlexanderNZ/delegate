@@ -15,9 +15,8 @@ from delegate import adapters
 from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.cli import delegate
 
-from ..support import ScriptedAdapter, make_repo, read_journal, run_main
+from ..support import HEAD, ScriptedAdapter, make_repo, read_journal, run_main, ticket
 from ..test_clean_abandon import REASON, a_paused_run
-from ..test_run_multi import HEAD, ticket
 
 
 @pytest.fixture

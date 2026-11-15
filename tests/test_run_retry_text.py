@@ -14,8 +14,7 @@ import pytest
 
 from delegate import adapters
 
-from .support import ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, git, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket, ticket_of
 
 RULING = "RULING-5202 add no new dependency."
 OLD_B = "Ticket b adds its file."

@@ -27,9 +27,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import state_dir
-from .support import ScriptedAdapter, Terminal, make_repo, read_journal, resume_main, run_main, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, Terminal, make_repo, read_journal, resume_main, run_main, state_dir, ticket, ticket_of
 from .test_run_pause import RUN_PAUSED
 
 # An SGR sequence: the paint of a role.

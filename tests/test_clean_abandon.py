@@ -18,9 +18,7 @@ import pytest
 from delegate import adapters
 from delegate.cli import delegate
 
-from .support import ScriptedAdapter, bare_repo, git, journal_path, live_lock, make_repo, read_journal_file, run_end, run_start, stale_lock, state_dir, write_journal
-from .support import event_names, resume_main, run_main, ticket_of
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, bare_repo, event_names, git, journal_path, live_lock, make_repo, read_journal_file, resume_main, run_end, run_main, run_start, stale_lock, state_dir, ticket, ticket_of, write_journal
 from .test_run_pause import ECONOMY_HEAD, pause_during_the_specialist_of, run_id_of
 
 REASON = "the owner cancelled the work"

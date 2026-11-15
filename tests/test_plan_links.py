@@ -14,9 +14,7 @@ from __future__ import annotations
 from delegate.run.journal import read_events
 from delegate.run.status_picker import plan_links
 
-from .support import state_dir
-from .support import bare_repo, finished_run, make_repo, run_start, step_end, step_start, write_journal
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, bare_repo, finished_run, make_repo, run_start, state_dir, step_end, step_start, ticket, write_journal
 
 
 def plan(*tickets: tuple[str, tuple[str, ...]]) -> list[dict[str, object]]:

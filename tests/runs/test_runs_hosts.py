@@ -19,8 +19,7 @@ from delegate.adapters.run_index import DirectoryRunIndex
 from delegate.cli import delegate
 from delegate.ports.index import RunRecord
 
-from ..support import make_repo, read_journal, run_main
-from ..test_run_multi import HEAD, ticket
+from ..support import HEAD, make_repo, read_journal, run_main, ticket
 from .journals import NOW, built, clock_time, run_end, runs, working, write_run
 
 

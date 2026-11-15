@@ -17,9 +17,7 @@ import pytest
 
 from delegate import adapters
 
-from .support import state_dir
-from .support import ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main
-from .test_run_multi import HEAD, ticket
+from .support import HEAD, ScriptedAdapter, event_names, git, journal_path, make_repo, read_journal_file, resume_main, run_main, state_dir, ticket
 
 
 @pytest.fixture
