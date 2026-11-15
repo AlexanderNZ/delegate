@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
-from ..ports.vcs import VersionControl
+from ..ports.vcs import VcsError, VersionControl
 from . import domain, run_state, step_scans
 from .brief import ChainSegment, GateLogCopy, green_gates_text
 from .context import RunContext
@@ -24,7 +24,7 @@ from .errors import Rejected, StepFailed
 from .events import GATE_PHASE_CHAIN, RETRY_PHASE_CHAIN_FIXUP, ROLE_FIXUP, TRIGGER_GATES_RED, TRIGGER_REJECT
 from .journal import Journal
 from .reports import VerifierReport, map_findings
-from .vcs_access import branch_tip, holds_commit
+from .vcs_access import branch_tip
 from .workflow import Stack, Ticket, specialist_tier, strongest_tier, ticket_branch
 
 
@@ -187,12 +187,18 @@ class ChainRun:
     def verify(self) -> list[str]:
         """Verify every stack of the chain and move the run branch. Return the findings that map to no ticket."""
         try:
-            run_branch = f"refs/heads/{self.run.workflow.run_branch}"
+            vcs, repo = self.run.vcs, self.run.repo
+            # Two reads serve every ticket (#347): the branches that exist, and the branches that the run branch holds. A run
+            # branch that does not exist holds nothing.
+            existing = vcs.branch_tips(repo).keys()
+            try:
+                held = vcs.branches_held_by(repo, self.run.workflow.run_branch)
+            except VcsError:
+                held = frozenset()
             # The clean-up of a run that ended `built` deletes only a ticket branch that the run branch holds (see `_clean_up`).
             self.chain = [
                 ticket for ticket in self.chain
-                if self.run.vcs.branch_exists(self.run.repo, ticket_branch(self.run.workflow, ticket))
-                and not holds_commit(self.run.vcs, self.run.repo, f"refs/heads/{ticket_branch(self.run.workflow, ticket)}", run_branch)
+                if (branch := ticket_branch(self.run.workflow, ticket)) in existing and branch not in held
             ]
             if not self.chain:
                 return []  # the run branch holds the work of every built ticket

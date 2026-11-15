@@ -506,17 +506,16 @@ def _check_run_branch_at_resume(
 
 def _check_branches(workflow: Workflow, repo: Path, vcs: VersionControl) -> None:
     """Refuse a new run whose base branch is missing, or whose run branch or ticket branch is taken. Create nothing."""
+    # One read of all branches serves each check (#347).
     with vcs_errors():
-        base_exists = vcs.branch_exists(repo, workflow.base_branch)
-        run_branch_taken = vcs.branch_exists(repo, workflow.run_branch)
-    if not base_exists:
+        existing = vcs.branch_tips(repo).keys()
+    if workflow.base_branch not in existing:
         raise EngineError(f"base-branch {workflow.base_branch!r} is not a branch of the repository {repo}")
+    run_branch_taken = workflow.run_branch in existing
     # A taken ticket branch is reported before a taken run branch: an earlier run leaves both, and the ticket names the step.
     for ticket in workflow.tickets:
         branch = ticket_branch(workflow, ticket)
-        with vcs_errors():
-            taken = vcs.branch_exists(repo, branch)
-        if taken:
+        if branch in existing:
             raise EngineError(f"branch {branch!r} for ticket {ticket.id!r} exists already; delete it or choose another run-branch")
     if run_branch_taken:
         raise EngineError(

@@ -15,6 +15,7 @@ Every operation that fails raises `VcsError`. The message gives the cause.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -111,6 +112,20 @@ class VersionControl(Protocol):
         """Tell whether a branch of that name exists. A tag of that name does not count."""
         ...
 
+    def branch_tips(self, repo: Path) -> dict[str, str]:
+        """Each local branch with the id of its newest commit, from one read (#347). A tag does not count.
+
+        A check of many branches reads them here one time, and does not ask `branch_exists` for each branch.
+        """
+        ...
+
+    def branches_held_by(self, repo: Path, holder: str) -> frozenset[str]:
+        """The local branches whose newest commit the branch `holder` holds, from one read (#347). `holder` holds itself.
+
+        Raise VcsError when there is no branch `holder`.
+        """
+        ...
+
     def default_branch(self, repo: Path) -> str | None:
         """The name of the default branch of the repository (#267), or None when it has none.
 
@@ -167,6 +182,14 @@ class VersionControl(Protocol):
 
         The abandon of a run uses it for the branches of a run that the owner ended. Raise VcsError when the
         branch does not exist, or when the tool refuses the delete, for example a branch that a worktree has checked out.
+        """
+        ...
+
+    def discard_branches(self, repo: Path, branches: Sequence[str]) -> None:
+        """Delete each branch of `branches` whatever it holds, with one call of the tool (#347). Do nothing for no branch.
+
+        Raise VcsError when the tool refuses to delete one of them. The tool then deletes the others: a caller that
+        needs to know which branch stayed reads the branches again.
         """
         ...
 

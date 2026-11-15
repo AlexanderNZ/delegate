@@ -551,6 +551,61 @@ def test_discard_branch_of_a_branch_that_a_worktree_has_checked_out_is_an_error_
     assert vcs.branch_exists(repo, "run/x-a")
 
 
+def test_branch_tips_gives_each_local_branch_with_its_commit_and_no_tag(tmp_path, vcs):
+    repo, work = branch_with_work(tmp_path, vcs, "run/x-a")
+    git(repo, "tag", "release", "main")
+
+    tips = vcs.branch_tips(repo)
+
+    assert tips == {"main": sha(repo, "main"), "run/x-a": work}
+
+
+def test_branches_held_by_gives_the_branches_whose_newest_commit_the_holder_holds_and_the_holder_itself(tmp_path, vcs):
+    repo, work = branch_with_work(tmp_path, vcs, "run/x-a")
+    vcs.create_branch(repo, "run/x", work)
+    vcs.create_branch(repo, "run/x-b", "main")
+
+    assert vcs.branches_held_by(repo, "run/x") == {"main", "run/x", "run/x-a", "run/x-b"}
+    assert vcs.branches_held_by(repo, "main") == {"main", "run/x-b"}
+
+
+def test_branches_held_by_a_branch_that_does_not_exist_is_an_error(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    with pytest.raises(VcsError):
+        vcs.branches_held_by(repo, "run/no-such-branch")
+
+
+def test_discard_branches_deletes_every_branch_with_one_git_process(tmp_path, vcs):
+    repo, _ = branch_with_work(tmp_path, vcs, "run/x-a")
+    vcs.create_branch(repo, "run/x-b", "main")
+    before = git_processes.all_started()
+
+    vcs.discard_branches(repo, ["run/x-a", "run/x-b"])
+
+    assert git_processes.all_started() - before == 1
+    assert set(vcs.branch_tips(repo)) == {"main"}
+
+
+def test_discard_branches_with_no_branch_does_nothing(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+
+    vcs.discard_branches(repo, [])
+
+    assert set(vcs.branch_tips(repo)) == {"main"}
+
+
+def test_discard_branches_with_a_branch_that_a_worktree_has_checked_out_is_an_error_and_the_other_branches_go(tmp_path, vcs):
+    repo = make_repo(tmp_path)
+    vcs.ensure_worktree(repo, tmp_path / "wt", "run/x-a", "main")
+    vcs.create_branch(repo, "run/x-b", "main")
+
+    with pytest.raises(VcsError):
+        vcs.discard_branches(repo, ["run/x-a", "run/x-b"])
+
+    assert set(vcs.branch_tips(repo)) == {"main", "run/x-a"}
+
+
 def test_prune_worktrees_drops_the_record_of_a_worktree_whose_directory_is_gone_and_keeps_the_others(tmp_path, vcs):
     repo = make_repo(tmp_path)
     gone, kept = tmp_path / "gone", tmp_path / "kept"

@@ -10,8 +10,10 @@ clean-up existed, or with `keep-worktrees = true` (#168). Both use the rules of
 - A ticket worktree with a change that is not committed stays, and so does its
   branch. Its file watcher is stopped, because nothing else stops it.
 - A ticket branch goes only when the holder branch (the run branch) holds its
-  newest commit, with the safe delete of the port. Otherwise it stays. A caller can
-  name more holders (`Holder`): the branch goes when one of them holds it (#267).
+  newest commit. Otherwise it stays. A caller can name more holders (`Holder`):
+  the branch goes when one of them holds it (#267). The port reads the branches
+  one time and each holder one time, and then deletes all the branches that go
+  with one call (#347).
 - A branch that a retry with a new text kept (`TicketTree.failed`) goes whatever
   it holds, when the caller allows it (`discard_failed`). The engine does not
   allow it at the end of a run: the coordinator reads that work first.
@@ -23,7 +25,7 @@ The module starts no process and imports no adapter: the port does the work.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -96,14 +98,22 @@ def clean_tickets(
     A branch in `also` can hold the ticket branch in place of `holder` (#267): the branch goes when `holder` or one of them holds it.
     """
     result = Cleanup()
+    # One read of all branches serves each check of a ticket branch, and one read for each holder says which branches it holds (#347).
     try:
-        holders = _holders(vcs, repo, [Holder(holder, holder_name), *also])
+        tips = vcs.branch_tips(repo)
+        holders = _holders(tips, [Holder(holder, holder_name), *also])
     except VcsError as failure:
-        holders, result.errors = [], [f"branch {holder}: {failure}"]
-    live = [h for h, exists in holders if exists]
+        tips, holders, result.errors = {}, [], [f"branch {holder}: {failure}"]
+    held = _Held(vcs, repo, [h for h, exists in holders if exists])
+    pending: list[str] = []  # the branches to delete, in the order of the tickets
     for tree in trees:
         if tree.failed:
-            _discard_failed(vcs, repo, tree.branch, result, discard_failed, dry_run)
+            if tree.branch not in tips:
+                continue
+            if discard_failed:
+                pending.append(tree.branch)
+            else:
+                result.keep_branch(tree.branch, "it holds the work of a step that a retry started again; delegate clean removes it")
             continue
         kept: str | None = None
         if tree.worktree.is_dir():
@@ -124,33 +134,69 @@ def clean_tickets(
                     result.errors.append(f"worktree {tree.worktree}: {kept}")
                 if not dry_run:
                     vcs.stop_file_watcher(tree.worktree)
+        if tree.branch not in tips:
+            continue
+        if kept is not None:
+            result.keep_branch(tree.branch, "its worktree is kept")
+            continue
         try:
-            if not vcs.branch_exists(repo, tree.branch):
-                continue
-            if kept is not None:
-                result.keep_branch(tree.branch, "its worktree is kept")
-            elif _delete_held(vcs, repo, tree.branch, live, dry_run):
-                result.branches_deleted.append(tree.branch)
-            else:
-                result.keep_branch(tree.branch, _reason(holders))
+            holds = held.holds(tree.branch)
         except VcsError as failure:
             result.keep_branch(tree.branch, str(failure), error=True)
+            continue
+        if holds:
+            pending.append(tree.branch)
+        else:
+            result.keep_branch(tree.branch, _reason(holders))
+    _delete_all(vcs, repo, pending, result, dry_run)
     return result
 
 
-def _discard_failed(vcs: VersionControl, repo: Path, branch: str, result: Cleanup, allowed: bool, dry_run: bool) -> None:
-    """Delete the branch that a retry kept for the work of a failed step, when `allowed`. Keep it, and say why, when not."""
-    try:
-        if not vcs.branch_exists(repo, branch):
+class _Held:
+    """Which branches the holders hold. The first question reads each holder one time: one git process for each holder."""
+
+    def __init__(self, vcs: VersionControl, repo: Path, holders: Sequence[Holder]) -> None:
+        self._vcs, self._repo, self._holders = vcs, repo, holders
+        self._held: frozenset[str] | None = None
+
+    def holds(self, branch: str) -> bool:
+        """Tell whether one of the holders holds the newest commit of `branch`. Raise VcsError when a holder cannot be read."""
+        if self._held is None:
+            held: set[str] = set()
+            for holder in self._holders:
+                held |= self._vcs.branches_held_by(self._repo, holder.branch)
+            self._held = frozenset(held)
+        return branch in self._held
+
+
+def _delete_all(vcs: VersionControl, repo: Path, branches: list[str], result: Cleanup, dry_run: bool) -> None:
+    """Delete `branches` with one call of the port, and add each to `result.branches_deleted`. With `dry_run`, delete none.
+
+    When the one call fails, the port deleted the branches that it could. The branches are read again: a branch that is gone
+    went, and each branch that is left is deleted alone, so that a failure keeps that branch only.
+    """
+    if not dry_run and branches:
+        try:
+            vcs.discard_branches(repo, branches)
+        except VcsError:
+            try:
+                left = vcs.branch_tips(repo).keys()
+            except VcsError as failure:
+                for branch in branches:
+                    result.keep_branch(branch, str(failure), error=True)
+                return
+            for branch in branches:
+                if branch not in left:
+                    result.branches_deleted.append(branch)
+                    continue
+                try:
+                    vcs.discard_branch(repo, branch)
+                except VcsError as failure:
+                    result.keep_branch(branch, str(failure), error=True)
+                else:
+                    result.branches_deleted.append(branch)
             return
-        if not allowed:
-            result.keep_branch(branch, "it holds the work of a step that a retry started again; delegate clean removes it")
-            return
-        if not dry_run:
-            vcs.discard_branch(repo, branch)
-        result.branches_deleted.append(branch)
-    except VcsError as failure:
-        result.keep_branch(branch, str(failure), error=True)
+    result.branches_deleted += branches
 
 
 def remove_empty_directories(*directories: Path) -> None:
@@ -168,12 +214,12 @@ def delete_held_branch(vcs: VersionControl, repo: Path, branch: str, holders: Se
     A holder that does not exist holds nothing, and it is no error (#267). Raise VcsError when the port refuses the
     delete for another cause.
     """
-    return _delete_held(vcs, repo, branch, [h for h, exists in _holders(vcs, repo, holders) if exists], dry_run)
+    return _delete_held(vcs, repo, branch, [h for h, exists in _holders(vcs.branch_tips(repo), holders) if exists], dry_run)
 
 
 def not_held_reason(vcs: VersionControl, repo: Path, holders: Sequence[Holder]) -> str:
     """The reason that a branch stays when no holder holds it: it names each holder that was checked (#267)."""
-    return _reason(_holders(vcs, repo, holders))
+    return _reason(_holders(vcs.branch_tips(repo), holders))
 
 
 def _reason(holders: Sequence[tuple[Holder, bool]]) -> str:
@@ -190,14 +236,14 @@ def _reason(holders: Sequence[tuple[Holder, bool]]) -> str:
     )
 
 
-def _holders(vcs: VersionControl, repo: Path, holders: Sequence[Holder]) -> list[tuple[Holder, bool]]:
-    """Each holder with the fact that its branch exists. A branch that two holders name counts once, with the first name."""
+def _holders(branches: Mapping[str, str], holders: Sequence[Holder]) -> list[tuple[Holder, bool]]:
+    """Each holder with the fact that its branch is in `branches`. A branch that two holders name counts once, with the first name."""
     seen: set[str] = set()
     found: list[tuple[Holder, bool]] = []
     for holder in holders:
         if holder.branch not in seen:
             seen.add(holder.branch)
-            found.append((holder, vcs.branch_exists(repo, holder.branch)))
+            found.append((holder, holder.branch in branches))
     return found
 
 

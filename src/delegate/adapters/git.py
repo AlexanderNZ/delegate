@@ -53,6 +53,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..ports.vcs import CONFLICT, FAILED, REBASED, Commit, PathChange, RebaseResult, VcsError
@@ -104,6 +105,19 @@ def _git_raw(directory: Path, *args: str, timeout: int | None = None) -> str:
         operation, cause = f"git {' '.join(args)}", result.stderr.strip() or str(result.returncode)
         raise VcsError(f"{operation} failed: {cause}", operation=operation, directory=directory, cause=cause)
     return result.stdout
+
+
+# The prefix of the ref of a local branch, which is also the pattern that lists them.
+_HEADS: str = "refs/heads/"
+
+
+def _branch_tips(listing: str) -> dict[str, str]:
+    """The branches of the lines `<commit> refs/heads/<name>`, with the commit of each."""
+    tips: dict[str, str] = {}
+    for line in listing.splitlines():
+        commit, _, ref = line.partition(" ")
+        tips[ref.removeprefix(_HEADS)] = commit
+    return tips
 
 
 def _git(directory: Path, *args: str, timeout: int | None = None) -> str:
@@ -232,12 +246,28 @@ class GitVersionControl:
     def branch_exists(self, repo: Path, branch: str) -> bool:
         return _run(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
 
+    def branch_tips(self, repo: Path) -> dict[str, str]:
+        return _branch_tips(_git(repo, "for-each-ref", "--format=%(objectname) %(refname)", _HEADS))
+
+    def branches_held_by(self, repo: Path, holder: str) -> frozenset[str]:
+        # `--merged` lists the refs whose newest commit the holder holds: one process for all branches.
+        listing = _git(repo, "for-each-ref", f"--merged=refs/heads/{holder}", "--format=%(objectname) %(refname)", _HEADS)
+        return frozenset(_branch_tips(listing))
+
     def default_branch(self, repo: Path) -> str | None:
-        remote = _run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-        if remote.returncode == 0:
+        # One read gives the name that origin/HEAD points to and the local branches (#347).
+        listing = _git(repo, "for-each-ref", "--format=%(refname) %(symref)", "refs/remotes/origin/HEAD", _HEADS)
+        remote: str | None = None
+        local: set[str] = set()
+        for line in listing.splitlines():
+            ref, _, target = line.partition(" ")
+            if ref == "refs/remotes/origin/HEAD":
+                remote = target.removeprefix("refs/remotes/origin/")
+            elif ref.startswith(_HEADS):
+                local.add(ref.removeprefix(_HEADS))
+        if remote is not None:
             # `origin/main` names the local branch `main`. A remote name that is not `origin` cannot be here: the ref is under `origin`.
-            name = remote.stdout.strip().removeprefix("origin/")
-            return name if name and self.branch_exists(repo, name) else None
+            return remote if remote in local else None
         # The first entry of the list of worktrees is the main checkout.
         listing = _git(repo, "worktree", "list", "--porcelain").splitlines()
         main = Path(listing[0].removeprefix("worktree ")) if listing and listing[0].startswith("worktree ") else repo
@@ -298,6 +328,10 @@ class GitVersionControl:
 
     def discard_branch(self, repo: Path, branch: str) -> None:
         _git(repo, "branch", "--quiet", "-D", branch)
+
+    def discard_branches(self, repo: Path, branches: Sequence[str]) -> None:
+        if branches:
+            _git(repo, "branch", "--quiet", "-D", *branches)
 
     def prune_worktrees(self, repo: Path) -> None:
         _git(repo, "worktree", "prune")
