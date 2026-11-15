@@ -247,7 +247,7 @@ def _chain_stop(prior: tuple[dict[str, object], ...]) -> dict[str, object] | Non
     """The `agents-changed` event of a stop before the chain fix-up of an `economy` step, or None (#209).
 
     The stop is the newest `agents-changed` of the step, for the role `fix-up`, and no agent started after it. The
-    chain verification wrote it with the ticket that ends the stack (see `_ChainRun`), and failed the tickets of the stack.
+    chain verification wrote it with the ticket that ends the stack (see `chain.ChainRun`), and failed the tickets of the stack.
     """
     stop = step_scans.unanswered_stop(prior)
     return prior[stop] if stop is not None and prior[stop]["role"] == ROLE_FIXUP else None
@@ -325,7 +325,7 @@ def _chain_retry_plan(
     tickets that the verification of the chain failed go in `revive`: their branches hold their commits, and the chain
     verification checks them again with the ticket. The verification of the chain starts again after the `retry` event:
     the gates run on the tip, and a fresh verifier checks each stack that has no ACCEPT. The fix-up rounds before the
-    retry do not count (see `_ChainRun`).
+    retry do not count (see `chain.ChainRun`).
 
     With no `coordinator` the plan is the same, and the tip does not move (#269): for example a gate that failed one time
     and then passes, or a stop of the agent check before a verifier session of the chain (#261). When the gates were green
@@ -577,7 +577,7 @@ def _chain_report_names_hotspot(workflow: Workflow, events: Sequence[dict[str, o
     The report is valid and says partial or blocked (see `unfinished_report`), and a word of its `blocked_reason` matches
     a hotspot of the stack of its ticket: the work can need a change that only the coordinator makes. The last
     verification of the chain is its events after the newest `retry` that is not a retry at the chain fix-up, or the
-    newest `plan-change`, as in `_ChainRun`.
+    newest `plan-change`, as in `chain.ChainRun`.
     """
     start = run_state.fold(events).chain.start
     report = unfinished_report([e for e in events[start:] if e["event"] == "fixup-report"])
