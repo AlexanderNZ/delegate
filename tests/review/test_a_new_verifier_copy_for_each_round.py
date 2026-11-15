@@ -45,12 +45,9 @@ def git_calls(tmp_path, monkeypatch):
     return calls
 
 
-pytestmark = pytest.mark.scripted_adapter()
-
-
 # The temp prefixes where a guard lets a verifier write. On a host whose temp directory is in one, the copy is in the
 # temp directory of the host. On any other host, as `/home/agent/.tmp` (#166), the copy is in the scratch directory of
-# the session, and a new session moves it into its own scratch directory.
+# the session. Each session makes its own copy in either place.
 FIXED = ("/tmp/", "/var/folders/", "/private/tmp/", "/private/var/folders/")
 
 
@@ -117,7 +114,7 @@ class Rounds:
             (copy / "left-by-round-1.txt").write_text("untracked\n")
             (copy / "notes").mkdir()
             (copy / "notes" / "round-1.txt").write_text("untracked in a new directory\n")
-            (copy / "seed.txt").write_text("changed by the verifier\n")
+            (copy / "feature.txt").write_text("changed by the verifier\n")
             plant_replace_ref_behind_a_link(copy, self.outside)
             through_the_link = git(copy, "show", "HEAD:seed.txt")  # the object of seed.txt is still the true one here
             forge_loose_object(copy, "seed.txt")
