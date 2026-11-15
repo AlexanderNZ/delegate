@@ -103,6 +103,6 @@ Each run writes its record there. `delegate runs` then reads each host that has 
 
 ## What not to do
 
-- Do not edit, copy or delete a file in an index or in the store of last answers. To forget a run, use `delegate clean`.
+- Do not edit, copy or delete a file in an index or in the [**store of last answers**](../glossary.md#store-of-last-answers). To forget a run, use `delegate clean`.
 - Do not set `DELEGATE_INDEX` in one shell or one command to make a run show. Use the configuration file.
 - Do not put `hosts` or `index` in a file of a repository or in `workflow.toml`. They are settings of a machine, not of a repository.

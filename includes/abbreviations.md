@@ -119,6 +119,10 @@
 *[fix-up]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of an economy chain.
 *[fix-ups]: A fix-up is the round that follows a REJECT, red gates after a fix-up, or red gates on the tip of an economy chain.
 *[Fixup]: See Fix-up.
+*[Fleet]: A fleet is the set of hosts that delegate runs reads, with the runs of each host.
+*[Fleets]: A fleet is the set of hosts that delegate runs reads, with the runs of each host.
+*[fleet]: A fleet is the set of hosts that delegate runs reads, with the runs of each host.
+*[fleets]: A fleet is the set of hosts that delegate runs reads, with the runs of each host.
 *[Frontmatter hook]: See Harness hook.
 *[Gate]: A gate is a command that proves that a change is good in a repository, for example the test suite or the build.
 *[Gates]: A gate is a command that proves that a change is good in a repository, for example the test suite or the build.
@@ -160,6 +164,10 @@
 *[Headlesses]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
 *[headless]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
 *[headlesses]: A headless run is a harness run with no interactive terminal: the harness takes a prompt, writes its events, and exits.
+*[Host reader]: A host reader is the port that delegate runs drives to read the live runs of one other host.
+*[Host readers]: A host reader is the port that delegate runs drives to read the live runs of one other host.
+*[host reader]: A host reader is the port that delegate runs drives to read the live runs of one other host.
+*[host readers]: A host reader is the port that delegate runs drives to read the live runs of one other host.
 *[Hosts key]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
 *[Hosts keys]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
 *[hosts key]: The hosts key is the key hosts of the configuration file of the user, ~/.config/delegate/config.toml.
@@ -181,6 +189,10 @@
 *[Ladders]: The ladder is the eight levels of agentic engineering of Bassim Eledath, from tab completion to autonomous agent teams.
 *[ladder]: The ladder is the eight levels of agentic engineering of Bassim Eledath, from tab completion to autonomous agent teams.
 *[ladders]: The ladder is the eight levels of agentic engineering of Bassim Eledath, from tab completion to autonomous agent teams.
+*[Lane]: A lane is the row of one run in delegate runs --timeline.
+*[Lanes]: A lane is the row of one run in delegate runs --timeline.
+*[lane]: A lane is the row of one run in delegate runs --timeline.
+*[lanes]: A lane is the row of one run in delegate runs --timeline.
 *[Levels of agentic engineering]: See Ladder.
 *[Live smoke run]: A live smoke run is one run of an adapter against the real harness on a real machine.
 *[Live smoke runs]: A live smoke run is one run of an adapter against the real harness on a real machine.
@@ -240,6 +252,10 @@
 *[Run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branch]: The run branch is the branch that the engine owns, and only accepted work lands on it.
 *[run branches]: The run branch is the branch that the engine owns, and only accepted work lands on it.
+*[Run context]: The run context is the values that do not change during a run: the workflow, the adapter, the version control, the gate runner, the tiers and the paths.
+*[Run contexts]: The run context is the values that do not change during a run: the workflow, the adapter, the version control, the gate runner, the tiers and the paths.
+*[run context]: The run context is the values that do not change during a run: the workflow, the adapter, the version control, the gate runner, the tiers and the paths.
+*[run contexts]: The run context is the values that do not change during a run: the workflow, the adapter, the version control, the gate runner, the tiers and the paths.
 *[Run index]: The run index is a list of runs, one record for each run.
 *[Run indexes]: The run index is a list of runs, one record for each run.
 *[run index]: The run index is a list of runs, one record for each run.
@@ -248,6 +264,10 @@
 *[Run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[run lock]: The run lock is a kernel lock on a file that stops a second run on one run branch.
 *[run locks]: The run lock is a kernel lock on a file that stops a second run on one run branch.
+*[Run state]: The run state is the one fold of the journal of a run.
+*[Run states]: The run state is the one fold of the journal of a run.
+*[run state]: The run state is the one fold of the journal of a run.
+*[run states]: The run state is the one fold of the journal of a run.
 *[Run that cannot be resumed]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
 *[Run that cannot be resumeds]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
 *[run that cannot be resumed]: A run that cannot be resumed is a run that an invariant violation or a moved run branch ended for good.
@@ -266,6 +286,14 @@
 *[short run ids]: The short run id is the part of a run id after its last -: e9dc of 20261016T030000Z-e9dc.
 *[Skill]: A skill is a directory with a SKILL.md file of instructions that an agent loads.
 *[Skip]: A skip is the state of a ticket whose blocker is not built.
+*[Slip]: The slip is how much later the ETA of a run is now than it was 2 hours ago.
+*[Slips]: The slip is how much later the ETA of a run is now than it was 2 hours ago.
+*[slip]: The slip is how much later the ETA of a run is now than it was 2 hours ago.
+*[slips]: The slip is how much later the ETA of a run is now than it was 2 hours ago.
+*[Snapshot]: A snapshot is the state of a run at one time, as one JSON object.
+*[Snapshots]: A snapshot is the state of a run at one time, as one JSON object.
+*[snapshot]: A snapshot is the state of a run at one time, as one JSON object.
+*[snapshots]: A snapshot is the state of a run at one time, as one JSON object.
 *[Spec]: A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come.
 *[Specs]: A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come.
 *[spec]: A spec is the plan of a piece of work: the problem, the solution and the decisions, from which the tickets come.
@@ -286,6 +314,10 @@
 *[STE]: See ASD-STE100.
 *[Step]: A step is the work of the engine for one ticket: the worktree, the specialist, the checks, the gates and, in assure mode, the verifier.
 *[Step cap]: See Turn cap.
+*[Store of last answers]: The store of last answers is the directory last-answers/ in the state root of a machine.
+*[Store of last answerses]: The store of last answers is the directory last-answers/ in the state root of a machine.
+*[store of last answers]: The store of last answers is the directory last-answers/ in the state root of a machine.
+*[store of last answerses]: The store of last answers is the directory last-answers/ in the state root of a machine.
 *[Strength]: See Tier.
 *[Team contract]: The team contract is what every agent gets, whatever its model: a role, the context, the tools, a definition of done, and an independent check.
 *[Team contracts]: The team contract is what every agent gets, whatever its model: a role, the context, the tools, a definition of done, and an independent check.
@@ -321,6 +353,10 @@
 *[Tracer bullets]: A tracer bullet is a narrow slice of work that goes through every layer and works from end to end.
 *[tracer bullet]: A tracer bullet is a narrow slice of work that goes through every layer and works from end to end.
 *[tracer bullets]: A tracer bullet is a narrow slice of work that goes through every layer and works from end to end.
+*[Trend]: The trend is how fast the tickets of a run end.
+*[Trends]: The trend is how fast the tickets of a run end.
+*[trend]: The trend is how fast the tickets of a run end.
+*[trends]: The trend is how fast the tickets of a run end.
 *[Turn cap]: A turn cap is the maximum number of turns of an agent run (maxTurns on Claude Code, steps on OpenCode).
 *[Turn caps]: A turn cap is the maximum number of turns of an agent run (maxTurns on Claude Code, steps on OpenCode).
 *[turn cap]: A turn cap is the maximum number of turns of an agent run (maxTurns on Claude Code, steps on OpenCode).

@@ -52,7 +52,7 @@ config /home/me/.config/delegate/config.toml · the index of this machine only �
 | `index <directory>` | The shared directory of the run index, from `DELEGATE_INDEX` or the key `index`. It is `the index of this machine only` when no setting names a directory. |
 | `hosts <names>` | The other hosts that the command read: the hosts of the records of the index and the hosts of the key `hosts`. It is `no other host` when the command read none. With `--local`, it is `--local: no other host is read`. |
 
-The header line is followed by the two fleet lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
+The header line is followed by the two [**fleet**](../glossary.md#fleet) lines, a blank line and the table. The table has one group for each host, this machine first. The first row of a group holds the name of the host, and the totals of its runs that have no `run-end`: the ended [**tickets**](../glossary.md#ticket) summed, the latest ETA, and the tokens summed. Under it, each run that the totals count has a row, and the rail `│` stands in the column `host`. A totals row is the sum of the rows under it: each number of the row is the sum of the same number on those rows, and the first fleet line is the sum of the totals rows.
 
 The runs that ended in the window are not under their host. They are in one group after the hosts, with the header `ended` in `dim`. Each row of the group has its host in the column `host`, in place of the rail. The group has no totals row. A host that has only runs that ended has no group of its own.
 
@@ -74,7 +74,7 @@ runs  4 of 4 reachable  █████░░░░░░░░░░░ 33%  3/
 | `new` and `cache` | Two sums of the tokens. They are never added together, and the line shows no cost. They are left out when no run has a count. |
 | `HH:MM–HH:MM` | The local clock time of the earliest start of the runs in the sums, and the local clock time of now. It is not the sum of the times of the runs. |
 | `⚠ N in trouble` | The runs with an agent that is idle for 5 minutes or more (the idle time of `delegate watch`), the runs that are `stopped` or `halted`, and the runs that failed at start in the window. A paused run is not in trouble. It is left out when N is 0. |
-| `trend: tickets ended an hour, last 6h · all` | The sparkline of the tickets that ended in each hour of the window, summed over the runs in the sums, and then the trend word. See [The trend](#the-trend). |
+| `trend: tickets ended an hour, last 6h · all` | The sparkline of the tickets that ended in each hour of the window, summed over the runs in the sums, and then the [**trend**](../glossary.md#trend) word. See [The trend](#the-trend). |
 
 With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, and the second line is not there.
 
@@ -86,7 +86,7 @@ With no run that has no `run-end`, the first line is `runs  0 of 0 reachable`, a
 | `state` | The state of the run, as `delegate status` gives it. A run that failed at start is `failed`. |
 | `ended` | The tickets that ended, over the tickets of the plan, as `X/Y`. It is dim for a run that ended. |
 | `ETA` | The local clock time `HH:MM` of the end that the run is estimated to reach. It is `-` while the run runs and has no estimate. It is blank when the run is paused, halted, stopped or ended. |
-| `slip` | How much later the ETA of the run is now than it was 2 hours ago, as `+55m`, in `warn`. See [The slip](#the-slip). It is blank otherwise. |
+| [**`slip`**](../glossary.md#slip) | How much later the ETA of the run is now than it was 2 hours ago, as `+55m`, in `warn`. See [The slip](#the-slip). It is blank otherwise. |
 | `new` | The new tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `cache` | The cache tokens of the run. It is blank when the command cannot read the streams of the run. |
 | `trend` | The sparkline of the tickets of the run that ended in each hour of the window, in `dim`. See [The trend](#the-trend). The row of the machine has none. |
@@ -111,7 +111,7 @@ The other hosts are each host that has a record in the [run index](run.md#the-ru
 
 The command reads each other host. For each host it runs `ssh -o BatchMode=yes -o ConnectTimeout=5 <host> delegate runs --local --json`, and `<host>` is the name of the host in the index or in `hosts`. So `ssh` must reach each host with no password, and `delegate` 1.22.0 or later must be on the `PATH` of the login shell of that host. The host needs no setting. The hosts are read at the same time, and the read of one host ends after 10 seconds at the latest. This is the only process that `delegate runs` starts. No command writes a record of a run to another host.
 
-A host that gives its document of `format` 1 shows its runs as live runs, as the runs of this machine show. They have the ETA, the `slip`, the tokens, the trend, the `alert` and the `do` word that the host worked out, and they are in the sums of the fleet lines and in `⚠ N in trouble`. The rows of the group of the host are not dim, and the row of the host has its totals. The records of that host in the index are not used. In `--timeline`, such a lane has the life of the run and the projection to the ETA, but not the `●` marks of the tickets, because the document holds the number of the tickets that ended in each hour, not their times.
+A host that gives its document of `format` 1 shows its runs as live runs, as the runs of this machine show. They have the ETA, the `slip`, the tokens, the trend, the `alert` and the `do` word that the host worked out, and they are in the sums of the fleet lines and in `⚠ N in trouble`. The rows of the group of the host are not dim, and the row of the host has its totals. The records of that host in the index are not used. In `--timeline`, such a [**lane**](../glossary.md#lane) has the life of the run and the projection to the ETA, but not the `●` marks of the tickets, because the document holds the number of the tickets that ended in each hour, not their times.
 
 This machine keeps the newest document of each host that it read in the [store of last answers](#the-store-of-last-answers).
 
@@ -128,7 +128,7 @@ A host is `unreachable` when its read fails, when the read takes more than 10 se
 | `<host> gave no JSON document`, `<host> gave a document that is not an object`, `<host> gave a document that this version of delegate cannot read` | The output of the host is not the document of `delegate runs --local --json`. | Look at what the login shell of the host prints. |
 | `ssh cannot start: <reason>` | This machine cannot start `ssh`. | Install `ssh` on this machine. |
 
-This machine then shows the last-known runs of that host, and nothing else. They are the runs of its last answer in the store of last answers, or the runs of its records in the index, the newer of the two. A host with no last answer and no record has only its row and the row of its reason.
+This machine then shows the last-known runs of that host, and nothing else. They are the runs of its last answer in the [**store of last answers**](../glossary.md#store-of-last-answers), or the runs of its records in the index, the newer of the two. A host with no last answer and no record has only its row and the row of its reason.
 
 For example, a host `build-host` with one run `a41e` that was `running` at 3 of 6 tickets, last heard 47 minutes ago, has these three rows. The first row has `unreachable` in `state`, `heard 47m ago` in `alert` and `check host` in `do`. The second row has `│` in `host` and the reason from the column `state`. The third row has `│` in `host`, `docs-site` in `repo`, `a41e` in `run`, `running` in `state` and `3/6` in `ended`, and nothing else.
 
@@ -244,6 +244,8 @@ A host with an alert or a command does not fold to its totals row. When the line
 ## The option `--timeline`
 
 `delegate runs --timeline` shows the same two fleet lines, and then one lane for each run in place of the table. A lane shows the time of a run across the window, the last 6 hours, and on to the latest ETA of the runs. It shows the same runs in the same order as the table. `--timeline` can be used with `--watch`, and it cannot be used with `--json`.
+
+### The lanes
 
 The legend is the end of the second fleet line, after the trend word. Under 100 columns it is only `one cell is 12m`. The header under the blank line holds the label `last 6h, to the latest ETA` and the headers `ended`, `ETA`, `state` and `alert`. The first lane is `all` (see below). Each lane row after it has the label `host repo run` (the host on the first row, the rail `│` under it), the lane, and then `ended`, `ETA`, `state` and `alert` as in the table. Under the lanes, after a blank line, is the footer `detail  delegate watch <run>; on another host, ssh <host> delegate watch <run>`.
 

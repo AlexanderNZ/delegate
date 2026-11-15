@@ -186,6 +186,10 @@ See [the fix-up round](reference/run.md#the-fix-up-round).
 
 See [Fix-up](#fix-up).
 
+## Fleet
+
+A fleet is the set of hosts that `delegate runs` reads, with the runs of each host. It has this machine and each other host that the run index or the configuration file names. One command shows the runs of all the hosts. See [the fleet lines](reference/runs.md#the-fleet-lines).
+
 ## Frontmatter hook
 
 See [Harness hook](#harness-hook).
@@ -252,6 +256,10 @@ Not: print mode.
 
 See [the `claude-code` command](reference/claude-code-adapter.md#the-command).
 
+## Host reader
+
+A host reader is the port that `delegate runs` drives to read the live runs of one other host. It gives the answer of the host, or the reason that the host is unreachable. The adapter that implements it uses `ssh`. See [the other hosts](reference/runs.md#the-other-hosts).
+
 ## Hosts key
 
 The hosts key is the key `hosts` of the configuration file of the user, `~/.config/delegate/config.toml`. It is a list of the ssh names of the other hosts that `delegate runs` reads on this machine. It is a setting of a machine and of a person, not of a repository, and an agent never writes it. See [the configuration file](reference/runs.md#the-configuration-file).
@@ -283,6 +291,10 @@ The ladder is the eight levels of agentic engineering of Bassim Eledath, from ta
 Not: levels of agentic engineering. Use the long form only for the title of the article.
 
 See [the ladder](overview.md#the-ladder) and [the article](https://www.bassimeledath.com/blog/levels-of-agentic-engineering).
+
+## Lane
+
+A lane is the row of one run in `delegate runs --timeline`. It shows the time of the run across the last 6 hours, and on to its ETA. You see all the runs on one time scale. See [the lanes](reference/runs.md#the-lanes).
 
 ## Levels of agentic engineering
 
@@ -384,6 +396,10 @@ A run is one execution of `delegate run` over a workflow, with its own run id an
 
 The run branch is the branch that the engine owns, and only accepted work lands on it. The coordinator merges the run branch into the base branch. See [the fields of a workflow](reference/workflow.md#top-level-fields).
 
+## Run context
+
+The run context is the values that do not change during a run: the workflow, the adapter, the version control, the gate runner, the tiers and the paths. The engine makes it once and gives it to each function that needs it. See [the layout of the package](reference/layout.md#the-package).
+
 ## Run index
 
 The run index is a list of runs, one record for each run. Each run writes its record there, with no setting. The journal stays the record of the run, so a failed write of the index loses nothing. The directory is `DELEGATE_INDEX`, else the key `index` of the configuration file of the user, else `index/` in the state root of the machine. See [the run index](reference/run.md#the-run-index).
@@ -391,6 +407,10 @@ The run index is a list of runs, one record for each run. Each run writes its re
 ## Run lock
 
 The run lock is a kernel lock on a file that stops a second run on one run branch. The process of the run holds it, and the kernel releases it when that process ends, also after a kill. Two runs cannot race on one branch, and a lock file that no process holds is free. See [the run lock](reference/run.md#the-run-lock).
+
+## Run state
+
+The run state is the one fold of the journal of a run. It gives the outcome of each ticket and the state of the run. The engine and each view decide from it, so they cannot disagree. See [one fold of the journal](explanation/why-the-code-has-this-shape.md#one-fold-of-the-journal).
 
 ## Run that cannot be resumed
 
@@ -417,6 +437,14 @@ A skill is a directory with a `SKILL.md` file of instructions that an agent load
 ## Skip
 
 A skip is the state of a ticket whose blocker is not built. The engine makes no worktree for the ticket and records the reason, so the journal shows why the ticket did not run. See [the skip rule](reference/run.md#the-skip-rule).
+
+## Slip
+
+The slip is how much later the ETA of a run is now than it was 2 hours ago. `delegate runs` shows it from 30 minutes. A slip tells you that a run takes longer than planned. See [the slip](reference/runs.md#the-slip).
+
+## Snapshot
+
+A snapshot is the state of a run at one time, as one JSON object. `delegate status --json` prints it. Other programs read it, so its fields do not change type or meaning. See [the snapshot](reference/status-and-watch.md#the-snapshot).
 
 ## Spec
 
@@ -454,6 +482,10 @@ A step is the work of the engine for one ticket: the worktree, the specialist, t
 
 See [Turn cap](#turn-cap).
 
+## Store of last answers
+
+The store of last answers is the directory `last-answers/` in the state root of a machine. It keeps the newest answer of each other host that `delegate runs` read. The command shows a host that is unreachable with its last-known runs. See [the store of last answers](reference/runs.md#the-store-of-last-answers).
+
 ## Strength
 
 See [Tier](#tier).
@@ -464,7 +496,7 @@ The team contract is what every agent gets, whatever its model: a role, the cont
 
 ## Temporary copy
 
-The temporary copy is a clone of the ticket branch that the engine makes for the verifier. The engine makes it once for each ticket, and updates it before each later verifier of the ticket, so no file of an earlier verifier stays. The verifier guard keeps the copy read-only, so for a red proof the verifier breaks a second copy in another temp directory. The real worktree stays as it was.
+The temporary copy is a clone of the ticket branch that the engine makes for the verifier. The engine makes it once for each ticket. It updates the copy before each later verifier of the ticket, so no file of an earlier verifier stays. The verifier guard keeps the copy read-only, so for a red proof the verifier breaks a second copy in another temp directory. The real worktree stays as it was.
 
 Not: verifier copy, copy.
 
@@ -513,6 +545,10 @@ A tracer bullet is a narrow slice of work that goes through every layer and work
 Not: vertical slice.
 
 See [the ladder](overview.md#the-ladder).
+
+## Trend
+
+The trend is how fast the tickets of a run end. It is a sparkline of the tickets that ended in each hour of the last 6 hours, and a word: `speeding up`, `steady` or `slowing`. See [the trend](reference/runs.md#the-trend).
 
 ## Turn cap
 

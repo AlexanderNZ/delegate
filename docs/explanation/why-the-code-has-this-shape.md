@@ -14,7 +14,7 @@ The first job is the [**run**](../glossary.md#run) of a [**workflow**](../glossa
 
 The second job is the work on agent files. One [**declaration**](../glossary.md#declaration) renders an [**agent pair**](../glossary.md#agent-pair) for each [**harness**](../glossary.md#harness), a [**validator**](../glossary.md#validator) checks the rendered files, and a [**bootstrap**](../glossary.md#bootstrap) sets up a repository. This code is in `definitions/`.
 
-Each context has its own words. The run context speaks of tickets, worktrees and [**verdicts**](../glossary.md#verdict). The definitions context speaks of declarations, [**stacks**](../glossary.md#stack) and rendered files. The two contexts know nothing of each other: neither imports the other, in either direction. A change to the [**renderer**](../glossary.md#renderer) cannot break the engine through an import, and a change to the engine cannot break the renderer. I wanted that guarantee more than I wanted to share a helper.
+Each context has its own words. The [**run context**](../glossary.md#run-context) speaks of tickets, worktrees and [**verdicts**](../glossary.md#verdict). The definitions context speaks of declarations, [**stacks**](../glossary.md#stack) and rendered files. The two contexts know nothing of each other: neither imports the other, in either direction. A change to the [**renderer**](../glossary.md#renderer) cannot break the engine through an import, and a change to the engine cannot break the renderer. I wanted that guarantee more than I wanted to share a helper.
 
 ## The shared tier
 
@@ -96,7 +96,7 @@ I chose a test over a convention because a rule in a document drifts and a rule 
 
 The journal is the record of a run. Many parts of the code need to know what it says: the engine at a [**resume**](../glossary.md#resume), and `status`, `watch` and `runs` for each view. Before, each of them read the events in its own way. When two folds had different rules, the engine did one thing and a view showed another. Ticket #304 was such a case.
 
-The run state is the one fold of the journal. It is a pure function in `run/run_state.py`, and it gives the outcome of each ticket, the state of the run, and the current pass of the [**chain**](../glossary.md#chain) verification. The engine and each view decide these facts from it, so a change of a rule changes all of them together. [ADR 0009](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0009-the-journal-has-one-projection-the-run-state.md) records the decision.
+The [**run state**](../glossary.md#run-state) is the one fold of the journal. It is a pure function in `run/run_state.py`, and it gives the outcome of each ticket, the state of the run, and the current pass of the [**chain**](../glossary.md#chain) verification. The engine and each view decide these facts from it, so a change of a rule changes all of them together. [ADR 0009](https://github.com/AlexanderNZ/delegate/blob/main/docs/adr/0009-the-journal-has-one-projection-the-run-state.md) records the decision.
 
 The run state holds only what the journal says. The lock of a live process, a [**pause**](../glossary.md#pause) request, the [**event streams**](../glossary.md#event-stream) and the clock are not in the journal. A view adds them to the run state, and it keeps its own rules for the phase, the times, the tokens and the idle time.
 
